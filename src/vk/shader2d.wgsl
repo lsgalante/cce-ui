@@ -955,24 +955,47 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // A field with no well (split left of it — a dropdown trigger, a
         // button) is all run: the face inset from the outline all round,
         // its own corners.
+        //
+        // The run ends at p_host.y. Past the field's right end (every form
+        // above) it reaches the outline there; short of it, a well lies to
+        // its right too, mirroring everything said of the left: the face
+        // inset half a wall from that seam with the corners of its LEFT end,
+        // and the seam the well's left wall's inner half. A toggle's run is
+        // half the field and glides between its ends, so mid-glide it has a
+        // well on both sides.
         let split = rrect_clip.p_host.x;
+        let run_end = rrect_clip.p_host.y;
         let hw = 0.5 * t;
         let pr = rrect_clip.p_rect;
         let fl = pr.x - pr.z;
+        let fr = pr.x + pr.z;
         let has_well = split > fl + 0.5;
+        let has_well_r = run_end < fr - 0.5;
         let run_l = select(fl, split, has_well);
+        let run_r = select(fr, run_end, has_well_r);
         let fx0 = run_l + hw;
-        let fx1 = pr.x + pr.z - hw;
+        let fx1 = run_r - hw;
         let fy0 = pr.y - pr.w + hw;
         let fy1 = pr.y + pr.w - hw;
         let face = vec4f(0.5 * (fx0 + fx1), 0.5 * (fy0 + fy1), max(0.5 * (fx1 - fx0), 0.0), max(0.5 * (fy1 - fy0), 0.0));
         let rr = rrect_clip.p_radii;
+        let rtl = max(rr.x - hw, 0.0);
         let rtr = max(rr.y - hw, 0.0);
         let rbr = max(rr.z - hw, 0.0);
-        let face_r = select(vec4f(max(rr.x - hw, 0.0), rtr, rbr, max(rr.w - hw, 0.0)), vec4f(rtr, rtr, rbr, rbr), has_well);
+        let rbl = max(rr.w - hw, 0.0);
+        let face_r = vec4f(
+            select(rtl, rtr, has_well),
+            select(rtr, rtl, has_well_r),
+            select(rbr, rbl, has_well_r),
+            select(rbl, rbr, has_well),
+        );
         // The outline: its outer half everywhere, its inner half over the
-        // well alone (`over_well`, antialiased across the seam's pixel).
-        let over_well = 1.0 - smoothstep(split - 0.5, split + 0.5, frag.x);
+        // wells alone (`over_well`, antialiased across each seam's pixel).
+        let over_well = clamp(
+            1.0 - smoothstep(split - 0.5, split + 0.5, frag.x) + smoothstep(run_end - 0.5, run_end + 0.5, frag.x),
+            0.0,
+            1.0,
+        );
         let inner = select(1.0, over_well, u > 0.5);
         slope = -cd * carve_slope(u) * inner;
         curv = rrect_clip.p_mat.w * sin(u * TAU) * inner;
@@ -992,6 +1015,17 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
                 let usc = min(us, 1.0);
                 let fade = clamp(d / hw, 0.0, 1.0);
                 sv_seam = sv_seam + vec2f(1.0, 0.0) * (-cd * carve_slope(usc)) * fade;
+                curv_seam = curv_seam + rrect_clip.p_mat.w * sin(usc * TAU) * fade;
+            }
+        }
+        // The right-hand seam: the right well's LEFT wall, its inner half,
+        // falling the other way.
+        if (has_well_r) {
+            let us = (frag.x - run_end) / t + 0.5;
+            if (us >= 0.5) {
+                let usc = min(us, 1.0);
+                let fade = clamp(d / hw, 0.0, 1.0);
+                sv_seam = sv_seam + vec2f(-1.0, 0.0) * (-cd * carve_slope(usc)) * fade;
                 curv_seam = curv_seam + rrect_clip.p_mat.w * sin(usc * TAU) * fade;
             }
         }

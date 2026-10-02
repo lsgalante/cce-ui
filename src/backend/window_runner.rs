@@ -2173,9 +2173,9 @@ pub fn tessellate_display_list(
             // A sunken well ending in a flush run (see `Prim::Field`): one
             // outline, one overlay — never grouped, its profile is not a
             // monotonic step. The cover quad inflates by half the wall, as a
-            // free carve's does; the host-box slot carries the seam's x
-            // (physical px), since nothing fades against a host here.
-            Prim::Field { rect, radii, depth, split, tint } if shader_plates => {
+            // free carve's does; the host-box slot carries the run's two
+            // ends (physical px), since nothing fades against a host here.
+            Prim::Field { rect, radii, depth, split, end, tint } if shader_plates => {
                 let infl = *depth * 0.5 + 2.0;
                 verts.extend(quad_vertices(
                     rect.x - infl, rect.y - infl,
@@ -2187,7 +2187,7 @@ pub fn tessellate_display_list(
                 if let Some(t) = tint {
                     p.specular_tint = [t[0], t[1], t[2], 1.0];
                 }
-                p.host = [*split * scale, 0.0, 0.0, 0.0];
+                p.host = [*split * scale, *end * scale, 0.0, 0.0];
                 plate = Some(p);
             }
             Prim::Recess { rect, radii, depth, edges, .. }
@@ -2542,32 +2542,42 @@ pub fn tessellate_display_list(
                     EdgeKind::Step, &mut verts,
                 );
             }
-            Prim::Field { rect, radii, depth, split, .. } => {
+            Prim::Field { rect, radii, depth, split, end, .. } => {
                 // Legacy approximation: the two-box form `Prim::Field`
-                // replaced — the well to the seam a step down, the run past it
-                // the Trough arm's down-then-up stack. The banded machinery
-                // has no blended outline, and the legacy path exists only for
-                // A/B comparison.
+                // replaced — a well either side of the run a step down, the
+                // run the Trough arm's down-then-up stack. The banded
+                // machinery has no blended outline, and the legacy path
+                // exists only for A/B comparison.
                 let all = (true, true, true, true);
-                if *split > rect.x {
+                let (fl, fr) = (rect.x, rect.x + rect.width);
+                let (well_l, well_r) = (*split > fl, *end < fr);
+                let rx = split.max(fl);
+                let rw = (end.min(fr) - rx).max(0.0);
+                if well_l {
                     push_bevel_edge_vertices_banded(
-                        rect.x, rect.y, *split - rect.x, rect.height, (radii.0, 0.0, 0.0, radii.3), *depth,
+                        fl, rect.y, rx - fl, rect.height, (radii.0, 0.0, 0.0, radii.3), *depth,
                         sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(*depth), all,
                         EdgeKind::Step, &mut verts,
                     );
                 }
-                let rx = split.max(rect.x);
-                let rw = (rect.x + rect.width - rx).max(0.0);
-                // All run (`PaintCtx::inset_plate`'s edge): its own left corners.
-                let (l0, l3) = if *split > rect.x { (0.0, 0.0) } else { (radii.0, radii.3) };
+                if well_r {
+                    push_bevel_edge_vertices_banded(
+                        rx + rw, rect.y, fr - rx - rw, rect.height, (0.0, radii.1, radii.2, 0.0), *depth,
+                        sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(*depth), all,
+                        EdgeKind::Step, &mut verts,
+                    );
+                }
+                // A run's own corners where it reaches the outline; square at a seam.
+                let (l0, l3) = if well_l { (0.0, 0.0) } else { (radii.0, radii.3) };
+                let (r1, r2) = if well_r { (0.0, 0.0) } else { (radii.1, radii.2) };
                 let half = *depth * 0.5;
                 push_bevel_edge_vertices_banded(
-                    rx, rect.y, rw, rect.height, (l0, radii.1, radii.2, l3), half,
+                    rx, rect.y, rw, rect.height, (l0, r1, r2, l3), half,
                     sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(half), all,
                     EdgeKind::Step, &mut verts,
                 );
-                let ir = (radii.1 - half).max(0.0);
-                let il = if *split > rect.x { 0.0 } else { (radii.0 - half).max(0.0) };
+                let ir = if well_r { 0.0 } else { (radii.1 - half).max(0.0) };
+                let il = if well_l { 0.0 } else { (radii.0 - half).max(0.0) };
                 push_bevel_edge_vertices_banded(
                     rx + half, rect.y + half, rw - *depth, rect.height - *depth, (il, ir, ir, il), half,
                     sw, sh, [0.0; 4], no, 1.0, default_bevel_bands(half), all,

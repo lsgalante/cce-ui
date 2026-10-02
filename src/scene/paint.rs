@@ -219,7 +219,9 @@ pub enum PlateStance {
 
 /// How far left of a [`Prim::Field`] its seam is put to make it all run and
 /// no well ([`PaintCtx::inset_plate`]): far enough that the blend across the
-/// seam and the seam's own wall land nowhere near the field.
+/// seam and the seam's own wall land nowhere near the field. A run's `end`
+/// is put as far past the field's right edge to reach that edge
+/// ([`PaintCtx::field`]).
 pub const FIELD_RUN_ONLY: f32 = 1.0e4;
 
 /// A control plate: the thing you press, at the control rung of the plate
@@ -586,12 +588,17 @@ pub enum Prim {
     /// `tint` lights the rim like [`Prim::Recess`]'s — the focus treatment of a
     /// flush control plate (`PaintCtx::control_plate`).
     Trough { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool), tint: Option<[f32; 3]> },
-    /// A sunken well that ends in a FLUSH run: one field, one outer contour.
-    /// Left of `split` (an x in the same space as `rect`) it is a
-    /// [`Prim::Recess`] — the interior one step down; right of it, a
-    /// [`Prim::Trough`] — a valley on the outline and the interior back at
-    /// the surface's level, as a flush control plate's. A parameter pane's
-    /// text row with its completion picker, a spinbox's value and its -/+ run.
+    /// A sunken well holding a FLUSH run: one field, one outer contour.
+    /// Between `split` and `end` (xs in the same space as `rect`) the
+    /// interior is back at the surface's level, as a flush control plate's
+    /// face, inside a valley on the outline; on either side of that it is a
+    /// [`Prim::Recess`] — the interior one step down. A run that reaches an
+    /// end of the field (`split` left of it, or `end` right of it — by
+    /// [`FIELD_RUN_ONLY`]) has no well on that side. The forms in use: a
+    /// parameter pane's text row with its completion picker and a spinbox's
+    /// value with its -/+ run (the run at the right end), a flush control
+    /// plate (all run), a toggle (a run half the field wide, at the left end
+    /// off and the right end on, gliding between).
     ///
     /// Why one prim and not the two it replaces, side by side: each of those
     /// shades its OWN box, so at the seam the outline breaks — each box
@@ -607,7 +614,7 @@ pub enum Prim {
     ///
     /// SDF path only; the legacy banded tessellation and flat hosts draw the
     /// two-box form it replaced. `tint` lights it like a recess's.
-    Field { rect: Rect, radii: Radii, depth: f32, split: f32, tint: Option<[f32; 3]> },
+    Field { rect: Rect, radii: Radii, depth: f32, split: f32, end: f32, tint: Option<[f32; 3]> },
     /// The window's glass slab: a rounded fill plus a rolled, lit edge around its whole
     /// perimeter, drawn at full size. Distinct from `Bevel`, which insets its fill by
     /// `depth` — a plate must fill the window exactly, or the compositor's rounded window
@@ -1114,7 +1121,7 @@ impl PaintCtx {
                 Some(t) => self.trough_tinted(rect, radii, depth, t),
                 None => self.trough_edges(rect, radii, depth, edges),
             },
-            Prim::Field { rect, radii, depth, split, tint } => self.field(rect, radii, depth, split, tint),
+            Prim::Field { rect, radii, depth, split, end, tint } => self.field_run(rect, radii, depth, (split, end), tint),
             Prim::Plate { rect, radii, material, depth, shape } => {
                 self.plate_shaped(rect, radii, &material, depth, shape)
             }
@@ -1566,12 +1573,21 @@ impl PaintCtx {
         self.push(Prim::Trough { rect, radii, depth, edges, tint: Some(tint) });
     }
 
-    /// A sunken well ending in a flush run at `split` — see [`Prim::Field`].
-    /// `tint` lights its rim (the focus and hover treatment).
+    /// A sunken well ending in a flush run at `split`, the run reaching the
+    /// field's right end — see [`Prim::Field`]. `tint` lights its rim (the
+    /// focus and hover treatment).
     pub fn field(&mut self, rect: Rect, radii: Radii, depth: f32, split: f32, tint: Option<[f32; 3]>) {
-        let split = split + self.offset.0;
+        let end = rect.x + rect.width + FIELD_RUN_ONLY;
+        self.field_run(rect, radii, depth, (split, end), tint);
+    }
+
+    /// A sunken well with a flush run from `run.0` to `run.1` — see
+    /// [`Prim::Field`]: the general form, a well on whichever sides of the
+    /// run the field extends past it.
+    pub fn field_run(&mut self, rect: Rect, radii: Radii, depth: f32, run: (f32, f32), tint: Option<[f32; 3]>) {
+        let (split, end) = (run.0 + self.offset.0, run.1 + self.offset.0);
         let rect = self.apply_offset(rect);
-        self.push(Prim::Field { rect, radii, depth, split, tint });
+        self.push(Prim::Field { rect, radii, depth, split, end, tint });
     }
 
     /// Raise a rim along `rect`'s boundary — see `Prim::Ridge`. `depth` is the

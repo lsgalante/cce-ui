@@ -400,6 +400,40 @@ are the tests. Until the same day the picker and the run were nested INSIDE a fu
 well, their faces stopping at the base of its wall, so they never reached the edge a
 dropdown's ▼ does.
 
+### A field is one object, and a toggle is a field whose run glides (since 2026-10-02)
+
+A dropdown, a button, a text row with its picker, a spinbox and a toggle are ONE
+object: a well cut into a plate with a flush plate, the RUN, standing in it, one
+outline round both (`Prim::Field`). They differ only in where the run is:
+
+| form | run | well |
+| --- | --- | --- |
+| flush control plate (dropdown trigger, button, breadcrumb run, …) | the whole field | none |
+| text row with its picker, spinbox with its -/+ run | the right end | left of it |
+| toggle | half the field: the left end off, the right end on | the other half; both sides mid-glide |
+| plain text box | none (a `Prim::Recess`, for grouping — see below) | the whole field |
+
+So the run is a span, `split` to `end` (`PaintCtx::field_run`; `PaintCtx::field`
+is the run reaching the right end, `end` `FIELD_RUN_ONLY` past it). Where the run
+stops short of the right end, a well lies to its right too, and `MODE_FIELD`
+mirrors everything it does on the left: the face is inset half a wall from that
+seam with the corners of the run's LEFT end, and the seam is that well's left
+wall's inner half. A run reaching the right end takes the same path through the
+shader as before, term for term, so every field that was drawn is drawn as it was.
+The host-box slot carries both ends (`p_host.x`, `.y`); the legacy banded path and
+the flat-host bridge draw a well box either side of the run.
+
+**The Toggle is drawn so** (`Toggle::field` the outline, `Toggle::run` the span,
+`Toggle::face` what the relief-off path lights; `ParametersBg::fields` asks for
+the same, and its `reliefs` no longer carries toggles). Until this it was a recess
+with a raised `Boss` on its floor: the one control whose nested plate stood ABOVE
+the surface where every other stood flush with it, and whose outline turned its
+own corner round the plate instead of running round the whole control. The run
+is laid out half the field and a wall wider than its face, as a picker is, so the
+face reaches the well; it glides by `slide_t` as the boss did. Focus lights the
+field's rim (`ControlPlate::focus_tint`), where it lit the boss's.
+`a_toggle_is_a_field_whose_run_glides` is the test.
+
 ### A grouped carve shades as its overlay does (since 2026-10-02)
 
 A full-ring, untinted `Prim::Recess` / `Boss` emitted while a plate's grouping window is
@@ -585,7 +619,7 @@ What this buys, and where the code is heading:
   instead of black (`FOCUS_SHADOW`, both at `FOCUS_GAIN`, in
   `shader2d.wgsl`), so a focused plate still reads which edges face the lamp.
   A Checkbox lights the ring its mark already draws; a Toggle lights the
-  rim of the plate that slides in its well.
+  rim of its field, as every field is lit.
   Roles today: Button, Checkbox, Toggle, Dropdown, FontSelector, ButtonStrip
   (arrows move the selection between its segment plates) and Breadcrumb
   (arrows walk its visible segments, Enter navigates) are plates; TextBox,

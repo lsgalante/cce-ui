@@ -237,9 +237,19 @@ impl Input for Checkbox {
     }
 }
 
-/// A plate that slides in a well: the toggle's footprint is a track carved
-/// into the plate it sits on, and a half-width control plate stands on that
-/// well's floor at the left (off) or right (on) end, gliding between them.
+/// A field whose run glides: the toggle's footprint is ONE field
+/// ([`crate::scene::paint::Prim::Field`]) — a well carved into the plate it
+/// sits on, holding a flush run half its width, the run at the left end
+/// (off) or the right end (on) and gliding between them.
+///
+/// It is the same object as a text row with its picker, a spinbox and its
+/// -/+ run, and a dropdown trigger: a well in a plate with a flush plate in
+/// it, one outline round both. Those hold their run still at the right end
+/// (or are all run); a toggle's moves, and where it stands is the state.
+/// Until 2026-10-02 it was a recess with a raised boss standing on its
+/// floor, the one control whose nested plate stood ABOVE the surface where
+/// every other stood flush with it, and whose outline turned its own corner
+/// round the plate rather than running round the whole control.
 ///
 /// That is the ONE toggle style. The rocker — two flat half faces with a
 /// hinge between them, the state half tipped out toward the light — is gone,
@@ -255,11 +265,11 @@ pub struct Toggle {
     /// Where the label sits across the track. Mirrors `Button::justify` — same enum, same
     /// 8px edge inset — so the two read as one control set wherever they share a column.
     justify: Justification,
-    /// Relief style: the track is a real carved well and the glider a raised
-    /// plate standing in it. Without it the track falls back to the hairline
-    /// frame every well shares and the plate to a lit face — see `paint`.
+    /// Relief style: the toggle is a field, a carved well with a flush run in
+    /// it. Without it the well falls back to the hairline frame every well
+    /// shares and the run to a lit face — see `paint`.
     raised: Option<bool>,
-    /// The glider's animated position along its well, 0 (left/off) → 1 (right/on).
+    /// The run's animated position along its field, 0 (left/off) → 1 (right/on).
     /// Chases `toggled` in `tick` after a click; programmatic state syncs
     /// (`set_toggled`, `set_value_string`) snap it, so only user interaction
     /// animates.
@@ -307,89 +317,44 @@ impl Toggle {
         self.toggled
     }
 
-    /// The well the glider lives in: the toggle's whole footprint carved one
-    /// step down. Taken through [`crate::layout::carve_inside`], so the walls
-    /// stay inside the rect and the gap beside a toggle is the gap, exactly as
-    /// a TextBox's well is taken. `(rect, per-corner radii, wall width)`.
+    /// The field's outline: the toggle's whole footprint, carved one step
+    /// down. Taken through [`crate::layout::carve_inside`], so the walls stay
+    /// inside the rect and the gap beside a toggle is the gap, exactly as a
+    /// TextBox's well and a spinbox's field are taken. `(rect, per-corner
+    /// radii, wall width)`.
     ///
-    /// The SINGLE source for the track geometry: `paint` carves it here and
-    /// [`Toggle::slide_plate`] measures the floor from it.
-    pub fn well(&self, rect: Rect) -> (Rect, crate::scene::paint::Radii, f32) {
+    /// The SINGLE source for the toggle's geometry: `paint` draws it here,
+    /// [`Toggle::run`] places the run in it, and a host that draws the relief
+    /// itself (`ParametersBg::fields`) asks for both.
+    pub fn field(&self, rect: Rect) -> (Rect, crate::scene::paint::Radii, f32) {
         let r = crate::layout::toggle_corner_radius();
         let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-        let (well, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
-        (well, radii, depth)
+        let (field, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
+        (field, radii, depth)
     }
 
-    /// The sliding plate, as `(footprint, corner radius, wall width)`: half the
-    /// well's floor wide, gliding between the floor's ends by the animated
-    /// `slide_t` — left is off, right is on.
-    ///
-    /// It stands ON the floor — the flat region inside the well's walls, which
-    /// start half a wall in from the well's own boundary — and its roll abuts
-    /// that floor's edge instead of shading over the well's wall. Its corners
-    /// run concentric with the well's.
-    ///
-    /// Its wall is HALF the well's. A plate in a well is the shallower part of
-    /// the pair, and at a control's height it has to be: a toggle is 24px, a
-    /// well wall 4.8, and two full-depth walls stacked leave the boss no flat
-    /// top at all — its own walls meet in the middle and the plate reads as a
-    /// ridge drawn across the track rather than a thing standing in it.
-    pub fn slide_plate(&self, rect: Rect) -> (Rect, f32, f32) {
-        let (well, radii, wd) = self.well(rect);
-        let (floor, floor_r) = inset(well, radii.0, wd * 0.5);
-        let pd = (wd * 0.5).max(1.0);
-        let (travel, pr) = inset(floor, floor_r, pd * 0.5);
-        let pw = travel.width * 0.5;
-        let plate = Rect {
-            x: travel.x + self.slide_t * (travel.width - pw),
-            y: travel.y,
-            width: pw,
-            height: travel.height,
-        };
-        (plate, pr, pd)
+    /// The flush run, as the xs it spans in [`Toggle::field`]: half the field
+    /// wide, placed by the animated `slide_t` — flush with the field's left
+    /// end off, its right end on, a well on both sides between. As a text
+    /// row's picker is, the run is laid out a wall wider than the face it
+    /// carries (the field insets the face half a wall from the outline and
+    /// from the seam), so the face reaches the well.
+    pub fn run(&self, rect: Rect) -> (f32, f32) {
+        let (field, _, _) = self.field(rect);
+        let w = field.width * 0.5;
+        let x = field.x + self.slide_t * (field.width - w);
+        (x, x + w)
     }
 
-    /// The carves this Toggle paints: the track's well (a `Recess`) and the
-    /// glider standing in it (a `Boss`, the faceless raised plate
-    /// [`crate::scene::paint::PaintCtx::control_plate`] emits) — in that order,
-    /// the order `paint` emits them.
-    ///
-    /// Exists because a Toggle paints NO fill in any state: on a legacy-view
-    /// host (`ParametersBg::reliefs`) these carves are the ENTIRE control, and
-    /// without them the row is a bare label. Empty without `raised` styling,
-    /// where the frame and the lit face stand in for them.
-    pub fn flat_carves(&self, rect: Rect) -> Vec<crate::layout::ReliefCarve> {
-        use crate::layout::{CarveKind, ReliefCarve};
-        if !self.raised() {
-            return Vec::new();
-        }
-        let all = (true, true, true, true);
-        let (well, well_radii, depth) = self.well(rect);
-        let (plate, pr, pd) = self.slide_plate(rect);
-        let (boss, boss_radii) = crate::layout::carve_inside(plate, (pr, pr, pr, pr), pd);
-        vec![
-            ReliefCarve {
-                kind: CarveKind::Recess { tint: None },
-                x: well.x,
-                y: well.y,
-                w: well.width,
-                h: well.height,
-                radii: well_radii,
-                depth,
-                edges: all,
-            },
-            ReliefCarve {
-                kind: CarveKind::Boss { tint: None },
-                x: boss.x,
-                y: boss.y,
-                w: boss.width,
-                h: boss.height,
-                radii: boss_radii,
-                depth: pd,
-                edges: all,
-            },
-        ]
+    /// The run's FACE — what stands at the surface's level inside the
+    /// field's valley: the run inset half a wall on every side, its corners
+    /// the field's less that. `(rect, corner radius)`. The relief-off paint
+    /// lights this rect, where the field cannot be carved.
+    pub fn face(&self, rect: Rect) -> (Rect, f32) {
+        let (field, radii, depth) = self.field(rect);
+        let (a, b) = self.run(rect);
+        let run = Rect { x: a, y: field.y, width: b - a, height: field.height };
+        inset(run, radii.0, depth * 0.5)
     }
 }
 
@@ -448,47 +413,41 @@ impl Paint for Toggle {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        use crate::scene::paint::{ControlPlate, PlateStance};
+        use crate::scene::paint::ControlPlate;
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
 
         // A toggle paints NO fill of its own: it is worked out of the plate it
         // sits on, so the plate's own material (tint, blur, whatever it is)
-        // shows through both the well's floor and the glider's face, and the
+        // shows through both the well's floor and the run's face, and the
         // state reads from light and relief alone — the DE's transparent-face
         // convention (closed dropdowns, inset troughs). The state colors this
         // used to tint with (enabled/disabled/background) are retired with the
         // rest of the toggle's palette.
-        let (well, well_radii, depth) = self.well(rect);
-        let (plate, plate_r, plate_depth) = self.slide_plate(rect);
+        let (field, field_radii, depth) = self.field(rect);
         if self.raised() {
-            // The track is a WELL — the same recess a TextBox carves — and the
-            // glider is a control plate standing on its floor, raised faceless
-            // (a `Boss`, the surface below as its face). Its position IS the
-            // read: left off, right on, animated in `tick`. Both also reach
-            // legacy-view hosts through `flat_carves` (see
-            // `ParametersBg::reliefs`), which must emit them in this order.
-            ctx.recess(well, well_radii, depth);
-            let focus = if self.focused { Some(ControlPlate::focus_tint()) } else { None };
-            ctx.control_plate(
-                &ControlPlate::control(plate, plate_r, PlateStance::Raised, None)
-                    .with_depth(plate_depth)
-                    .with_tint(focus),
-            );
+            // ONE field — the well and the flush run in it under one outline,
+            // as a text row's picker and a spinbox's -/+ run are drawn. The
+            // run's position IS the read: left off, right on, animated in
+            // `tick`. A host that draws the relief itself
+            // (`ParametersBg::fields`) asks for the same `field` and `run`.
+            // Focus lights the field's rim, the ring every field wears.
+            let focus = self.focused.then(ControlPlate::focus_tint);
+            ctx.field_run(field, field_radii, depth, self.run(rect), focus);
         } else {
             // Relief off: a well is its frame — the one hairline every well
             // falls back to, lit while focused, exactly `well_rim`'s flat arm —
-            // and the plate standing in it is a lit face, the neutral overlay
-            // the DE gives a surface it cannot carve (what the rocker's halves
-            // wore). Scaled by the relief strength, as that lighting was.
+            // and the run's face is a lit face, the neutral overlay the DE
+            // gives a surface it cannot carve (what the rocker's halves wore).
+            // Scaled by the relief strength, as that lighting was.
             //
-            // The plate's overlay is a ROUNDED RECT on purpose: the legacy
+            // The face's overlay is a ROUNDED RECT on purpose: the legacy
             // reverse bridge reads only those, never a `Border`, so a
-            // legacy-view host (`ParametersBg`, whose carves are gated on
-            // relief) still shows which end the plate is at.
+            // legacy-view host still shows which end the run is at.
             let bw = crate::layout::toggle_border_width().max(1.0);
-            ctx.border(well, well_radii, [0.0; 4], colors::well_frame_color(self.hovered, self.focused), bw);
+            ctx.border(field, field_radii, [0.0; 4], colors::well_frame_color(self.hovered, self.focused), bw);
+            let (face, face_r) = self.face(rect);
             let lit = (0.16 * (crate::layout::bevel_depth() / 0.15)).clamp(0.0, 0.5);
-            ctx.rounded_rect(plate, plate_r, (true, true, true, true), [1.0, 1.0, 1.0, lit]);
+            ctx.rounded_rect(face, face_r, (true, true, true, true), [1.0, 1.0, 1.0, lit]);
         }
 
         if let Some(ref label) = self.label {
@@ -499,13 +458,13 @@ impl Paint for Toggle {
                 Justification::Right => x + w - est_w - crate::layout::CONTROL_TEXT_INSET,
                 Justification::Center => x + (w - est_w) / 2.0,
             };
-            // The label never moves with the state. When the glider covers it
-            // the text shows through: the plate carries no face of its own, and
+            // The label never moves with the state. When the run covers it
+            // the text shows through: the run carries no face of its own, and
             // the glyphs land in the engine's later text pass either way.
             //
-            // Focus is the glider plate's own lit rim (`ControlPlate::with_tint`)
-            // — the ring every other plate wears, which the rocker's partial
-            // carves could not — so the label stays the label.
+            // Focus is the field's own lit rim — the ring every other field
+            // wears, which the rocker's partial carves could not — so the
+            // label stays the label.
             ctx.text_with(
                 label.clone(),
                 tx,
@@ -685,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn toggle_click_glides_the_plate_across_its_well() {
+    fn toggle_click_glides_the_run_across_its_field() {
         let mut ctx = UiContext::new();
         let mut t = Toggle::new();
         let (id, ptr) = (t.id(), t.as_ptr_mut());
@@ -699,7 +658,7 @@ mod tests {
             pc.finish().items.into_iter().map(|i| format!("{:?}", i.prim)).collect::<Vec<_>>()
         };
         let before = painted(&t);
-        let plate_x = |t: &Adapted<Toggle>| t.inner().slide_plate(rect).0.x;
+        let plate_x = |t: &Adapted<Toggle>| t.inner().run(rect).0;
         let left = plate_x(&t);
 
         assert!(ctx.propagate_event(&click_at(30.0, 15.0), id), "toggle consumed the click");
@@ -720,57 +679,48 @@ mod tests {
         assert_eq!(WidgetHost::preferred_height(&t), Some(crate::layout::toggle_height()));
     }
 
-    /// The plate stands ON the well's floor, clear of its walls by one wall
-    /// width on every side, and travels between the floor's ends: off is flush
-    /// left, on is flush right, and it never reaches outside the toggle's rect.
+    /// The toggle is ONE field, the form a text row's picker and a spinbox's
+    /// -/+ run take: off, its run is the left half and the well the right;
+    /// on, the other way round; between, a well either side. The run's face
+    /// stands half a wall inside the run, so the run reaches the well.
     #[test]
-    fn toggle_plate_lives_inside_the_well() {
+    fn a_toggle_is_a_field_whose_run_glides() {
+        use crate::scene::paint::{Prim, FIELD_RUN_ONLY};
         let rect = Rect { x: 10.0, y: 4.0, width: 120.0, height: 24.0 };
-        let mut t = Toggle::new();
+        let mut t = Toggle::new().with_raised(true);
+        let (field, radii, depth) = t.inner().field(rect);
+        assert!(field.x >= rect.x && field.y >= rect.y, "the field carves inside the rect");
+        let (fl, fr) = (field.x, field.x + field.width);
 
-        let (well, _, depth) = t.inner().well(rect);
-        assert!(well.x >= rect.x && well.y >= rect.y, "the well carves inside the rect");
-
-        // The floor is the flat region inside the well's walls; the plate's own
-        // (half-depth) roll abuts its edge, so the plate is inset one more
-        // half-wall of its own from there.
-        let (off, _, pd) = t.inner().slide_plate(rect);
-        assert!((pd - depth * 0.5).abs() < 1e-4, "the plate's wall is half the well's");
-        let edge = depth * 0.5 + pd * 0.5;
-        assert!((off.x - (well.x + edge)).abs() < 1e-4, "off sits at the travel's left end");
-        assert!((off.y - (well.y + edge)).abs() < 1e-4, "and clear of the floor's top");
-        assert!(
-            off.height > pd * 2.0,
-            "the plate keeps a flat top: a boss no taller than its own wall is a ridge",
-        );
+        let fields = |t: &Adapted<Toggle>| -> Vec<Prim> {
+            let mut pc = crate::scene::paint::PaintCtx::new();
+            crate::widget::Paint::paint(t.inner(), rect, &mut pc);
+            pc.finish().items.into_iter().map(|i| i.prim).filter(|p| !matches!(p, Prim::Text { .. })).collect()
+        };
+        let off = fields(&t);
+        assert_eq!(off.len(), 1, "one prim, the field: {off:?}");
+        let Prim::Field { rect: r, radii: rr, depth: d, split, end, tint } = off[0] else { panic!("{off:?}") };
+        assert_eq!((r, rr, d, tint), (field, radii, depth, None));
+        assert_eq!(split, fl, "off: the run reaches the field's left end — no well there");
+        assert!((end - (fl + field.width * 0.5)).abs() < 1e-4, "half the field, the well beyond it");
 
         t.set_toggled(true); // programmatic syncs snap, so this is the on-end geometry
-        let (on, _, _) = t.inner().slide_plate(rect);
-        assert!(on.x > off.x, "on is to the right of off");
-        assert!(
-            (on.x + on.width - (well.x + well.width - edge)).abs() < 1e-4,
-            "on sits flush against the travel's right end",
-        );
-        assert!(on.x + on.width <= rect.x + rect.width, "and never leaves the toggle's rect");
-        assert!((off.width * 2.0 - (well.width - 2.0 * edge)).abs() < 1e-4, "half the travel wide");
-    }
+        let Prim::Field { split, end, .. } = fields(&t)[0] else { panic!() };
+        assert!((split - (fl + field.width * 0.5)).abs() < 1e-4 && (end - fr).abs() < 1e-4, "on: the right half");
 
-    /// The carves a legacy-view host re-emits (`ParametersBg::reliefs`) are the
-    /// well then the plate, in the order `paint` emits them — and nothing at
-    /// all with relief off, where the flat frames stand in.
-    #[test]
-    fn toggle_flat_carves_are_the_well_then_the_plate() {
-        use crate::layout::CarveKind;
-        let rect = Rect { x: 0.0, y: 0.0, width: 120.0, height: 24.0 };
-        let t = Toggle::new().with_raised(true);
-        let carves = t.inner().flat_carves(rect);
-        assert_eq!(carves.len(), 2);
-        assert!(matches!(carves[0].kind, CarveKind::Recess { .. }), "the track's well first");
-        assert!(matches!(carves[1].kind, CarveKind::Boss { .. }), "then the plate standing in it");
-        assert!(carves.iter().all(|c| c.edges == (true, true, true, true)), "both are full rings");
+        t.slide_t = 0.5;
+        let Prim::Field { split, end, .. } = fields(&t)[0] else { panic!() };
+        assert!(split > fl + 1.0 && end < fr - 1.0, "mid-glide, a well either side of the run");
+        assert!(end < fr + FIELD_RUN_ONLY, "and the run's end is its own, not the field's");
 
-        let flat = Toggle::new().with_raised(false);
-        assert!(flat.inner().flat_carves(rect).is_empty(), "relief off carves nothing");
+        let (face, face_r) = t.inner().face(rect);
+        let (a, b) = t.inner().run(rect);
+        assert!((face.x - (a + depth * 0.5)).abs() < 1e-4 && (face.x + face.width - (b - depth * 0.5)).abs() < 1e-4);
+        assert!((face_r - (radii.0 - depth * 0.5).max(0.0)).abs() < 1e-4, "concentric with the field");
+
+        // Focus lights the field's rim.
+        t.focused = true;
+        assert!(matches!(fields(&t)[0], Prim::Field { tint: Some(_), .. }), "focus tints the field");
     }
 
     #[test]

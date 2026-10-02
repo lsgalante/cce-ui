@@ -4272,7 +4272,9 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
         let trough_for_face = match (&item.prim, &pending_face) {
             (Prim::Trough { rect, .. }, Some((face_rect, _, _))) => same_rect(*rect, *face_rect),
             // `inset_plate`'s edge: a field that is all run.
-            (Prim::Field { rect, split, .. }, Some((face_rect, _, _))) => *split <= rect.x && same_rect(*rect, *face_rect),
+            (Prim::Field { rect, split, end, .. }, Some((face_rect, _, _))) => {
+                *split <= rect.x && *end >= rect.x + rect.width && same_rect(*rect, *face_rect)
+            }
             _ => false,
         };
         if !trough_for_face {
@@ -4347,25 +4349,33 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
             // A flat host has no blended outline: the two-box form
             // `Prim::Field` replaced — the well to the seam, the run's flush
             // plate past it.
-            Prim::Field { rect, radii, depth, split, tint } => {
+            Prim::Field { rect, radii, depth, split, end, tint } => {
+                let (fl, fr) = (rect.x, rect.x + rect.width);
+                let (well_l, well_r) = (split > fl, end < fr);
                 // All run and no well (`PaintCtx::inset_plate`'s edge): the
                 // plate alone, with the face that came before it.
-                let face = if split <= rect.x { pending_face.take().map(|(_, _, fill)| fill) } else { None }.unwrap_or([0.0; 4]);
-                if split > rect.x {
+                let face = if !well_l && !well_r { pending_face.take().map(|(_, _, fill)| fill) } else { None }.unwrap_or([0.0; 4]);
+                let rx = split.max(fl);
+                let rw = (end.min(fr) - rx).max(0.0);
+                let mut well = |x: f32, w: f32, radii: (f32, f32, f32, f32)| {
                     pc.relief_carve(&ReliefCarve {
                         kind: CarveKind::Recess { tint },
-                        x: rect.x,
+                        x,
                         y: rect.y,
-                        w: split - rect.x,
+                        w,
                         h: rect.height,
-                        radii: (radii.0, 0.0, 0.0, radii.3),
+                        radii,
                         depth,
                         edges: (true, true, true, true),
                     });
+                };
+                if well_l {
+                    well(fl, rx - fl, (radii.0, 0.0, 0.0, radii.3));
                 }
-                let r = radii.1.max(radii.2);
-                let rx = split.max(rect.x);
-                let rw = (rect.x + rect.width - rx).max(0.0);
+                if well_r {
+                    well(rx + rw, fr - rx - rw, (0.0, radii.1, radii.2, 0.0));
+                }
+                let r = if well_r { radii.0.max(radii.3) } else { radii.1.max(radii.2) };
                 match tint {
                     Some(t) => pc.inset_plate_tinted(face, rx, rect.y, rw, rect.height, r, depth, t),
                     None => pc.inset_plate(face, rx, rect.y, rw, rect.height, r, depth),
