@@ -1731,7 +1731,10 @@ impl ParametersBg {
                 // the widget itself never draws.
                 None
             } else if p.2 == "button" {
-                self.buttons[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::button_corner_radius(), true))
+                // A flush control with a field run's edge, as its own paint
+                // draws it ([`Self::fields`]) — it was a boss here, a raised
+                // island the button itself never drew.
+                None
             } else if p.2 == "toggle" || p.2 == "checkbox" {
                 // A toggle paints no fill at all, so these carves — the
                 // widget's own (`Toggle::flat_carves`, exactly what its paint
@@ -1847,6 +1850,19 @@ impl ParametersBg {
                         let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
                         let r = crate::layout::textbox_corner_radius();
                         out.push((x, y + ty, dx + dw - x, h - ty, (r, r, r, r), depth, dx));
+                    }
+                }
+            } else if p.2 == "button" {
+                // A button: a field that is all run, as its own flush plate
+                // (`Button::plate`, `ControlPlate::with_run_edge`) on its
+                // band, at the button radius.
+                if let Some(b) = &self.buttons[i] {
+                    let (x, y, w, h) = b.rect();
+                    let ty = b.label_strip();
+                    if w > 0.0 && h - ty > 0.0 {
+                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
+                        let r = crate::layout::button_corner_radius();
+                        out.push((x, y + ty, w, h - ty, (r, r, r, r), depth, x - crate::scene::paint::FIELD_RUN_ONLY));
                     }
                 }
             } else if p.2.starts_with("choice") {

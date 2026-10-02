@@ -293,9 +293,14 @@ impl Button {
         let radius = crate::layout::button_corner_radius();
         // Keyboard focus lights the plate's own rim — the ring IS the silhouette.
         let tint = self.focused.then(crate::widget::ControlPlate::focus_tint);
+        // A flush plate wears a field run's edge (`ControlPlate::with_run_edge`),
+        // as the dropdown trigger does: one edge for every flush control
+        // beside the wells and fields of a pane, where a trough's outer half
+        // read as a compressed copy of a well's.
         Some(
             crate::widget::ControlPlate::control(rect, radius, stance, crate::scene::Material::face(self.color()))
-                .with_tint(tint),
+                .with_tint(tint)
+                .with_run_edge(stance == crate::widget::PlateStance::Flush),
         )
     }
 
@@ -495,9 +500,8 @@ impl Paint for Button {
         let radius = crate::layout::button_corner_radius();
         let color = self.color();
 
-        // Relief style: a flush inset plate — the button sits sunken in a
-        // carved groove ring with its beveled lip rising back to the surface
-        // plane, face level with the surface. Transparent fills degrade to
+        // Relief style: a flush plate — its face level with the surface, its
+        // edge a field run's (a well's fall, mirrored back up to the face). Transparent fills degrade to
         // edges-only inside the groove (an opaque hover_color fills the face).
         // List rows are exempt: they are transparent-until-hover/selected
         // surfaces, and the edges-only groove would stack a permanent carved
@@ -872,24 +876,33 @@ mod focus_ring_tests {
     use crate::scene::paint::{PaintCtx, Prim};
     use crate::widget::{Event, WidgetHost};
 
-    /// The focus ring is the plate's own rim lit: focused, the trough carries
-    /// the highlight tint; unfocused, the same trough untinted — no extra geometry.
+    /// The focus ring is the plate's own rim lit: focused, its edge (a field
+    /// that is all run) carries the highlight tint; unfocused, the same edge
+    /// untinted — no extra geometry. Never a trough.
     #[test]
     fn focus_lights_the_plate_rim() {
         let mut ctx = crate::widget::UiContext::new();
         let mut b = Button::new(0.0, 0.0, 120.0, 26.0).with_label("Plate").with_raised(true);
         WidgetHost::set_rect(&mut b, 10.0, 20.0, 120.0, 26.0);
         let rect = Rect { x: 10.0, y: 20.0, width: 120.0, height: 26.0 };
-        let troughs = |b: &Adapted<Button>| -> Vec<Option<[f32; 3]>> {
+        let edges = |b: &Adapted<Button>| -> Vec<Option<[f32; 3]>> {
             let mut pc = PaintCtx::new();
             Paint::paint(b.inner(), rect, &mut pc);
-            pc.finish().items.into_iter().filter_map(|i| match i.prim { Prim::Trough { tint, .. } => Some(tint), _ => None }).collect()
+            let items = pc.finish().items;
+            assert!(!items.iter().any(|i| matches!(i.prim, Prim::Trough { .. })), "no trough");
+            items
+                .into_iter()
+                .filter_map(|i| match i.prim {
+                    Prim::Field { rect, split, tint, .. } if split < rect.x - 100.0 => Some(tint),
+                    _ => None,
+                })
+                .collect()
         };
-        assert_eq!(troughs(&b), vec![None], "unfocused: one untinted trough");
+        assert_eq!(edges(&b), vec![None], "unfocused: one untinted edge, a field that is all run");
         b.handle_event(&Event::FocusIn, &mut ctx);
-        assert_eq!(troughs(&b), vec![Some(crate::widget::ControlPlate::focus_tint())], "focused: the rim lit");
+        assert_eq!(edges(&b), vec![Some(crate::widget::ControlPlate::focus_tint())], "focused: the rim lit");
         b.handle_event(&Event::FocusOut, &mut ctx);
-        assert_eq!(troughs(&b), vec![None]);
+        assert_eq!(edges(&b), vec![None]);
     }
 }
 
