@@ -19,7 +19,13 @@
 //!
 //! [`TextBox`]: super::TextBox
 
+use std::time::{Duration, Instant};
+
 use crate::widget::{ElementState, Key, KeyEvent, NamedKey};
+
+/// How close two presses at the same offset must be to count as one double
+/// (or triple) click — `DocEditor`'s figure, so the two editors agree.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 /// What a keystroke meant, beyond editing the text.
 #[derive(Debug, PartialEq)]
@@ -42,9 +48,30 @@ pub struct LineEdit {
     pub selection: Option<(usize, usize)>,
     /// Render as bullets. Set for password fields.
     pub masked: bool,
-    /// While a pointer button is held after [`LineEdit::press`]: the byte the
-    /// selection runs from. `None` when no drag is in progress.
-    drag_anchor: Option<usize>,
+    /// While a pointer button is held after [`LineEdit::press`]: what the
+    /// press selected and how a drag grows it. `None` when no drag is in
+    /// progress.
+    drag: Option<Drag>,
+    /// The last press — when, where, and how many presses in a row landed
+    /// there — for telling a double or triple click from two clicks.
+    clicks: Option<(Instant, usize, u8)>,
+}
+
+/// A press being dragged: the span the press selected (empty for a single
+/// click, the word for a double, everything for a triple) and the unit the
+/// selection grows by as the pointer moves.
+#[derive(Clone, Copy, Debug)]
+struct Drag {
+    lo: usize,
+    hi: usize,
+    unit: Unit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Unit {
+    Char,
+    Word,
+    All,
 }
 
 /// The char boundary before byte `i` in `s` (0 at the start). For stepping a
@@ -107,36 +134,120 @@ impl LineEdit {
     /// A press at byte `at`: the caret goes there and a drag starts from it.
     /// With `extend` (Shift held) the selection's far end stays put and the
     /// selection runs from it to `at` instead — shift+click.
+    ///
+    /// Presses at the same offset within [`DOUBLE_CLICK`] of each other count
+    /// up: the second selects the word there (see [`LineEdit::word_at`]) and
+    /// a drag from it grows by whole words; the third selects everything —
+    /// the field is one line; a fourth starts over. A masked field selects
+    /// everything on the second press too: picking out a "word" would show
+    /// where the password's spaces and symbols are. Shift+click never counts.
     pub fn press(&mut self, at: usize, extend: bool) {
+        self.press_at(at, extend, Instant::now());
+    }
+
+    fn press_at(&mut self, at: usize, extend: bool, now: Instant) {
         let at = self.boundary(at);
-        let anchor = if extend { self.anchor() } else { at };
-        self.drag_anchor = Some(anchor);
-        self.select_between(anchor, at);
+        let count = match self.clicks {
+            Some((t, p, n)) if !extend && p == at && now.duration_since(t) < DOUBLE_CLICK => n % 3 + 1,
+            _ => 1,
+        };
+        self.clicks = Some((now, at, count));
+        let unit = match count {
+            1 => Unit::Char,
+            2 if !self.masked => Unit::Word,
+            _ => Unit::All,
+        };
+        let (lo, hi) = match unit {
+            Unit::Char => {
+                let anchor = if extend { self.anchor() } else { at };
+                self.select_between(anchor, at);
+                (anchor, anchor)
+            }
+            Unit::Word => {
+                let (a, b) = self.word_at(at);
+                self.select_between(a, b);
+                (a, b)
+            }
+            Unit::All => {
+                self.select_all();
+                (0, self.text.len())
+            }
+        };
+        self.drag = Some(Drag { lo, hi, unit });
     }
 
     /// The pointer moved to byte `at` with the button still held: the
     /// selection is now everything between the press and here, and the caret
-    /// is here. True when that changed anything (a repaint is due); false,
-    /// and nothing happens, when no press is in progress.
+    /// is here — or, after a double-click, everything from the pressed word
+    /// to the whole word here. True when that changed anything (a repaint is
+    /// due); false, and nothing happens, when no press is in progress.
     pub fn drag_to(&mut self, at: usize) -> bool {
-        let Some(anchor) = self.drag_anchor else {
+        let Some(drag) = self.drag else {
             return false;
         };
         let before = (self.cursor, self.selection);
-        self.select_between(anchor, self.boundary(at));
+        let at = self.boundary(at);
+        match drag.unit {
+            Unit::Char => self.select_between(drag.lo, at),
+            Unit::Word if at < drag.lo => self.select_between(drag.hi, self.word_at(at).0),
+            Unit::Word if at > drag.hi => self.select_between(drag.lo, self.word_at(at).1),
+            Unit::Word => self.select_between(drag.lo, drag.hi),
+            Unit::All => {}
+        }
         (self.cursor, self.selection) != before
     }
 
     /// The button came up: the drag is over, and what it selected stays
     /// selected.
     pub fn release(&mut self) {
-        self.drag_anchor = None;
+        self.drag = None;
     }
 
     /// Whether a press is being dragged — the app routes pointer motion to
     /// [`LineEdit::drag_to`] while this holds, wherever the pointer is.
     pub fn dragging(&self) -> bool {
-        self.drag_anchor.is_some()
+        self.drag.is_some()
+    }
+
+    /// The "word" a double-click at byte `at` selects: the run of characters
+    /// of one kind around it — letters and digits (with `_`, as `DocEditor`
+    /// counts them), spaces, or anything else. So in a URL `example` is a
+    /// word and so is `://`. On the edge of a word the word wins, so a click
+    /// just past a word's last letter still selects the word.
+    pub fn word_at(&self, at: usize) -> (usize, usize) {
+        let at = self.boundary(at);
+        let s = &self.text;
+        let kind = |c: char| {
+            if c.is_alphanumeric() || c == '_' {
+                0
+            } else if c.is_whitespace() {
+                1
+            } else {
+                2
+            }
+        };
+        let after = s[at..].chars().next();
+        let before = s[..at].chars().next_back();
+        let k = match (before.map(kind), after.map(kind)) {
+            (_, Some(0)) | (Some(0), _) => 0,
+            (_, Some(k)) | (Some(k), None) => k,
+            (None, None) => return (at, at),
+        };
+        let mut a = at;
+        while let Some(c) = s[..a].chars().next_back() {
+            if kind(c) != k {
+                break;
+            }
+            a -= c.len_utf8();
+        }
+        let mut b = at;
+        while let Some(c) = s[b..].chars().next() {
+            if kind(c) != k {
+                break;
+            }
+            b += c.len_utf8();
+        }
+        (a, b)
     }
 
     /// A byte offset into [`LineEdit::display`] as the offset into `text` it
@@ -201,6 +312,8 @@ impl LineEdit {
         if event.state != ElementState::Pressed {
             return EditOutcome::Ignored;
         }
+        // Typing between two clicks makes them two clicks, not a double.
+        self.clicks = None;
         match &event.logical_key {
             Key::Named(NamedKey::Enter) => return EditOutcome::Submit,
             Key::Named(NamedKey::Escape) => return EditOutcome::Cancel,
@@ -477,6 +590,93 @@ mod tests {
         }
         assert_eq!(e.display_index(3), 2 * bullet);
         assert_eq!(LineEdit::with_text("abc").display_index(2), 2);
+    }
+
+    fn ms(t0: Instant, n: u64) -> Instant {
+        t0 + Duration::from_millis(n)
+    }
+
+    fn click(e: &mut LineEdit, at: usize, now: Instant) {
+        e.press_at(at, false, now);
+        e.release();
+    }
+
+    #[test]
+    fn a_double_click_selects_the_word_and_a_triple_everything() {
+        let t0 = Instant::now();
+        let mut e = LineEdit::with_text("https://example.com/drag");
+        click(&mut e, 10, t0);
+        assert_eq!(e.selection, None);
+        click(&mut e, 10, ms(t0, 150));
+        assert_eq!((e.selection, e.cursor), (Some((8, 15)), 15), "example");
+        click(&mut e, 10, ms(t0, 300));
+        assert_eq!(e.selection, Some((0, 24)), "the third click takes the line");
+        click(&mut e, 10, ms(t0, 450));
+        assert_eq!((e.selection, e.cursor), (None, 10), "the fourth starts over");
+    }
+
+    #[test]
+    fn slow_or_moved_clicks_are_two_clicks() {
+        let t0 = Instant::now();
+        let mut e = LineEdit::with_text("hello world");
+        click(&mut e, 2, t0);
+        click(&mut e, 2, ms(t0, 500));
+        assert_eq!(e.selection, None, "too slow");
+        click(&mut e, 3, ms(t0, 600));
+        assert_eq!(e.selection, None, "somewhere else");
+        // Shift+click is never half of a double-click.
+        let mut e = LineEdit::with_text("hello world");
+        click(&mut e, 2, t0);
+        e.press_at(2, true, ms(t0, 100));
+        assert_eq!(e.selection, None);
+        // Nor is a click after typing.
+        let mut e = LineEdit::with_text("hello world");
+        click(&mut e, 11, t0);
+        typed(&mut e, "!");
+        e.handle_key(&named(NamedKey::Backspace));
+        click(&mut e, 11, ms(t0, 100));
+        assert_eq!(e.selection, None);
+    }
+
+    #[test]
+    fn a_word_is_a_run_of_one_kind() {
+        let e = LineEdit::with_text("https://example.com/a_b  c");
+        assert_eq!(e.word_at(1), (0, 5), "https");
+        assert_eq!(e.word_at(6), (5, 8), "the :// between words");
+        assert_eq!(e.word_at(15), (8, 15), "just past a word's end is still the word");
+        assert_eq!(e.word_at(21), (20, 23), "_ joins a word");
+        assert_eq!(e.word_at(24), (23, 25), "a run of spaces");
+        assert_eq!(e.word_at(26), (25, 26), "the end of the text");
+        assert_eq!(LineEdit::default().word_at(0), (0, 0));
+        // Multi-byte letters are letters.
+        assert_eq!(LineEdit::with_text("é1 x").word_at(1), (0, 3));
+    }
+
+    #[test]
+    fn dragging_a_double_click_grows_by_words() {
+        let t0 = Instant::now();
+        let mut e = LineEdit::with_text("one two three four");
+        click(&mut e, 5, t0);
+        e.press_at(5, false, ms(t0, 100));
+        assert_eq!(e.selection, Some((4, 7)), "two");
+        e.drag_to(10); // into "three"
+        assert_eq!((e.selection, e.cursor), (Some((4, 13)), 13));
+        e.drag_to(6); // back inside "two": just the word again
+        assert_eq!(e.selection, Some((4, 7)));
+        e.drag_to(1); // into "one": from its start to the end of "two"
+        assert_eq!((e.selection, e.cursor), (Some((0, 7)), 0));
+        e.release();
+        assert!(!e.drag_to(16));
+    }
+
+    #[test]
+    fn a_masked_double_click_selects_it_all() {
+        let t0 = Instant::now();
+        let mut e = LineEdit::masked();
+        typed(&mut e, "pass word");
+        click(&mut e, 2, t0);
+        click(&mut e, 2, ms(t0, 100));
+        assert_eq!(e.selection, Some((0, 9)), "no word boundaries in a password");
     }
 
     /// A password must not leave through a chord the user may not have meant.
