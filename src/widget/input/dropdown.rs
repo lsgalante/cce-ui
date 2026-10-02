@@ -1124,7 +1124,7 @@ impl Paint for Dropdown {
         // A menu that replaces the trigger has no band to redraw on.
         if !self.menu_replaces_trigger {
             let (tx, ty) = (rect.x, rect.y);
-            let (tw, th) = (rect.width, rect.height);
+            let th = rect.height;
             let band_bounds = Some([ux, uy, ux + uw, uy + uh]);
             let font = crate::layout::control_label_font_detached();
             let text_y = crate::layout::align_text_y(ty, th, 12.0, 0.0);

@@ -1732,9 +1732,9 @@ impl ParametersBg {
             }
             // (control, its configured corner radius, raised vs recessed)
             let ctl: Option<(&dyn WidgetHost, f32, bool)> = if is_text_row(&p.2) {
-                // The textpick picker is NOT in this list: with it the row is
-                // a field ([`Self::fields`]) — a well ending in a flush run.
-                self.texts[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::textbox_corner_radius(), false))
+                // A text row is a field ([`Self::fields`]): with its picker a
+                // well ending in a flush run, without one all well.
+                None
             } else if p.2.starts_with("choice") {
                 // The dropdown trigger is a FLUSH control, a field that is all
                 // run ([`Self::fields`]). A boss here read as a raised island
@@ -1817,11 +1817,6 @@ impl ParametersBg {
                 // The top-label band stays outside the relief like every other host.
                 let ty = w.label_strip();
                 let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                // A text box joined to its picker is half of a field
-                // ([`Self::fields`]), drawn there.
-                if is_text_row(&p.2) && self.texts[i].as_ref().is_some_and(|t| t.inner().joined_right) {
-                    continue;
-                }
                 out.push((x, y + ty, ww, h - ty, r4(radius), depth, raised, all));
             }
         }
@@ -1848,7 +1843,24 @@ impl ParametersBg {
             if hidden[i] {
                 continue;
             }
-            if p.2.starts_with("textpick") {
+            let joined = self.texts[i].as_ref().is_some_and(|t| t.inner().joined_right);
+            if is_text_row(&p.2) && !joined {
+                // A plain text row (a textpick with no candidates included):
+                // a field that is all well, so it shades as the well of a
+                // textpick row beside it does — an overlay of its own, where
+                // as a recess in [`Self::reliefs`] it was grouped into the
+                // pane's plate and read flatter (until 2026-10-02).
+                if let Some(tb) = &self.texts[i] {
+                    let (x, y, w, h) = tb.rect();
+                    let ty = tb.label_strip();
+                    if w > 0.0 && h - ty > 0.0 {
+                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
+                        let r = crate::layout::textbox_corner_radius();
+                        let band = Rect { x, y: y + ty, width: w, height: h - ty };
+                        out.push((x, y + ty, w, h - ty, (r, r, r, r), depth, crate::scene::paint::field_well_only(band)));
+                    }
+                }
+            } else if p.2.starts_with("textpick") {
                 if let (Some(tb), Some(d)) = (&self.texts[i], &self.choices[i]) {
                     if !tb.inner().joined_right {
                         continue;
@@ -3910,8 +3922,17 @@ mod tests {
         // there.
         let rr = crate::layout::textbox_corner_radius();
         let fields = p.inner().fields();
-        assert_eq!(fields.len(), 1, "{fields:?}");
+        assert_eq!(fields.len(), 3, "{fields:?}");
         let (fx, fy, fw, fh, fradii, _, split) = fields[0];
+        // The plain row and the textpick with nothing to pick are fields
+        // too, all well: their seam past their right end.
+        for (i, f) in fields[1..].iter().enumerate() {
+            let (x, _, w, _, radii, _, s) = *f;
+            let (bx, _, bw, _) = p.texts[i + 1].as_ref().unwrap().rect();
+            assert_eq!((x, w), (bx, bw), "row {}'s field is its box", i + 1);
+            assert_eq!(radii, (rr, rr, rr, rr));
+            assert!(s >= x + w + 100.0, "all well: {s}");
+        }
         assert_eq!((fx, fy, fx + fw, fy + fh), (tx, dy, dx + dw, dy + dh), "the field spans box and picker");
         assert_eq!(fradii, (rr, rr, rr, rr), "its own radius at all four corners");
         assert_eq!(split, dx, "the seam is where the picker begins");

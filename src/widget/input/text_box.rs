@@ -1568,10 +1568,9 @@ impl Paint for TextBox {
                 if let Some((well, radii, depth, tint)) = self.well() {
                     // Focus lights the well's rim in the highlight accent (with
                     // the shader's complementary shadow) — the TreeList treatment.
-                    match tint {
-                        Some(t) => ctx.recess_tinted(well, radii, depth, t),
-                        None => ctx.recess(well, radii, depth),
-                    }
+                    // A field that is all well (`PaintCtx::well_field`), the
+                    // well a textpick row's box is half of.
+                    ctx.well_field(well, radii, depth, tint);
                 }
             }
 
@@ -1825,6 +1824,28 @@ unsafe impl Sync for TextBox {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A text box's well is a field that is all well — the well a textpick
+    /// row's box is half of — and not a recess, which grouped into the plate
+    /// under it and read flatter beside the textpick's.
+    #[test]
+    fn a_text_box_is_a_field_that_is_all_well() {
+        use crate::scene::paint::{PaintCtx, Prim};
+        let mut tb = TextBox::new("x".to_string()).with_recessed(true);
+        tb.set_rect(10.0, 10.0, 200.0, 26.0);
+        let Some((well, radii, depth, _)) = tb.well() else {
+            return; // a square-cornered config draws no well
+        };
+        let mut pc = PaintCtx::new();
+        Paint::paint(tb.inner(), Rect { x: 10.0, y: 10.0, width: 200.0, height: 26.0 }, &mut pc);
+        let prims: Vec<Prim> = pc.finish().items.into_iter().map(|i| i.prim).collect();
+        assert!(
+            prims.iter().any(|p| matches!(p, Prim::Field { rect, radii: r, depth: d, split, .. }
+                if *rect == well && *r == radii && *d == depth && *split >= rect.x + rect.width + 100.0)),
+            "{prims:?}"
+        );
+        assert!(!prims.iter().any(|p| matches!(p, Prim::Recess { .. })), "no recess of its own");
+    }
 
     /// The multiline caret/click math reads shaped per-line offsets; a caret
     /// must land exactly where it is drawn, on every column of every line.

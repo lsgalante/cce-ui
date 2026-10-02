@@ -382,6 +382,18 @@ explicit valley and `cce-relief`'s preview. `a_dropdown_trigger_wears_the_runs_e
 `focus_lights_the_plate_rim`, `a_breadcrumb_and_a_font_selector_wear_the_runs_edge` and
 `an_inset_plate_is_a_field_that_is_all_run` are the tests.
 
+**A text box is a field that is all well** (since 2026-10-02): `PaintCtx::well_field`, a
+`Prim::Field` whose seam is `FIELD_RUN_ONLY` px past its right end (`field_well_only`),
+in `TextBox`'s own paint and in `ParametersBg::fields` for every text row without a
+picker. It was a `Prim::Recess`, which the runner GROUPS into a live host plate as a CSG
+feature, and on the NVIDIA device (`CCE_VK_DEVICE=discrete`, the designer's `gpu
+"discrete"`) a grouped recess drew a doubled outline where the field beside it — never
+grouped, its own overlay — drew the single edge; on the integrated GPU the two are
+identical to the pixel, so the difference shows only on the discrete card. Other grouped
+recesses (a spinbox with no run, a colour well, a toggle's track) still group. Both
+fallbacks draw an all-well field as one plain recess. `a_text_box_is_a_field_that_is_all_well`
+is the test.
+
 The pieces that feed it: `ParametersBg::fields` (the pane's list, drawn after its troughs,
 hover-tinted like them; textpick rows and spinboxes with a run are in neither `reliefs`
 nor `troughs`), `TextBox::joined_right` (the box stops at the seam), `Dropdown::set_radii`
