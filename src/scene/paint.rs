@@ -580,6 +580,28 @@ pub enum Prim {
     /// `tint` lights the rim like [`Prim::Recess`]'s — the focus treatment of a
     /// flush control plate (`PaintCtx::control_plate`).
     Trough { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool), tint: Option<[f32; 3]> },
+    /// A sunken well that ends in a FLUSH run: one field, one outer contour.
+    /// Left of `split` (an x in the same space as `rect`) it is a
+    /// [`Prim::Recess`] — the interior one step down; right of it, a
+    /// [`Prim::Trough`] — a valley on the outline and the interior back at
+    /// the surface's level, as a flush control plate's. A parameter pane's
+    /// text row with its completion picker, a spinbox's value and its -/+ run.
+    ///
+    /// Why one prim and not the two it replaces, side by side: each of those
+    /// shades its OWN box, so at the seam the outline breaks — each box
+    /// turns its own square corner there, and the strong line of the edge
+    /// jumps from the recess's outer rim to the trough's inner lip. Here the
+    /// outline is evaluated once (the whole field, its own radii), its wall
+    /// blends from the step to the valley across a wall's width about the
+    /// seam — the two agree on the outer half, falling from the surface to
+    /// half the step, and part on the inner half — and the seam is the
+    /// well's floor rising to the run's face: a step wall along `split`,
+    /// fading to nothing where it meets the outer wall, the one place the
+    /// two sides stand at the same height.
+    ///
+    /// SDF path only; the legacy banded tessellation and flat hosts draw the
+    /// two-box form it replaced. `tint` lights it like a recess's.
+    Field { rect: Rect, radii: Radii, depth: f32, split: f32, tint: Option<[f32; 3]> },
     /// The window's glass slab: a rounded fill plus a rolled, lit edge around its whole
     /// perimeter, drawn at full size. Distinct from `Bevel`, which insets its fill by
     /// `depth` — a plate must fill the window exactly, or the compositor's rounded window
@@ -1086,6 +1108,7 @@ impl PaintCtx {
                 Some(t) => self.trough_tinted(rect, radii, depth, t),
                 None => self.trough_edges(rect, radii, depth, edges),
             },
+            Prim::Field { rect, radii, depth, split, tint } => self.field(rect, radii, depth, split, tint),
             Prim::Plate { rect, radii, material, depth, shape } => {
                 self.plate_shaped(rect, radii, &material, depth, shape)
             }
@@ -1525,6 +1548,14 @@ impl PaintCtx {
     ) {
         let rect = self.apply_offset(rect);
         self.push(Prim::Trough { rect, radii, depth, edges, tint: Some(tint) });
+    }
+
+    /// A sunken well ending in a flush run at `split` — see [`Prim::Field`].
+    /// `tint` lights its rim (the focus and hover treatment).
+    pub fn field(&mut self, rect: Rect, radii: Radii, depth: f32, split: f32, tint: Option<[f32; 3]>) {
+        let split = split + self.offset.0;
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Field { rect, radii, depth, split, tint });
     }
 
     /// Raise a rim along `rect`'s boundary — see `Prim::Ridge`. `depth` is the

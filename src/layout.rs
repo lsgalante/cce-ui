@@ -4342,6 +4342,27 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
                     pending_face = Some((rect, radii, fill));
                 }
             }
+            // A flat host has no blended outline: the two-box form
+            // `Prim::Field` replaced — the well to the seam, the run's flush
+            // plate past it.
+            Prim::Field { rect, radii, depth, split, tint } => {
+                pc.relief_carve(&ReliefCarve {
+                    kind: CarveKind::Recess { tint },
+                    x: rect.x,
+                    y: rect.y,
+                    w: (split - rect.x).max(0.0),
+                    h: rect.height,
+                    radii: (radii.0, 0.0, 0.0, radii.3),
+                    depth,
+                    edges: (true, true, true, true),
+                });
+                let r = radii.1.max(radii.2);
+                let (rx, rw) = (split, (rect.x + rect.width - split).max(0.0));
+                match tint {
+                    Some(t) => pc.inset_plate_tinted([0.0; 4], rx, rect.y, rw, rect.height, r, depth, t),
+                    None => pc.inset_plate([0.0; 4], rx, rect.y, rw, rect.height, r, depth),
+                }
+            }
             Prim::Trough { rect, radii, depth, tint, .. } => {
                 let face = pending_face.take().map(|(_, _, fill)| fill).unwrap_or([0.0; 4]);
                 let (r1, r2, r3, r4) = radii;

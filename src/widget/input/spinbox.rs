@@ -39,6 +39,20 @@ pub struct Spinbox {
 }
 
 /// The zone geometry shared by paint and input, derived from the content rect.
+/// A spinbox's relief: one field, its well and its -/+ run — see
+/// [`Spinbox::relief_parts`].
+#[derive(Clone, Copy, Debug)]
+pub struct SpinRelief {
+    /// The field's outline, as the host was handed it.
+    pub rect: Rect,
+    pub radius: f32,
+    pub depth: f32,
+    /// Where the -/+ run begins (an x), and the engraved seam dividing - from
+    /// + as `(top, bottom, width, host)` — `None` when the button zone has no
+    /// area, and the field is the well alone.
+    pub run: Option<(f32, ((f32, f32), (f32, f32), f32, Rect))>,
+}
+
 struct SpinGeom {
     x: f32,
     y: f32,
@@ -131,36 +145,24 @@ impl Spinbox {
     /// own `paint` and flat hosts (`ParametersBg`) that must re-emit carves
     /// (their rounded-quad bridge keeps only flat prims — the slider's
     /// `track_relief` precedent). Faces are transparent in this style; the
-    /// relief IS the chrome:
-    /// - the value sits in a recessed well (the TextBox language) that ends
-    ///   at the -/+ run, square there,
-    /// - the -/+ pair is ONE flush control plate, the control's right end:
-    ///   it reaches the control's outer edge on the top, right and bottom as
-    ///   a dropdown trigger's plate does, its ring all round, square where it
-    ///   meets the well and the control's radius outside — so the two read as
-    ///   one field with a seam between them, as a parameter pane's text row
-    ///   and its picker do. Until 2026-10-01 the run was nested INSIDE a
-    ///   full-width well, its face stopping at the base of the well's wall,
-    ///   so it never reached the edge a dropdown's does,
+    /// relief IS the chrome, and it is ONE field ([`crate::scene::paint::Prim::Field`]):
+    /// - the value sits in a sunken well (the TextBox language),
+    /// - the -/+ pair is a flush run, the field's right end — out to the
+    ///   control's edge on the top, right and bottom as a dropdown trigger's
+    ///   plate is — and the field's one outline runs round both, its wall
+    ///   blending from the well's step to the run's valley at the seam, so
+    ///   the edge does not break there. Until 2026-10-01 the run was nested
+    ///   inside a full-width well (its face stopping at the base of the
+    ///   well's wall), and for a few hours after that the well and the run
+    ///   were two carves side by side, each turning its own corner at the
+    ///   seam,
     /// - the two buttons divide by an engraved seam, not a wall pair — the
     ///   breadcrumb run's segment language at miniature scale.
     ///
-    /// Returns the well `(rect, radii, depth)` — carved, radii top-left
-    /// clockwise — plus the run
-    /// `(rect, radii, depth, trough edges)` and seam `(top, bottom, width,
-    /// host)` when the button zone is non-degenerate. `None` when the control
+    /// The field's outline is `rect` as given — a host carves it inside or
+    /// not by its own rule, as it does every well. `None` when the control
     /// has no area. The caller gates on `control_relief`.
-    #[allow(clippy::type_complexity)]
-    pub fn relief_parts(
-        &self,
-        rect: Rect,
-    ) -> Option<(
-        (Rect, (f32, f32, f32, f32), f32),
-        Option<(
-            (Rect, (f32, f32, f32, f32), f32, (bool, bool, bool, bool)),
-            ((f32, f32), (f32, f32), f32, Rect),
-        )>,
-    )> {
+    pub fn relief_parts(&self, rect: Rect) -> Option<SpinRelief> {
         let g = self.geom(rect);
         if g.w <= 0.0 || g.h <= 0.0 {
             return None;
@@ -169,27 +171,19 @@ impl Spinbox {
         let depth = crate::layout::bevel_width().min(g.h * 0.2);
         let whole = Rect { x: g.x, y: g.y, width: g.w, height: g.h };
         if g.btn_w <= 0.0 || g.btn_h <= 0.0 {
-            let (well_rect, well_radii) = crate::layout::carve_inside(whole, (radius, radius, radius, radius), depth);
-            return Some(((well_rect, well_radii, depth), None));
+            return Some(SpinRelief { rect: whole, radius, depth, run: None });
         }
         // The run begins at the button hit zone and spans the whole band to
-        // the control's right edge; the well is what is left of it.
+        // the control's right edge.
         let split = g.split_dec + g.pad;
-        let (well_rect, well_radii) = crate::layout::carve_inside(
-            Rect { x: g.x, y: g.y, width: split - g.x, height: g.h },
-            (radius, 0.0, 0.0, radius),
-            depth,
-        );
-        let well = (well_rect, well_radii, depth);
-        let run_rect = Rect { x: split, y: g.y, width: g.x + g.w - split, height: g.h };
-        let run = (run_rect, (0.0, radius, radius, 0.0), depth, (true, true, true, true));
         // Seam floor width: the breadcrumb's SEAM_WIDTH — a hair of flat
         // floor so the crease doesn't alias into a dotted line. It sits on
         // the -/+ hit boundary, not the painted run's midpoint, and crosses
-        // the run's face between its ring's walls.
+        // the run's face between its outline's walls.
         let sx = split + g.btn_w;
-        let seam = ((sx, run_rect.y + depth), (sx, run_rect.y + run_rect.height - depth), 0.75, run_rect);
-        Some((well, Some((run, seam))))
+        let host = Rect { x: split, y: g.y, width: g.x + g.w - split, height: g.h };
+        let seam = ((sx, g.y + depth), (sx, g.y + g.h - depth), 0.75, host);
+        Some(SpinRelief { rect: whole, radius, depth, run: Some((split, seam)) })
     }
 
     fn value_text(&self) -> String {
@@ -336,20 +330,20 @@ impl Paint for Spinbox {
             // chrome (see [`Self::relief_parts`]). Flat prims first — hover
             // washes and the editing cue survive a flat host's rounded-quad
             // bridge, the carves are re-emitted host-side.
-            if let Some((well, buttons)) = self.relief_parts(rect) {
-                if let Some(((run, radii, _, _), (seam_top, _, _, _))) = buttons {
+            if let Some(rel) = self.relief_parts(rect) {
+                // Carved inside the control as every well is.
+                let r = rel.radius;
+                let (field, radii) = crate::layout::carve_inside(rel.rect, (r, r, r, r), rel.depth);
+                if let Some((split, _)) = rel.run {
                     let wash = [1.0, 1.0, 1.0, 0.06];
+                    let sx = split + g.btn_w;
+                    let (top, h) = (field.y, field.height);
                     if self.hover_dec {
-                        ctx.rounded_rect(
-                            Rect { x: run.x, y: run.y, width: seam_top.0 - run.x, height: run.height },
-                            radii.0,
-                            (true, false, false, true),
-                            wash,
-                        );
+                        ctx.rounded_rect(Rect { x: split, y: top, width: sx - split, height: h }, 0.0, (false, false, false, false), wash);
                     }
                     if self.hover_inc {
                         ctx.rounded_rect(
-                            Rect { x: seam_top.0, y: run.y, width: run.x + run.width - seam_top.0, height: run.height },
+                            Rect { x: sx, y: top, width: field.x + field.width - sx, height: h },
                             radii.1,
                             (false, true, true, false),
                             wash,
@@ -370,11 +364,12 @@ impl Paint for Spinbox {
                     let cursor_y = g.y + (g.h - 14.0) / 2.0;
                     ctx.quad(Rect { x: cursor_x, y: cursor_y, width: 1.5, height: 14.0 }, [0.80, 0.80, 0.85, 1.0]);
                 }
-                let (wr, wradii, wd) = well;
-                ctx.recess(wr, wradii, wd);
-                if let Some(((run, radii, rd, edges), (sa, sb, sw, host))) = buttons {
-                    ctx.trough_edges(run, radii, rd, edges);
-                    ctx.groove(sa, sb, sw, rd, host);
+                match rel.run {
+                    Some((split, (sa, sb, sw, host))) => {
+                        ctx.field(field, radii, rel.depth, split, None);
+                        ctx.groove(sa, sb, sw, rel.depth, host);
+                    }
+                    None => ctx.recess(field, radii, rel.depth),
                 }
             }
         } else if rounded {
@@ -628,6 +623,38 @@ impl Input for Spinbox {
 mod tests {
     use super::*;
     use crate::widget::{WidgetHost, UiContext};
+
+    /// The value's well and the -/+ run are ONE field: one outline round
+    /// both, its seam where the run begins — not a well and a trough side by
+    /// side, each turning its own corner there — with the engraved seam
+    /// between - and + on top.
+    #[test]
+    fn a_spinbox_is_one_field_with_its_run_at_the_right_end() {
+        use crate::scene::paint::{PaintCtx, Prim};
+        if !crate::layout::control_relief() {
+            return;
+        }
+        let sb = Spinbox::new(0, -100, 100, 1);
+        let rect = Rect { x: 10.0, y: 20.0, width: 200.0, height: 26.0 };
+        let rel = sb.inner().relief_parts(rect).expect("a relief");
+        assert_eq!(rel.rect, rect, "the outline is the control as handed over");
+        let (split, (sa, sb2, _, _)) = rel.run.expect("a -/+ run");
+        assert!(split > rect.x + rect.width * 0.5 && split < rect.x + rect.width, "the run is the right end");
+        assert!(sa.0 > split && sa.0 == sb2.0, "the -/+ seam crosses the run");
+        let mut pc = PaintCtx::new();
+        Paint::paint(sb.inner(), rect, &mut pc);
+        let prims: Vec<Prim> = pc.finish().items.into_iter().map(|i| i.prim).collect();
+        let fields: Vec<&Prim> = prims.iter().filter(|p| matches!(p, Prim::Field { .. })).collect();
+        assert_eq!(fields.len(), 1, "{prims:?}");
+        if let Prim::Field { split: s, .. } = fields[0] {
+            assert_eq!(*s, split);
+        }
+        assert!(
+            !prims.iter().any(|p| matches!(p, Prim::Recess { .. } | Prim::Trough { .. })),
+            "no well or ring of its own beside the field"
+        );
+        assert!(prims.iter().any(|p| matches!(p, Prim::Groove { .. })), "the -/+ seam");
+    }
 
     #[test]
     fn spinbox_button_zones_step_the_value() {

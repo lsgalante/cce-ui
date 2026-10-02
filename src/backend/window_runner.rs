@@ -1851,7 +1851,7 @@ fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
         P::Quad { .. } => "Quad", P::RoundedRect { .. } => "RoundedRect",
         P::Border { .. } => "Border", P::Bevel { .. } => "Bevel",
         P::Recess { .. } => "Recess", P::Boss { .. } => "Boss",
-        P::Ridge { .. } => "Ridge", P::Trough { .. } => "Trough", P::Plate { .. } => "Plate",
+        P::Ridge { .. } => "Ridge", P::Trough { .. } => "Trough", P::Field { .. } => "Field", P::Plate { .. } => "Plate",
         P::Arc { .. } => "Arc", P::ArcShaded { .. } => "ArcShaded",
         P::Vector { .. } => "Vector", P::Circle { .. } => "Circle",
         P::Sphere { .. } => "Sphere", P::Droplet { .. } => "Droplet",
@@ -2169,6 +2169,26 @@ pub fn tessellate_display_list(
                     plate = Some(p);
                     made_plate = Some(*rect);
                 }
+            }
+            // A sunken well ending in a flush run (see `Prim::Field`): one
+            // outline, one overlay — never grouped, its profile is not a
+            // monotonic step. The cover quad inflates by half the wall, as a
+            // free carve's does; the host-box slot carries the seam's x
+            // (physical px), since nothing fades against a host here.
+            Prim::Field { rect, radii, depth, split, tint } if shader_plates => {
+                let infl = *depth * 0.5 + 2.0;
+                verts.extend(quad_vertices(
+                    rect.x - infl, rect.y - infl,
+                    rect.width + 2.0 * infl, rect.height + 2.0 * infl,
+                    sw, sh, [0.0; 4],
+                ));
+                let mut p = plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, false, None);
+                p.mode = 16.0; // MODE_FIELD
+                if let Some(t) = tint {
+                    p.specular_tint = [t[0], t[1], t[2], 1.0];
+                }
+                p.host = [*split * scale, 0.0, 0.0, 0.0];
+                plate = Some(p);
             }
             Prim::Recess { rect, radii, depth, edges, .. }
             | Prim::Boss { rect, radii, depth, edges, .. }
@@ -2519,6 +2539,33 @@ pub fn tessellate_display_list(
                     rect.width - *depth, rect.height - *depth,
                     (ir, ir, ir, ir), half,
                     sw, sh, [0.0; 4], no, 1.0, default_bevel_bands(half), *edges,
+                    EdgeKind::Step, &mut verts,
+                );
+            }
+            Prim::Field { rect, radii, depth, split, .. } => {
+                // Legacy approximation: the two-box form `Prim::Field`
+                // replaced — the well to the seam a step down, the run past it
+                // the Trough arm's down-then-up stack. The banded machinery
+                // has no blended outline, and the legacy path exists only for
+                // A/B comparison.
+                let all = (true, true, true, true);
+                let lw = (*split - rect.x).max(0.0);
+                push_bevel_edge_vertices_banded(
+                    rect.x, rect.y, lw, rect.height, (radii.0, 0.0, 0.0, radii.3), *depth,
+                    sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(*depth), all,
+                    EdgeKind::Step, &mut verts,
+                );
+                let (rx, rw) = (*split, (rect.x + rect.width - *split).max(0.0));
+                let half = *depth * 0.5;
+                push_bevel_edge_vertices_banded(
+                    rx, rect.y, rw, rect.height, (0.0, radii.1, radii.2, 0.0), half,
+                    sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(half), all,
+                    EdgeKind::Step, &mut verts,
+                );
+                let ir = (radii.1 - half).max(0.0);
+                push_bevel_edge_vertices_banded(
+                    rx + half, rect.y + half, rw - *depth, rect.height - *depth, (0.0, ir, ir, 0.0), half,
+                    sw, sh, [0.0; 4], no, 1.0, default_bevel_bands(half), all,
                     EdgeKind::Step, &mut verts,
                 );
             }

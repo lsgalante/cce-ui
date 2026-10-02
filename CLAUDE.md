@@ -317,24 +317,41 @@ cce-files does: a `PopoverCollector` keeps fills as plain rects, so the grown pl
 loses its relief and its corners (`inset_plate` degrades to a flat fill there). The
 designer's params pane went through one until the same day.
 
-### A text row's picker is the field's right end (since 2026-10-01)
+### A well with a flush run at its end is ONE field (since 2026-10-01)
 
-A `textpick` row in `ParametersBg` — a TextBox with a completion picker — is one field
-of two parts. The picker (a menu-button Dropdown, `PICK_W` wide) is a flush control
-plate over the whole band below the label, reaching the field's outer edge on the top,
-right and bottom as a dropdown trigger's plate does: square at the seam, the text box's
-radius outside (`Dropdown::set_radii`, and its ring in `troughs`). The TextBox stops at
-the seam with its well's right corners square (`TextBox::joined_right`, which `well()`
-and the pane's `reliefs` both read). Until then the picker was a button nested inside the
-box's well, its face stopping at the base of the well's wall, so it never reached the edge
-a dropdown's ▼ does. `textpick_rows_carry_a_picker` holds the layout.
+`Prim::Field { rect, radii, depth, split, tint }` (`PaintCtx::field`) is a sunken well
+that ends in a flush run: left of `split` the interior one step down, right of it back at
+the surface's level, as a flush control plate's face. Two controls are drawn so: a
+`ParametersBg` textpick row (the TextBox and its completion picker, a menu-button Dropdown
+`PICK_W` wide) and a `Spinbox` (its value and its -/+ run). In both the run is the
+control's right end, reaching its outer edge on the top, right and bottom as a dropdown
+trigger's plate does.
 
-**A spinbox's -/+ run is its right end the same way** (the same day):
-`Spinbox::relief_parts` makes the run a flush plate over the whole band, out to the
-outer edge, its ring all round, square at the seam and the spinbox radius outside, and
-the value's well ends there square (`relief_parts` returns its radii, which the widget's
-paint and the pane's `reliefs` both use). The seam between - and + crosses the run's face
-between its ring's walls. It was nested inside a full-width well, as the picker was.
+It is one prim because two did not work: a recess for the well and a trough for the run,
+side by side, each shade their OWN box, so at the seam each turns its own square corner
+and the strong line of the edge jumps — a recess is lit at its outer rim, a trough at its
+inner lip — and the outline reads broken exactly where the two meet. The field's outline
+is evaluated once (the whole rect, its own radii, `MODE_FIELD` in `shader2d.wgsl`). Its
+outer half is ONE profile all the way round — the recess's fall and shoulder — and only
+the inner half differs: on to the floor in the well, mirrored back up to the face in the
+run, blended across one wall width about the seam. Note the run's valley is NOT
+`Prim::Trough`'s, which fits its whole fall and rise into the wall's width, so its outer
+half is a compressed copy of a step that read differently from the well's beside it. The
+seam is the well's floor rising to the run's face — a step along `split` — fading to
+nothing at the outline, where both sides stand at half the step. Never grouped into a host
+plate (its profile is not a monotonic step); the overlay's host-box slot carries `split`.
+The legacy banded path and flat hosts (`layout.rs`'s bridge) draw the two-box form.
+
+The pieces that feed it: `ParametersBg::fields` (the pane's list, drawn after its troughs,
+hover-tinted like them; textpick rows and spinboxes with a run are in neither `reliefs`
+nor `troughs`), `TextBox::joined_right` (the box stops at the seam), `Dropdown::set_radii`
+(the picker's own raised paint, square at the seam), and `Spinbox::relief_parts`, which
+returns a `SpinRelief` — the outline as handed over, its radius and depth, and the run's
+`split` with the engraved -/+ seam; the widget's own paint carves it inside as every well
+is. `textpick_rows_carry_a_picker` and `a_spinbox_is_one_field_with_its_run_at_the_right_end`
+are the tests. Until the same day the picker and the run were nested INSIDE a full-width
+well, their faces stopping at the base of its wall, so they never reached the edge a
+dropdown's ▼ does.
 
 ### A row can open a submenu (since 2026-09-29)
 

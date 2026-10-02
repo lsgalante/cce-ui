@@ -1775,12 +1775,12 @@ impl ParametersBg {
                     if w > 0.0 && h > 0.0 {
                         let r = crate::layout::spinbox_corner_radius();
                         let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                        match sb.inner().relief_parts(band) {
-                            Some((_, Some(((run, _, _, _), _)))) => {
-                                out.push((x, y + ty, run.x - x, h - ty, (r, 0.0, 0.0, r), depth, false, all));
+                        // With its -/+ run the control is a field
+                        // ([`Self::fields`]); without, a plain well.
+                        if let Some(rel) = sb.inner().relief_parts(band) {
+                            if rel.run.is_none() {
+                                out.push((x, y + ty, w, h - ty, r4(r), depth, false, all));
                             }
-                            Some((_, None)) => out.push((x, y + ty, w, h - ty, r4(r), depth, false, all)),
-                            None => {}
                         }
                     }
                 }
@@ -1815,9 +1815,12 @@ impl ParametersBg {
                 let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
                 // A text box joined to its picker is square at the seam,
                 // as the box's own carve is (`TextBox::well`).
-                let joined = is_text_row(&p.2) && self.texts[i].as_ref().is_some_and(|t| t.inner().joined_right);
-                let radii = if joined { (radius, 0.0, 0.0, radius) } else { r4(radius) };
-                out.push((x, y + ty, ww, h - ty, radii, depth, raised, all));
+                // A text box joined to its picker is half of a field
+                // ([`Self::fields`]), drawn there.
+                if is_text_row(&p.2) && self.texts[i].as_ref().is_some_and(|t| t.inner().joined_right) {
+                    continue;
+                }
+                out.push((x, y + ty, ww, h - ty, r4(radius), depth, raised, all));
             }
         }
         out
@@ -1849,29 +1852,12 @@ impl ParametersBg {
             if hidden[i] {
                 continue;
             }
-            if p.2.starts_with("textpick") {
-                if let Some(d) = &self.choices[i] {
-                    // The picker's plate is the field's right end: its ring
-                    // all round, as a dropdown trigger's, square at the seam.
-                    let (bx, by, bw, bh) = d.rect();
-                    if bw > 0.0 && bh > 0.0 {
-                        let depth = crate::layout::bevel_width().min(bh * 0.2);
-                        let r = crate::layout::textbox_corner_radius();
-                        out.push((bx, by, bw, bh, (0.0, r, r, 0.0), depth, (true, true, true, true)));
-                    }
-                }
-            } else if p.2.starts_with("spinbox") {
-                if let Some(sb) = &self.spinboxes[i] {
-                    let (x, y, w, h) = sb.rect();
-                    let ty = sb.label_strip();
-                    let band = Rect { x, y: y + ty, width: w, height: h - ty };
-                    if let Some((_, Some(((run, radii, rd, edges), _)))) =
-                        sb.inner().relief_parts(band)
-                    {
-                        out.push((run.x, run.y, run.width, run.height, radii, rd, edges));
-                    }
-                }
-            } else if p.2.starts_with("choice") {
+            // A textpick row's picker and a spinbox's -/+ run are the flush
+            // ends of fields ([`Self::fields`]), not troughs of their own.
+            if p.2.starts_with("textpick") || p.2.starts_with("spinbox") {
+                continue;
+            }
+            if p.2.starts_with("choice") {
                 // The dropdown trigger: the widget's own raised paint is one
                 // `inset_plate` on its content band — the same ring here, on
                 // the same band (top-label band excluded),
@@ -1890,6 +1876,54 @@ impl ParametersBg {
             }
             // A toggle contributes nothing here: its well and its glider plate
             // are a recess and a boss, and both ride [`Self::reliefs`].
+        }
+        out
+    }
+
+    /// The rows that are ONE field ([`crate::scene::paint::Prim::Field`]):
+    /// a sunken well ending in a flush run, one outline round both —
+    /// `(x, y, w, h, radii, depth, split)`, drawn AFTER [`Self::troughs`].
+    /// A textpick row is its text box's well and its picker; a spinbox, its
+    /// value's well and its -/+ run. On the pane's own rule for wells and
+    /// troughs: the content band as the outline, the wall straddling it.
+    #[allow(clippy::type_complexity)]
+    pub fn fields(&self) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32, f32)> {
+        if !self.visible || !crate::layout::control_relief() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let hidden = self.hidden_rows();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if hidden[i] {
+                continue;
+            }
+            if p.2.starts_with("textpick") {
+                if let (Some(tb), Some(d)) = (&self.texts[i], &self.choices[i]) {
+                    if !tb.inner().joined_right {
+                        continue;
+                    }
+                    let (x, y, w, h) = tb.rect();
+                    let (dx, _, dw, _) = d.rect();
+                    let ty = tb.label_strip();
+                    if w > 0.0 && h - ty > 0.0 && dw > 0.0 {
+                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
+                        let r = crate::layout::textbox_corner_radius();
+                        out.push((x, y + ty, dx + dw - x, h - ty, (r, r, r, r), depth, dx));
+                    }
+                }
+            } else if p.2.starts_with("spinbox") {
+                if let Some(sb) = &self.spinboxes[i] {
+                    let (x, y, w, h) = sb.rect();
+                    let ty = sb.label_strip();
+                    let band = Rect { x, y: y + ty, width: w, height: h - ty };
+                    if let Some(rel) = sb.inner().relief_parts(band) {
+                        if let Some((split, _)) = rel.run {
+                            let r = rel.radius;
+                            out.push((band.x, band.y, band.width, band.height, (r, r, r, r), rel.depth, split));
+                        }
+                    }
+                }
+            }
         }
         out
     }
@@ -1914,10 +1948,10 @@ impl ParametersBg {
                 let (x, y, w, h) = sb.rect();
                 let ty = sb.label_strip();
                 let band = Rect { x, y: y + ty, width: w, height: h - ty };
-                if let Some((_, Some(((_, _, rd, _), (sa, sb2, sw, host))))) =
-                    sb.inner().relief_parts(band)
-                {
-                    out.push((sa, sb2, sw, rd, host));
+                if let Some(rel) = sb.inner().relief_parts(band) {
+                    if let Some((_, (sa, sb2, sw, host))) = rel.run {
+                        out.push((sa, sb2, sw, rel.depth, host));
+                    }
                 }
             }
         }
@@ -2108,6 +2142,11 @@ impl Paint for ParametersBg {
             } else {
                 ctx.trough_edges(rect, radii, td, tedges);
             }
+        }
+        for (fx, fy, fw, fh, radii, fd, split) in self.fields() {
+            let rect = Rect { x: fx, y: fy, width: fw, height: fh };
+            let tint = hovered(fx, fy, fw, fh).then_some(Self::HOVER_TINT);
+            ctx.field(rect, radii, fd, split, tint);
         }
         for (ga, gb, gw, gd, ghost) in self.grooves() {
             ctx.groove(ga, gb, gw, gd, ghost);
@@ -3874,12 +3913,18 @@ mod tests {
         assert_eq!((dy, dy + dh), (ty + label, ty + th), "the picker spans the field's band, edge to edge");
         assert!(p.texts[0].as_ref().unwrap().inner().joined_right, "the box is square at the seam");
         assert!(!p.texts[1].as_ref().unwrap().inner().joined_right, "a plain text row is not");
-        let (_, radii, _, _) = p.texts[0].as_ref().unwrap().inner().well().expect("a well");
-        assert_eq!((radii.1, radii.2), (0.0, 0.0), "the well's right corners are square");
-        assert!(radii.0 > 0.0 && radii.3 > 0.0);
+        // ONE field: one outline round the box and the picker, its seam at
+        // the picker — not a well and a trough each turning its own corner
+        // there.
         let rr = crate::layout::textbox_corner_radius();
-        let ring = p.inner().troughs().into_iter().find(|t| t.0 == dx).expect("the picker's ring");
-        assert_eq!(ring.4, (0.0, rr, rr, 0.0), "square at the seam, the field's radius outside");
+        let fields = p.inner().fields();
+        assert_eq!(fields.len(), 1, "{fields:?}");
+        let (fx, fy, fw, fh, fradii, _, split) = fields[0];
+        assert_eq!((fx, fy, fx + fw, fy + fh), (tx, dy, dx + dw, dy + dh), "the field spans box and picker");
+        assert_eq!(fradii, (rr, rr, rr, rr), "its own radius at all four corners");
+        assert_eq!(split, dx, "the seam is where the picker begins");
+        assert!(p.inner().troughs().iter().all(|t| t.0 != dx), "the picker draws no ring of its own");
+        assert!(p.inner().reliefs().iter().all(|r| !(r.0 == tx && r.2 == tw)), "nor the box a well of its own");
 
         // Both text variants lay out at the same row height.
         assert_eq!(p.inner().row_height(0), p.inner().row_height(1));
@@ -4667,7 +4712,10 @@ mod tests {
         };
         // A carve's rect and tint, whatever its kind.
         let carve = |prim: &Prim| match prim {
-            Prim::Recess { rect, tint, .. } | Prim::Boss { rect, tint, .. } | Prim::Trough { rect, tint, .. } => Some((*rect, *tint)),
+            Prim::Recess { rect, tint, .. }
+            | Prim::Boss { rect, tint, .. }
+            | Prim::Trough { rect, tint, .. }
+            | Prim::Field { rect, tint, .. } => Some((*rect, *tint)),
             _ => None,
         };
         let at_rest = prims(&p, &ctx);

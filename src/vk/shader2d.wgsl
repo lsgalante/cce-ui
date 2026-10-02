@@ -157,6 +157,7 @@ const MODE_DROPLET_SCRIM: i32 = 12; // flat feathered fill of the droplet silhou
 const MODE_LATTICE: i32 = 13;     // periodic well field: nearest-cell carve, one evaluation
 const MODE_UNION: i32 = 14;       // union of feature boxes carved/raised as one wall
 const MODE_GROUT: i32 = 15;       // flat colour outside a periodic field of rounded cells
+const MODE_FIELD: i32 = 16;       // sunken well ending in a flush run: one outline (Prim::Field)
 // Fillet modes rejoin the shared free-carve path as their flat equivalents.
 const FILLET_TO_STEP: i32 = 4;    // 6 -> RECESS, 7 -> BOSS
 
@@ -868,6 +869,10 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         fd = best;
         fgd = bgrad;
         eff = select(MODE_RECESS, MODE_BOSS, rrect_clip.p_radii.x > 0.5);
+    } else if (mode == MODE_FIELD) {
+        // The whole field's outline (p_rect / p_radii) as it stands; the
+        // profile branch below blends its wall and adds the seam.
+        eff = MODE_FIELD;
     } else if (mode == MODE_FILLET_DOWN || mode == MODE_FILLET_UP) {
         eff = mode - FILLET_TO_STEP;
         let c = frag - rrect_clip.p_rect.xy;
@@ -885,7 +890,39 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let cd = select(RECESS_DEPTH, window_info.relief_meta.x / t, window_info.relief_meta.x > 0.0);
     var slope = 0.0;
     var curv = 0.0;
-    if (eff == MODE_RIDGE || eff == MODE_TROUGH) {
+    // A second wall's slope and curvature, summed with the outline's: the
+    // seam of a MODE_FIELD.
+    var sv_seam = vec2f(0.0);
+    var curv_seam = 0.0;
+    if (eff == MODE_FIELD) {
+        // A well (the interior one step DOWN) left of the seam at
+        // p_host.x, a flush run (a valley on the outline, the interior back
+        // at the surface) right of it — one outline. The run's valley is
+        // NOT MODE_TROUGH's: that one fits its whole fall and rise into the
+        // wall's width, so its outer half is a compressed copy of a step and
+        // the edge read differently either side of the seam. Here the
+        // valley's outer half IS the well's — the same fall, the same
+        // shoulder — and its inner half that fall mirrored back up to the
+        // face. So the outline's outer half is one profile all the way round
+        // the field, and only the inner half, which the run's face really
+        // does rise from, blends across one wall width about the seam.
+        let split = rrect_clip.p_host.x;
+        let wf = smoothstep(split - 0.5 * t, split + 0.5 * t, frag.x);
+        let s_rec = -cd * carve_slope(u);
+        let c_rec = rrect_clip.p_mat.w * sin(u * TAU);
+        let s_tr = select(s_rec, cd * carve_slope(1.0 - u), u > 0.5);
+        let c_tr = rrect_clip.p_mat.w * sin(min(u, 1.0 - u) * TAU);
+        slope = mix(s_rec, s_tr, wf);
+        curv = mix(c_rec, c_tr, wf);
+        // The seam: the well's floor rising to the run's face — the well's
+        // own right wall, a step along x = split. Full inside the field,
+        // gone at the outline, where the outer wall stands both sides at
+        // half the step and there is nothing between them to climb.
+        let us = clamp((split - frag.x) / t + 0.5, 0.0, 1.0);
+        let fade = clamp(d / (0.5 * t), 0.0, 1.0);
+        sv_seam = vec2f(1.0, 0.0) * (-cd * carve_slope(us)) * fade;
+        curv_seam = rrect_clip.p_mat.w * sin(us * TAU) * fade;
+    } else if (eff == MODE_RIDGE || eff == MODE_TROUGH) {
         // Ridge bump: the carve profile mirrored about the boundary (rising
         // outer half, falling inner half), amplitude halved so the wall tilt
         // matches a step's despite the doubled profile rate. MODE_TROUGH is the
@@ -916,15 +953,16 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // boss.
         curv = -dir * rrect_clip.p_mat.w * sin(u * TAU);
     }
-    let sv = fgd * slope;
+    let sv = fgd * slope + sv_seam;
     let n = normalize(vec3f(sv, 1.0));
     let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
     let spec = roll_spec(sv);
     // Fade the carve out across the host plate's perimeter roll (see p_host).
+    // A field's p_host carries its seam instead, and it fades against nothing.
     let hb = rrect_clip.p_host;
     let host_d = min(hb.z - abs(frag.x - hb.x), hb.w - abs(frag.y - hb.y));
-    let att = clamp(host_d / t, 0.0, 1.0) * wedge;
-    let v = (diff / flat_shade - 1.0 + curv + spec) * strength * att;
+    let att = select(clamp(host_d / t, 0.0, 1.0), 1.0, eff == MODE_FIELD) * wedge;
+    let v = (diff / flat_shade - 1.0 + curv + curv_seam + spec) * strength * att;
     // p_spec_tint.w = 1 marks a tinted carve — the FOCUS treatment. The
     // relief is the unfocused carve's, term for term; only its colours
     // change: the light composites in the accent instead of white and the
