@@ -6,7 +6,9 @@
 //! draws [`LineEdit::display`] with the caret and selection wherever its
 //! own layout puts them. Enter and Escape come back as [`EditOutcome`]s for
 //! the caller to act on, as does any chord the field does not own, so the
-//! app's own shortcuts still reach it. cce-browser's URL bar and its dialog
+//! app's own shortcuts still reach it. The pointer selects by dragging:
+//! the app hit-tests a press and each motion to a byte offset and calls
+//! [`LineEdit::press`] / [`LineEdit::drag_to`] / [`LineEdit::release`]. cce-browser's URL bar and its dialog
 //! fields (HTTP auth, JS prompts) are built on it.
 //!
 //! Indices are **byte** offsets into `text`, always on a char boundary
@@ -40,6 +42,9 @@ pub struct LineEdit {
     pub selection: Option<(usize, usize)>,
     /// Render as bullets. Set for password fields.
     pub masked: bool,
+    /// While a pointer button is held after [`LineEdit::press`]: the byte the
+    /// selection runs from. `None` when no drag is in progress.
+    drag_anchor: Option<usize>,
 }
 
 /// The char boundary before byte `i` in `s` (0 at the start). For stepping a
@@ -89,6 +94,85 @@ impl LineEdit {
     pub fn select_all(&mut self) {
         self.cursor = self.text.len();
         self.selection = (self.cursor > 0).then_some((0, self.cursor));
+    }
+
+    // ---- the pointer ----
+    //
+    // The field does not know where its characters are drawn; the app does.
+    // So the pointer arrives as a byte offset into `text` that the app has
+    // already hit-tested (nearest char boundary to the pointer's x on the
+    // same shaped run it drew), and for a masked field converted with
+    // `text_index`, since what was drawn there is bullets.
+
+    /// A press at byte `at`: the caret goes there and a drag starts from it.
+    /// With `extend` (Shift held) the selection's far end stays put and the
+    /// selection runs from it to `at` instead — shift+click.
+    pub fn press(&mut self, at: usize, extend: bool) {
+        let at = self.boundary(at);
+        let anchor = if extend { self.anchor() } else { at };
+        self.drag_anchor = Some(anchor);
+        self.select_between(anchor, at);
+    }
+
+    /// The pointer moved to byte `at` with the button still held: the
+    /// selection is now everything between the press and here, and the caret
+    /// is here. True when that changed anything (a repaint is due); false,
+    /// and nothing happens, when no press is in progress.
+    pub fn drag_to(&mut self, at: usize) -> bool {
+        let Some(anchor) = self.drag_anchor else {
+            return false;
+        };
+        let before = (self.cursor, self.selection);
+        self.select_between(anchor, self.boundary(at));
+        (self.cursor, self.selection) != before
+    }
+
+    /// The button came up: the drag is over, and what it selected stays
+    /// selected.
+    pub fn release(&mut self) {
+        self.drag_anchor = None;
+    }
+
+    /// Whether a press is being dragged — the app routes pointer motion to
+    /// [`LineEdit::drag_to`] while this holds, wherever the pointer is.
+    pub fn dragging(&self) -> bool {
+        self.drag_anchor.is_some()
+    }
+
+    /// A byte offset into [`LineEdit::display`] as the offset into `text` it
+    /// stands for: the same offset unless the field is masked, where each
+    /// bullet stands for one character of the text.
+    pub fn text_index(&self, display_at: usize) -> usize {
+        if !self.masked {
+            return self.boundary(display_at);
+        }
+        let n = display_at / '\u{2022}'.len_utf8();
+        self.text.char_indices().nth(n).map_or(self.text.len(), |(i, _)| i)
+    }
+
+    /// The end of the selection the caret is not at — what a shift+click
+    /// keeps — or the caret itself with nothing selected.
+    fn anchor(&self) -> usize {
+        match self.selection {
+            Some((a, b)) if self.cursor == a => b,
+            Some((a, _)) => a,
+            None => self.cursor,
+        }
+    }
+
+    fn select_between(&mut self, anchor: usize, at: usize) {
+        self.cursor = at;
+        self.selection = (anchor != at).then(|| (anchor.min(at), anchor.max(at)));
+    }
+
+    /// `at` clamped into the text and onto a char boundary.
+    fn boundary(&self, at: usize) -> usize {
+        let at = at.min(self.text.len());
+        if self.text.is_char_boundary(at) {
+            at
+        } else {
+            prev_boundary(&self.text, at)
+        }
     }
 
     fn take_selection(&mut self) -> bool {
@@ -300,6 +384,82 @@ mod tests {
         assert_eq!(e.cursor, 2, "é is two bytes");
         e.handle_key(&named(NamedKey::Backspace));
         assert_eq!(e.text, "1");
+    }
+
+    #[test]
+    fn a_drag_selects_from_the_press_to_the_pointer_either_way() {
+        let mut e = LineEdit::with_text("hello world");
+        e.press(2, false);
+        assert!(e.dragging());
+        assert_eq!((e.cursor, e.selection), (2, None), "a press alone selects nothing");
+        assert!(e.drag_to(7));
+        assert_eq!((e.cursor, e.selection), (7, Some((2, 7))));
+        assert!(!e.drag_to(7), "no move, no repaint");
+        // Back past the press: the selection flips to the other side of it.
+        e.drag_to(0);
+        assert_eq!((e.cursor, e.selection), (0, Some((0, 2))));
+        // Back onto the press point: nothing selected, caret there.
+        e.drag_to(2);
+        assert_eq!((e.cursor, e.selection), (2, None));
+        e.drag_to(11);
+        e.release();
+        assert!(!e.dragging());
+        assert_eq!(e.selection, Some((2, 11)), "release keeps what was dragged");
+        assert!(!e.drag_to(4), "motion after release is not a drag");
+        assert_eq!(e.selection, Some((2, 11)));
+    }
+
+    #[test]
+    fn shift_click_extends_from_the_far_end() {
+        let mut e = LineEdit::with_text("hello world");
+        e.press(3, false);
+        e.release();
+        e.press(8, true);
+        assert_eq!((e.cursor, e.selection), (8, Some((3, 8))));
+        e.release();
+        // Shift+click on the other side of the anchor keeps the anchor.
+        e.press(1, true);
+        assert_eq!((e.cursor, e.selection), (1, Some((1, 3))));
+        e.release();
+        // After a select-all the caret is at the end, so the start is kept.
+        e.select_all();
+        e.press(5, true);
+        assert_eq!(e.selection, Some((0, 5)));
+    }
+
+    #[test]
+    fn a_dragged_selection_is_edited_like_any_other() {
+        let mut e = LineEdit::with_text("hello world");
+        e.press(0, false);
+        e.drag_to(6);
+        e.release();
+        typed(&mut e, "big ");
+        assert_eq!(e.text, "big world");
+        assert_eq!(e.cursor, 4);
+    }
+
+    /// The app's offset is clamped into the text and never splits a char.
+    #[test]
+    fn pointer_offsets_land_on_char_boundaries() {
+        let mut e = LineEdit::with_text("aé");
+        e.press(2, false); // inside é's two bytes
+        assert_eq!(e.cursor, 1);
+        e.drag_to(99);
+        assert_eq!((e.cursor, e.selection), (3, Some((1, 3))));
+    }
+
+    /// Each bullet is three bytes of display and one char of text.
+    #[test]
+    fn a_masked_field_maps_bullets_back_to_the_text() {
+        let mut e = LineEdit::masked();
+        typed(&mut e, "pé!");
+        let bullet = '\u{2022}'.len_utf8();
+        assert_eq!(e.text_index(0), 0);
+        assert_eq!(e.text_index(bullet), 1);
+        assert_eq!(e.text_index(2 * bullet), 3, "past é's two bytes");
+        assert_eq!(e.text_index(3 * bullet), 4);
+        assert_eq!(e.text_index(99), 4);
+        assert_eq!(LineEdit::with_text("abc").text_index(2), 2, "unmasked is the identity");
     }
 
     /// A password must not leave through a chord the user may not have meant.
