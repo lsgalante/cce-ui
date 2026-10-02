@@ -149,6 +149,10 @@ pub struct Dropdown {
     /// parameter pane's textpick picker button nested in its TextBox), where
     /// the menu should span the whole field, not the button sliver.
     pub popover_anchor: Option<Rect>,
+    /// The ▼ stands in the MIDDLE of the trigger instead of at its right
+    /// end — for a trigger that carries nothing else (the textpick
+    /// picker), whose padding about the arrow should be even.
+    pub center_arrow: bool,
     pub font_family: String,
     pub custom_display_text: Option<String>,
     pub open_upward: Option<bool>,
@@ -231,6 +235,7 @@ impl Dropdown {
             just_changed: false,
             parent_snapshot: None,
             popover_anchor: None,
+            center_arrow: false,
             font_family: "sans-serif".to_string(),
             custom_display_text: None,
             open_upward: None,
@@ -810,9 +815,16 @@ impl Dropdown {
         // character by character toward `right_limit` and drops anything past
         // 90% — an overflow treatment of its own, which a hard clip would
         // fight rather than help.
+        // The glyph is drawn at the configured font's size (the runner
+        // reads it off the font string), so that is the size it is measured at.
+        let arrow_x = if self.center_arrow {
+            x + 0.5 * (w - text_advance("▼", &font_family, font_size))
+        } else {
+            x + w - 18.0
+        };
         ctx.text_with(
             "▼",
-            x + w - 18.0,
+            arrow_x,
             crate::layout::center_text_y(content.y, content.height, 10.0),
             10.0,
             [0x83, 0x83, 0x8a],
@@ -1640,6 +1652,23 @@ mod tests {
         ];
         assert_eq!(first_char.color, expected_color);
         assert_ne!(last_char.color, expected_color); // color has shifted towards background
+    }
+
+    /// A trigger that carries nothing but its arrow (the textpick picker)
+    /// stands it in its middle: its padding about the arrow is even.
+    #[test]
+    fn a_centred_arrow_stands_in_the_middle_of_its_trigger() {
+        let arrow_x = |center: bool| {
+            let mut dd = Dropdown::new(vec!["a".to_string()], 0).with_custom_display_text("");
+            dd.inner_mut().center_arrow = center;
+            dd.set_rect(10.0, 10.0, 30.0, 24.0);
+            dd.own_text_labels().into_iter().find(|l| l.text == "▼").expect("the arrow").x
+        };
+        let (family, size) = crate::layout::control_label_font_detached_parsed();
+        let adv = super::text_advance("▼", &family, size);
+        let x = arrow_x(true);
+        assert!((x + 0.5 * adv - 25.0).abs() < 1e-3, "centred on the trigger's middle: {x} + {adv}/2");
+        assert_eq!(arrow_x(false), 10.0 + 30.0 - 18.0, "an ordinary trigger keeps it at its right end");
     }
 
     #[test]

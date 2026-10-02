@@ -1088,8 +1088,14 @@ impl ParametersBg {
                     let label_top = if inline[i] { 0.0 } else { crate::layout::control_label_strip() };
                     let band_h = r.3 - label_top;
                     let rr = crate::layout::textbox_corner_radius();
-                    d.set_rect(r.0 + r.2 - PICK_W, r.1 + label_top, PICK_W, band_h);
+                    // The picker begins a wall before PICK_W: that is the
+                    // seam, where the well's floor ends and its wall meets
+                    // the button's lip, so the button is PICK_W wide where
+                    // it is a face and the arrow sits in its middle.
+                    let depth = crate::layout::bevel_width().min(band_h * 0.2);
+                    d.set_rect(r.0 + r.2 - PICK_W - depth, r.1 + label_top, PICK_W + depth, band_h);
                     d.inner_mut().set_radii(Some((0.0, rr, rr, 0.0)));
+                    d.inner_mut().center_arrow = true;
                     // The menu hangs off the WHOLE field, not the button
                     // sliver: anchor the popover to the box's well band.
                     d.popover_anchor = Some(Rect {
@@ -1111,9 +1117,7 @@ impl ParametersBg {
                 tb.inner_mut().joined_right = joined;
                 tb.set_rect(r.0, r.1, r.2, r.3);
                 if joined {
-                    // The box's well ends a whole wall short of the picker
-                    // (the field's seam: the well's wall, a ridge, the
-                    // picker's valley), so its text stops there too.
+                    // The box ends where the picker begins, at the seam.
                     let depth = crate::layout::bevel_width().min((r.3 - tb.label_strip()) * 0.2);
                     tb.set_rect(r.0, r.1, (r.2 - PICK_W - depth).max(0.0), r.3);
                 }
@@ -3874,12 +3878,14 @@ mod tests {
         // edge on the right, top and bottom, as a dropdown trigger does.
         let (tx, ty, tw, th) = p.texts[0].as_ref().unwrap().rect();
         let (dx, dy, dw, dh) = p.choices[0].as_ref().unwrap().rect();
-        assert_eq!(dw, PICK_W);
-        // The box stops a wall short of the picker: the field's seam is the
-        // well's wall, a ridge and the picker's valley.
+        // The box ends where the picker begins, at the seam; the picker
+        // is a wall wider than PICK_W, the wall being the lip its face
+        // rises out of at the seam, so the face is PICK_W wide.
         let label = p.texts[0].as_ref().unwrap().label_strip();
         let depth = crate::layout::bevel_width().min((th - label) * 0.2);
-        assert!((dx - (tx + tw + depth)).abs() < 1e-3, "the picker begins a wall past the box's end: {dx} vs {}", tx + tw + depth);
+        assert!((dw - (PICK_W + depth)).abs() < 1e-3, "the picker is PICK_W and a wall: {dw}");
+        assert!((dx - (tx + tw)).abs() < 1e-3, "the picker begins where the box ends: {dx} vs {}", tx + tw);
+        assert!(d.center_arrow, "the picker's arrow stands in its middle, its padding even");
         assert_eq!((dy, dy + dh), (ty + label, ty + th), "the picker spans the field's band, edge to edge");
         assert!(p.texts[0].as_ref().unwrap().inner().joined_right, "the box is square at the seam");
         assert!(!p.texts[1].as_ref().unwrap().inner().joined_right, "a plain text row is not");

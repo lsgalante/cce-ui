@@ -343,14 +343,22 @@ well's fall mirrored back up, and whose left corners are its right corners, so t
 button has the same padding and rounding at both ends (since 2026-10-02; until then
 the lip was the outline's own inner half and the face met the seam square). Where the
 face's rounded corner leaves room by the straight outline is the valley's flat floor.
-The seam is the right side mirrored: the button's valley rises out of `split` to the
-surface (its outer half, as the outline's is on the right), and the well's own right
-wall, a whole wall further left, falls from there to the floor — a ridge at the
-surface's level between them, where the surface lies outside the button's right edge.
-Both fade out at the outline, which runs straight across. (For an hour the seam was the
-well's wall's inner half running straight into the lip, which read as one doubled line
-with half the gap of the button's right side.) A textpick row's TextBox ends a wall
-short of its picker accordingly, so its text stops at the well. Never grouped into a host
+The seam is the well's own right wall's inner half, from half the step at `split`
+down to the floor, meeting the face's lip where both stand at half the step; it fades
+out at the outline, which runs straight across. **The run is laid out a wall wider than
+its face**, so the BUTTON is what reaches the well and what it carries stands in its
+middle: a textpick picker is `PICK_W` plus a wall, its arrow centred
+(`Dropdown::center_arrow`), and a spinbox's run begins a wall before its flat layout's
+buttons (`SpinGeom::run_x`), its face halved at its middle by the -/+ seam with each
+glyph in the middle of its half — hit zones, washes, glyphs and relief all read
+`SpinGeom`. For a few hours on 2026-10-02 the seam was the right side mirrored instead
+— the button's valley rising to a ridge at the surface's level, the well's wall falling
+from it a whole wall further left — which read as a strip of new surface between the
+well and the button rather than a wider button; the well's floor ends where it did
+then, the button having taken the strip. (Before that, the face began half a wall from
+the seam with the arrow at the trigger's usual right-hand place, and its left side read
+narrower than its right.) A textpick row's TextBox ends where its picker begins, so its
+text stops at the well. Never grouped into a host
 plate (its profile is not a monotonic step); the overlay's host-box slot carries `split`.
 The legacy banded path and flat hosts (`layout.rs`'s bridge) draw the two-box form.
 

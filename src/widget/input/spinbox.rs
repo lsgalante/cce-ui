@@ -63,6 +63,18 @@ struct SpinGeom {
     btn_h: f32,
     btn_w: f32,
     pad: f32,
+    /// The -/+ run: where it begins (under the relief, the field's seam,
+    /// where the well's floor ends and its wall meets the run's lip), the
+    /// line between - and +, and where it ends. Hit zones, hover washes,
+    /// glyphs and the relief all read these, so they cannot disagree.
+    run_x: f32,
+    seam_x: f32,
+    run_end: f32,
+    /// The middles of the - and + halves, where the glyphs stand.
+    dec_c: f32,
+    inc_c: f32,
+    /// Where the value's text is clipped: the end of the well's floor.
+    text_end: f32,
 }
 
 impl Spinbox {
@@ -128,16 +140,42 @@ impl Spinbox {
         let x = rect.x;
         let w = rect.width;
         let pad = crate::layout::spinbox_button_padding();
+        let split_dec = x + w * 0.55;
+        let btn_w = ((w * 0.45 - 2.0 * pad).max(0.0)) / 2.0;
+        let flat_run = split_dec + pad;
+        let (run_x, seam_x, run_end, dec_c, inc_c, text_end) = if crate::layout::control_relief() && btn_w > 0.0 {
+            // The run's face is inset half a wall from its outline on every
+            // side (`Prim::Field`), so it is halved at its own middle and
+            // each glyph stands in the middle of its half: the padding about
+            // - and + is even. The run begins a wall before the flat
+            // layout's buttons, taking the wall a ridge stood on for a few
+            // hours on 2026-10-02 (the well's floor ends where it did then).
+            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+            let hw = 0.5 * depth;
+            let run_x = flat_run - depth;
+            let end = x + w;
+            let seam = 0.5 * (run_x + end);
+            (run_x, seam, end, 0.5 * (run_x + hw + seam), 0.5 * (seam + end - hw), (run_x - hw).min(split_dec))
+        } else {
+            let seam = flat_run + btn_w;
+            (flat_run, seam, seam + btn_w, flat_run + 0.5 * btn_w, seam + 0.5 * btn_w, split_dec)
+        };
         SpinGeom {
             x,
             y: rect.y,
             w,
             h: rect.height,
-            split_dec: x + w * 0.55,
+            split_dec,
             btn_y: rect.y + pad,
             btn_h: (rect.height - 2.0 * pad).max(0.0),
-            btn_w: ((w * 0.45 - 2.0 * pad).max(0.0)) / 2.0,
+            btn_w,
             pad,
+            run_x,
+            seam_x,
+            run_end,
+            dec_c,
+            inc_c,
+            text_end,
         }
     }
 
@@ -175,12 +213,12 @@ impl Spinbox {
         }
         // The run begins at the button hit zone and spans the whole band to
         // the control's right edge.
-        let split = g.split_dec + g.pad;
+        let split = g.run_x;
         // Seam floor width: the breadcrumb's SEAM_WIDTH — a hair of flat
         // floor so the crease doesn't alias into a dotted line. It sits on
         // the -/+ hit boundary, not the painted run's midpoint, and crosses
         // the run's face between its outline's walls.
-        let sx = split + g.btn_w;
+        let sx = g.seam_x;
         let host = Rect { x: split, y: g.y, width: g.x + g.w - split, height: g.h };
         let seam = ((sx, g.y + depth), (sx, g.y + g.h - depth), 0.75, host);
         Some(SpinRelief { rect: whole, radius, depth, run: Some((split, seam)) })
@@ -336,7 +374,7 @@ impl Paint for Spinbox {
                 let (field, radii) = crate::layout::carve_inside(rel.rect, (r, r, r, r), rel.depth);
                 if let Some((split, _)) = rel.run {
                     let wash = [1.0, 1.0, 1.0, 0.06];
-                    let sx = split + g.btn_w;
+                    let sx = g.seam_x;
                     let (top, h) = (field.y, field.height);
                     if self.hover_dec {
                         ctx.rounded_rect(Rect { x: split, y: top, width: sx - split, height: h }, 0.0, (false, false, false, false), wash);
@@ -438,17 +476,17 @@ impl Paint for Spinbox {
         // buttons begin (`split_dec`). The caret above is already clamped to
         // that field; the text it belongs to was not, so a long value ran
         // under the buttons and out of the control.
-        let field = Some([g.x, g.y, g.split_dec, g.y + g.h]);
+        let field = Some([g.x, g.y, g.text_end, g.y + g.h]);
         ctx.text_with(self.value_text(), g.x + crate::layout::CONTROL_TEXT_INSET, crate::layout::align_text_y(g.y, g.h, 14.0, 0.0), 14.0, text_color, None, field);
         if let Some(ref unit) = self.unit {
             ctx.text_with(unit.clone(), g.x + crate::layout::CONTROL_TEXT_INSET + 36.0, crate::layout::align_text_y(g.y, g.h, 11.0, 0.0), 11.0, [0x73, 0x73, 0x7a], None, field);
         }
         if g.btn_w > 0.0 {
-            let dec_center_x = g.split_dec + g.pad + g.btn_w * 0.5;
-            let inc_center_x = g.split_dec + g.pad + g.btn_w * 1.5;
+            let dec_center_x = g.dec_c;
+            let inc_center_x = g.inc_c;
             let ty = crate::layout::align_text_y(g.y, g.h, 12.0, 0.0);
-            let dec_box = Some([g.split_dec + g.pad, g.y, g.split_dec + g.pad + g.btn_w, g.y + g.h]);
-            let inc_box = Some([g.split_dec + g.pad + g.btn_w, g.y, g.split_dec + g.pad + 2.0 * g.btn_w, g.y + g.h]);
+            let dec_box = Some([g.run_x, g.y, g.seam_x, g.y + g.h]);
+            let inc_box = Some([g.seam_x, g.y, g.run_end, g.y + g.h]);
             ctx.text_with("-".to_string(), dec_center_x - 4.0, ty, 12.0, text_color, None, dec_box);
             ctx.text_with("+".to_string(), inc_center_x - 4.0, ty, 12.0, text_color, None, inc_box);
         }
@@ -473,8 +511,8 @@ impl Input for Spinbox {
                 }
                 let g = self.geom(r);
                 let in_y = *py >= g.btn_y && *py < g.btn_y + g.btn_h;
-                let hd = in_y && *px >= g.split_dec + g.pad && *px < g.x + g.w * 0.775;
-                let hi = in_y && *px >= g.x + g.w * 0.775 && *px < g.x + g.w - g.pad;
+                let hd = in_y && *px >= g.run_x && *px < g.seam_x;
+                let hi = in_y && *px >= g.seam_x && *px < g.run_end;
                 let changed = hd != self.hover_dec || hi != self.hover_inc;
                 self.hover_dec = hd;
                 self.hover_inc = hi;
@@ -483,10 +521,10 @@ impl Input for Spinbox {
             Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x: px, y: py, .. } => {
                 let g = self.geom(ectx.rect);
                 let in_y = *py >= g.btn_y && *py < g.btn_y + g.btn_h;
-                if in_y && *px >= g.split_dec + g.pad && *px < g.x + g.w * 0.775 {
+                if in_y && *px >= g.run_x && *px < g.seam_x {
                     self.step_by(-1);
                     true
-                } else if in_y && *px >= g.x + g.w * 0.775 && *px < g.x + g.w - g.pad {
+                } else if in_y && *px >= g.seam_x && *px < g.run_end {
                     self.step_by(1);
                     true
                 } else if *px < g.split_dec {
