@@ -543,6 +543,21 @@ pub fn data_home() -> std::path::PathBuf {
     }
 }
 
+/// XDG state base directory: `$XDG_STATE_HOME`, else `~/.local/state`.
+///
+/// State is what should survive a restart but is not worth backing up or
+/// syncing like data, and is not the user's to edit like config: history,
+/// open tabs, logs, a "never ask again" list. A relative `$XDG_STATE_HOME`
+/// counts as unset, as the XDG spec says it must (an empty one too).
+pub fn state_home() -> std::path::PathBuf {
+    match std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from) {
+        Some(x) if x.is_absolute() => x,
+        _ => std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+            .join(".local")
+            .join("state"),
+    }
+}
+
 /// XDG runtime base directory: `$XDG_RUNTIME_DIR`, else the temp dir.
 ///
 /// Unlike the other bases there is no `~/...` fallback to construct: the
@@ -560,6 +575,13 @@ pub fn runtime_dir() -> std::path::PathBuf {
 /// The cce config directory (`<config_home>/cce`).
 pub fn cce_config_dir() -> std::path::PathBuf {
     config_home().join("cce")
+}
+
+/// The cce state directory (`<state_home>/cce`); each app keeps its own
+/// subdirectory under it (`cce/browser`, `cce/mail`, …). Not created here:
+/// a caller creates the subdirectory it writes, with the mode it needs.
+pub fn cce_state_dir() -> std::path::PathBuf {
+    state_home().join("cce")
 }
 
 /// The cce runtime directory (`<runtime_dir>/cce`), created if absent.
@@ -879,6 +901,25 @@ pub fn get_kdl_type_annotations(kdl_content: &str, key_paths: &[String]) -> Vec<
 
 #[cfg(test)]
 mod tests {
+    /// `$XDG_STATE_HOME` when it is absolute; `~/.local/state` when it is
+    /// unset, empty or relative. Nothing else in the crate reads the
+    /// variable, so setting it here cannot race another test.
+    #[test]
+    fn state_home_follows_xdg_and_falls_back() {
+        let home = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default());
+        let fallback = home.join(".local").join("state");
+        std::env::set_var("XDG_STATE_HOME", "/srv/state");
+        assert_eq!(super::state_home(), std::path::PathBuf::from("/srv/state"));
+        assert_eq!(super::cce_state_dir(), std::path::PathBuf::from("/srv/state/cce"));
+        for invalid in ["", "relative/state"] {
+            std::env::set_var("XDG_STATE_HOME", invalid);
+            assert_eq!(super::state_home(), fallback, "{invalid:?}");
+        }
+        std::env::remove_var("XDG_STATE_HOME");
+        assert_eq!(super::state_home(), fallback);
+        assert_eq!(super::cce_state_dir(), fallback.join("cce"));
+    }
+
     /// A string the writer emits comes back as it went in, quotes,
     /// backslashes and control characters included — as a section value,
     /// a top-level value, a keybind (written with a type annotation), a
