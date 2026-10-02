@@ -897,31 +897,69 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     if (eff == MODE_FIELD) {
         // A well (the interior one step DOWN) left of the seam at
         // p_host.x, a flush run (a valley on the outline, the interior back
-        // at the surface) right of it — one outline. The run's valley is
-        // NOT MODE_TROUGH's: that one fits its whole fall and rise into the
-        // wall's width, so its outer half is a compressed copy of a step and
-        // the edge read differently either side of the seam. Here the
-        // valley's outer half IS the well's — the same fall, the same
-        // shoulder — and its inner half that fall mirrored back up to the
-        // face. So the outline's outer half is one profile all the way round
-        // the field, and only the inner half, which the run's face really
-        // does rise from, blends across one wall width about the seam.
+        // at the surface) right of it — one outline. Three walls:
+        //
+        // * The OUTLINE, whose outer half — the fall from the surface to
+        //   half the step — is the well's profile all the way round the
+        //   field, so the edge never breaks. Over the well its inner half
+        //   falls on to the floor; over the run it is not the outline's at
+        //   all (below). (MODE_TROUGH fits its whole fall and rise into the
+        //   wall's width, a compressed copy of a step that read differently
+        //   from the well beside it; this valley's outer half IS the well's.)
+        // * The run's FACE, a rounded rect inset half a wall on every side
+        //   — from the outline on the top, right and bottom, from the seam
+        //   on the left — whose lip is the fall mirrored back up. Its left
+        //   corners are its right corners, so the button reads the same at
+        //   both ends: the same padding, the same rounding. Where the face's
+        //   rounded corner leaves room by the straight outline, that is the
+        //   valley's floor, flat.
+        // * The SEAM, the well's own right wall's inner half: from half the
+        //   step at the seam down to the floor, meeting the face's lip at
+        //   the seam where both stand at half the step.
+        //
+        // A field with no well (split left of it — a dropdown trigger, a
+        // button) is all run: the face inset from the outline all round,
+        // its own corners.
         let split = rrect_clip.p_host.x;
-        let wf = smoothstep(split - 0.5 * t, split + 0.5 * t, frag.x);
-        let s_rec = -cd * carve_slope(u);
-        let c_rec = rrect_clip.p_mat.w * sin(u * TAU);
-        let s_tr = select(s_rec, cd * carve_slope(1.0 - u), u > 0.5);
-        let c_tr = rrect_clip.p_mat.w * sin(min(u, 1.0 - u) * TAU);
-        slope = mix(s_rec, s_tr, wf);
-        curv = mix(c_rec, c_tr, wf);
-        // The seam: the well's floor rising to the run's face — the well's
-        // own right wall, a step along x = split. Full inside the field,
-        // gone at the outline, where the outer wall stands both sides at
-        // half the step and there is nothing between them to climb.
-        let us = clamp((split - frag.x) / t + 0.5, 0.0, 1.0);
-        let fade = clamp(d / (0.5 * t), 0.0, 1.0);
-        sv_seam = vec2f(1.0, 0.0) * (-cd * carve_slope(us)) * fade;
-        curv_seam = rrect_clip.p_mat.w * sin(us * TAU) * fade;
+        let hw = 0.5 * t;
+        let pr = rrect_clip.p_rect;
+        let fl = pr.x - pr.z;
+        let has_well = split > fl + 0.5;
+        let run_l = select(fl, split, has_well);
+        let fx0 = run_l + hw;
+        let fx1 = pr.x + pr.z - hw;
+        let fy0 = pr.y - pr.w + hw;
+        let fy1 = pr.y + pr.w - hw;
+        let face = vec4f(0.5 * (fx0 + fx1), 0.5 * (fy0 + fy1), max(0.5 * (fx1 - fx0), 0.0), max(0.5 * (fy1 - fy0), 0.0));
+        let rr = rrect_clip.p_radii;
+        let rtr = max(rr.y - hw, 0.0);
+        let rbr = max(rr.z - hw, 0.0);
+        let face_r = select(vec4f(max(rr.x - hw, 0.0), rtr, rbr, max(rr.w - hw, 0.0)), vec4f(rtr, rtr, rbr, rbr), has_well);
+        // The outline: its outer half everywhere, its inner half over the
+        // well alone (`over_well`, antialiased across the seam's pixel).
+        let over_well = 1.0 - smoothstep(split - 0.5, split + 0.5, frag.x);
+        let inner = select(1.0, over_well, u > 0.5);
+        slope = -cd * carve_slope(u) * inner;
+        curv = rrect_clip.p_mat.w * sin(u * TAU) * inner;
+        // The face's lip: half a wall wide, rising to the face.
+        let gf = rr_sdf_grad(frag, face, face_r);
+        let df = -gf.z;
+        if (df >= -hw && df <= 0.0) {
+            let uf = df / t + 1.0;
+            sv_seam = gf.xy * (cd * carve_slope(1.0 - uf));
+            curv_seam = rrect_clip.p_mat.w * sin((1.0 - uf) * TAU);
+        }
+        // The seam: the well's right wall, its inner half, faded out at the
+        // outline (outside the field there is no well to fall into).
+        if (has_well) {
+            let us = (split - frag.x) / t + 0.5;
+            if (us >= 0.5) {
+                let usc = min(us, 1.0);
+                let fade = clamp(d / hw, 0.0, 1.0);
+                sv_seam = sv_seam + vec2f(1.0, 0.0) * (-cd * carve_slope(usc)) * fade;
+                curv_seam = curv_seam + rrect_clip.p_mat.w * sin(usc * TAU) * fade;
+            }
+        }
     } else if (eff == MODE_RIDGE || eff == MODE_TROUGH) {
         // Ridge bump: the carve profile mirrored about the boundary (rising
         // outer half, falling inner half), amplitude halved so the wall tilt

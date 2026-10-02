@@ -337,8 +337,14 @@ the inner half differs: on to the floor in the well, mirrored back up to the fac
 run, blended across one wall width about the seam. Note the run's valley is NOT
 `Prim::Trough`'s, which fits its whole fall and rise into the wall's width, so its outer
 half is a compressed copy of a step that read differently from the well's beside it. The
-seam is the well's floor rising to the run's face — a step along `split` — fading to
-nothing at the outline, where both sides stand at half the step. Never grouped into a host
+run's FACE is a rounded rect of its own, inset half a wall on every side — from the
+outline on the top, right and bottom, from the seam on the left — whose lip is the
+well's fall mirrored back up, and whose left corners are its right corners, so the
+button has the same padding and rounding at both ends (since 2026-10-02; until then
+the lip was the outline's own inner half and the face met the seam square). Where the
+face's rounded corner leaves room by the straight outline is the valley's flat floor.
+The seam is the well's right wall's inner half: from half the step at `split` down to
+the floor, meeting the face's lip there at the same height, faded out at the outline. Never grouped into a host
 plate (its profile is not a monotonic step); the overlay's host-box slot carries `split`.
 The legacy banded path and flat hosts (`layout.rs`'s bridge) draw the two-box form.
 
