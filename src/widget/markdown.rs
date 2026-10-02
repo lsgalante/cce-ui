@@ -168,7 +168,7 @@ impl Layout {
                 }
                 Draw::Check { cx, cy, r, checked } => {
                     let (x, y) = at(*cx, *cy);
-                    crate::widget::Checkbox::paint_round_mark(pc, x, y, r * k, *checked)
+                    crate::widget::Checkbox::paint_inline(pc, x, y, r * k, *checked)
                 }
                 Draw::Dot { cx, cy, r, color } => {
                     let (x, y) = at(*cx, *cy);

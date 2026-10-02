@@ -457,11 +457,20 @@ square in the rect when it has none — an empty well unchecked, and checked a r
 half its width standing in its middle, the well either side. The toggle's object
 with no travel: its run is there or not. A box FILLED with its run when checked
 was tried first and dropped: at a control's size an all-run field's outline is
-an empty well's, and the two states were hard to tell apart in a render. It drew
-the ring-and-dot mark until 2026-10-02; that mark stays
-(`Checkbox::paint_round_mark`) for what draws a check inline in text, where there
-is no plate to cut a well in. In a parameter pane a `checkbox` row has always
-been a Toggle. `a_checkbox_is_a_field_with_a_run_in_it_or_not` is the test.
+an empty well's, and the two states were hard to tell apart in a render. In a
+parameter pane a `checkbox` row has always been a Toggle.
+`a_checkbox_is_a_field_with_a_run_in_it_or_not` is the test.
+
+**A check drawn inline is the same box** (`Checkbox::paint_inline(ctx, cx, cy,
+half, checked)`): cce-list's rows, a markdown task item, the doc editor. Both it
+and the widget build the field through `Checkbox::box_field(square, checked)`, so
+they cannot disagree; the corner is the toggle's IN PROPORTION (its radius over
+its height), which is the toggle's corner exactly at a toggle's height and keeps a
+14px box (`Checkbox::INLINE_HALF`, cce-list's) a rounded square where the
+toggle's radius taken whole would make it a disc. They drew a ring with a blue
+dot until the same day (`paint_round_mark`, gone). Rendered at 10–14px it reads at
+1x and 2x, the smallest least clearly; the state is the plate, with no colour.
+`an_inline_check_is_the_widgets_box` is the test.
 
 ### A grouped carve shades as its overlay does (since 2026-10-02)
 
@@ -618,10 +627,9 @@ widget does not fit one of them, say so rather than stretching a word.
   text/swatch split. One silhouette, one relief pass, seams between. A
   `Separator` is the same cut made in the plate it sits on, with no segment
   to part: a groove that dies out at its own ends (flat: a hairline).
-- **Marks and bands sit outside this vocabulary on purpose.** The round
-  check mark drawn inline in text (`Checkbox::paint_round_mark`: cce-list's
-  rows, a markdown task item, the doc editor) is a mark — the `Checkbox`
-  WIDGET is a field; the Slider's swelling band is a band. Do not call
+- **Bands sit outside this vocabulary on purpose.** The Slider's swelling
+  band is a band. (The round Checkbox mark was the other exception, a mark;
+  since 2026-10-02 a check box is a field wherever it is drawn.) Do not call
   them plates or wells.
 
 What this buys, and where the code is heading:

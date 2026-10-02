@@ -914,7 +914,7 @@ impl DocEditor {
                     match d {
                         Deco::Quad(r, c) => pc.quad(Rect { x: ox + r.x, y: top + r.y, width: r.width, height: r.height }, *c),
                         Deco::Dot { cx, cy, r, color } => pc.circle(ox + cx, top + cy, *r, *color),
-                        Deco::Check { cx, cy, r, checked } => crate::widget::Checkbox::paint_round_mark(pc, ox + cx, top + cy, *r, *checked),
+                        Deco::Check { cx, cy, r, checked } => crate::widget::Checkbox::paint_inline(pc, ox + cx, top + cy, *r, *checked),
                         Deco::Text { text, x, y, size, color, font } => {
                             pc.text_with(text.clone(), ox + x, top + y, *size, srgb_u8(*color), Some(font.clone()), None)
                         }
