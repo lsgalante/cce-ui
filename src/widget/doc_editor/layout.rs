@@ -459,6 +459,27 @@ impl LineLayout {
         }
     }
 
+    /// The line with the images embedded inside it shown in a row below
+    /// it, left to right, wrapping at `width` (live preview cannot sit a
+    /// picture inside a text row: rows are one height).
+    pub fn with_images_below(mut self, images: &[(String, f32, f32)], width: f32) -> LineLayout {
+        let (mut x, mut y, mut row_h) = (0.0f32, self.height + IMAGE_PAD, 0.0f32);
+        for (target, w, h) in images {
+            if x > 0.0 && x + w > width {
+                y += row_h + IMAGE_PAD;
+                x = 0.0;
+                row_h = 0.0;
+            }
+            self.decos.push(Deco::Image { target: target.clone(), rect: Rect { x, y, width: *w, height: *h } });
+            x += w + 2.0 * IMAGE_PAD;
+            row_h = row_h.max(*h);
+        }
+        if !images.is_empty() {
+            self.height = y + row_h + IMAGE_PAD;
+        }
+        self
+    }
+
     /// The raw line with its image shown below it (the caret on it).
     pub fn with_image_below(mut self, target: &str, w: f32, h: f32) -> LineLayout {
         let y = self.height + IMAGE_PAD;

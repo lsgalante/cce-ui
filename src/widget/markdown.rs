@@ -53,6 +53,12 @@ const HIGHLIGHT_BG: [f32; 4] = [1.0, 0.82, 0.0, 0.40];
 const RULE: [f32; 4] = [1.0, 1.0, 1.0, 0.12];
 const QUOTE_BAR: [f32; 4] = [0.66, 0.55, 0.98, 1.0];
 
+/// What an inline image's link text is swapped for while a paragraph is
+/// tokenized: one non-space char, so the image is one word.
+const IMAGE_MARK: &str = "\u{FFFC}";
+/// Space an inline image keeps above and below it on its line.
+const INLINE_IMAGE_PAD: f32 = 4.0;
+
 /// Indent of a list level, and of a quote's body past its bar.
 const INDENT: f32 = 24.0;
 const BLOCK_GAP: f32 = 10.0;
@@ -212,7 +218,7 @@ pub fn layout_with(
     resolved: &dyn Fn(&SpanLink) -> bool,
     image: &dyn Fn(&str) -> Option<EmbedImage>,
 ) -> Layout {
-    let mut l = Layouter { theme, m, resolved, image, out: Layout::default(), pending: Vec::new() };
+    let mut l = Layouter { theme, m, resolved, image, out: Layout::default(), pending: Vec::new(), pending_images: Vec::new() };
     let y = l.blocks(blocks, 0.0, width.max(80.0), 0.0, true);
     l.out.height = y;
     l.out
@@ -226,6 +232,8 @@ struct Layouter<'a> {
     out: Layout,
     /// Runs finished on the current line, emitted when the line ends.
     pending: Vec<Run>,
+    /// Inline images placed on the current line: (link text, x, w, h).
+    pending_images: Vec<(String, f32, f32, f32)>,
 }
 
 /// One inline run's look, before it is placed.
@@ -492,6 +500,28 @@ impl<'a> Layouter<'a> {
     fn inline(&mut self, spans: &[Span], x: f32, w: f32, y: f32, base: RunStyle) -> f32 {
         let lh = self.theme.line_h(base.size);
         let right = x + w;
+        // An image embed inside the text is one box in the flow, the size
+        // its image fits at: its link text becomes a single placeholder
+        // word so the tokenizer cannot split it.
+        let boxes: Vec<Option<(f32, f32)>> = spans.iter().map(|s| self.inline_image(s, w)).collect();
+        // One with no image yet (loading, missing) shows as its link — by
+        // file name when its alias is only a size (`|300`), not "300".
+        let sized_link = |s: &Span| matches!(&s.link, Some(SpanLink::Embed { .. })) && cce_vault::markdown::embed_size(&s.text).is_some();
+        let owned: Vec<Span>;
+        let spans: &[Span] = if boxes.iter().any(Option::is_some) || spans.iter().any(sized_link) {
+            owned = spans
+                .iter()
+                .zip(&boxes)
+                .map(|(s, b)| match (&s.link, b) {
+                    (_, Some(_)) => Span { text: IMAGE_MARK.to_string(), ..s.clone() },
+                    (Some(SpanLink::Embed { target, .. }), None) if sized_link(s) => Span { text: target.clone(), ..s.clone() },
+                    _ => s.clone(),
+                })
+                .collect();
+            &owned
+        } else {
+            spans
+        };
         let looks: Vec<Look> = spans.iter().map(|s| self.look(s, base)).collect();
         let spaces: Vec<f32> = looks.iter().map(|l| self.space_width(l)).collect();
         let mut cx = x;
@@ -504,8 +534,7 @@ impl<'a> Layouter<'a> {
         for tok in tokens(spans) {
             match tok {
                 Tok::Break => {
-                    self.flush(&mut run, line_y, lh);
-                    line_y += lh;
+                    line_y += self.flush(&mut run, line_y, lh);
                     cx = x;
                     gap = None;
                 }
@@ -518,21 +547,37 @@ impl<'a> Layouter<'a> {
                     any = true;
                     let widths: Vec<f32> = segs
                         .iter()
-                        .map(|(t, si)| {
-                            let l = &looks[*si];
-                            self.m.width(t, l.size, &l.font, l.attrs)
+                        .map(|(t, si)| match boxes[*si] {
+                            Some((bw, _)) => bw,
+                            None => {
+                                let l = &looks[*si];
+                                self.m.width(t, l.size, &l.font, l.attrs)
+                            }
                         })
                         .collect();
                     let total: f32 = widths.iter().sum();
                     let mut lead = gap.take().unwrap_or(0.0);
                     if cx > x && cx + lead + total > right {
-                        self.flush(&mut run, line_y, lh);
-                        line_y += lh;
+                        line_y += self.flush(&mut run, line_y, lh);
                         cx = x;
                         lead = 0.0;
                     }
                     for ((text, si), mut ww) in segs.into_iter().zip(widths) {
                         let (look, span) = (&looks[si], &spans[si]);
+                        if let Some((bw, bh)) = boxes[si] {
+                            // The text run before it ends here.
+                            if let Some(r) = run.take() {
+                                self.pending.push(r);
+                            }
+                            let target = match &span.link {
+                                Some(SpanLink::Embed { target, .. }) => target.clone(),
+                                _ => unreachable!("only embeds get boxes"),
+                            };
+                            self.pending_images.push((target, cx + lead, bw, bh));
+                            cx += lead + bw;
+                            lead = 0.0;
+                            continue;
+                        }
                         // A word wider than the whole line (a URL) breaks
                         // by characters rather than overflowing.
                         let mut rest = text;
@@ -541,8 +586,7 @@ impl<'a> Layouter<'a> {
                             let (head, tail) = rest.split_at(cut);
                             let hw = self.m.width(head, look.size, &look.font, look.attrs);
                             self.place(&mut run, head, cx + lead, hw, lead, look, span);
-                            self.flush(&mut run, line_y, lh);
-                            line_y += lh;
+                            line_y += self.flush(&mut run, line_y, lh);
                             cx = x;
                             lead = 0.0;
                             rest = tail;
@@ -555,11 +599,20 @@ impl<'a> Layouter<'a> {
                 }
             }
         }
-        self.flush(&mut run, line_y, lh);
+        let last = self.flush(&mut run, line_y, lh);
         if !any && line_y == y {
             return y + lh;
         }
-        line_y + lh
+        line_y + last
+    }
+
+    /// The box an inline image embed takes in a column `w` wide, when the
+    /// host has its image (sized by its `|300` alias, as a block embed).
+    fn inline_image(&self, span: &Span, w: f32) -> Option<(f32, f32)> {
+        let Some(SpanLink::Embed { target, .. }) = &span.link else { return None };
+        let img = (self.image)(target)?;
+        let want = cce_vault::markdown::embed_size(&span.text);
+        Some(img.fit(want.map(|s| s.width), want.and_then(|s| s.height), w))
     }
 
     /// The longest char prefix of `word` fitting `w` (at least one char).
@@ -636,10 +689,21 @@ impl<'a> Layouter<'a> {
         *run = Some(Run { text: word.to_string(), x, w, look: look.clone(), link: span.link.clone() });
     }
 
-    fn flush(&mut self, run: &mut Option<Run>, line_y: f32, lh: f32) {
+    /// Emit the current line at `line_y`; returns its height — `lh`, or
+    /// taller when an inline image is. Text sits on the line's bottom `lh`
+    /// band and images stand on the same bottom, as inline images do.
+    fn flush(&mut self, run: &mut Option<Run>, line_y: f32, lh: f32) -> f32 {
         if let Some(r) = run.take() {
             self.pending.push(r);
         }
+        let images = std::mem::take(&mut self.pending_images);
+        let height = images.iter().fold(lh, |h, (_, _, _, ih)| h.max(*ih + INLINE_IMAGE_PAD));
+        for (target, ix, iw, ih) in images {
+            let rect = Rect { x: ix, y: line_y + height - ih - INLINE_IMAGE_PAD / 2.0, width: iw, height: ih };
+            self.out.draws.push(Draw::Image { target, rect });
+        }
+        // Text runs below sit in the bottom band.
+        let line_y = line_y + height - lh;
         for r in std::mem::take(&mut self.pending) {
             let ty = line_y + (lh - r.look.size) / 2.0;
             let box_ = Rect { x: r.x - 2.0, y: line_y + 2.0, width: r.w + 4.0, height: lh - 4.0 };
@@ -663,6 +727,7 @@ impl<'a> Layouter<'a> {
                 self.out.hits.push((Rect { x: r.x, y: line_y, width: r.w, height: lh }, Hit::Link(link)));
             }
         }
+        height
     }
 }
 
@@ -877,6 +942,34 @@ mod tests {
         assert_eq!((rects[1].width, rects[1].height), (400.0, 200.0));
         assert_eq!(rects.len(), 2);
         assert!(texts(&l).iter().any(|(t, _, _)| t.contains("Note")));
+    }
+
+    #[test]
+    fn inline_images_flow_with_the_text_and_heighten_their_line() {
+        let doc = blocks("ab ![[i.png|30]] cd\n\nnext\n");
+        let image = |t: &str| (t == "i.png").then_some(EmbedImage { id: 1, width: 60, height: 40 });
+        let l = layout_with(&doc, 1000.0, &theme(), &mut Fixed, &|_| true, &image);
+        let img = l.draws.iter().find_map(|d| match d {
+            Draw::Image { rect, .. } => Some(*rect),
+            _ => None,
+        });
+        let img = img.expect("an inline image");
+        // |30 keeps the aspect: 30 x 20, after "ab " (Fixed: 10 px a char).
+        assert_eq!((img.width, img.height), (30.0, 20.0));
+        let t = texts(&l);
+        let ab = t.iter().find(|(s, _, _)| s == "ab").unwrap();
+        let cd = t.iter().find(|(s, _, _)| s == "cd").unwrap();
+        assert!(img.x > ab.1 && cd.1 > img.x + img.width, "{t:?} {img:?}");
+        // The line grew for the image: text sits below its top.
+        assert!(ab.2 > img.y);
+        // Without the image the embed shows as its link: the file name, not
+        // the size alias.
+        let l2 = layout(&doc, 1000.0, &theme(), &mut Fixed, &|_| true);
+        assert!(texts(&l2).iter().any(|(s, _, _)| s.contains("i.png")), "{:?}", texts(&l2));
+        assert!(!texts(&l2).iter().any(|(s, _, _)| s.contains("30")));
+        let next_with = t.iter().find(|(s, _, _)| s == "next").unwrap().2;
+        let next_without = texts(&l2).iter().find(|(s, _, _)| s == "next").unwrap().2;
+        assert!(next_with > next_without, "the taller line pushes what follows down");
     }
 
     #[test]

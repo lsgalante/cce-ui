@@ -318,6 +318,18 @@ impl DocEditor {
                     let (w, h) = img.fit(want_w, want_h, self.width);
                     l = if active { l.with_image_below(&target, w, h) } else { LineLayout::image(&target, w, h, l.text_size) };
                 }
+            } else if text.contains("![") {
+                // Embeds inside the text: their pictures in a row below it.
+                let width = self.width;
+                let found: Vec<(String, f32, f32)> = preview::inline_embeds(text)
+                    .into_iter()
+                    .filter_map(|(target, want_w, want_h)| {
+                        let img = self.images.as_ref().and_then(|f| f(&target))?;
+                        let (w, h) = img.fit(want_w, want_h, width);
+                        Some((target, w, h))
+                    })
+                    .collect();
+                l = l.with_images_below(&found, width);
             }
         }
         if (l.height - self.heights[i]).abs() > 0.01 {
@@ -995,6 +1007,25 @@ mod tests {
         e.set_preview(false);
         e.paint(&mut pc, rect, true);
         assert!(!e.layouts[1].as_ref().unwrap().decos.iter().any(|d| matches!(d, Deco::Image { .. })));
+    }
+
+    #[test]
+    fn embeds_inside_a_line_show_below_it() {
+        let mut e = DocEditor::new("text ![[a.png|100]] and ![[b.png|100]] more\nend", EditorTheme::new(14.0), false);
+        e.set_images(Box::new(|_| Some(EmbedImage { id: 3, width: 200, height: 100 })));
+        let mut pc = PaintCtx::new();
+        e.buf.caret = Pos::new(1, 0);
+        e.paint(&mut pc, Rect { x: 0.0, y: 0.0, width: 600.0, height: 400.0 }, true);
+        let l = e.layouts[0].as_ref().unwrap();
+        assert!(!l.runs.is_empty(), "the text stays");
+        let rects: Vec<Rect> = l.decos.iter().filter_map(|d| match d {
+            Deco::Image { rect, .. } => Some(*rect),
+            _ => None,
+        }).collect();
+        assert_eq!(rects.len(), 2);
+        assert_eq!((rects[0].width, rects[0].height), (100.0, 50.0));
+        assert!(rects[1].x > rects[0].x && rects[1].y == rects[0].y, "side by side");
+        assert!(l.height >= l.row_h + 50.0);
     }
 
     #[test]

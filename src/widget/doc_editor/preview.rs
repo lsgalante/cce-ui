@@ -67,6 +67,37 @@ pub fn standalone_embed(text: &str) -> Option<(String, Option<u32>, Option<u32>)
     Some((target, w, h))
 }
 
+/// Every embed in a line, in order — `![[…]]` and `![…](…)` anywhere in
+/// it — read as [`standalone_embed`] reads one.
+pub fn inline_embeds(text: &str) -> Vec<(String, Option<u32>, Option<u32>)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(off) = text[i..].find("![") {
+        let at = i + off;
+        let rest = &text[at..];
+        let end = if rest.starts_with("![[") {
+            rest.find("]]").map(|e| e + 2)
+        } else {
+            rest.find("](").and_then(|m| rest[m..].find(')').map(|e| m + e + 1))
+        };
+        let Some(end) = end else { break };
+        if let Some(found) = standalone_embed(&rest[..end]) {
+            out.push(found);
+        }
+        i = at + end;
+    }
+    out
+}
+
+/// Whether an embed alias is Obsidian's size form (`300`, `300x200`).
+fn embed_size_spec(alias: &str) -> bool {
+    let num = |v: &str| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit());
+    match alias.trim().split_once('x') {
+        Some((w, h)) => num(w.trim()) && num(h.trim()),
+        None => num(alias.trim()),
+    }
+}
+
 /// Block context per line: fences toggle code; a `---` first line opens
 /// frontmatter, closed by the next `---`.
 pub fn contexts(lines: &[String]) -> Vec<Context> {
@@ -642,10 +673,17 @@ fn inline(text: &str, from: usize, flags: &mut [u16], link_of: &mut [Option<usiz
         };
         let idx = links.len();
         links.push(Target::Note { target: t.trim().to_string(), subpath: sub.filter(|s| !s.is_empty()) });
-        let shown = alias_at.unwrap_or(o + 2)..c;
+        // An embed's alias that is only a size (`![[pic.png|300]]`) is not
+        // a caption: show the file name and hide the `|300`, as for links.
+        let size_alias = start < o && alias_at.is_some_and(|a| embed_size_spec(&text[a..c]));
+        let shown = match alias_at {
+            Some(a) if size_alias => o + 2..a - 1,
+            Some(a) => a..c,
+            None => o + 2..c,
+        };
         mark(flags, start..shown.start, MARKER);
         mark(flags, shown.clone(), LINK);
-        mark(flags, c..c + 2, MARKER);
+        mark(flags, shown.end..c + 2, MARKER);
         for x in &mut link_of[shown] {
             *x = Some(idx);
         }
@@ -776,6 +814,29 @@ fn find_run(b: &[u8], from: usize, c: u8, len: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_size_alias_shows_the_file_name() {
+        let shown = |t: &str| {
+            let l = style_line(t, Context::Normal, false);
+            l.segs.iter().filter(|g| g.look.link).map(|g| &t[g.range.clone()]).collect::<String>()
+        };
+        assert_eq!(shown("![[pic.png|300]]"), "pic.png");
+        assert_eq!(shown("![[pic.png|300x20]]"), "pic.png");
+        assert_eq!(shown("![[pic.png|a caption]]"), "a caption");
+        assert_eq!(shown("[[Note|300]]"), "300");
+    }
+
+    #[test]
+    fn inline_embeds_in_a_line() {
+        let found = inline_embeds("see ![[a.png|40]] and ![x](b%20c.png) then ![[N]] end");
+        assert_eq!(found, vec![
+            ("a.png".to_string(), Some(40), None),
+            ("b c.png".to_string(), None, None),
+            ("N".to_string(), None, None),
+        ]);
+        assert!(inline_embeds("no embeds ![ here").is_empty());
+    }
 
     #[test]
     fn standalone_embeds() {
