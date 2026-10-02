@@ -399,22 +399,32 @@ pub mod context_menu {
         }
     }
 
-    /// The mark a row that opens a submenu carries at its right end.
-    pub const SUBMENU_MARK: &str = "›";
+    /// The mark a row that leads to a PAGE carries at its right end.
+    pub const PAGE_MARK: &str = "›";
+    /// What a page's back band leads with, before the title of the plate it
+    /// goes back to.
+    pub const BACK_MARK: &str = "‹";
 
-    /// What a row's SUBMENU holds: a second menu that flies out beside the
-    /// row while the pointer is on it, set on a shown menu with
-    /// [`set_row_submenu`]. The menu opens and closes it — a host only says
-    /// what is in it and dispatches its rows, through [`submenu`]. Its rows
-    /// are actions or sliders as the menu's own are; it has no submenus of
-    /// its own.
-    #[derive(Debug, Clone, Default, PartialEq)]
-    pub struct SubmenuSpec {
-        pub options: Vec<String>,
-        /// Leading rows that are headers: dimmed, never hovered.
-        pub header_count: usize,
-        /// Slider rows by index; shorter than `options` is fine.
-        pub sliders: Vec<Option<MenuSlider>>,
+    /// A page turn the menu has been asked for, drained by the host with
+    /// [`take_turn`] (a swipe) or read with [`turn_at`] (a press). The menu
+    /// does not turn by itself: what a row leads to may be another list of
+    /// rows or another plate altogether (the designer's dialog), so the host
+    /// shows it — a list with [`show_page`], which keeps the plate where it
+    /// stands, so the menu reads as turning into the page rather than as a
+    /// second menu arriving.
+    ///
+    /// Until 2026-10-02 a row could open a SUBMENU, a second menu flying out
+    /// beside it on hover, while rows that led to another plate swapped it
+    /// in place on a click: two kinds of row for one idea. A page row is
+    /// both, and is the only kind.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PageTurn {
+        /// Into the page row `n` leads to: a press on it, or a side swipe
+        /// forward with the pointer on it.
+        Into(usize),
+        /// Back to the plate this page was turned to from: a press on the
+        /// back band, or a side swipe back anywhere over the plate.
+        Back,
     }
 
     /// A toolkit color as the `[u8; 3]` a [`TextLabel`] carries.
@@ -443,21 +453,21 @@ pub mod context_menu {
         /// Emptied by every `show`, so a menu's sliders are the ones its
         /// host set this time.
         pub sliders: Vec<Option<MenuSlider>>,
-        /// Submenus by row, parallel to `options` — see [`SubmenuSpec`].
-        /// Emptied by every `show`, as the sliders are.
-        pub submenus: Vec<Option<SubmenuSpec>>,
-        /// The row whose submenu is open, on the MENU.
-        pub open_sub: Option<usize>,
-        /// On the SUBMENU: the row of the menu it flew out from. `None` on
-        /// the menu itself, which is how the two are told apart.
-        pub parent_row: Option<usize>,
-        /// On the submenu: the rect of that row's menu, `(x, y, w, h)` — what
-        /// it is placed beside, and flips to the other side of.
-        pub beside: (f32, f32, f32, f32),
-        /// Where the pointer last was on the row whose submenu is open: the
-        /// apex of the triangle a pointer heading INTO the submenu stays
-        /// inside, crossing other rows on its way without switching to them.
-        intent_apex: Option<(f32, f32)>,
+        /// Rows that lead to a PAGE, parallel to `options` — see
+        /// [`set_row_page`](Self::set_row_page). Emptied by every `show`.
+        pub pages: Vec<bool>,
+        /// On a page: the title of the plate it was turned to from, which
+        /// the back band across its top reads as `‹ Title`. `None` on a menu
+        /// that was opened rather than turned to.
+        pub back: Option<String>,
+        /// The pointer is on the back band.
+        pub back_hovered: bool,
+        /// Shown by [`show_page`](Self::show_page), in place of the plate it
+        /// turned from: a placement keeps its corner where that plate's
+        /// was, sliding it on screen rather than flipping it.
+        pub turned: bool,
+        /// A turn a swipe asked for, until the host takes it.
+        turn: Option<PageTurn>,
         /// The slider row a press took hold of, until the release.
         pub slider_drag: Option<usize>,
         /// A trackpad's leftover fraction of a wheel notch.
@@ -510,11 +520,11 @@ pub mod context_menu {
                 target: None,
                 header_count: 0,
                 sliders: Vec::new(),
-                submenus: Vec::new(),
-                open_sub: None,
-                parent_row: None,
-                beside: (0.0, 0.0, 0.0, 0.0),
-                intent_apex: None,
+                pages: Vec::new(),
+                back: None,
+                back_hovered: false,
+                turned: false,
+                turn: None,
                 slider_drag: None,
                 wheel_accum: 0.0,
                 slider_change: None,
@@ -573,170 +583,110 @@ pub mod context_menu {
             self.target = Some(target);
             self.header_count = header_count;
             self.sliders = vec![None; self.options.len()];
-            self.submenus = vec![None; self.options.len()];
-            self.close_submenu();
+            self.pages = vec![false; self.options.len()];
+            self.back = None;
+            self.back_hovered = false;
+            self.turned = false;
+            self.turn = None;
             self.slider_drag = None;
             self.wheel_accum = 0.0;
             self.slider_change = None;
         }
 
-        /// Give row `idx` a submenu, or replace the one it has. Widens the
-        /// plate for the mark. Replacing the contents of a submenu that is
-        /// OPEN changes it where it stands — its hover, its scroll and a
-        /// held slider are kept — which is how a host re-marks a row of it
-        /// after that row was picked.
-        pub fn set_row_submenu(&mut self, idx: usize, spec: SubmenuSpec) {
-            if idx >= self.options.len() || self.parent_row.is_some() {
+        /// Make row `idx` lead to a PAGE — see [`PageTurn`]. It wears
+        /// [`PAGE_MARK`] at its right end; the plate widens for it.
+        pub fn set_row_page(&mut self, idx: usize) {
+            if idx >= self.options.len() {
                 return;
             }
             let (family, size) = label_font();
             let measure = |t: &str| crate::widget::display::measure_text_width(t, &family, size);
-            let need = PAD + measure(&self.options[idx]) + SLIDER_GAP + measure(SUBMENU_MARK) + PAD;
+            let need = PAD + measure(&self.options[idx]) + SLIDER_GAP + measure(PAGE_MARK) + PAD;
             self.w = self.w.max(need);
-            if self.open_sub == Some(idx) {
-                SUBMENU.with(|s| {
-                    if let Ok(mut s) = s.try_borrow_mut() {
-                        s.refill(&spec);
-                    }
-                });
+            self.pages[idx] = true;
+        }
+
+        /// Whether row `idx` leads to a page.
+        pub fn leads_to_page(&self, idx: usize) -> bool {
+            self.pages.get(idx).copied().unwrap_or(false)
+        }
+
+        /// Show `options` as a PAGE, the plate's top-left at `(x, y)` — where
+        /// the plate it turns from stood — with a back band reading `‹ back`
+        /// across its top when `back` names that plate. The rows are new
+        /// rows (sliders and page rows are set again after, as after
+        /// [`show`](Self::show)); what changes is that a placement keeps the
+        /// corner rather than opening from a pointer.
+        pub fn show_page(&mut self, x: f32, y: f32, back: Option<&str>, options: Vec<String>, header_count: usize, target: WidgetId) {
+            self.show(x, y, options, header_count, target);
+            self.turned = true;
+            if let Some(title) = back {
+                let label = format!("{BACK_MARK} {title}");
+                let (family, size) = label_font();
+                let need = PAD + crate::widget::display::measure_text_width(&label, &family, size) + PAD;
+                self.w = self.w.max(need);
+                self.back = Some(title.to_string());
+                self.content_h += ROW_H;
+                self.h = self.content_h;
             }
-            self.submenus[idx] = Some(spec);
         }
 
-        /// Whether row `idx` opens a submenu.
-        pub fn has_submenu(&self, idx: usize) -> bool {
-            self.submenus.get(idx).is_some_and(|s| s.is_some())
-        }
-
-        /// Open row `idx`'s submenu beside it. A no-op for a row with none,
-        /// or whose submenu is the one open.
-        pub fn open_submenu(&mut self, idx: usize) -> bool {
-            if self.open_sub == Some(idx) {
+        /// New labels and slider values for the rows that are showing, in
+        /// place — the hover, the scroll, the back band, the page rows and a
+        /// held slider are kept — which is how a host re-marks a row of a
+        /// menu that stays up after the row ran. `false`, and nothing
+        /// changed, when the number of rows differs: that is another menu,
+        /// to be shown afresh.
+        pub fn refill(&mut self, options: Vec<String>, sliders: &[Option<MenuSlider>]) -> bool {
+            if options.len() != self.options.len() {
                 return false;
             }
-            let Some(Some(spec)) = self.submenus.get(idx).cloned() else { return false };
-            let Some(target) = self.target else { return false };
-            // The submenu's first row level with the row it flew out from.
-            let (x, y) = (self.x + self.w, self.row_y(idx) - PAD);
-            let beside = (self.x, self.y, self.w, self.h);
-            SUBMENU.with(|s| {
-                let Ok(mut s) = s.try_borrow_mut() else { return };
-                s.show(x, y, spec.options.clone(), spec.header_count, target);
-                for (i, sl) in spec.sliders.iter().enumerate() {
-                    if let Some(sl) = sl {
-                        s.set_row_slider(i, *sl);
-                    }
-                }
-                s.parent_row = Some(idx);
-                s.beside = beside;
-                s.hosted = self.hosted;
-            });
-            self.open_sub = Some(idx);
-            true
-        }
-
-        /// Close the open submenu, if there is one.
-        pub fn close_submenu(&mut self) -> bool {
-            self.intent_apex = None;
-            if self.open_sub.take().is_none() {
-                return false;
-            }
-            SUBMENU.with(|s| {
-                if let Ok(mut s) = s.try_borrow_mut() {
-                    s.hide();
-                }
-            });
-            true
-        }
-
-        /// New contents for a submenu that is showing: the labels and the
-        /// slider values, in place. A different NUMBER of rows is a different
-        /// menu, and is shown afresh where this one stands.
-        fn refill(&mut self, spec: &SubmenuSpec) {
-            if spec.options.len() != self.options.len() {
-                let (anchor, target, parent, beside, hosted) = (self.anchor, self.target, self.parent_row, self.beside, self.hosted);
-                let Some(target) = target else { return };
-                self.show(anchor.0, anchor.1, spec.options.clone(), spec.header_count, target);
-                for (i, sl) in spec.sliders.iter().enumerate() {
-                    if let Some(sl) = sl {
-                        self.set_row_slider(i, *sl);
-                    }
-                }
-                self.parent_row = parent;
-                self.beside = beside;
-                self.hosted = hosted;
-                return;
-            }
-            self.options = spec.options.clone();
-            self.header_count = spec.header_count;
+            self.options = options;
             for i in 0..self.options.len() {
                 // A held slider is the pointer's until the release.
                 if self.slider_drag == Some(i) {
                     continue;
                 }
-                self.sliders[i] = spec.sliders.get(i).copied().flatten();
+                self.sliders[i] = sliders.get(i).copied().flatten();
             }
+            true
         }
 
-        /// After a pointer move has settled the menu's hover: open the
-        /// submenu of the row now hovered, close the open one when another
-        /// row is — unless the pointer is on its way INTO the submenu, inside
-        /// the triangle from where it left the row to the submenu's near
-        /// edge — and keep the open submenu's row lit while the pointer is
-        /// anywhere else.
-        fn follow_hover(&mut self, px: f32, py: f32) {
-            if self.parent_row.is_some() || self.slider_drag.is_some() {
-                return;
-            }
-            match (self.hovered_item, self.open_sub) {
-                (Some(i), Some(open)) if i != open && self.heading_into_submenu(px, py) => {
-                    self.hovered_item = Some(open);
-                }
-                (Some(i), _) if self.has_submenu(i) => {
-                    self.open_submenu(i);
-                    self.intent_apex = Some((px, py));
-                }
-                (Some(_), _) => {
-                    self.close_submenu();
-                }
-                (None, open) => self.hovered_item = open,
-            }
+        /// The band's height above the rows: one row on a page that goes
+        /// back somewhere, none otherwise.
+        fn band_h(&self) -> f32 {
+            if self.back.is_some() { ROW_H } else { 0.0 }
         }
 
-        fn heading_into_submenu(&self, px: f32, py: f32) -> bool {
-            let Some((ax, ay)) = self.intent_apex else { return false };
-            let (sx, sy, sw, sh) = SUBMENU.with(|s| s.try_borrow().map(|s| (s.x, s.y, s.w, s.h)).unwrap_or_default());
-            // The edge of the submenu nearer the menu, a row taller at each
-            // end: a hand does not aim at a corner.
-            let near = if sx >= self.x { sx } else { sx + sw };
-            let (b, c) = ((near, sy - ROW_H), (near, sy + sh + ROW_H));
-            let side = |p: (f32, f32), q: (f32, f32)| (px - q.0) * (p.1 - q.1) - (p.0 - q.0) * (py - q.1);
-            let (d1, d2, d3) = (side((ax, ay), b), side(b, c), side(c, (ax, ay)));
-            let neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
-            let pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
-            (px - ax).abs() > 0.5 && !(neg && pos)
+        /// The top of the back band, where it is drawn.
+        pub fn back_band_y(&self) -> f32 {
+            self.y + PAD - self.scroll
         }
 
-        /// Keep a SUBMENU on screen inside `(bx, by, bw, bh)`: beside its
-        /// menu on the right, on the left where the right has no room, slid
-        /// up where it would run off the bottom, cut down and scrolling where
-        /// it is taller than the box. For hosts with no popup surface.
-        pub fn constrain_beside(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
-            let (mx, _, mw, _) = self.beside;
-            let x = if mx + mw + self.w <= bx + bw {
-                mx + mw
-            } else if mx - self.w >= bx {
-                mx - self.w
-            } else {
-                (bx + bw - self.w).max(bx)
-            };
-            let ay = self.anchor.1;
-            let (y, max_h) = if ay + self.content_h <= by + bh {
-                (ay.max(by), self.content_h)
-            } else {
-                ((by + bh - self.content_h).max(by), bh)
-            };
-            self.place(x, y, max_h);
+        /// Whether `(px, py)` is on the back band.
+        pub fn on_back_band(&self, px: f32, py: f32) -> bool {
+            if self.back.is_none() || !self.hit_test(px, py) {
+                return false;
+            }
+            let top = self.back_band_y();
+            py >= top && py < top + ROW_H
+        }
+
+        /// The turn a press at `(px, py)` asks for: the back band goes back,
+        /// a page row goes into its page.
+        pub fn turn_at(&self, px: f32, py: f32) -> Option<PageTurn> {
+            if !self.visible {
+                return None;
+            }
+            if self.on_back_band(px, py) {
+                return Some(PageTurn::Back);
+            }
+            self.row_at(px, py).filter(|&i| self.leads_to_page(i)).map(PageTurn::Into)
+        }
+
+        /// The turn a side swipe asked for since the last call.
+        pub fn take_turn(&mut self) -> Option<PageTurn> {
+            self.turn.take()
         }
 
         /// Make row `idx` a slider. Widens the plate to hold the label, the
@@ -783,7 +733,7 @@ pub mod context_menu {
             let x = if ax + self.w > bx + bw { (bx + bw - self.w).max(bx) } else { ax.max(bx) };
             let (y, max_h) = if ay + self.content_h <= by + bh {
                 (ay.max(by), self.content_h)
-            } else if ay - self.content_h >= by {
+            } else if !self.turned && ay - self.content_h >= by {
                 (ay - self.content_h, self.content_h)
             } else {
                 ((by + bh - self.content_h).max(by), bh)
@@ -839,7 +789,7 @@ pub mod context_menu {
         /// [`Self::scroll_by`] this does not re-hover the row under the
         /// pointer: the keyboard put the highlight where it is.
         fn scroll_into_view(&mut self, idx: usize) {
-            let top = idx as f32 * ROW_H;
+            let top = self.band_h() + idx as f32 * ROW_H;
             let bottom = top + ROW_H + 2.0 * PAD;
             if top < self.scroll {
                 self.scroll = top;
@@ -895,6 +845,21 @@ pub mod context_menu {
         pub fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
             if !self.visible {
                 return false;
+            }
+            // A side swipe turns a page: forward with the pointer on a page
+            // row, back from anywhere on a page that has somewhere to go.
+            if self.hit_test(px, py) && self.slider_drag.is_none() {
+                let turn = match crate::widget::side_swipe::feed(delta) {
+                    Some(crate::widget::SwipeDir::Forward) => {
+                        self.row_at(px, py).filter(|&i| self.leads_to_page(i)).map(PageTurn::Into)
+                    }
+                    Some(crate::widget::SwipeDir::Back) => self.back.is_some().then_some(PageTurn::Back),
+                    None => None,
+                };
+                if turn.is_some() {
+                    self.turn = turn;
+                    return true;
+                }
             }
             let Some(idx) = self.row_at(px, py) else { return false };
             let Some(s) = self.slider(idx) else {
@@ -960,7 +925,8 @@ pub mod context_menu {
             self.target = None;
             self.last_cursor = None;
             self.slider_drag = None;
-            self.close_submenu();
+            self.back_hovered = false;
+            self.turn = None;
         }
 
         pub fn hit_test(&self, px: f32, py: f32) -> bool {
@@ -971,7 +937,7 @@ pub mod context_menu {
         /// The top of row `idx`, where it is drawn: scrolled, so a row above
         /// the view lies above `y`.
         pub fn row_y(&self, idx: usize) -> f32 {
-            self.y + PAD + idx as f32 * ROW_H - self.scroll
+            self.y + PAD + self.band_h() + idx as f32 * ROW_H - self.scroll
         }
 
         /// The row under `(px, py)`, or `None` outside the plate or in its
@@ -981,7 +947,7 @@ pub mod context_menu {
             if px < self.x || px > self.x + self.w || py < self.y || py > self.y + self.h {
                 return None;
             }
-            let rel = py - self.y - PAD + self.scroll;
+            let rel = py - self.y - PAD - self.band_h() + self.scroll;
             if rel < 0.0 {
                 return None;
             }
@@ -995,15 +961,15 @@ pub mod context_menu {
             if self.slider_drag.is_some() {
                 return self.slider_drag_to(px);
             }
-            let was = (self.hovered_item, self.open_sub);
+            let was = (self.hovered_item, self.back_hovered);
             self.rehover(px, py);
-            self.follow_hover(px, py);
-            (self.hovered_item, self.open_sub) != was
+            (self.hovered_item, self.back_hovered) != was
         }
 
         fn rehover(&mut self, px: f32, py: f32) -> bool {
-            let was_hovered = self.hovered_item;
+            let was_hovered = (self.hovered_item, self.back_hovered);
             self.hovered_item = None;
+            self.back_hovered = self.on_back_band(px, py);
             if let Some(idx) = self.row_at(px, py) {
                 // A "-" row is a SEPARATOR (the dropdown's convention):
                 // engraved, never hovered, never an action.
@@ -1011,7 +977,7 @@ pub mod context_menu {
                     self.hovered_item = Some(idx);
                 }
             }
-            self.hovered_item != was_hovered
+            (self.hovered_item, self.back_hovered) != was_hovered
         }
 
         pub fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: Option<&mut crate::context::UiContext>) -> bool {
@@ -1030,6 +996,10 @@ pub mod context_menu {
                 return false;
             }
 
+            if let Some(turn) = self.turn_at(px, py) {
+                self.turn = Some(turn);
+                return true;
+            }
             if self.hit_test(px, py) {
                 if let Some(idx) = self.row_at(px, py) {
                     if idx >= self.header_count {
@@ -1122,6 +1092,23 @@ pub mod context_menu {
         }
 
         fn paint_rows(&self, ctx: &mut crate::scene::paint::PaintCtx, rect: crate::scene::layout::Rect, r: f32, depth: f32) {
+            if self.back.is_some() {
+                // The back band: lit like a row under the pointer, and cut off
+                // from the page's rows by the separator's groove.
+                let top = self.back_band_y();
+                if self.back_hovered {
+                    let inset = (depth * 0.5).max(2.0).max(PAD * 0.5);
+                    ctx.rounded_rect(
+                        crate::scene::layout::Rect { x: self.x + inset, y: top + 2.0, width: self.w - 2.0 * inset, height: ROW_H - 4.0 },
+                        (r - inset).max(0.0),
+                        (true, true, true, true),
+                        [0.20, 0.40, 0.65, 0.6],
+                    );
+                }
+                let inset = (depth * 0.5).max(PAD);
+                let cy = top + ROW_H;
+                ctx.groove((self.x + inset, cy), (self.x + self.w - inset, cy), 0.75, depth, rect);
+            }
             if let Some(h_idx) = self.hovered_item {
                 // Inset off the roll so the fill sits on the face instead of
                 // climbing the lit edge, and round the corners it actually meets:
@@ -1245,6 +1232,16 @@ pub mod context_menu {
             let mut labels = Vec::new();
             if !self.visible || self.hosted { return labels; }
 
+            if let Some(title) = &self.back {
+                let (_, label_size) = label_font();
+                labels.push(TextLabel {
+                    text: format!("{BACK_MARK} {title}"),
+                    x: self.x + PAD,
+                    y: self.back_band_y() + (ROW_H - label_size) / 2.0,
+                    font_size: label_size,
+                    color: rgb8(if self.back_hovered { crate::color::TEXT_HEADER } else { crate::color::TEXT_DIM }),
+                });
+            }
             for (idx, opt) in self.options.iter().enumerate() {
                 if opt == "-" {
                     continue;
@@ -1277,12 +1274,12 @@ pub mod context_menu {
                     font_size: label_size,
                     color: text_color,
                 });
-                // A row with a submenu says so at its right end.
-                if self.has_submenu(idx) {
+                // A row that leads to a page says so at its right end.
+                if self.leads_to_page(idx) {
                     let (family, _) = label_font();
-                    let tw = crate::widget::display::measure_text_width(SUBMENU_MARK, &family, label_size);
+                    let tw = crate::widget::display::measure_text_width(PAGE_MARK, &family, label_size);
                     labels.push(TextLabel {
-                        text: SUBMENU_MARK.to_string(),
+                        text: PAGE_MARK.to_string(),
                         x: self.x + self.w - PAD - tw.max(label_size * 0.4),
                         y: iy,
                         font_size: label_size,
@@ -1348,138 +1345,40 @@ pub mod context_menu {
 
     thread_local! {
         pub static CONTEXT_MENU: RefCell<ContextMenuState> = RefCell::new(ContextMenuState::new());
-        /// The open submenu: a second menu, beside the row of the first it
-        /// flew out from. See [`submenu`].
-        pub static SUBMENU: RefCell<ContextMenuState> = RefCell::new(ContextMenuState::new());
     }
 
-    /// The open SUBMENU, for a host that dispatches the menu itself. The
-    /// menu opens and closes it (see [`SubmenuSpec`]); what is left to the
-    /// host is what it does for the menu's own rows: ask which row a press
-    /// landed on, and drain its sliders.
-    ///
-    /// The calls that are about where the POINTER is — [`hit_test`],
-    /// [`cursor_moved`], [`mouse_wheel`], [`slider_press`],
-    /// [`slider_dragging`], [`slider_release`] at the menu's top level —
-    /// answer for the menu and its submenu together, so a host with no
-    /// submenus is unchanged and one with them routes nothing by hand. The
-    /// calls that NAME A ROW are apart, since a row index means nothing
-    /// without the menu it is a row of: [`row_at`] there is the menu's alone
-    /// (and `None` over the submenu), and the submenu's is here.
-    ///
-    /// [`hit_test`]: super::hit_test
-    /// [`cursor_moved`]: super::cursor_moved
-    /// [`mouse_wheel`]: super::mouse_wheel
-    /// [`slider_press`]: super::slider_press
-    /// [`slider_dragging`]: super::slider_dragging
-    /// [`slider_release`]: super::slider_release
-    /// [`row_at`]: super::row_at
-    pub mod submenu {
-        use super::{MenuSlider, SUBMENU};
-
-        pub fn is_visible() -> bool {
-            SUBMENU.with(|m| m.borrow().visible)
-        }
-        /// The row of the menu the open submenu belongs to.
-        pub fn parent_row() -> Option<usize> {
-            SUBMENU.with(|m| {
-                let m = m.borrow();
-                m.visible.then_some(m.parent_row).flatten()
-            })
-        }
-        pub fn hit_test(px: f32, py: f32) -> bool {
-            SUBMENU.with(|m| m.borrow().hit_test(px, py))
-        }
-        pub fn row_at(px: f32, py: f32) -> Option<usize> {
-            SUBMENU.with(|m| {
-                let m = m.borrow();
-                if !m.visible {
-                    return None;
-                }
-                m.row_at(px, py)
-            })
-        }
-        pub fn row_y(idx: usize) -> f32 {
-            SUBMENU.with(|m| m.borrow().row_y(idx))
-        }
-        pub fn slider(idx: usize) -> Option<MenuSlider> {
-            SUBMENU.with(|m| m.borrow().slider(idx))
-        }
-        pub fn slider_dragging() -> bool {
-            SUBMENU.with(|m| m.borrow().slider_drag.is_some())
-        }
-        /// `(row, value)` of the last change to one of the submenu's sliders
-        /// since the last call.
-        pub fn take_slider_change() -> Option<(usize, f32)> {
-            SUBMENU.with(|m| m.borrow_mut().take_slider_change())
-        }
-        pub fn x() -> f32 { SUBMENU.with(|m| m.borrow().x) }
-        pub fn y() -> f32 { SUBMENU.with(|m| m.borrow().y) }
-        pub fn w() -> f32 { SUBMENU.with(|m| m.borrow().w) }
-        pub fn h() -> f32 { SUBMENU.with(|m| m.borrow().h) }
-        pub fn hovered_item() -> Option<usize> { SUBMENU.with(|m| m.borrow().hovered_item) }
-        pub fn options() -> Vec<String> { SUBMENU.with(|m| m.borrow().options.clone()) }
-        pub fn generation() -> u64 { SUBMENU.with(|m| m.borrow().generation) }
-        /// See [`super::ContextMenuState::place`].
-        pub fn place(x: f32, y: f32, max_h: f32) {
-            SUBMENU.with(|m| m.borrow_mut().place(x, y, max_h));
-        }
-        /// See [`super::ContextMenuState::constrain_beside`].
-        pub fn constrain_beside(bx: f32, by: f32, bw: f32, bh: f32) {
-            SUBMENU.with(|m| m.borrow_mut().constrain_beside(bx, by, bw, bh));
-        }
-        pub fn set_hosted(hosted: bool) {
-            SUBMENU.with(|m| m.borrow_mut().hosted = hosted);
-        }
-        /// `(w, content_h)` and the rect of the menu it stands beside.
-        pub fn natural_geometry() -> (f32, f32, (f32, f32, f32, f32)) {
-            SUBMENU.with(|m| {
-                let m = m.borrow();
-                (m.w, m.content_h, m.beside)
-            })
-        }
-        /// The top of the row it flew out from, less the padding: where its
-        /// own top goes.
-        pub fn anchor_y() -> f32 {
-            SUBMENU.with(|m| m.borrow().anchor.1)
-        }
-        /// As [`super::paint_hosted`], for the submenu's own popup surface.
-        pub fn paint_hosted(ctx: &mut crate::scene::paint::PaintCtx) {
-            let mut menu = SUBMENU.with(|m| m.borrow().clone());
-            menu.hosted = false;
-            menu.in_popup = true;
-            let (x, y) = (menu.x, menu.y);
-            ctx.translate(-x, -y, |ctx| menu.paint_with_labels(ctx));
-        }
+    /// Make row `idx` of the shown menu lead to a page — see [`PageTurn`].
+    /// Call after [`show`] / [`show_page`], which clear every row back to an
+    /// action.
+    pub fn set_row_page(idx: usize) {
+        CONTEXT_MENU.with(|m| m.borrow_mut().set_row_page(idx));
     }
-
-    /// Give row `idx` of the shown menu a submenu — see [`SubmenuSpec`].
-    /// Call after [`show`], which clears every row back to an action, and
-    /// again whenever the submenu's contents change.
-    pub fn set_row_submenu(idx: usize, spec: SubmenuSpec) {
-        CONTEXT_MENU.with(|m| m.borrow_mut().set_row_submenu(idx, spec));
+    pub fn leads_to_page(idx: usize) -> bool {
+        CONTEXT_MENU.with(|m| m.borrow().leads_to_page(idx))
     }
-    pub fn has_submenu(idx: usize) -> bool {
-        CONTEXT_MENU.with(|m| m.borrow().has_submenu(idx))
+    /// See [`ContextMenuState::show_page`].
+    pub fn show_page(x: f32, y: f32, back: Option<&str>, options: Vec<String>, header_count: usize, target: WidgetId) {
+        CONTEXT_MENU.with(|m| m.borrow_mut().show_page(x, y, back, options, header_count, target));
     }
-    /// Open row `idx`'s submenu: what a press on the row does, for a
-    /// pointer that has not moved since the menu came up under it.
-    pub fn open_submenu(idx: usize) -> bool {
-        CONTEXT_MENU.with(|m| m.borrow_mut().open_submenu(idx))
+    /// See [`ContextMenuState::refill`].
+    pub fn refill(options: Vec<String>, sliders: &[Option<MenuSlider>]) -> bool {
+        CONTEXT_MENU.with(|m| m.borrow_mut().refill(options, sliders))
     }
-    pub fn close_submenu() -> bool {
-        CONTEXT_MENU.with(|m| m.borrow_mut().close_submenu())
+    /// See [`ContextMenuState::turn_at`].
+    pub fn turn_at(px: f32, py: f32) -> Option<PageTurn> {
+        CONTEXT_MENU.with(|m| m.borrow().turn_at(px, py))
     }
-    /// Whether the point is the submenu's: inside it, or anywhere while one
-    /// of its sliders is held.
-    fn submenu_takes(px: f32, py: f32) -> bool {
-        if CONTEXT_MENU.with(|m| m.borrow().slider_drag.is_some()) {
-            return false;
-        }
-        SUBMENU.with(|s| {
-            let s = s.borrow();
-            s.visible && (s.slider_drag.is_some() || s.hit_test(px, py))
-        })
+    /// See [`ContextMenuState::take_turn`].
+    pub fn take_turn() -> Option<PageTurn> {
+        CONTEXT_MENU.with(|m| m.borrow_mut().take_turn())
+    }
+    /// Whether the shown menu is a page turned to in place of another plate.
+    pub fn is_turned() -> bool {
+        CONTEXT_MENU.with(|m| m.borrow().turned)
+    }
+    /// The title of the plate the shown page goes back to.
+    pub fn back_title() -> Option<String> {
+        CONTEXT_MENU.with(|m| m.borrow().back.clone())
     }
 
     pub fn is_visible() -> bool {
@@ -1574,9 +1473,6 @@ pub mod context_menu {
     /// row, and runs off the end on the last one (2026-09-22 audit: six
     /// call sites across five apps had it).
     pub fn row_at(px: f32, py: f32) -> Option<usize> {
-        if submenu::hit_test(px, py) {
-            return None;
-        }
         CONTEXT_MENU.with(|m| m.borrow().row_at(px, py))
     }
     /// A row's top, PAD-aware — for a host painting the rows itself.
@@ -1584,28 +1480,11 @@ pub mod context_menu {
         CONTEXT_MENU.with(|m| m.borrow().row_y(idx))
     }
     pub fn hit_test(px: f32, py: f32) -> bool {
-        CONTEXT_MENU.with(|m| m.borrow().hit_test(px, py)) || submenu::hit_test(px, py)
+        CONTEXT_MENU.with(|m| m.borrow().hit_test(px, py))
     }
 
     pub fn cursor_moved(px: f32, py: f32) -> bool {
-        if submenu_takes(px, py) {
-            let moved = SUBMENU.with(|s| s.borrow_mut().cursor_moved(px, py));
-            // The row it flew out from stays lit while the pointer is in it.
-            let relit = CONTEXT_MENU.with(|m| {
-                let mut m = m.borrow_mut();
-                let was = m.hovered_item;
-                m.hovered_item = m.open_sub;
-                // It has arrived: on its way back out it is heading nowhere.
-                m.intent_apex = None;
-                m.hovered_item != was
-            });
-            return moved || relit;
-        }
-        let left = SUBMENU.with(|s| {
-            let mut s = s.borrow_mut();
-            s.visible && s.hovered_item.take().is_some()
-        });
-        CONTEXT_MENU.with(|m| m.borrow_mut().cursor_moved(px, py)) || left
+        CONTEXT_MENU.with(|m| m.borrow_mut().cursor_moved(px, py))
     }
 
     /// Make row `idx` of the shown menu a slider — see [`MenuSlider`]. Call
@@ -1619,26 +1498,19 @@ pub mod context_menu {
     /// The wheel, for hosts that route it: steps the slider under the
     /// pointer. `false` when no slider row is there — let it scroll the page.
     pub fn mouse_wheel(delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
-        if submenu_takes(px, py) {
-            return SUBMENU.with(|m| m.borrow_mut().mouse_wheel(delta, px, py));
-        }
         CONTEXT_MENU.with(|m| m.borrow_mut().mouse_wheel(delta, px, py))
     }
     /// A left press, for hosts that dispatch the menu themselves: `true` when
     /// it landed on a slider row, which the host must then NOT treat as an
     /// action or a dismissal.
     pub fn slider_press(px: f32, py: f32) -> bool {
-        if submenu_takes(px, py) {
-            return SUBMENU.with(|m| m.borrow_mut().slider_press(px, py));
-        }
         CONTEXT_MENU.with(|m| m.borrow_mut().slider_press(px, py))
     }
     pub fn slider_dragging() -> bool {
-        CONTEXT_MENU.with(|m| m.borrow().slider_drag.is_some()) || submenu::slider_dragging()
+        CONTEXT_MENU.with(|m| m.borrow().slider_drag.is_some())
     }
     pub fn slider_release() -> bool {
-        let sub = SUBMENU.with(|m| m.borrow_mut().slider_release());
-        CONTEXT_MENU.with(|m| m.borrow_mut().slider_release()) || sub
+        CONTEXT_MENU.with(|m| m.borrow_mut().slider_release())
     }
     /// `(row, value)` of the last slider change since the last call.
     pub fn take_slider_change() -> Option<(usize, f32)> {
@@ -1653,30 +1525,20 @@ pub mod context_menu {
     /// the display-list path call this in place of the [`extra_quads`] loop.
     pub fn paint(ctx: &mut crate::scene::paint::PaintCtx) {
         CONTEXT_MENU.with(|m| m.borrow().paint(ctx));
-        SUBMENU.with(|m| m.borrow().paint(ctx));
     }
 
     pub fn extra_quads() -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut quads = CONTEXT_MENU.with(|m| m.borrow().extra_quads());
-        quads.extend(SUBMENU.with(|m| m.borrow().extra_quads()));
-        quads
+        CONTEXT_MENU.with(|m| m.borrow().extra_quads())
     }
 
     pub fn text_labels() -> Vec<TextLabel> {
-        let mut labels = CONTEXT_MENU.with(|m| m.borrow().text_labels());
-        labels.extend(SUBMENU.with(|m| m.borrow().text_labels()));
-        labels
+        CONTEXT_MENU.with(|m| m.borrow().text_labels())
     }
 
     /// Plate and labels in one call — see
     /// [`ContextMenuState::paint_with_labels`].
     pub fn paint_with_labels(ctx: &mut crate::scene::paint::PaintCtx) {
         CONTEXT_MENU.with(|m| m.borrow().paint_with_labels(ctx));
-        // In the window the two paint under a borrow, and the slider stamp's
-        // drop reaches back for the menu (`clear_if_matches`), which lets go
-        // when it cannot have it; the submenu's copy keeps that to one cell.
-        let sub = SUBMENU.with(|m| m.borrow().clone());
-        sub.paint_with_labels(ctx);
     }
 }
 
@@ -2101,135 +1963,86 @@ mod context_menu_padding_tests {
 }
 
 #[cfg(test)]
-mod context_menu_submenu_tests {
-    use super::context_menu::{self, submenu, MenuSlider, SubmenuSpec, PAD, ROW_H};
-    use crate::widget::{MouseScrollDelta, WidgetId};
+mod context_menu_page_tests {
+    use super::context_menu::{self, PageTurn, PAD, ROW_H};
+    use crate::widget::{MouseScrollDelta, Position, WidgetId};
 
-    fn open() -> SubmenuSpec {
+    fn open() {
         context_menu::show(400.0, 200.0, vec!["Frame".into(), "Style".into(), "Markers".into(), "Exit".into()], 0, WidgetId(1));
-        let spec = SubmenuSpec {
-            options: vec!["○ Wireframe".into(), "Opacity".into(), "Smooth".into()],
-            header_count: 0,
-            sliders: vec![None, Some(MenuSlider { value: 50.0, min: 0.0, max: 100.0, step: 5.0, decimals: 0, suffix: "%" })],
-        };
-        context_menu::set_row_submenu(1, spec.clone());
-        context_menu::set_row_submenu(2, SubmenuSpec { options: vec!["Points".into()], ..Default::default() });
-        spec
-    }
-    fn over(row: usize) -> (f32, f32) {
-        (context_menu::x() + 20.0, context_menu::row_y(row) + ROW_H * 0.5)
+        context_menu::set_row_page(1);
+        context_menu::set_row_page(2);
     }
 
-    /// A row's submenu opens under the pointer, beside the menu with its
-    /// first row level with the row it flew out from, and the pointer calls
-    /// answer for both menus while the row calls stay each menu's own.
+    fn over(idx: usize) -> (f32, f32) {
+        (context_menu::x() + 20.0, context_menu::row_y(idx) + ROW_H * 0.5)
+    }
+
+    /// One swipe, a few events long, the fingers lifted after. The runner's
+    /// phase is left alone — it is one value for the whole process and
+    /// other tests set it.
+    fn swipe(dx: f64, x: f32, y: f32) -> bool {
+        crate::widget::side_swipe::end_gesture();
+        let mut took = false;
+        for _ in 0..4 {
+            took |= context_menu::mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: dx / 4.0, y: 0.0 }), x, y);
+        }
+        took
+    }
+
+    /// A page row is a row that turns the plate: a press on it, or a swipe
+    /// forward with the pointer on it, asks for its page, and nothing opens
+    /// on hover alone.
     #[test]
-    fn a_submenu_flies_out_beside_the_row_under_the_pointer() {
-        open();
-        assert!(!submenu::is_visible());
-        let (x, y) = over(1);
-        assert!(context_menu::cursor_moved(x, y));
-        assert_eq!(submenu::parent_row(), Some(1));
-        assert_eq!((submenu::x(), submenu::row_y(0)), (context_menu::x() + context_menu::w(), context_menu::row_y(1)));
-        assert_eq!(submenu::y(), context_menu::row_y(1) - PAD);
-        assert!(submenu::slider(1).is_some(), "its slider rows came with it");
-
-        let (sx, sy) = (submenu::x() + 20.0, submenu::row_y(2) + ROW_H * 0.5);
-        assert!(context_menu::hit_test(sx, sy), "over the submenu is over the menu");
-        assert_eq!(context_menu::row_at(sx, sy), None, "but on no row of the menu's own");
-        assert_eq!(submenu::row_at(sx, sy), Some(2));
-        context_menu::cursor_moved(sx, sy);
-        assert_eq!(submenu::hovered_item(), Some(2));
-        assert_eq!(context_menu::hovered_item(), Some(1), "the row it flew out from stays lit");
-
-        // The wheel and a press over its slider row are the submenu's, and
-        // the change is drained from it, not from the menu.
-        let (wx, wy) = (submenu::x() + 20.0, submenu::row_y(1) + ROW_H * 0.5);
-        assert!(context_menu::mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), wx, wy));
-        assert_eq!(context_menu::take_slider_change(), None);
-        assert_eq!(submenu::take_slider_change(), Some((1, 55.0)));
-        let band = context_menu::SUBMENU.with(|m| m.borrow().slider_band(1));
-        assert!(context_menu::slider_press(band.x + band.width, wy));
-        assert!(context_menu::slider_dragging());
-        // Held, it follows the pointer anywhere — over the menu included.
-        let (mx, my) = over(3);
-        context_menu::cursor_moved(band.x, my.max(wy));
-        let _ = mx;
-        assert_eq!(submenu::take_slider_change(), Some((1, 0.0)));
-        assert!(submenu::is_visible(), "a held slider keeps its submenu");
-        assert!(context_menu::slider_release());
-
-        context_menu::hide();
-        assert!(!submenu::is_visible(), "the submenu goes with its menu");
-        assert!(!context_menu::hit_test(sx, sy));
-    }
-
-    /// The pointer on another row swaps or closes the submenu — unless it
-    /// is on its way INTO the submenu, crossing that row inside the triangle
-    /// from where it left its own row to the submenu's near edge.
-    #[test]
-    fn a_pointer_heading_into_the_submenu_keeps_it_open() {
+    fn a_page_row_turns_on_a_press_or_a_swipe() {
         open();
         let (x, y) = over(1);
         context_menu::cursor_moved(x, y);
-        assert_eq!(submenu::parent_row(), Some(1));
+        assert_eq!(context_menu::take_turn(), None, "hovering turns nothing");
+        assert_eq!(context_menu::turn_at(x, y), Some(PageTurn::Into(1)));
+        let (ex, ey) = over(3);
+        assert_eq!(context_menu::turn_at(ex, ey), None, "an action row is no page");
 
-        // Down and to the right, toward the submenu's lower rows: over row
-        // 2 of the menu, inside the triangle.
-        let toward = (context_menu::x() + context_menu::w() - 4.0, context_menu::row_y(2) + 4.0);
-        context_menu::cursor_moved(toward.0, toward.1);
-        assert_eq!(submenu::parent_row(), Some(1), "still the first row's");
-        assert_eq!(context_menu::hovered_item(), Some(1));
-
-        // Straight down the menu: that is a move to the next row.
-        context_menu::cursor_moved(x, y);
-        let (x2, y2) = over(2);
-        context_menu::cursor_moved(x2, y2);
-        assert_eq!(submenu::parent_row(), Some(2), "the other row's submenu took its place");
-        assert_eq!(submenu::options(), vec!["Points".to_string()]);
-
-        // And onto a row with none.
-        let (x3, y3) = over(3);
-        context_menu::cursor_moved(x3, y3);
-        assert!(!submenu::is_visible());
-        assert_eq!(context_menu::hovered_item(), Some(3));
-        context_menu::hide();
-    }
-
-    /// New contents for a submenu that is open change it where it stands:
-    /// the labels follow, the hover and the popup (its generation) stay.
-    #[test]
-    fn an_open_submenu_is_refilled_in_place() {
-        let mut spec = open();
-        let (x, y) = over(1);
-        context_menu::cursor_moved(x, y);
-        context_menu::cursor_moved(submenu::x() + 20.0, submenu::row_y(0) + ROW_H * 0.5);
-        let (at, generation) = ((submenu::x(), submenu::y()), submenu::generation());
-        spec.options[0] = "● Wireframe".into();
-        spec.sliders[1].as_mut().unwrap().value = 80.0;
-        context_menu::set_row_submenu(1, spec);
-        assert_eq!(submenu::options()[0], "● Wireframe");
-        assert_eq!(submenu::slider(1).unwrap().value, 80.0);
-        assert_eq!(submenu::hovered_item(), Some(0));
-        assert_eq!(((submenu::x(), submenu::y()), submenu::generation()), (at, generation));
-        context_menu::hide();
-    }
-
-    /// In a window with no popup surface the submenu is kept inside it: on
-    /// the menu's left where the right has no room, slid up off the bottom.
-    #[test]
-    fn a_submenu_with_no_room_flips_to_the_other_side() {
+        assert!(swipe(-80.0, x, y), "the swipe was the menu's");
+        assert_eq!(context_menu::take_turn(), Some(PageTurn::Into(1)));
+        assert_eq!(context_menu::take_turn(), None, "taken once");
+        for _ in 0..4 {
+            context_menu::mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: -20.0, y: 0.0 }), x, y);
+        }
+        assert_eq!(context_menu::take_turn(), None, "one turn a gesture");
         open();
+        assert!(!swipe(-80.0, ex, ey), "forward over an action row turns nothing");
+        open();
+        assert!(!swipe(80.0, x, y), "back from a menu that was opened goes nowhere");
+        assert_eq!(context_menu::take_turn(), None);
+        context_menu::hide();
+    }
+
+    /// A page stands where the menu stood, under a back band that a press or
+    /// a swipe back turns back from; its rows begin under the band.
+    #[test]
+    fn a_page_stands_in_the_menus_place_with_a_way_back() {
+        open();
+        let (mx, my) = (context_menu::x(), context_menu::y());
+        context_menu::show_page(mx, my, Some("View"), vec!["○ Wireframe".into(), "Opacity".into()], 0, WidgetId(1));
+        assert!(context_menu::is_turned());
+        assert_eq!((context_menu::x(), context_menu::y()), (mx, my));
+        assert_eq!(context_menu::back_title().as_deref(), Some("View"));
+        assert_eq!(context_menu::row_y(0), my + PAD + ROW_H, "the rows begin under the band");
+        assert_eq!(context_menu::h(), 2.0 * ROW_H + ROW_H + 2.0 * PAD);
+
+        let band = (mx + 20.0, my + PAD + ROW_H * 0.5);
+        assert_eq!(context_menu::row_at(band.0, band.1), None, "the band is no row");
+        assert_eq!(context_menu::turn_at(band.0, band.1), Some(PageTurn::Back));
         let (x, y) = over(1);
-        context_menu::cursor_moved(x, y);
-        let right = context_menu::x() + context_menu::w();
-        submenu::constrain_beside(0.0, 0.0, right + submenu::w() + 1.0, 1000.0);
-        assert_eq!(submenu::x(), right);
-        submenu::constrain_beside(0.0, 0.0, right + 10.0, 1000.0);
-        assert_eq!(submenu::x() + submenu::w(), context_menu::x(), "flipped to the left");
-        let bottom = context_menu::row_y(1) + ROW_H;
-        submenu::constrain_beside(0.0, 0.0, 2000.0, bottom);
-        assert!(submenu::y() + submenu::h() <= bottom + 0.01, "slid up");
+        assert_eq!(context_menu::row_at(x, y), Some(1));
+        assert!(swipe(80.0, x, y));
+        assert_eq!(context_menu::take_turn(), Some(PageTurn::Back), "back from anywhere on the page");
+
+        // A placement that cannot fit it below slides it, never flips it up
+        // from the corner it took over.
+        context_menu::constrain_to(0.0, 0.0, 2000.0, my + 10.0);
+        assert!(context_menu::y() + context_menu::h() <= my + 10.0 + 0.01);
+        assert!(context_menu::y() >= 0.0);
         context_menu::hide();
     }
 }

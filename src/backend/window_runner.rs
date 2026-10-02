@@ -4041,9 +4041,6 @@ pub struct EngineState<A: Application> {
     /// surface to the next: a renderer costs a device and every pipeline
     /// (tens of ms), a re-attach costs one swapchain.
     pub menu_renderer: Option<VkRenderer>,
-    /// The open submenu's popup, a child of `menu_popup`, and its renderer.
-    pub submenu_popup: Option<crate::backend::menu_popup::MenuPopup>,
-    pub submenu_renderer: Option<VkRenderer>,
     /// The `wl_display` the renderers were made from, as an address.
     pub display_ptr: usize,
 
@@ -4320,7 +4317,7 @@ impl<A: Application> EngineState<A> {
     /// [`Application::cursor_icon`] override, else the standard-CSD edge
     /// cursors (status bars and non-standard-CSD apps fall back to Default).
     fn cursor_icon_at(&self, lx: f32, ly: f32) -> CursorIcon {
-        // Over the context menu or its submenu the pointer is the menu's,
+        // Over the context menu the pointer is the menu's,
         // whatever of the app lies at that place under it (a splitter, a
         // resize border) — and in their popups that place may be outside
         // the window altogether.
@@ -4531,10 +4528,6 @@ impl<A: Application> EngineState<A> {
                 crate::widget::context_menu::w(),
                 crate::widget::context_menu::h(),
             ));
-            if crate::widget::context_menu::submenu::is_visible() {
-                use crate::widget::context_menu::submenu;
-                dl_overlay_rects.push((submenu::x(), submenu::y(), submenu::w(), submenu::h()));
-            }
         }
         let spans = dl_text_spans(&self.dl_text_items, scale_f32, bounds, &dl_overlay_rects);
 
@@ -4663,7 +4656,6 @@ impl<A: Application> Drop for EngineState<A> {
         // its wl_surface) drops with the rest of the fields.
         self.close_menu_popup();
         self.menu_renderer = None;
-        self.submenu_renderer = None;
         self.renderer = None;
     }
 }
@@ -6141,8 +6133,6 @@ fn run_session<'l, A: Application>(
         sent_popover_region: None,
         menu_popup: None,
         menu_renderer: None,
-        submenu_popup: None,
-        submenu_renderer: None,
         display_ptr: 0,
         exit: false,
         redraw: false,

@@ -532,48 +532,58 @@ the process can reach an X display (`DISPLAY=:0` and `XAUTHORITY=$HOME/.Xauthori
 fell back to the Intel device SILENTLY. It says so on stderr now (below, "Debug
 environment variables"); `grep -c nvidia /proc/<pid>/maps` is the check from outside.
 
-### A row can open a submenu (since 2026-09-29)
+### A row can lead to a page, and a side swipe turns it (since 2026-10-02)
 
-`context_menu::set_row_submenu(idx, SubmenuSpec { options, header_count, sliders })`,
-called after `show` like `set_row_slider`, gives a row a SUBMENU: a second menu that
-flies out beside the row while the pointer is on it. The row wears a `›` at its right
-end. **The menu opens and closes it; a host says what is in it and dispatches its
-rows.** One level deep: a submenu has no submenus.
+`context_menu::set_row_page(idx)`, called after `show` like `set_row_slider`, makes a
+row a PAGE row: it wears `›` at its right end, and a press on it, or a two-finger swipe
+to the side with the pointer on it, asks to TURN the menu into what the row leads to —
+another list of rows, or another plate altogether (the designer's dialog). **The menu
+recognizes the turn; the host shows the page**, since only the host knows what is
+there:
 
-- **It is a second `ContextMenuState`**, the `SUBMENU` thread-local, so everything a
-  menu does — sliders, scrolling, the plate — a submenu does by the same code. Its
-  `parent_row` is the row it flew out from and what tells the two apart.
-- **The pointer calls answer for both; the row calls are each menu's own.** `hit_test`,
-  `cursor_moved`, `mouse_wheel`, `slider_press`, `slider_dragging` and `slider_release`
-  route to whichever menu the pointer is in, so a host with no submenus is unchanged and
-  one with them routes nothing by hand. A row index means nothing without its menu, so
-  `row_at` is the menu's alone (and `None` over the submenu) and `take_slider_change`
-  the menu's sliders'; the submenu's are `context_menu::submenu::row_at`,
-  `::take_slider_change`, `::parent_row`, `::slider`, `::options`.
-- **Hover intent is a triangle, not a timer.** Moving from a row into its submenu
-  crosses the rows between; while the pointer is inside the triangle from where it last
-  was on the open submenu's row to the submenu's near edge (a row taller at each end),
-  those rows neither hover nor swap the submenu. Straight down the menu is outside it,
-  and once the pointer has arrived in the submenu the apex is dropped, so coming back
-  out is an ordinary move. `open_submenu(idx)` is for a press on the row, under a
-  pointer that has not moved since the menu came up.
-- **Setting a submenu that is OPEN changes it where it stands** — labels and slider
-  values, keeping its hover, scroll, held slider and popup — which is how a host
-  re-marks a row after it was picked. A different number of rows shows it afresh.
-- **Its popup is the CHILD of the menu's popup** (`menu_popup.rs`), positioned against
-  the menu's whole width at the row's height: anchor top-right, gravity bottom-right,
-  flip-x / slide / resize-y, so it lands on the menu's left where the output has no
-  room on the right. Its configure is relative to its parent, so where it is, is that
-  plus where the menu landed. It has its own renderer (`submenu_renderer`), kept across
-  opens. **The child closes first**: a popup that is not the topmost may not be
-  destroyed, so `close_menu_popup` closes the submenu's ahead of the menu's. In a window
-  with no popup surface `submenu::constrain_beside` does the same flip and slide.
-- The cursor over either menu is the default arrow (`cursor_icon_at`): what lies under
-  a popup in window coordinates is the app's splitter or resize border, or nothing.
+- **A turn is a `PageTurn`**: `Into(row)` or `Back`. A press is read with
+  `turn_at(x, y)` (the standard `mouse_input` path records it instead of hiding); a
+  swipe arrives through `mouse_wheel` and is drained with `take_turn()`.
+- **`show_page(x, y, back, options, header_count, target)`** shows a page with its
+  top-left at the corner of the plate it replaces (`x()`, `y()` read before), so the
+  menu reads as turning rather than a second menu arriving. With `back` naming the
+  plate it came from, a BACK BAND across its top reads `‹ Title`: a press on it is
+  `Back`, it hovers like a row, and the rows begin under it (`row_y`, `row_at` and the
+  height all count it). A swipe back from anywhere on a page with a band is `Back`; on
+  a menu that was opened rather than turned to, it goes nowhere. A page is `turned`:
+  placed in a window, or by the popup's positioner, it SLIDES on screen and never flips
+  up from the corner it took over.
+- **`refill(options, sliders)`** changes the shown rows' labels and slider values in
+  place (hover, scroll, band, page rows and a held slider kept) — how a host re-marks a
+  switch on a page that stays up after it ran. A different row count is refused.
+- **The swipe is `widget::side_swipe`**, one recognizer per thread (`side_swipe::feed`)
+  shared by the menu and any plate a host turns into, so one gesture turns one page
+  however many plates pass under the fingers; the lift (`ScrollPhase::FingerEnd`) or a
+  250 ms pause readies the next. It fires once the fingers have gone `SWIPE_PX` (40) to
+  the side, half again more sideways than vertical; a tilt-wheel notch is a whole swipe.
+  **Forward follows the content**: the delta that scrolls a list to show what is to its
+  right, so under natural scrolling the fingers go LEFT to go in and right to go back,
+  as on every touch surface, and the user's scrolling setting flips both. A test that
+  swipes twice calls `side_swipe::end_gesture()` between, since the runner's phase is
+  process-wide.
+- **The rest of a gesture that turned is the turn's**: `side_swipe::swallow(delta)`,
+  asked at the top of a host's wheel handling, is true for it until the lift, and the
+  host drops the event. Without it a page narrower than the plate it replaced left the
+  fingers over the scene, and the end of a swipe back orbited the camera.
+- **A page MOVES the popup that is up** (`menu_popup.rs`, `xdg_popup.reposition`,
+  version 3), anchored at the corner, without `FlipY`; only where it cannot (no popup
+  placed yet, an older protocol) is a new one opened. A NEW surface under a pointer that
+  has not moved gets no pointer focus until it moves, so with a replaced popup the rest
+  of a swipe and the swipe back went to nothing — found in a shadow session, where the
+  first cut turned forward and then would not turn back.
 
-The designer's viewport menu is the first consumer (Style, Markers).
-`context_menu_submenu_tests` covers the state; the popups were checked in a shadow
-session, at the output's right edge included.
+**Until this a row could open a SUBMENU** (2026-09-29 to 2026-10-02): a second
+`ContextMenuState` flying out beside the row on hover, in a child popup, with a
+hover-intent triangle. It went with the change, the `SUBMENU` thread-local, the
+`submenu` module, `SubmenuSpec` and the child popup included: the designer, its only
+consumer, had flyouts on some rows and plate swaps on others, two gestures for one
+idea, and the user asked for one. `context_menu_page_tests` covers the menu,
+`side_swipe::tests` the recognizer.
 
 ## Plates, wells and seams — the surface vocabulary
 
