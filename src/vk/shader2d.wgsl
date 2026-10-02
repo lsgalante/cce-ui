@@ -408,6 +408,17 @@ fn carve_slope(v: f32) -> f32 {
     return 6.0 * v * (1.0 - v);
 }
 
+// A carve's signed shading value `v` (a free carve's, or what the carves
+// grouped into a plate add to its roll) composited over colour `c` the way
+// the free-carve overlay is blended: positive screens toward white, negative
+// multiplies toward black, |v| the alpha. Exactly `c` at v = 0.
+fn carve_over(c: vec3f, v: f32) -> vec3f {
+    if (v >= 0.0) {
+        return mix(c, vec3f(1.0), min(v, 1.0));
+    }
+    return mix(c, vec3f(0.0), min(-v, 1.0));
+}
+
 // Per-pixel lighting of a plate. The plate is one composite height field:
 // the host's rolled-edge surface minus every carve's profile, with the carve
 // depth measured RELATIVE to the local surface (a deboss/etch, not a flat
@@ -416,10 +427,11 @@ fn carve_slope(v: f32) -> f32 {
 // subtract, so slope vectors ADD: the pixel's normal comes from the summed
 // analytic slopes of every feature over it, and the junction where a carve's
 // wall crosses the plate's perimeter roll is the smooth composite of both
-// tilts, ending in the rim notch a real groove leaves. One lighting
-// evaluation per pixel — features never blend in color space. Shading is
-// expressed relative to the flat face (shade ratio 1.0, specular delta 0.0)
-// so the face keeps exactly the app's chosen color.
+// tilts, ending in the rim notch a real groove leaves. One normal per pixel —
+// features never blend with each other. The roll is shaded relative to the
+// flat face (shade ratio 1.0, specular delta 0.0) so the face keeps exactly
+// the app's chosen color; what the carves add to it is composited as a free
+// carve's overlay is (`carve_over`), so a carve reads the same grouped or not.
 fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let l = rrect_clip.p_light.xyz;
     let strength = rrect_clip.p_mat.x;
@@ -660,7 +672,10 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         if (vcol.a < 0.0) {
             base = resolve_blur(frag, vcol, sv_rim * (refr * t), refr * f * f, k_plate, stride);
         }
-        var extra = PLATE_CREST * f * f * f * crest_weight(gd.xy);
+        // The roll's crest. The carves' shoulder/fillet terms are kept apart
+        // in `curv`: they composite as an overlay's do (below).
+        let crest = PLATE_CREST * f * f * f * crest_weight(gd.xy);
+        var curv = 0.0;
         let f_off = u32(rrect_clip.p_host.x);
         let f_cnt = u32(rrect_clip.p_host.y);
         for (var i = 0u; i < f_cnt; i = i + 1u) {
@@ -676,11 +691,30 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
             // shoulder/fillet ambient term flips with it (a boss's convex
             // shoulder is at the top of its wall, not the bottom).
             sv += -(feat.params.y / ft) * carve_slope(v) * fg.xy;
-            extra += rrect_clip.p_mat.w * sin(v * TAU) * sign(feat.params.y);
+            curv += rrect_clip.p_mat.w * sin(v * TAU) * sign(feat.params.y);
         }
+        // The roll alone, lit as a plate: a multiply on the face colour, plus
+        // the glint and its shade line in colour units.
+        let n_r = normalize(vec3f(sv_rim, 1.0));
+        let diff_r = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n_r, l), 0.0);
+        let shade_r = 1.0 + (diff_r / flat_shade - 1.0 + crest) * strength;
+        let spec_r = roll_spec(sv_rim);
+        let dark_r = roll_shade_line(sv_rim);
+        // The carves, as what they ADD to the roll's lighting — the summed
+        // slope's diffuse and glint less the roll's own, plus their
+        // curvature — composited the way a free carve's overlay is: a white
+        // screen up, a black multiply down (`carve_over`). On the face this
+        // is the overlay's `v` term for term, so a carve reads the same
+        // grouped or not; across the roll the normal is still the summed one,
+        // which is the junction grouping exists for. Not a multiply on the
+        // face colour, and no shade line: on a dark face a multiply barely
+        // moves the shoulder while the glint is added whole, and the shade
+        // line — a lobe at the half-vector's tilt — fired twice down every
+        // wall, as the tilt rose through that angle and fell back, each time
+        // subtracted to black: a doubled outline (2026-10-02).
         let n = normalize(vec3f(sv, 1.0));
         let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
-        let shade = 1.0 + (diff / flat_shade - 1.0 + extra) * strength;
+        let v_c = ((diff - diff_r) / flat_shade + curv + roll_spec(sv) - spec_r) * strength;
         // p_spec_tint.w = 1 marks an accent-tinted plate (the focused-pane
         // treatment). Neutral plates (w = 0) take the plain return below,
         // byte-identical.
@@ -706,14 +740,9 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
             // carved into a focused plate — each parameter control on the
             // designer's parameter pane — wore the accent too, reading as if
             // every control were focused alongside the pane. The carves'
-            // neutral shading is added back on top unchanged.
+            // neutral shading is composited over it unchanged.
             let tint = rrect_clip.p_spec_tint.rgb;
-            let n_r = normalize(vec3f(sv_rim, 1.0));
-            let diff_r = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n_r, l), 0.0);
-            let crest = PLATE_CREST * f * f * f * crest_weight(gd.xy);
-            let shade_r = 1.0 + (diff_r / flat_shade - 1.0 + crest) * strength;
-            let rim = base.rgb * shade_r + vec3f((roll_spec(sv_rim) - roll_shade_line(sv_rim)) * strength);
-            let full = base.rgb * shade + vec3f((roll_spec(sv) - roll_shade_line(sv)) * strength);
+            let rim = base.rgb * shade_r + vec3f((spec_r - dark_r) * strength);
             // The alpha a carve would composite white (or black) at for the
             // same change in luminance, then that alpha in the accent.
             let W = vec3f(0.2126, 0.7152, 0.0722);
@@ -725,11 +754,10 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
             } else {
                 lit = mix(base.rgb, tint * FOCUS_SHADOW, min(-dl / max(bl, 0.004) * FOCUS_GAIN, 1.0));
             }
-            return vec4f(lit + (full - rim), abs(base.a) * aa);
+            return vec4f(carve_over(lit, v_c), abs(base.a) * aa);
         }
-        let spec = roll_spec(sv);
-        let dark = roll_shade_line(sv);
-        return vec4f(base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength) - vec3f(dark * strength), abs(base.a) * aa);
+        let rolled = base.rgb * shade_r + rrect_clip.p_spec_tint.rgb * (spec_r * strength) - vec3f(dark_r * strength);
+        return vec4f(carve_over(rolled, v_c), abs(base.a) * aa);
     }
 
     if (mode == MODE_ROLL) {

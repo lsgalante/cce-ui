@@ -386,13 +386,11 @@ explicit valley and `cce-relief`'s preview. `a_dropdown_trigger_wears_the_runs_e
 `Prim::Field` whose seam is `FIELD_RUN_ONLY` px past its right end (`field_well_only`),
 in `TextBox`'s own paint and in `ParametersBg::fields` for every text row without a
 picker. It was a `Prim::Recess`, which the runner GROUPS into a live host plate as a CSG
-feature, and on the NVIDIA device (`CCE_VK_DEVICE=discrete`, the designer's `gpu
-"discrete"`) a grouped recess drew a doubled outline where the field beside it — never
-grouped, its own overlay — drew the single edge; on the integrated GPU the two are
-identical to the pixel, so the difference shows only on the discrete card. Other grouped
-recesses (a spinbox with no run, a colour well, a toggle's track) still group. Both
-fallbacks draw an all-well field as one plain recess. `a_text_box_is_a_field_that_is_all_well`
-is the test.
+feature, and a grouped recess drew a doubled outline where the field beside it — never
+grouped, its own overlay — drew the single edge. That was first put down to the NVIDIA
+device; it was not (see "A grouped carve shades as its overlay does" below, which fixed
+the cause the same day, so the two now agree whichever is used). Both fallbacks draw an
+all-well field as one plain recess. `a_text_box_is_a_field_that_is_all_well` is the test.
 
 The pieces that feed it: `ParametersBg::fields` (the pane's list, drawn after its troughs,
 hover-tinted like them; textpick rows and spinboxes with a run are in neither `reliefs`
@@ -404,6 +402,48 @@ is. `textpick_rows_carry_a_picker` and `a_spinbox_is_one_field_with_its_run_at_t
 are the tests. Until the same day the picker and the run were nested INSIDE a full-width
 well, their faces stopping at the base of its wall, so they never reached the edge a
 dropdown's ▼ does.
+
+### A grouped carve shades as its overlay does (since 2026-10-02)
+
+A full-ring, untinted `Prim::Recess` / `Boss` emitted while a plate's grouping window is
+open becomes a CSG feature of that plate's one draw (`MODE_PLATE` in `shader2d.wgsl`);
+otherwise it is its own overlay (`MODE_RECESS` / `MODE_BOSS`). The two must look the same
+on the plate's face. They did not: the grouped one drew a **doubled outline**, two thin
+black lines down its shadowed wall and two bright ones down its lit wall, where the
+overlay drew one soft edge. Two causes, both in how the plate path applied the carves:
+
+- **The shade line took the carves' slope.** The plate's colour subtracted
+  `roll_shade_line(sv)` with `sv` the roll's slope PLUS every carve's. The shade line is
+  a narrow lobe at the half-vector's tilt (22.5° at the DE's 45° light); a carve wall's
+  tilt rises through that angle and falls back through it, so the lobe fired twice per
+  wall — subtracted in colour units from a face near 0.016 linear, both hits went to
+  black. The overlay path, and `relief_shade::carve_shade`, never had a shade line: it
+  exists for the raised roll. It is now `roll_shade_line(sv_rim)`, the roll's alone.
+- **Diffuse and curvature were a multiply on the face; the glint was added whole.** On a
+  dark face a multiply barely moves the pixel, so the overlay's lit shoulder vanished,
+  and the glint's two crossings (the same twice-through-the-angle as above) no longer
+  cancelled against the fillet's darkening as they do inside the overlay's one signed
+  value. The plate now lights its roll alone as before (multiply plus glint and shade
+  line), and composites what the carves ADD — the summed normal's diffuse and glint less
+  the roll's, plus their curvature — as an overlay is blended (`carve_over`: screen
+  toward white, multiply toward black). On the face that is the overlay's `v` term for
+  term; across the roll the normal is still the summed one, the junction grouping is
+  for. A plate with no carves composites `v = 0` and is unchanged to the bit.
+
+Measured with `examples/grouped_recess_probe.rs` (a plate whose recesses group beside the
+same recesses forced to overlay by a transparent quad): grouped and overlay columns
+5,462 px apart before, 0 after; in the designer with grouped text wells, 0 px from the
+`well_field` rendering.
+
+**It was never the GPU.** The report was "doubled on the NVIDIA card, single on the
+Iris Xe"; the 2D path is identical to the pixel on both, before the fix and after. Two
+things made it look GPU-specific. Grouping is decided per frame by what is painted
+between a plate and its carves, so two captures of "the same" pane can differ in what
+grouped. And inside a `cce-shadow` session the NVIDIA ICD does not load at all unless
+the process can reach an X display (`DISPLAY=:0` and `XAUTHORITY=$HOME/.Xauthority`):
+`vk_icdGetInstanceProcAddr` fails, the loader skips the ICD, and `CCE_VK_DEVICE=discrete`
+falls back to the Intel device SILENTLY. Check `grep -c nvidia /proc/<pid>/maps` before
+believing a "discrete" shadow capture.
 
 ### A row can open a submenu (since 2026-09-29)
 

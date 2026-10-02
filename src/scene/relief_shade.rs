@@ -3,7 +3,10 @@
 //! sketching them. Both branches: the free carves ([`carve_shade`]) and the
 //! plate's own perimeter roll ([`plate_surface`]), which do not composite the
 //! same way — a carve is a translucent overlay, a plate is a multiply on its
-//! own fill plus an additive specular.
+//! own fill plus an additive specular. A carve GROUPED into a plate is both:
+//! the plate's roll as [`plate_surface`], then what the carve adds composited
+//! over it as [`carve_shade`]'s value is ([`composite`]) — on the face, exactly
+//! the free carve.
 //!
 //! This exists because `cce-relief` drew its cross-sections with a stand-in
 //! (`lit = dot(normal, light) * 0.35`) that shares nothing with the shader but
@@ -269,6 +272,24 @@ mod tests {
         assert_eq!(wgsl_const("PLATE_CREST"), PLATE_CREST);
         assert_eq!(wgsl_const("ROLL_CUT"), ROLL_CUT);
         assert_eq!(wgsl_const("PLATE_SHADE_LINE"), PLATE_SHADE_LINE);
+    }
+
+    /// A carve grouped into a plate shades as its overlay does: the plate path
+    /// takes the shade line from its own roll alone, and composites what the
+    /// carves add as `carve_shade`'s value is composited ([`composite`]). With
+    /// the summed slope the shade line fired twice down every carve wall and
+    /// drew a doubled outline (2026-10-02). WGSL has no test harness here, so
+    /// this reads the plate branch's source.
+    #[test]
+    fn a_grouped_carve_takes_no_shade_line() {
+        let plate = WGSL
+            .split("if (mode == MODE_PLATE) {")
+            .nth(1)
+            .and_then(|rest| rest.split("if (mode == MODE_ROLL) {").next())
+            .expect("the plate branch");
+        assert!(!plate.contains("roll_shade_line(sv)"), "a carve's slope reached the shade line");
+        assert!(plate.contains("roll_shade_line(sv_rim)"));
+        assert!(plate.contains("carve_over("), "the carves are composited as an overlay");
     }
 
     /// The crest is light-facing: at the silhouette the edge toward the light
