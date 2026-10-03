@@ -21,6 +21,7 @@
 
 use std::time::{Duration, Instant};
 
+use crate::history::History;
 use crate::widget::{ElementState, Key, KeyEvent, NamedKey};
 
 /// How close two presses at the same offset must be to count as one double
@@ -55,6 +56,18 @@ pub struct LineEdit {
     /// The last press — when, where, and how many presses in a row landed
     /// there — for telling a double or triple click from two clicks.
     clicks: Option<(Instant, usize, u8)>,
+    /// Undo and redo for what [`LineEdit::handle_key`] changes. Never kept
+    /// for a masked field (see [`LineEdit::undo`]).
+    history: History<Snapshot>,
+}
+
+/// What an undo step restores: the text, and where the caret and selection
+/// were, so undoing a deletion puts the caret back where it was.
+#[derive(Clone, Debug)]
+struct Snapshot {
+    text: String,
+    cursor: usize,
+    selection: Option<(usize, usize)>,
 }
 
 /// A press being dragged: the span the press selected (empty for a single
@@ -152,6 +165,8 @@ impl LineEdit {
     }
 
     fn press_at(&mut self, at: usize, extend: bool, now: Instant) {
+        // A click moves the caret: typing after it is a new undo step.
+        self.history.break_group();
         let at = self.boundary(at);
         let count = match self.clicks {
             Some((t, p, n)) if !extend && p == at && now.duration_since(t) < DOUBLE_CLICK => n % 3 + 1,
@@ -356,7 +371,91 @@ impl LineEdit {
         }
     }
 
+    /// One key. Edits are recorded for [`LineEdit::undo`] the way `TextBox`
+    /// records them: a typed run is one step and whitespace starts the next,
+    /// so undo walks back a word at a time; a run of Backspace (or Delete)
+    /// is one step; replacing a selection, a paste, a cut, a Ctrl word-delete
+    /// and Ctrl+U are each their own; and a caret move — by key or click —
+    /// ends a run.
+    ///
+    /// Undo and redo themselves are not keys here: the window runner routes
+    /// the DE's `undo` / `redo` chords (`input.kdl`, Ctrl+Z / Ctrl+Shift+Z
+    /// by default) to the app, which calls [`LineEdit::undo`] /
+    /// [`LineEdit::redo`] on the field that has focus.
     pub fn handle_key(&mut self, event: &KeyEvent) -> EditOutcome {
+        let before = (!self.masked).then(|| self.snapshot());
+        let outcome = self.apply_key(event);
+        if let Some(before) = before {
+            if self.text != before.text {
+                let replaced = before.selection.is_some_and(|(a, b)| a < b);
+                let group = match &event.logical_key {
+                    _ if replaced || event.ctrl => None,
+                    Key::Named(NamedKey::Backspace) => Some(2),
+                    Key::Named(NamedKey::Delete) => Some(3),
+                    Key::Named(NamedKey::Space) => Some(4),
+                    _ => {
+                        let ws = event.text.as_deref().is_some_and(|t| t.chars().all(char::is_whitespace));
+                        Some(if ws { 4 } else { 1 })
+                    }
+                };
+                match group {
+                    Some(g) => self.history.record_grouped(before, g),
+                    None => self.history.record(before),
+                }
+            } else if outcome == EditOutcome::Edited {
+                // A caret or selection move between keystrokes splits the
+                // run: "abc", Left, "d" undoes as two steps.
+                self.history.break_group();
+            }
+        }
+        outcome
+    }
+
+    /// Step back to before the last edit; true when there was one. The caret
+    /// and selection come back with the text. A masked field keeps no
+    /// history — holding past versions of a password in memory is a cost
+    /// with nothing to show for it — so this is always false there.
+    pub fn undo(&mut self) -> bool {
+        let current = self.snapshot();
+        let Some(prev) = self.history.undo(current) else {
+            return false;
+        };
+        self.restore(prev);
+        true
+    }
+
+    /// Step forward again after [`LineEdit::undo`]; true when there was a
+    /// step to redo. Any new edit after an undo drops what could be redone.
+    pub fn redo(&mut self) -> bool {
+        let current = self.snapshot();
+        let Some(next) = self.history.redo(current) else {
+            return false;
+        };
+        self.restore(next);
+        true
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot { text: self.text.clone(), cursor: self.cursor, selection: self.selection }
+    }
+
+    fn restore(&mut self, s: Snapshot) {
+        self.text = s.text;
+        self.cursor = s.cursor;
+        self.selection = s.selection;
+        self.drag = None;
+        self.clicks = None;
+    }
+
+    fn apply_key(&mut self, event: &KeyEvent) -> EditOutcome {
         if event.state != ElementState::Pressed {
             return EditOutcome::Ignored;
         }
@@ -842,6 +941,88 @@ mod tests {
         e.handle_key(&named(NamedKey::ArrowLeft)); // before "rd"
         e.handle_key(&ctrl_key(NamedKey::Backspace, false));
         assert_eq!((e.text.as_str(), e.cursor), ("rd", 0), "no stop at the space");
+    }
+
+    #[test]
+    fn undo_walks_back_a_word_at_a_time_and_redo_forward() {
+        let mut e = LineEdit::default();
+        typed(&mut e, "hello world");
+        assert!(e.can_undo());
+        assert!(e.undo());
+        assert_eq!((e.text.as_str(), e.cursor), ("hello ", 6), "the word after the space");
+        assert!(e.undo());
+        assert_eq!(e.text, "hello", "then the space");
+        assert!(e.undo());
+        assert_eq!((e.text.as_str(), e.cursor), ("", 0));
+        assert!(!e.undo(), "nothing left");
+        assert!(e.redo());
+        assert!(e.redo());
+        assert!(e.redo());
+        assert_eq!((e.text.as_str(), e.cursor), ("hello world", 11));
+        assert!(!e.redo());
+    }
+
+    #[test]
+    fn a_caret_move_or_click_splits_a_run() {
+        let mut e = LineEdit::default();
+        typed(&mut e, "abc");
+        e.handle_key(&named(NamedKey::ArrowLeft));
+        typed(&mut e, "X");
+        e.undo();
+        assert_eq!((e.text.as_str(), e.cursor), ("abc", 2), "X alone, caret back before c");
+        let mut e = LineEdit::default();
+        typed(&mut e, "abc");
+        e.press(1, false);
+        e.release();
+        typed(&mut e, "X");
+        e.undo();
+        assert_eq!(e.text, "abc");
+    }
+
+    #[test]
+    fn deleting_runs_and_replacements_are_their_own_steps() {
+        let mut e = LineEdit::with_text("hello world");
+        for _ in 0..3 {
+            e.handle_key(&named(NamedKey::Backspace));
+        }
+        assert_eq!(e.text, "hello wo");
+        e.undo();
+        assert_eq!(e.text, "hello world", "three Backspaces, one step");
+        // Typing over a selection: the replacement is one step, then the
+        // rest of the typed run another.
+        e.select_all();
+        typed(&mut e, "xyz");
+        e.undo();
+        assert_eq!(e.text, "x");
+        e.undo();
+        assert_eq!((e.text.as_str(), e.selection), ("hello world", Some((0, 11))), "the selection comes back too");
+        // Ctrl word-delete is a step of its own.
+        e.selection = None;
+        e.handle_key(&ctrl_key(NamedKey::Backspace, false));
+        e.handle_key(&ctrl_key(NamedKey::Backspace, false));
+        assert_eq!(e.text, "");
+        e.undo();
+        assert_eq!(e.text, "hello ");
+    }
+
+    #[test]
+    fn a_new_edit_after_undo_drops_the_redo() {
+        let mut e = LineEdit::default();
+        typed(&mut e, "one two");
+        e.undo();
+        typed(&mut e, "six");
+        assert!(!e.can_redo());
+        assert!(!e.redo());
+        assert_eq!(e.text, "one six");
+    }
+
+    #[test]
+    fn a_masked_field_keeps_no_history() {
+        let mut e = LineEdit::masked();
+        typed(&mut e, "hunter2");
+        assert!(!e.can_undo());
+        assert!(!e.undo());
+        assert_eq!(e.text, "hunter2");
     }
 
     fn ms(t0: Instant, n: u64) -> Instant {
