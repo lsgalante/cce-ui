@@ -378,11 +378,24 @@ impl LineEdit {
     /// and Ctrl+U are each their own; and a caret move — by key or click —
     /// ends a run.
     ///
-    /// Undo and redo themselves are not keys here: the window runner routes
-    /// the DE's `undo` / `redo` chords (`input.kdl`, Ctrl+Z / Ctrl+Shift+Z
-    /// by default) to the app, which calls [`LineEdit::undo`] /
-    /// [`LineEdit::redo`] on the field that has focus.
+    /// Undo and redo are mostly not keys here: the window runner routes the
+    /// DE's `undo` / `redo` chords (`input.kdl`, Ctrl+Z / Ctrl+Shift+Z by
+    /// default) to the app, which calls [`LineEdit::undo`] /
+    /// [`LineEdit::redo`] on the field that has focus. The one exception is
+    /// **Ctrl+Y**, the other redo hands expect, which is not a DE chord and
+    /// so arrives here as a key: it redoes, or is `Ignored` with nothing to
+    /// redo. (A DE chord bound to Ctrl+Y is offered to the app first, as
+    /// any chord is, and never gets this far.)
     pub fn handle_key(&mut self, event: &KeyEvent) -> EditOutcome {
+        // Before the recording below, which would file the redo as a fresh
+        // edit and so drop everything left to redo.
+        if event.state == ElementState::Pressed
+            && event.ctrl
+            && !event.shift
+            && matches!(&event.logical_key, Key::Character(c) if c.eq_ignore_ascii_case("y"))
+        {
+            return if self.redo() { EditOutcome::Edited } else { EditOutcome::Ignored };
+        }
         let before = (!self.masked).then(|| self.snapshot());
         let outcome = self.apply_key(event);
         if let Some(before) = before {
@@ -1014,6 +1027,27 @@ mod tests {
         assert!(!e.can_redo());
         assert!(!e.redo());
         assert_eq!(e.text, "one six");
+    }
+
+    #[test]
+    fn ctrl_y_redoes_and_keeps_the_rest_redoable() {
+        let mut e = LineEdit::default();
+        typed(&mut e, "one two three");
+        e.undo();
+        e.undo();
+        e.undo();
+        assert_eq!(e.text, "one ");
+        assert_eq!(e.handle_key(&ctrl("y")), EditOutcome::Edited);
+        assert_eq!(e.text, "one two");
+        assert!(e.can_redo(), "a redo by key is not a new edit");
+        e.handle_key(&ctrl("y"));
+        e.handle_key(&ctrl("y"));
+        assert_eq!(e.text, "one two three");
+        assert_eq!(e.handle_key(&ctrl("y")), EditOutcome::Ignored, "nothing left to redo");
+        assert_eq!(e.text, "one two three", "and no stray y typed");
+        // Undo still steps back over what Ctrl+Y redid.
+        e.undo();
+        assert_eq!(e.text, "one two ");
     }
 
     #[test]
