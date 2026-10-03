@@ -331,6 +331,20 @@ impl LineEdit {
                 }
             }
             // Arrows collapse a selection to the edge they move toward.
+            // With Shift the caret moves and the selection follows it from
+            // its anchor — the end the caret is not at, the same one a
+            // shift+click keeps — so it grows, shrinks, or flips past the
+            // anchor as the caret goes.
+            Key::Named(NamedKey::ArrowLeft) if event.shift => {
+                let to = prev_boundary(&self.text, self.cursor);
+                self.select_between(self.anchor(), to);
+            }
+            Key::Named(NamedKey::ArrowRight) if event.shift => {
+                let to = next_boundary(&self.text, self.cursor);
+                self.select_between(self.anchor(), to);
+            }
+            Key::Named(NamedKey::Home) if event.shift => self.select_between(self.anchor(), 0),
+            Key::Named(NamedKey::End) if event.shift => self.select_between(self.anchor(), self.text.len()),
             Key::Named(NamedKey::ArrowLeft) => {
                 self.cursor = match self.selection.take() {
                     Some((a, _)) => a,
@@ -590,6 +604,60 @@ mod tests {
         }
         assert_eq!(e.display_index(3), 2 * bullet);
         assert_eq!(LineEdit::with_text("abc").display_index(2), 2);
+    }
+
+    fn shifted(n: NamedKey) -> KeyEvent {
+        KeyEvent { shift: true, ..named(n) }
+    }
+
+    #[test]
+    fn shift_arrows_grow_and_shrink_the_selection_from_its_anchor() {
+        let mut e = LineEdit::with_text("hello");
+        e.handle_key(&named(NamedKey::Home));
+        e.handle_key(&shifted(NamedKey::ArrowRight));
+        e.handle_key(&shifted(NamedKey::ArrowRight));
+        assert_eq!((e.cursor, e.selection), (2, Some((0, 2))));
+        e.handle_key(&shifted(NamedKey::ArrowLeft));
+        assert_eq!((e.cursor, e.selection), (1, Some((0, 1))), "shrinks back toward the anchor");
+        e.handle_key(&shifted(NamedKey::ArrowLeft));
+        assert_eq!((e.cursor, e.selection), (0, None), "back on the anchor: nothing selected");
+        // Past the anchor it flips to the other side.
+        let mut e = LineEdit::with_text("hello");
+        e.handle_key(&named(NamedKey::ArrowLeft)); // caret 4
+        e.handle_key(&shifted(NamedKey::ArrowRight));
+        e.handle_key(&shifted(NamedKey::ArrowLeft));
+        e.handle_key(&shifted(NamedKey::ArrowLeft));
+        assert_eq!((e.cursor, e.selection), (3, Some((3, 4))));
+        // At the ends it stops.
+        e.handle_key(&shifted(NamedKey::End));
+        e.handle_key(&shifted(NamedKey::ArrowRight));
+        assert_eq!((e.cursor, e.selection), (5, Some((4, 5))));
+    }
+
+    #[test]
+    fn shift_home_and_end_select_to_the_ends() {
+        let mut e = LineEdit::with_text("hello world");
+        e.press(6, false);
+        e.release();
+        e.handle_key(&shifted(NamedKey::End));
+        assert_eq!((e.cursor, e.selection), (11, Some((6, 11))));
+        e.handle_key(&shifted(NamedKey::Home));
+        assert_eq!((e.cursor, e.selection), (0, Some((0, 6))), "the anchor stays where the caret was");
+        // A select-all keeps its start; Shift+Left then trims its end.
+        e.select_all();
+        e.handle_key(&shifted(NamedKey::ArrowLeft));
+        assert_eq!(e.selection, Some((0, 10)));
+        // A plain arrow still collapses to the edge it points at.
+        e.handle_key(&named(NamedKey::ArrowLeft));
+        assert_eq!((e.cursor, e.selection), (0, None));
+    }
+
+    /// Multi-byte text: Shift+arrow steps a character, not a byte.
+    #[test]
+    fn shift_arrows_step_whole_characters() {
+        let mut e = LineEdit::with_text("aé");
+        e.handle_key(&shifted(NamedKey::ArrowLeft));
+        assert_eq!((e.cursor, e.selection), (1, Some((1, 3))));
     }
 
     fn ms(t0: Instant, n: u64) -> Instant {
