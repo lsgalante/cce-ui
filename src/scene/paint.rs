@@ -795,7 +795,11 @@ pub enum Prim {
     /// shading fades out across that box's perimeter roll, so a seam cut across a
     /// plate dies into the plate's own rolled edge instead of ending on a hard line.
     /// SDF path only — the legacy banded tessellation draws nothing (like `Ridge`).
-    Groove { a: (f32, f32), b: (f32, f32), width: f32, depth: f32, host: Rect },
+    ///
+    /// `strength` scales the groove's shading, specular and AO — 1.0 is the
+    /// DE's finish, 0.0 no groove at all — which is how a carve with no colour
+    /// of its own fades ([`Prim::faded`]).
+    Groove { a: (f32, f32), b: (f32, f32), width: f32, depth: f32, host: Rect, strength: f32 },
     /// A periodic field of identical rounded-box wells — every cell of a grid
     /// carved into whatever is painted beneath, as ONE surface. The wells
     /// repeat every `period` (x, y) with one cell centred at `origin`, each
@@ -874,6 +878,38 @@ pub enum Prim {
     /// display-list order like any other primitive. The paint walk's clip
     /// applies through the item's `clip` as usual.
     Image { image: u32, rect: Rect, alpha: f32 },
+}
+
+impl Prim {
+    /// This prim at `alpha` of its strength (0..1): a colour's alpha scaled,
+    /// a text's or an image's alpha, a groove's shading. What a host fading a
+    /// part of its drawing out or in replays it through (the context menu's
+    /// page turn). The relief prims with no colour or strength of their own —
+    /// the walls, plates and materials — come back as they are: they are
+    /// drawn whole or not at all.
+    pub fn faded(self, alpha: f32) -> Prim {
+        let a = alpha.clamp(0.0, 1.0);
+        let f = |c: [f32; 4]| [c[0], c[1], c[2], c[3] * a];
+        match self {
+            Prim::Quad { rect, color } => Prim::Quad { rect, color: f(color) },
+            Prim::RoundedRect { rect, radius, corners, color } => Prim::RoundedRect { rect, radius, corners, color: f(color) },
+            Prim::Border { rect, radii, fill, border, thickness } => Prim::Border { rect, radii, fill: f(fill), border: f(border), thickness },
+            Prim::Arc { cx, cy, radius, thickness, start, end, color } => Prim::Arc { cx, cy, radius, thickness, start, end, color: f(color) },
+            Prim::ArcShaded { cx, cy, radius, thickness, start, end, inner, crest, outer } => {
+                Prim::ArcShaded { cx, cy, radius, thickness, start, end, inner: f(inner), crest: f(crest), outer: f(outer) }
+            }
+            Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => Prim::Vector { x1, y1, x2, y2, thickness, color: f(color), cap },
+            Prim::Circle { cx, cy, radius, color } => Prim::Circle { cx, cy, radius, color: f(color) },
+            Prim::Glow { rect, radius, reach, color } => Prim::Glow { rect, radius, reach, color: f(color) },
+            Prim::Grout { rect, period, origin, cell, radius, color } => Prim::Grout { rect, period, origin, cell, radius, color: f(color) },
+            Prim::Groove { a: p, b, width, depth, host, strength } => Prim::Groove { a: p, b, width, depth, host, strength: strength * a },
+            Prim::Text { text, x, y, font_size, color, alpha, font, bounds, attrs, layout } => {
+                Prim::Text { text, x, y, font_size, color, alpha: alpha * a, font, bounds, attrs, layout }
+            }
+            Prim::Image { image, rect, alpha } => Prim::Image { image, rect, alpha: alpha * a },
+            other => other,
+        }
+    }
 }
 
 /// Horizontal alignment of laid-out (boxed) text — the toolkit-plain mirror of
@@ -1244,7 +1280,7 @@ impl PaintCtx {
             Prim::ConcaveFillet { cx, cy, radius, depth, start, raised } => {
                 self.concave_fillet(cx, cy, radius, depth, start, raised)
             }
-            Prim::Groove { a, b, width, depth, host } => self.groove(a, b, width, depth, host),
+            Prim::Groove { a, b, width, depth, host, strength } => self.groove_strength(a, b, width, depth, host, strength),
             Prim::Lattice { rect, period, origin, cell, radius, depth } => {
                 self.lattice(rect, period, origin, cell, radius, depth)
             }
@@ -1260,6 +1296,11 @@ impl PaintCtx {
 
     /// An engraved line from `a` to `b` cut into `host` — see [`Prim::Groove`].
     pub fn groove(&mut self, a: (f32, f32), b: (f32, f32), width: f32, depth: f32, host: Rect) {
+        self.groove_strength(a, b, width, depth, host, 1.0);
+    }
+
+    /// [`Self::groove`] at a fraction of its strength — see [`Prim::Groove`].
+    pub fn groove_strength(&mut self, a: (f32, f32), b: (f32, f32), width: f32, depth: f32, host: Rect, strength: f32) {
         let (ox, oy) = self.offset;
         let host = self.apply_offset(host);
         self.push(Prim::Groove {
@@ -1268,6 +1309,7 @@ impl PaintCtx {
             width,
             depth,
             host,
+            strength,
         });
     }
 

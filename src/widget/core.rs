@@ -461,6 +461,13 @@ pub mod context_menu {
         1.0 - u * u * u
     }
 
+    /// How strongly the rows a turn leaves and the rows it brings are drawn
+    /// at eased progress `e`: squared, so the two are seldom both legible at
+    /// once — the old ones mostly gone before the new ones mostly come.
+    fn turn_fades(e: f32) -> (f32, f32) {
+        ((1.0 - e) * (1.0 - e), e * e)
+    }
+
     /// A toolkit color as the `[u8; 3]` a [`TextLabel`] carries.
     fn rgb8(c: [f32; 4]) -> [u8; 3] {
         [
@@ -1169,14 +1176,35 @@ pub mod context_menu {
             }
             let r = crate::layout::menu_corner_radius();
             if let (Some(e), Some(t)) = (self.turn_progress(), self.turning.as_ref()) {
-                // Turning: the plate on its way between the two sizes, the
-                // page's rows sliding in from the side the turn comes from.
-                // The rows it turned from leave as text (`paint_with_labels`).
+                // Turning: the plate on its way between the two sizes; the
+                // rows it turned from — sliders, separators — sliding away
+                // and fading, the page's sliding in from the side the turn
+                // comes from and coming up. Each set is drawn aside and
+                // replayed moved and faded (`Prim::faded`); their labels
+                // are `paint_with_labels`', at the same strengths.
                 let rect = self.drawn_rect();
                 let depth = crate::layout::bevel_width().min(rect.height * 0.2);
                 paint_menu_plate(ctx, rect, self.in_popup);
+                let (out, into) = turn_fades(e);
+                let (lo, hi) = (-t.dir * e * TURN_SLIDE, t.dir * (1.0 - e) * TURN_SLIDE);
                 ctx.clip_rounded(rect, r, |ctx| {
-                    ctx.translate(t.dir * (1.0 - e) * TURN_SLIDE, 0.0, |ctx| self.paint_rows(ctx, rect, r, depth));
+                    for (rows, dx, alpha) in [(&*t.from, lo, out), (self, hi, into)] {
+                        let mut aside = crate::scene::paint::PaintCtx::new();
+                        rows.paint_rows(&mut aside, rect, r, depth);
+                        ctx.translate(dx, 0.0, |ctx| {
+                            for item in aside.finish().items {
+                                if let Some(c) = item.clip {
+                                    ctx.push_clip(c);
+                                }
+                                // The rows draw no text; a label would be
+                                // doubled with `paint_with_labels`'.
+                                let _ = ctx.replay(item.prim.faded(alpha));
+                                if item.clip.is_some() {
+                                    ctx.pop_clip();
+                                }
+                            }
+                        });
+                    }
                 });
                 return;
             }
@@ -1337,9 +1365,7 @@ pub mod context_menu {
                 let rect = self.drawn_rect();
                 let bounds = Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]);
                 let (lo, hi) = (-t.dir * e * TURN_SLIDE, t.dir * (1.0 - e) * TURN_SLIDE);
-                // Squared, so the two are seldom both legible at once: the
-                // old ones mostly gone before the new ones mostly come.
-                let (out, into) = ((1.0 - e) * (1.0 - e), e * e);
+                let (out, into) = turn_fades(e);
                 for (labels, dx, alpha) in [(t.from.labels(), lo, out), (self.labels(), hi, into)] {
                     for label in labels {
                         ctx.text_faded(label.text, label.x + dx, label.y, label.font_size, label.color, alpha, Some(family.clone()), bounds);
@@ -2196,6 +2222,38 @@ mod context_menu_page_tests {
         context_menu::hide();
         context_menu::show_page(mx, my, None, (0..12).map(|i| format!("Row {i}")).collect(), 0, WidgetId(1));
         assert!(context_menu::is_turning(), "handed over from the menu just hidden");
+        context_menu::hide();
+    }
+
+    /// A turn fades the rows' geometry too, not only their labels: the
+    /// separators of the plate it leaves and of the page it brings are both
+    /// drawn, each at part of its strength, and at the end only the page's,
+    /// whole.
+    #[test]
+    fn a_turn_fades_the_separators_of_both_plates() {
+        let grooves = || {
+            let mut pc = crate::scene::paint::PaintCtx::new();
+            context_menu::paint(&mut pc);
+            pc.finish()
+                .items
+                .into_iter()
+                .filter_map(|it| match it.prim {
+                    crate::scene::paint::Prim::Groove { strength, .. } => Some(strength),
+                    _ => None,
+                })
+                .collect::<Vec<f32>>()
+        };
+        context_menu::show(400.0, 200.0, vec!["A".into(), "-".into(), "B".into()], 0, WidgetId(1));
+        assert_eq!(grooves(), vec![1.0], "a menu's separator, whole");
+        let (mx, my) = (context_menu::x(), context_menu::y());
+        context_menu::show_page(mx, my, Some("View"), vec!["C".into(), "-".into(), "D".into(), "E".into()], 0, WidgetId(1));
+        // The band's groove is drawn with the page's rows at their strength.
+        let mid = grooves();
+        assert!(mid.len() >= 2, "both plates' separators while it turns: {mid:?}");
+        assert!(mid.iter().all(|s| *s < 1.0), "each faded: {mid:?}");
+        std::thread::sleep(std::time::Duration::from_millis(context_menu::turn_ms() as u64 + 40));
+        let after = grooves();
+        assert!(!after.is_empty() && after.iter().all(|s| *s == 1.0), "the page's alone, whole: {after:?}");
         context_menu::hide();
     }
 

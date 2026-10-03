@@ -587,8 +587,14 @@ there:
   is for a turn from a plate the menu does not draw (the designer's dialog). While it
   runs `natural_geometry` is the larger of the two sizes, so the popup is repositioned
   to hold both and again to the page's own when it lands, and the runner asks for
-  frames (`is_turning`). Only labels fade (`text_faded`); the leaving rows' geometry
-  is not drawn. **A turned page that needs a NEW popup is handed over from the
+  frames (`is_turning`). **Both sets of rows fade, geometry and all**: each is
+  drawn aside (`paint_rows`) and replayed moved through `Prim::faded`, which scales a
+  colour's alpha, a text's or an image's, and a GROOVE's `strength` — the factor on
+  its shading, specular and AO, since a carve has no colour to fade (a separator was
+  the one relief prim a menu's rows draw; the slider rows are coloured quads). The
+  relief prims with no colour or strength come back as they are. Squared fades
+  (`turn_fades`), so the two are seldom both legible at once.
+  `a_turn_fades_the_separators_of_both_plates` is the test. **A turned page that needs a NEW popup is handed over from the
   window** (`MenuPopup::handoff`): it stays drawn in the window until the popup's
   first configure, and the frame after commits the popup ahead of the window
   (`take_menu_popup_lead`). Hosted at once, as a menu opened at the pointer is, a

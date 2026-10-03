@@ -2789,7 +2789,7 @@ pub fn tessellate_display_list(
             // Legacy banded path has no radial wall — the composed corner
             // stays square there (A/B comparison path only).
             Prim::ConcaveFillet { .. } => {}
-            Prim::Groove { a, b, width, depth, host } if shader_plates => {
+            Prim::Groove { a, b, width, depth, host, strength } if shader_plates => {
                 // A slab carve about the line a–b (shader mode 8): the cover
                 // quad is the segment's bounding box grown by the groove's own
                 // half-width plus the wall's reach. Off-band corners of that
@@ -2815,7 +2815,12 @@ pub fn tessellate_display_list(
                     ],
                     radii: [n.0, n.1, 0.0, 0.0],
                     light: [plate_light[0], plate_light[1], plate_light[2], *depth * scale],
-                    material: plate_mat,
+                    // The finish's shading, specular and AO, at the groove's
+                    // strength; shininess is a shape, not an amount.
+                    material: {
+                        let s = strength.clamp(0.0, 1.0);
+                        [plate_mat[0] * s, plate_mat[1] * s, plate_mat[2], plate_mat[3] * s]
+                    },
                     host: [
                         (host.x + host.width * 0.5) * scale,
                         (host.y + host.height * 0.5) * scale,
@@ -2827,7 +2832,7 @@ pub fn tessellate_display_list(
                     shape: crate::layout::corner_shape(),
                 });
             }
-            Prim::Groove { a, b, width, depth, host: _ } => {
+            Prim::Groove { a, b, width, depth, host: _, strength } => {
                 // Legacy approximation. The banded tessellators walk BOX edges —
                 // exactly the axis-aligned assumption a groove exists to escape —
                 // so the walls are drawn directly as two feathered lines meeting
@@ -2859,7 +2864,8 @@ pub fn tessellate_display_list(
                 let half = (*width * 0.5 + *depth * 0.5).max(0.5);
                 for side in [1.0f32, -1.0] {
                     let sv = v * side;
-                    let c = if sv >= 0.0 { overlay_light(sv) } else { overlay_dark(sv) };
+                    let mut c = if sv >= 0.0 { overlay_light(sv) } else { overlay_dark(sv) };
+                    c[3] *= strength.clamp(0.0, 1.0);
                     if c[3] <= 0.0 {
                         continue;
                     }
