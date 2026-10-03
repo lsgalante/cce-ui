@@ -69,19 +69,29 @@ Every client implements `Application` (`src/backend/app.rs`, re-exported from
 (e.g. `cce-status-interface`) — do not invent a new structure.
 
 Key methods (see the trait def in `backend/app.rs`):
-- `new`, `settings()` (→ `WindowSettings`), `layer()` (→ optional `LayerSettings` for
+- `create(sender)`, `settings()` (→ `WindowSettings`), `layer()` (→ optional `LayerSettings` for
   layer-shell surfaces like the status bar), `update(msg, needs_rebuild, exit)`, `tick(dt, …)`.
   **`tick` is not a clock.** Since 2026-09-11 the runner sleeps between ticks while the
   window is idle (no redraw pending, no animation, no key held, no warm-down) — up to
   `IDLE_DISPATCH` (1 s, `CCE_UI_IDLE_MS` overrides) — and is woken by Wayland events and
-  by messages on the calloop `Sender` handed to `new`. It used to tick a flat 16 ms
+  by messages on the `AppSender` handed to `create`. It used to tick a flat 16 ms
   forever: every client awake 60×/s doing nothing. So: deliver background results
-  through that `Sender`, never by draining a `std::sync::mpsc` in `tick`; if a widget
+  through that sender, never by draining a `std::sync::mpsc` in `tick`; if a widget
   or app must poll something the loop cannot see, say so — a widget returns `true`
   from `tick` while the session is live (ColorSelector's picker), an app overrides
   `Application::idle_poll_interval` (cce-authenticator, cce-system-interface,
   cce-designer while a pane is detached). Any animation keeps the frame cadence by
   itself because it reports a change.
+- **Construction is `create(sender: AppSender<Self::Message>)`** (since 2026-10-03).
+  `AppSender` is cce-ui's own handle — `send`, `Clone`, `Send`, and `From` both ways
+  with `calloop::channel::Sender` for a client that still stores calloop's type — so
+  the constructor names no window system, which is what lets a second shell (macOS,
+  the browser) run the same `Application`. The legacy `new(qh, sender)` still works:
+  the runner calls `new`, whose default forwards to `create`, so a client implements
+  ONE of the two and moves when it likes (no client ever used `qh`). Implementing
+  neither panics at startup naming the app. `new` is removed once no client
+  implements it, the way `VkRenderer::new` went. `register_sources` stays a
+  calloop-only hook: it is the Wayland shell's, not part of the portable contract.
 - **Draw**: `view` / `view_rounded_quads` / `view_vectors` / `overlay_quads` push legacy
   primitive tuples; `text_items()` returns text; `custom_vertices()` appends raw vertices (e.g.
   graph geometry). `display_list()` is the new opt-in path (see below).

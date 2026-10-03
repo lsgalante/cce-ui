@@ -77,10 +77,78 @@ pub struct RenderContext<'a> {
     pub font_system: &'a mut FontSystem,
 }
 
+/// The app's handle for posting a message to itself: from a worker thread, a
+/// callback, a timer the app runs itself. Each message reaches
+/// [`Application::update`] on the UI thread and wakes an idle loop, so
+/// background results arrive without polling (see "`tick` is not a clock"
+/// in CLAUDE.md).
+///
+/// It names no window system. Handed to [`Application::create`], it is what
+/// a client written against it can be run by any shell with; the Wayland
+/// runner backs it with its calloop channel, and `From` converts both ways
+/// for a client that still keeps a `calloop::channel::Sender` somewhere.
+pub struct AppSender<M> {
+    inner: calloop::channel::Sender<M>,
+}
+
+impl<M> AppSender<M> {
+    /// Post `msg` to the app. Fails, handing it back, only once the loop is
+    /// gone: the app has exited.
+    pub fn send(&self, msg: M) -> Result<(), std::sync::mpsc::SendError<M>> {
+        self.inner.send(msg)
+    }
+}
+
+impl<M> Clone for AppSender<M> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
+impl<M> std::fmt::Debug for AppSender<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AppSender")
+    }
+}
+
+impl<M> From<calloop::channel::Sender<M>> for AppSender<M> {
+    fn from(inner: calloop::channel::Sender<M>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<M> From<AppSender<M>> for calloop::channel::Sender<M> {
+    fn from(sender: AppSender<M>) -> Self {
+        sender.inner
+    }
+}
+
 pub trait Application: Sized + 'static {
     type Message: Send + Clone + 'static;
 
-    fn new(qh: &QueueHandle<EngineState<Self>>, sender: calloop::channel::Sender<Self::Message>) -> Self;
+    /// Build the app. Implement this or the legacy [`new`](Self::new), not
+    /// both: the runner calls `new`, whose default forwards here. `create`
+    /// takes no Wayland type, so it is the constructor another shell can
+    /// call; `new` goes once no client implements it.
+    ///
+    /// Implementing neither panics at startup, naming the app: the price of
+    /// letting clients move one at a time.
+    fn create(sender: AppSender<Self::Message>) -> Self {
+        let _ = sender;
+        panic!(
+            "{}: implement Application::create (or the legacy Application::new)",
+            std::any::type_name::<Self>()
+        )
+    }
+
+    /// The legacy constructor, from before the runner had a second shell in
+    /// view: the session's Wayland queue handle (no client ever used it) and
+    /// its calloop sender. Prefer [`create`](Self::create); the default here
+    /// forwards to it.
+    fn new(qh: &QueueHandle<EngineState<Self>>, sender: calloop::channel::Sender<Self::Message>) -> Self {
+        let _ = qh;
+        Self::create(AppSender::from(sender))
+    }
     fn settings(&self) -> WindowSettings;
     /// Return `Some(..)` to run on a wlr-layer-shell surface (overlay/panel)
     /// instead of an xdg toplevel. Defaults to `None` (a normal window).
@@ -425,3 +493,39 @@ pub trait Application: Sized + 'static {
     fn on_exit(&mut self) {}
 }
 
+
+#[cfg(test)]
+mod app_sender_tests {
+    use super::AppSender;
+    use calloop::channel::{channel, Event};
+
+    #[test]
+    fn an_app_sender_delivers_through_the_loop_and_fails_once_it_is_gone() {
+        let (tx, rx) = channel::<u32>();
+        let sender = AppSender::from(tx);
+        let worker = sender.clone();
+        std::thread::spawn(move || worker.send(7).unwrap()).join().unwrap();
+        sender.send(8).unwrap();
+
+        let mut event_loop = calloop::EventLoop::<Vec<u32>>::try_new().unwrap();
+        let token = event_loop
+            .handle()
+            .insert_source(rx, |event, _, got: &mut Vec<u32>| {
+                if let Event::Msg(m) = event {
+                    got.push(m);
+                }
+            })
+            .unwrap();
+        let mut got = Vec::new();
+        event_loop.dispatch(Some(std::time::Duration::ZERO), &mut got).unwrap();
+        assert_eq!(got, vec![7, 8]);
+
+        // The loop dropping its end is the app having exited: the message
+        // comes back to the sender rather than vanishing.
+        event_loop.handle().remove(token);
+        assert_eq!(sender.send(9).unwrap_err().0, 9);
+
+        // And the escape hatch for a client still holding calloop's type.
+        let _raw: calloop::channel::Sender<u32> = sender.into();
+    }
+}

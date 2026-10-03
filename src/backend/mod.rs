@@ -6,6 +6,6 @@ pub mod text;
 pub mod window_runner;
 
 pub use window_runner::{
-    EngineState, WindowSettings, LogicalPosition, LogicalSize, Application, run,
+    EngineState, WindowSettings, LogicalPosition, LogicalSize, Application, AppSender, run,
     Vertex, LineCap, PressedKey, get_text_buffer,
 };

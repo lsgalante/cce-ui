@@ -19,7 +19,7 @@
 //!    plate is prims, not a root plate container; popovers draw INTO the frame (there is no popup
 //!    surface); app state — not any widget tree — is the source of truth.
 
-use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
+use cce_ui::engine::{Application, AppSender, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::arena::Arena;
 use cce_ui::scene::layout::{
     compute_layout, FitMode, LayoutBox, Length, Rect, Size as LSize, Style,
@@ -29,7 +29,6 @@ use cce_ui::widget::{
     Adapted, Button, Dropdown, ImageView, WidgetHost, WidgetId, ElementState, Event, KeyEvent,
     MouseButton, MouseScrollDelta, Slider, TextBox, Toggle,
 };
-use wayland_client::QueueHandle;
 
 #[derive(Debug, Clone)]
 enum DemoMessage {
@@ -143,10 +142,7 @@ impl DemoApp {
 impl Application for DemoApp {
     type Message = DemoMessage;
 
-    fn new(
-        _qh: &QueueHandle<EngineState<Self>>,
-        _sender: calloop::channel::Sender<Self::Message>,
-    ) -> Self {
+    fn create(_sender: AppSender<Self::Message>) -> Self {
         cce_ui::scale::set_scale_factor(1.0);
         // One procedurally generated gradient (no asset dependency), uploaded
         // once and SHARED by both ImageViews — the widget borrows ids;
