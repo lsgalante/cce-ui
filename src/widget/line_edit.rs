@@ -74,6 +74,12 @@ enum Unit {
     All,
 }
 
+/// A word character for double-click and Ctrl+arrow purposes: letters and
+/// digits, and `_` (as `DocEditor` counts them).
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
 /// The char boundary before byte `i` in `s` (0 at the start). For stepping a
 /// caret, or trimming text to fit without splitting a character.
 pub fn prev_boundary(s: &str, i: usize) -> usize {
@@ -214,11 +220,53 @@ impl LineEdit {
     /// counts them), spaces, or anything else. So in a URL `example` is a
     /// word and so is `://`. On the edge of a word the word wins, so a click
     /// just past a word's last letter still selects the word.
+    /// Where Ctrl+Left goes from byte `at`: back over anything that is not
+    /// a word character, then to the start of the word before it — the same
+    /// word characters as [`LineEdit::word_at`] (letters, digits, `_`). On a
+    /// masked field, straight to the start: stopping at word edges would show
+    /// where a password's spaces and symbols are.
+    pub fn word_left(&self, at: usize) -> usize {
+        if self.masked {
+            return 0;
+        }
+        let s = &self.text;
+        let mut i = self.boundary(at);
+        for want_word in [false, true] {
+            while let Some(c) = s[..i].chars().next_back() {
+                if is_word_char(c) != want_word {
+                    break;
+                }
+                i -= c.len_utf8();
+            }
+        }
+        i
+    }
+
+    /// Where Ctrl+Right goes from byte `at`: forward over anything that is
+    /// not a word character, then to the end of the word after it. On a
+    /// masked field, straight to the end (see [`LineEdit::word_left`]).
+    pub fn word_right(&self, at: usize) -> usize {
+        if self.masked {
+            return self.text.len();
+        }
+        let s = &self.text;
+        let mut i = self.boundary(at);
+        for want_word in [false, true] {
+            while let Some(c) = s[i..].chars().next() {
+                if is_word_char(c) != want_word {
+                    break;
+                }
+                i += c.len_utf8();
+            }
+        }
+        i
+    }
+
     pub fn word_at(&self, at: usize) -> (usize, usize) {
         let at = self.boundary(at);
         let s = &self.text;
         let kind = |c: char| {
-            if c.is_alphanumeric() || c == '_' {
+            if is_word_char(c) {
                 0
             } else if c.is_whitespace() {
                 1
@@ -335,6 +383,27 @@ impl LineEdit {
             // its anchor — the end the caret is not at, the same one a
             // shift+click keeps — so it grows, shrinks, or flips past the
             // anchor as the caret goes.
+            // Ctrl moves by word, plain or with Shift. Plain, it starts from
+            // the selection's edge in the direction it goes, as a plain
+            // arrow collapses to that edge.
+            Key::Named(NamedKey::ArrowLeft) if event.ctrl => {
+                if event.shift {
+                    let to = self.word_left(self.cursor);
+                    self.select_between(self.anchor(), to);
+                } else {
+                    let from = self.selection.take().map_or(self.cursor, |(a, _)| a);
+                    self.cursor = self.word_left(from);
+                }
+            }
+            Key::Named(NamedKey::ArrowRight) if event.ctrl => {
+                if event.shift {
+                    let to = self.word_right(self.cursor);
+                    self.select_between(self.anchor(), to);
+                } else {
+                    let from = self.selection.take().map_or(self.cursor, |(_, b)| b);
+                    self.cursor = self.word_right(from);
+                }
+            }
             Key::Named(NamedKey::ArrowLeft) if event.shift => {
                 let to = prev_boundary(&self.text, self.cursor);
                 self.select_between(self.anchor(), to);
@@ -658,6 +727,59 @@ mod tests {
         let mut e = LineEdit::with_text("aé");
         e.handle_key(&shifted(NamedKey::ArrowLeft));
         assert_eq!((e.cursor, e.selection), (1, Some((1, 3))));
+    }
+
+    fn ctrl_key(n: NamedKey, shift: bool) -> KeyEvent {
+        KeyEvent { ctrl: true, shift, ..named(n) }
+    }
+
+    #[test]
+    fn ctrl_arrows_jump_by_word() {
+        let mut e = LineEdit::with_text("https://example.com/a_b  c");
+        e.handle_key(&named(NamedKey::Home));
+        let mut stops = Vec::new();
+        for _ in 0..6 {
+            e.handle_key(&ctrl_key(NamedKey::ArrowRight, false));
+            stops.push(e.cursor);
+        }
+        assert_eq!(stops, [5, 15, 19, 23, 26, 26], "ends of https, example, com, a_b, c; then stays");
+        let mut back = Vec::new();
+        for _ in 0..6 {
+            e.handle_key(&ctrl_key(NamedKey::ArrowLeft, false));
+            back.push(e.cursor);
+        }
+        assert_eq!(back, [25, 20, 16, 8, 0, 0], "starts of c, a_b, com, example, https; then stays");
+        // From inside a word: to that word's own edge.
+        e.cursor = 11;
+        e.handle_key(&ctrl_key(NamedKey::ArrowLeft, false));
+        assert_eq!(e.cursor, 8);
+    }
+
+    #[test]
+    fn ctrl_shift_arrows_select_by_word() {
+        let mut e = LineEdit::with_text("one two three");
+        e.handle_key(&named(NamedKey::Home));
+        e.handle_key(&ctrl_key(NamedKey::ArrowRight, true));
+        e.handle_key(&ctrl_key(NamedKey::ArrowRight, true));
+        assert_eq!((e.cursor, e.selection), (7, Some((0, 7))));
+        e.handle_key(&ctrl_key(NamedKey::ArrowLeft, true));
+        assert_eq!((e.cursor, e.selection), (4, Some((0, 4))), "shrinks a word back");
+        // A plain Ctrl+arrow leaves from the selection's edge and drops it.
+        e.handle_key(&ctrl_key(NamedKey::ArrowRight, false));
+        assert_eq!((e.cursor, e.selection), (7, None));
+        e.select_all();
+        e.handle_key(&ctrl_key(NamedKey::ArrowLeft, false));
+        assert_eq!((e.cursor, e.selection), (0, None));
+    }
+
+    #[test]
+    fn ctrl_arrows_in_a_password_go_to_the_ends() {
+        let mut e = LineEdit::masked();
+        typed(&mut e, "pass word");
+        e.handle_key(&ctrl_key(NamedKey::ArrowLeft, false));
+        assert_eq!(e.cursor, 0, "no stop at the space");
+        e.handle_key(&ctrl_key(NamedKey::ArrowRight, true));
+        assert_eq!(e.selection, Some((0, 9)));
     }
 
     fn ms(t0: Instant, n: u64) -> Instant {
