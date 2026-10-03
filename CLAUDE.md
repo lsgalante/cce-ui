@@ -31,7 +31,8 @@ set outright.
   per-corner radii, vectors with caps, arcs, circles, and the **relief primitives** — the
   lit-surface family: bevels, plates, recesses, bosses, ridges, fillets, grooves, lattices, box unions; see the
   `Prim` enum doc in `src/scene/paint.rs`). Tessellators live in
-  `backend/window_runner.rs` and are re-exported through `src/engine.rs`.
+  `backend/tessellate.rs` and are re-exported through `backend/window_runner.rs` and
+  `src/engine.rs`.
 - It is **both a library and a binary.** `src/lib.rs` is the toolkit; `src/main.rs` is
   `DemoApp`, the reference `Application` — a small widget gallery on the Phase 6 target
   architecture (display-list frame, scene-solver layout, routed events, in-frame
@@ -62,12 +63,12 @@ no `build.rs` and no codegen step to run.
 
 ## The `Application` trait — the client contract
 
-Every client implements `Application` (`src/backend/window_runner.rs`, re-exported from
-`engine.rs`). A client's `main.rs` is typically a struct implementing it plus a one-line
+Every client implements `Application` (`src/backend/app.rs`, re-exported from
+`window_runner` and `engine.rs`). A client's `main.rs` is typically a struct implementing it plus a one-line
 `cce_ui::engine::run::<MyApp>();`. When adding a widget or client, **mirror an existing client**
 (e.g. `cce-status-interface`) — do not invent a new structure.
 
-Key methods (see the trait def around `window_runner.rs:1450`):
+Key methods (see the trait def in `backend/app.rs`):
 - `new`, `settings()` (→ `WindowSettings`), `layer()` (→ optional `LayerSettings` for
   layer-shell surfaces like the status bar), `update(msg, needs_rebuild, exit)`, `tick(dt, …)`.
   **`tick` is not a clock.** Since 2026-09-11 the runner sleeps between ticks while the
@@ -190,7 +191,7 @@ nothing.
 ## Rendering: one paint path (the Phase 3 state)
 
 The backend `render()` **always builds a `scene::paint::DisplayList` and tessellates that single
-list** (`window_runner.rs` ~1799). Two ways an app feeds it:
+list** (`EngineState::render` in `window_runner.rs`). Two ways an app feeds it:
 
 1. **Migrated**: return `Some(DisplayList)` from `Application::display_list()`.
 2. **Legacy (default)**: return `None`, and the backend wraps the app's `view*`/`view_vectors`

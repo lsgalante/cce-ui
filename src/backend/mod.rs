@@ -1,5 +1,8 @@
+pub mod app;
 pub mod dnd;
 pub mod menu_popup;
+pub mod tessellate;
+pub mod text;
 pub mod window_runner;
 
 pub use window_runner::{
