@@ -365,6 +365,23 @@ impl LineEdit {
         match &event.logical_key {
             Key::Named(NamedKey::Enter) => return EditOutcome::Submit,
             Key::Named(NamedKey::Escape) => return EditOutcome::Cancel,
+            // Ctrl deletes a word: back to where Ctrl+Left would go, or on to
+            // where Ctrl+Right would. A selection goes instead, as it does
+            // for the plain keys. On a masked field the word edges are the
+            // ends, so these clear to the start or the end.
+            Key::Named(NamedKey::Backspace) if event.ctrl => {
+                if !self.take_selection() {
+                    let from = self.word_left(self.cursor);
+                    self.text.replace_range(from..self.cursor, "");
+                    self.cursor = from;
+                }
+            }
+            Key::Named(NamedKey::Delete) if event.ctrl => {
+                if !self.take_selection() {
+                    let to = self.word_right(self.cursor);
+                    self.text.replace_range(self.cursor..to, "");
+                }
+            }
             Key::Named(NamedKey::Backspace) => {
                 if !self.take_selection() && self.cursor > 0 {
                     let prev = prev_boundary(&self.text, self.cursor);
@@ -780,6 +797,51 @@ mod tests {
         assert_eq!(e.cursor, 0, "no stop at the space");
         e.handle_key(&ctrl_key(NamedKey::ArrowRight, true));
         assert_eq!(e.selection, Some((0, 9)));
+    }
+
+    #[test]
+    fn ctrl_backspace_and_delete_take_a_word() {
+        let mut e = LineEdit::with_text("https://example.com/drag");
+        e.handle_key(&ctrl_key(NamedKey::Backspace, false));
+        assert_eq!((e.text.as_str(), e.cursor), ("https://example.com/", 20));
+        e.handle_key(&ctrl_key(NamedKey::Backspace, false));
+        assert_eq!((e.text.as_str(), e.cursor), ("https://example.", 16), "the / and com go together");
+        // From inside a word: just its first half.
+        let mut e = LineEdit::with_text("hello world");
+        e.cursor = 8;
+        e.handle_key(&ctrl_key(NamedKey::Backspace, false));
+        assert_eq!((e.text.as_str(), e.cursor), ("hello rld", 6));
+        // Ctrl+Delete: forward to the end of the word.
+        e.cursor = 0;
+        e.handle_key(&ctrl_key(NamedKey::Delete, false));
+        assert_eq!((e.text.as_str(), e.cursor), (" rld", 0));
+        // At the ends nothing happens.
+        let mut e = LineEdit::with_text("abc");
+        e.handle_key(&ctrl_key(NamedKey::Delete, false));
+        assert_eq!(e.text, "abc");
+        e.cursor = 0;
+        e.handle_key(&ctrl_key(NamedKey::Backspace, false));
+        assert_eq!(e.text, "abc");
+    }
+
+    #[test]
+    fn ctrl_backspace_takes_a_selection_not_a_word() {
+        let mut e = LineEdit::with_text("one two three");
+        e.press(4, false);
+        e.drag_to(6);
+        e.release();
+        e.handle_key(&ctrl_key(NamedKey::Backspace, false));
+        assert_eq!((e.text.as_str(), e.cursor), ("one o three", 4));
+    }
+
+    #[test]
+    fn ctrl_backspace_in_a_password_clears_to_the_start() {
+        let mut e = LineEdit::masked();
+        typed(&mut e, "pass word");
+        e.handle_key(&named(NamedKey::ArrowLeft));
+        e.handle_key(&named(NamedKey::ArrowLeft)); // before "rd"
+        e.handle_key(&ctrl_key(NamedKey::Backspace, false));
+        assert_eq!((e.text.as_str(), e.cursor), ("rd", 0), "no stop at the space");
     }
 
     fn ms(t0: Instant, n: u64) -> Instant {
