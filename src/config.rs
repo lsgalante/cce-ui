@@ -1296,7 +1296,6 @@ mod tests {
         assert_eq!(crate::color::root_plate_corner_radius(), 17.0, "legacy spelling is not read");
     }
 
-    #[test]
     /// A string list (`rounded_apps "a" "b"`) must survive the JSON round
     /// trip cce-data-editor saves through — it used to come back as ONE arg,
     /// `rounded_apps "a b"`, and the compositor's allowlist then matched

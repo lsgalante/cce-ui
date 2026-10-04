@@ -448,15 +448,21 @@ pub fn read_config_value(target_key: &str) -> Option<String> {
 }
 
 pub fn parse_font_string(s: &str) -> (String, Option<f32>) {
+    let (family, size) = split_font_string(s);
+    (family.to_string(), size)
+}
+
+/// [`parse_font_string`] borrowing the family from `s` instead of copying it.
+pub fn split_font_string(s: &str) -> (&str, Option<f32>) {
     let s = s.trim();
     if let Some(last_space_idx) = s.rfind(' ') {
         let (family, size_str) = s.split_at(last_space_idx);
         let size_str = size_str.trim();
         if let Ok(size) = size_str.parse::<f32>() {
-            return (family.trim().to_string(), Some(size));
+            return (family.trim(), Some(size));
         }
     }
-    (s.to_string(), None)
+    (s, None)
 }
 
 static SECTION_PADDING: RwLock<f32> = RwLock::new(8.0);
@@ -6593,7 +6599,7 @@ mod tests {
     fn section_text_and_rows_share_one_inset() {
         let mut pc = ProbeTarget::default();
         let (left, cw) = (100.0f32, 320.0f32);
-        let mut sec: SectionContext<'_, ProbeTarget> =
+        let sec: SectionContext<'_, ProbeTarget> =
             SectionContext::new(&mut pc, left, 50.0, cw, "Probe", false, false);
 
         let cols = sec.row_layout(2, 8.0);
@@ -6657,7 +6663,7 @@ mod tests {
     #[test]
     fn section_ax_is_continuous() {
         let mut pc = ProbeTarget::default();
-        let mut sec: SectionContext<'_, ProbeTarget> =
+        let sec: SectionContext<'_, ProbeTarget> =
             SectionContext::new(&mut pc, 100.0, 50.0, 320.0, "Probe", false, false);
         for off in [0.0f32, 1.0, 11.0, 11.999, 12.0, 13.0, 24.0] {
             assert!(
