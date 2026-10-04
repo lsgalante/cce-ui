@@ -25,7 +25,8 @@ pub mod buffer;
 pub mod layout;
 pub mod preview;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 pub use buffer::{Buffer, EditKind, Pos};
 pub use layout::EditorTheme;

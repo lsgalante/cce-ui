@@ -18,17 +18,38 @@ doc_editor = []
 
 [dependencies]
 cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "41ca52bd51ea3655a791c58005be9fce939e4333", optional = true }
-raw-window-handle = "0.6"
 glam = "0.29"
 bytemuck = { version = "1", features = ["derive"] }
 # Text shaping. This was reached through glyphon until the wgpu path was retired;
 # every `glyphon::` item cce-ui ever used was a cosmic-text re-export (the sole
-# exception, `TextBounds`, is now defined in backend/window_runner.rs), so depending
+# exception, `TextBounds`, is now defined in backend/text.rs), so depending
 # on cosmic-text directly drops glyphon, wgpu and 17 more crates from the build —
 # the rest of wgpu's tree stays only because naga/ash below already pull it.
 # Pinned to the exact version glyphon 0.8 resolved to, so shaping does not change:
 # verified by diffing shaped glyph ids/advances both ways over 288 runs.
 cosmic-text = "=0.12.1"
+bitflags = "2"
+# The cursor names an app returns. smithay-client-toolkit re-exports this same
+# crate's type, so the Wayland shell hands it over unconverted; depending on it
+# directly keeps the client contract free of the toolkit.
+cursor-icon = "1.2"
+resvg = "0.41.0"
+# App/tray icon themes are overwhelmingly PNG; resvg covers only the SVG half.
+png = "0.17"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+kdl = "4.6"
+log = "0.4"
+# `Instant` that works in the browser: std's panics on wasm32-unknown-unknown,
+# which has no clock of its own. On every other target this IS std's.
+web-time = "1"
+
+# The native shell and renderer: Wayland through smithay-client-toolkit on a
+# calloop loop, Vulkan through ash. None of it builds for the browser, where
+# the shell and renderer are the web platform's (`cargo check --lib --target
+# wasm32-unknown-unknown` is the check that keeps the rest portable).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+raw-window-handle = "0.6"
 # Raw-Vulkan backend (versions match what wgpu 24 already pulled in).
 ash = "0.38"
 gpu-allocator = { version = "0.27", default-features = false, features = ["vulkan"] }
@@ -40,20 +61,6 @@ wayland-client = { version = "0.31", features = ["system"] }
 wayland-protocols = { version = "0.31", features = ["client", "unstable"] }
 wayland-backend = "0.3"
 wayland-scanner = "0.31"
-bitflags = "2"
-# The cursor names an app returns. smithay-client-toolkit re-exports this same
-# crate's type, so the Wayland shell hands it over unconverted; depending on it
-# directly keeps the client contract free of the toolkit.
-cursor-icon = "1.2"
 xkeysym = "0.2"
-resvg = "0.41.0"
-# App/tray icon themes are overwhelmingly PNG; resvg covers only the SVG half.
-png = "0.17"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-kdl = "4.6"
 libc = "0.2"
-log = "0.4"
 rfd = "0.15"
-
-

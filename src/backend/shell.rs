@@ -11,7 +11,8 @@
 //! loop — the browser's animation frames, an AppKit run loop — calls `turn`
 //! from wherever its loop turns and sleeps (or schedules) for what it says.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use super::app::Application;
 use super::driver::{Driver, Turn};

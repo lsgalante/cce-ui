@@ -654,31 +654,7 @@ impl Input for ColorSelector {
                 self.command.clone()
             };
 
-            // Ask the compositor to open the picker at this control instead of
-            // its remembered position: the pointer is on the swatch right now,
-            // so its location IS the control's location. One-shot, best-effort
-            // (`place-next` consumed at the picker's map; ignored off-cce).
-            if let Ok(reply) = crate::ipc::send_command("cce", "pointer-location") {
-                let mut px = None;
-                let mut py = None;
-                for tok in reply.split_whitespace() {
-                    if let Some(v) = tok.strip_prefix("x=") {
-                        px = v.parse::<f64>().ok();
-                    } else if let Some(v) = tok.strip_prefix("y=") {
-                        py = v.parse::<f64>().ok();
-                    }
-                }
-                if let (Some(x), Some(y)) = (px, py) {
-                    let app_id = std::path::Path::new(&self.command)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| self.command.clone());
-                    let _ = crate::ipc::send_command(
-                        "cce",
-                        &format!("place-next {} {:.0} {:.0}", app_id, x, y),
-                    );
-                }
-            }
+            place_picker_at_pointer(&self.command);
 
             let mut cmd = std::process::Command::new(&cmd_path);
             cmd.arg(&hex);
@@ -827,6 +803,39 @@ impl Input for ColorSelector {
 fn parse_hex(s: &str) -> Option<[u8; 4]> {
     crate::color::parse_hex_bytes(s)
 }
+
+/// Ask the compositor to open the picker at this control instead of its
+/// remembered position. Native only: in a browser there is no compositor to ask.
+#[cfg(not(target_arch = "wasm32"))]
+fn place_picker_at_pointer(command: &str) {
+    // The pointer is on the swatch right now, so its location IS the
+    // control's location. One-shot, best-effort (`place-next` consumed at
+    // the picker's map; ignored off-cce).
+    if let Ok(reply) = crate::ipc::send_command("cce", "pointer-location") {
+        let mut px = None;
+        let mut py = None;
+        for tok in reply.split_whitespace() {
+            if let Some(v) = tok.strip_prefix("x=") {
+                px = v.parse::<f64>().ok();
+            } else if let Some(v) = tok.strip_prefix("y=") {
+                py = v.parse::<f64>().ok();
+            }
+        }
+        if let (Some(x), Some(y)) = (px, py) {
+            let app_id = std::path::Path::new(&command)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| command.to_string());
+            let _ = crate::ipc::send_command(
+                "cce",
+                &format!("place-next {} {:.0} {:.0}", app_id, x, y),
+            );
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn place_picker_at_pointer(_command: &str) {}
 
 #[cfg(test)]
 mod tests {
@@ -1086,5 +1095,3 @@ mod tests {
     }
 
 }
-
-

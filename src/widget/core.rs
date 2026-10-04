@@ -448,7 +448,7 @@ pub mod context_menu {
     struct Turning {
         /// The plate as it stood when the turn began: its size and its rows.
         from: Box<ContextMenuState>,
-        start: std::time::Instant,
+        start: web_time::Instant,
         /// +1 forward (the page comes in from the right, where `›` points),
         /// -1 back.
         dir: f32,
@@ -514,7 +514,7 @@ pub mod context_menu {
         /// When the menu was last hidden: a page shown in the same moment
         /// turns from it, as a host that closes one menu and shows the next
         /// in one dispatch means it to.
-        hidden_at: Option<std::time::Instant>,
+        hidden_at: Option<web_time::Instant>,
         /// The slider row a press took hold of, until the release.
         pub slider_drag: Option<usize>,
         /// A trackpad's leftover fraction of a wheel notch.
@@ -684,7 +684,7 @@ pub mod context_menu {
             self.turned = true;
             self.turning = from.map(|from| Turning {
                 from,
-                start: std::time::Instant::now(),
+                start: web_time::Instant::now(),
                 dir: if back.is_some() { 1.0 } else { -1.0 },
             });
             if let Some(title) = back {
@@ -733,7 +733,7 @@ pub mod context_menu {
             from.hovered_item = None;
             from.w = w;
             from.h = h;
-            self.turning = Some(Turning { from: Box::new(from), start: std::time::Instant::now(), dir: if forward { 1.0 } else { -1.0 } });
+            self.turning = Some(Turning { from: Box::new(from), start: web_time::Instant::now(), dir: if forward { 1.0 } else { -1.0 } });
         }
 
         /// How far the turn in progress has gone, eased, 0..1; `None` when
@@ -1040,7 +1040,7 @@ pub mod context_menu {
             self.back_hovered = false;
             self.turn = None;
             self.turning = None;
-            self.hidden_at = Some(std::time::Instant::now());
+            self.hidden_at = Some(web_time::Instant::now());
         }
 
         pub fn hit_test(&self, px: f32, py: f32) -> bool {

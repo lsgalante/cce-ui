@@ -19,7 +19,7 @@ struct BufferCacheKey {
 #[derive(Clone)]
 struct CachedBuffer {
     buffer: Buffer,
-    last_accessed: std::time::Instant,
+    last_accessed: web_time::Instant,
 }
 
 std::thread_local! {
@@ -124,7 +124,7 @@ pub fn get_text_buffer_attrs(
     let cached = BUFFER_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(cached_item) = cache.get_mut(&key) {
-            cached_item.last_accessed = std::time::Instant::now();
+            cached_item.last_accessed = web_time::Instant::now();
             Some(cached_item.buffer.clone())
         } else {
             None
@@ -221,7 +221,7 @@ pub fn get_text_buffer_attrs(
     BUFFER_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.len() >= 2000 {
-            let mut items: Vec<(BufferCacheKey, std::time::Instant)> = cache
+            let mut items: Vec<(BufferCacheKey, web_time::Instant)> = cache
                 .iter()
                 .map(|(k, v)| (k.clone(), v.last_accessed))
                 .collect();
@@ -232,7 +232,7 @@ pub fn get_text_buffer_attrs(
         }
         cache.insert(key, CachedBuffer {
             buffer: buf.clone(),
-            last_accessed: std::time::Instant::now(),
+            last_accessed: web_time::Instant::now(),
         });
     });
 

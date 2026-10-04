@@ -19,7 +19,8 @@
 //! (`0`/`off` or `1`/`on`) overrides the file for one process, for testing.
 
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// Where the switch lives. Shared with `cce-power-apply`, the writer.
 pub const STATE_PATH: &str = "/run/cce/animations";

@@ -27,7 +27,8 @@
 
 use crate::widget::scroll_motion::{current_scroll_phase, ScrollPhase};
 use crate::widget::MouseScrollDelta;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// How far the fingers travel to the side, in the runner's pixel delta,
 /// before a swipe is a page turn. A deliberate flick covers this in two or

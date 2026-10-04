@@ -3,11 +3,13 @@
 //! Moved out of `window_runner` unchanged; still re-exported from there
 //! (and from `engine`) at the old paths.
 
-use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel;
-use wayland_client::QueueHandle;
 use cosmic_text::FontSystem;
 use crate::widget::{MouseButton, ElementState, MouseScrollDelta, KeyEvent};
+#[cfg(not(target_arch = "wasm32"))]
+use wayland_client::QueueHandle;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::vk::VkRenderer;
+#[cfg(not(target_arch = "wasm32"))]
 use super::window_runner::EngineState;
 use cursor_icon::CursorIcon;
 use super::tessellate::Vertex;
@@ -22,16 +24,25 @@ pub struct WindowSettings {
     pub min_size: Option<(u32, u32)>,
 }
 
+/// The edge a [`WindowAction::Resize`] grabs. On Wayland it is
+/// `xdg_toplevel`'s own enum, as it always was; elsewhere the driver's.
+#[cfg(not(target_arch = "wasm32"))]
+pub use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge as WindowEdge;
+#[cfg(target_arch = "wasm32")]
+pub use super::driver::ResizeEdge as WindowEdge;
+
 /// A compositor-side window operation requested by the app: an interactive
 /// move or resize grab. Returned from [`Application::take_window_action`];
 /// the runner executes it with the serial of the most recent pointer press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowAction {
     Move,
-    Resize(xdg_toplevel::ResizeEdge),
+    Resize(WindowEdge),
 }
 
 // Re-export the wlr-layer-shell types apps need to describe a layer surface.
+// Layer surfaces are a Wayland (wlr) notion: native only, like `layer()`.
+#[cfg(not(target_arch = "wasm32"))]
 pub use smithay_client_toolkit::shell::wlr_layer::{
     Anchor as LayerAnchor, KeyboardInteractivity as LayerKeyboardInteractivity, Layer as LayerKind,
 };
@@ -39,6 +50,7 @@ pub use smithay_client_toolkit::shell::wlr_layer::{
 /// Opt-in configuration for running an [`Application`] on a wlr-layer-shell
 /// surface (panels, overlays, notifications) instead of an xdg toplevel.
 /// Return one from [`Application::layer`] to select layer-shell.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub struct LayerSettings {
     pub layer: LayerKind,
@@ -87,9 +99,15 @@ pub struct RenderContext<'a> {
 /// It names no window system. Handed to [`Application::create`], it is what
 /// a client written against it can be run by any shell with; the Wayland
 /// runner backs it with its calloop channel, and `From` converts both ways
-/// for a client that still keeps a `calloop::channel::Sender` somewhere.
+/// for a client that still keeps a `calloop::channel::Sender` somewhere. In
+/// the browser it is a `std::sync::mpsc` sender whose receiver the shell
+/// drains every turn — still `Send`, so app code that hands it to a worker
+/// compiles unchanged.
 pub struct AppSender<M> {
+    #[cfg(not(target_arch = "wasm32"))]
     inner: calloop::channel::Sender<M>,
+    #[cfg(target_arch = "wasm32")]
+    inner: std::sync::mpsc::Sender<M>,
 }
 
 impl<M> AppSender<M> {
@@ -112,12 +130,21 @@ impl<M> std::fmt::Debug for AppSender<M> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<M> From<calloop::channel::Sender<M>> for AppSender<M> {
     fn from(inner: calloop::channel::Sender<M>) -> Self {
         Self { inner }
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+impl<M> From<std::sync::mpsc::Sender<M>> for AppSender<M> {
+    fn from(inner: std::sync::mpsc::Sender<M>) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl<M> From<AppSender<M>> for calloop::channel::Sender<M> {
     fn from(sender: AppSender<M>) -> Self {
         sender.inner
@@ -145,7 +172,8 @@ pub trait Application: Sized + 'static {
     /// The legacy constructor, from before the runner had a second shell in
     /// view: the session's Wayland queue handle (no client ever used it) and
     /// its calloop sender. Prefer [`create`](Self::create); the default here
-    /// forwards to it.
+    /// forwards to it. Native only: it names the Wayland queue.
+    #[cfg(not(target_arch = "wasm32"))]
     fn new(qh: &QueueHandle<EngineState<Self>>, sender: calloop::channel::Sender<Self::Message>) -> Self {
         let _ = qh;
         Self::create(AppSender::from(sender))
@@ -153,6 +181,7 @@ pub trait Application: Sized + 'static {
     fn settings(&self) -> WindowSettings;
     /// Return `Some(..)` to run on a wlr-layer-shell surface (overlay/panel)
     /// instead of an xdg toplevel. Defaults to `None` (a normal window).
+    #[cfg(not(target_arch = "wasm32"))]
     fn layer(&self) -> Option<LayerSettings> {
         None
     }
@@ -282,6 +311,7 @@ pub trait Application: Sized + 'static {
         [0.0, 0.0, 0.0, 0.0]
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn register_sources(&mut self, _handle: &calloop::LoopHandle<'_, EngineState<Self>>) {}
 
     fn adjust_size(&self, width: f32, height: f32) -> (f32, f32) {
@@ -418,6 +448,7 @@ pub trait Application: Sized + 'static {
     /// Called once, right after the renderer is created and before the first
     /// frame: create persistent renderer resources here (3D meshes via
     /// [`VkRenderer::create_mesh`]). Most 2D apps never need this.
+    #[cfg(not(target_arch = "wasm32"))]
     fn renderer_init(&mut self, _renderer: &mut VkRenderer) {}
 
     /// Direct renderer staging, called every frame after the engine's own text
@@ -428,6 +459,7 @@ pub trait Application: Sized + 'static {
     /// the renderer's text state, the engine never touches it). Return `true`
     /// to request another frame immediately (e.g. while a path tracer is still
     /// accumulating samples).
+    #[cfg(not(target_arch = "wasm32"))]
     fn stage_renderer(&mut self, _renderer: &mut VkRenderer, _size: LogicalSize, _scale: f64) -> bool {
         false
     }
@@ -495,7 +527,7 @@ pub trait Application: Sized + 'static {
 }
 
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod app_sender_tests {
     use super::AppSender;
     use calloop::channel::{channel, Event};

@@ -13,7 +13,7 @@
 //! them (the Wayland runner keeps them on `EngineState`, where clients'
 //! `register_sources` callbacks reach `inner` and `redraw` directly).
 
-use std::time::Instant;
+use web_time::Instant;
 
 use super::app::{Application, LogicalPosition, LogicalSize};
 use cursor_icon::CursorIcon;

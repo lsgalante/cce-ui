@@ -1,3 +1,7 @@
+// Modules under `cfg(not(target_arch = "wasm32"))` are the native shell and
+// renderer (Wayland, Vulkan, the compositor IPC, file dialogs). Everything
+// else builds for the browser too: `cargo check --lib --target
+// wasm32-unknown-unknown` is the check.
 pub mod color;
 pub mod widget;
 pub mod config;
@@ -5,7 +9,9 @@ pub mod input;
 pub mod history;
 pub mod layout;
 pub mod relief_spec;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod wayland;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod protocol;
 pub mod engine;
 pub mod scale;
@@ -14,11 +20,15 @@ pub mod backend;
 pub mod context;
 pub mod draw;
 pub mod scene;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialog;
 pub mod icon;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ipc;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod mcp;
 pub mod motion;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod vk;
 
 pub mod colors {

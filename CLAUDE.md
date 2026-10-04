@@ -57,6 +57,19 @@ scattering of widgets (`text_box`, `slider`, `dropdown`, `treelist`, …). When 
 engine, that module's tests are the fast feedback loop; run `cargo test -p cce-ui scene::` before
 anything else.
 
+**The library also builds for the browser** (`wasm32-unknown-unknown`, since 2026-10-04):
+`scripts/check-wasm` type-checks it, with and without the optional features. The native
+shell and renderer — `vk`, the Wayland shell (`backend::{window_runner, menu_popup, dnd}`),
+`wayland`, `protocol`, `ipc`, `mcp`, `file_dialog` — and their crates (ash, smithay, calloop,
+wayland-*, libc, rfd) are `cfg(not(target_arch = "wasm32"))`; so are the Wayland-typed parts
+of the client contract: `Application::new(qh, …)`, `layer()` and `LayerSettings`,
+`register_sources`, and `renderer_init` / `stage_renderer`, which take a `VkRenderer`.
+`WindowAction::Resize` takes `app::WindowEdge` — xdg's `ResizeEdge` on Linux, as before.
+Portable code keeps time with `web_time::Instant` (std's own type natively; std's panics in
+the browser), and reaches what a renderer draws through `crate::draw`, not `crate::vk`. A
+change that makes portable code call into a native module fails `check-wasm` first — put
+the native half behind the cfg, as `color_selector::place_picker_at_pointer` does.
+
 Wayland protocol bindings are generated **inline at compile time** by `wayland-scanner` macros in
 `src/protocol.rs` from `protocol/*.xml` (`cce-inspector-v1`, `cce-window-management-v1`) — there is
 no `build.rs` and no codegen step to run.
