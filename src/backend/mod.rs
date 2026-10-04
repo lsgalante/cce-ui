@@ -1,4 +1,5 @@
 pub mod app;
+pub mod driver;
 pub mod dnd;
 pub mod menu_popup;
 pub mod tessellate;

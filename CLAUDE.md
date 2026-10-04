@@ -1086,6 +1086,16 @@ cce-system-interface) to confirm behavior, not just the test suite.
   of a one-line field an app draws itself — cce-browser's URL bar and dialog fields) and
   `core.rs`. (The KDL/JSON-driven `json_layout.rs` is dissolved; `scene/layout.rs` is the
   box model.)
+- `backend/` — the runner, split (since 2026-10-03) so a second shell (macOS, the browser)
+  can share everything that is not Wayland: `app.rs` (the `Application` trait, `AppSender`,
+  the plain types it speaks in), `driver.rs` (`Driver`: input state and routing — modifiers,
+  key repeat, the undo/redo and plate-navigation chords, the CSD hit zones, the
+  outside-press popover close, held-button release on a lost pointer, the scroll phase,
+  the pinch fallback — fed in cce-ui's own terms and unit-tested with no compositor),
+  `tessellate.rs`, `text.rs`, and `window_runner.rs`, the Wayland shell: it maps evdev
+  buttons, xkb keysyms and `wl_pointer` axis frames into driver calls and carries out the
+  grabs and cursors the driver asks for. A routing change belongs in `driver.rs`, never in
+  a Wayland handler. `menu_popup.rs` and `dnd.rs` are Wayland-only.
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
   the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance

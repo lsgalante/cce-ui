@@ -1,4 +1,3 @@
-use std::time::Instant;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     data_device_manager::DataDeviceManagerState,
@@ -37,35 +36,15 @@ pub use smithay_client_toolkit::seat::pointer::CursorIcon as PointerCursorIcon;
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
 use cosmic_text::FontSystem;
-use crate::widget::{TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey, Position};
+use crate::widget::{TextItem, MouseButton, ElementState, Key, NamedKey};
 use crate::wayland::detect_scale_factor;
 use crate::vk::{Frame2D, VkRenderer};
 
 pub use super::app::*;
+pub use super::driver::PressedKey;
+use super::driver::{Driver, Modifiers, Press, PressSite, ResizeEdge, ScrollFrame, ScrollSource, Turn};
 pub use super::tessellate::*;
 pub use super::text::*;
-
-pub struct PressedKey {
-    pub logical_key: Key,
-    pub text: Option<String>,
-    pub first_pressed: Instant,
-    pub last_repeated: Instant,
-}
-
-fn is_repeatable_key(key: &Key) -> bool {
-    match key {
-        Key::Named(NamedKey::Backspace) |
-        Key::Named(NamedKey::Delete) |
-        Key::Named(NamedKey::ArrowLeft) |
-        Key::Named(NamedKey::ArrowRight) |
-        Key::Named(NamedKey::ArrowUp) |
-        Key::Named(NamedKey::ArrowDown) |
-        Key::Named(NamedKey::Home) |
-        Key::Named(NamedKey::End) |
-        Key::Character(_) => true,
-        _ => false,
-    }
-}
 
 /// Default cap on the runner's idle sleep — see `Application::idle_poll_interval`.
 pub const IDLE_DISPATCH: std::time::Duration = std::time::Duration::from_millis(1000);
@@ -155,18 +134,9 @@ pub struct EngineState<A: Application> {
     /// 1; a persistent count means no frame is presenting and deserves a warn.
     pub extent_gate_skips: u32,
     pub first_configure_received: bool,
-    pub ctrl_pressed: bool,
-    /// The `undo` / `redo` chords, resolved from `input.kdl` at startup.
-    pub undo_chord: String,
-    /// `focus_next_group` / `focus_prev_group` (input.kdl, cce-ui domain):
-    /// the plate-navigation group jump, for apps that opt in.
-    pub group_next_chord: String,
-    pub group_prev_chord: String,
-    pub redo_chord: String,
-    pub shift_pressed: bool,
-    pub alt_pressed: bool,
-    pub logo_pressed: bool,
-    pub pressed_key: Option<PressedKey>,
+    /// The session's input state and routing: modifiers, the held key, the
+    /// pointer's place and held buttons, the chords (see [`Driver`]).
+    pub driver: Driver,
     pub sender: calloop::channel::Sender<A::Message>,
     pub current_cursor_icon: Option<CursorIcon>,
     pub qh: QueueHandle<EngineState<A>>,
@@ -179,19 +149,9 @@ pub struct EngineState<A: Application> {
     /// Latest unrendered grid_patch (serial, x, y, w, h, scale) — a newer
     /// event supersedes an unconsumed older one, per protocol.
     pub pending_grid_patch: Option<(u32, f64, f64, f64, f64, f64)>,
-    pub last_pinch_scale: f32,
-    pub cursor_pos: (f32, f32),
     /// Serial of the most recent pointer press, kept for
     /// [`Application::take_window_action`] move/resize grabs.
     pub last_press_serial: Option<u32>,
-    /// Mouse buttons currently held, as a bitmask (1 Left / 2 Right /
-    /// 4 Middle). On pointer Leave mid-gesture the real Release goes to
-    /// whatever surface takes the pointer next (fullscreen switches, layout
-    /// animations), so Leave synthesizes releases for the held set — a drag
-    /// must end, not stay armed and steered by later motion — and only then
-    /// runs the off-screen hover-clear (which would otherwise corrupt the
-    /// drag: a ramp key snapped to the graph corner).
-    pub buttons_down: u32,
     /// This frame's display-list text, shaped and held here so the `TextSpan`s built
     /// in the render pass can borrow the buffers (Phase 6 —
     /// [`Application::display_list_text`]).
@@ -403,51 +363,22 @@ impl<A: Application> EngineState<A> {
         self.sent_popover_region = next;
     }
 
-    /// The cursor for the pointer at (lx, ly): the app's
-    /// [`Application::cursor_icon`] override, else the standard-CSD edge
-    /// cursors (status bars and non-standard-CSD apps fall back to Default).
+    /// The driver and the app's turn, borrowed apart: every input dispatch
+    /// is `let (driver, t) = self.turn(); driver.<event>(t, ..)`.
+    fn turn(&mut self) -> (&mut Driver, Turn<'_, A>) {
+        (
+            &mut self.driver,
+            Turn { app: self.inner.as_mut().unwrap(), redraw: &mut self.redraw, exit: &mut self.exit },
+        )
+    }
+
+    fn logical_size(&self) -> LogicalSize {
+        LogicalSize::new(self.logical_width, self.logical_height)
+    }
+
+    /// The cursor for the pointer at (lx, ly) — see [`Driver::cursor_icon_at`].
     fn cursor_icon_at(&self, lx: f32, ly: f32) -> CursorIcon {
-        // Over the context menu the pointer is the menu's,
-        // whatever of the app lies at that place under it (a splitter, a
-        // resize border) — and in their popups that place may be outside
-        // the window altogether.
-        if crate::widget::context_menu::is_visible() && crate::widget::context_menu::hit_test(lx, ly) {
-            return CursorIcon::Default;
-        }
-        let inner = self.inner.as_ref().unwrap();
-        if let Some(icon) = inner.cursor_icon(lx, ly) {
-            return icon;
-        }
-        if inner.settings().app_id.starts_with("cce-status")
-            || !inner.standard_csd()
-            || !inner.csd_resize_borders()
-        {
-            return CursorIcon::Default;
-        }
-        let border = 8.0f32;
-        if ly < border {
-            if lx < border {
-                CursorIcon::NwResize
-            } else if lx > self.logical_width - border {
-                CursorIcon::NeResize
-            } else {
-                CursorIcon::NResize
-            }
-        } else if ly > self.logical_height - border {
-            if lx < border {
-                CursorIcon::SwResize
-            } else if lx > self.logical_width - border {
-                CursorIcon::SeResize
-            } else {
-                CursorIcon::SResize
-            }
-        } else if lx < border {
-            CursorIcon::WResize
-        } else if lx > self.logical_width - border {
-            CursorIcon::EResize
-        } else {
-            CursorIcon::Default
-        }
+        self.driver.cursor_icon_at(self.inner.as_ref().unwrap(), lx, ly, self.logical_size())
     }
 
     pub fn render(&mut self) {
@@ -1033,13 +964,8 @@ impl<A: Application> PointerHandler for EngineState<A> {
         events: &[smithay_client_toolkit::seat::pointer::PointerEvent],
     ) {
         use smithay_client_toolkit::seat::pointer::PointerEventKind;
-        let mut coalesced_h = 0.0f64;
-        let mut coalesced_v = 0.0f64;
-        let mut discrete_h = 0;
-        let mut discrete_v = 0;
+        let mut scroll = ScrollFrame::default();
         let mut has_scroll = false;
-        let mut axis_source: Option<wl_pointer::AxisSource> = None;
-        let mut axis_stop = false;
         let (mut last_lx, mut last_ly) = (0.0f32, 0.0f32);
 
         // Forced mode: pointer positions arrive in the compositor's scale-1
@@ -1060,19 +986,13 @@ impl<A: Application> PointerHandler for EngineState<A> {
                 Some((ox, oy)) => (lx + ox, ly + oy),
                 None => (lx, ly),
             };
+            let pos = LogicalPosition::new(lx, ly);
 
-            self.cursor_pos = (lx, ly);
+            self.driver.cursor_pos = (lx, ly);
             match &event.kind {
                 PointerEventKind::Enter { .. } => {
-                    // Enter carries the pointer's position but no Motion follows until it
-                    // actually moves — without this the app's hover state is stale from
-                    // enter to first move, and a press in that window can misroute (e.g. a
-                    // divider press falling through to the movable-root plate window drag).
-                    let mut rebuild = false;
-                    self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(lx, ly), &mut rebuild);
-                    if rebuild {
-                        self.redraw = true;
-                    }
+                    let (driver, t) = self.turn();
+                    driver.pointer_enter(t, pos);
 
                     let cursor_icon = self.cursor_icon_at(lx, ly);
                     self.current_cursor_icon = Some(cursor_icon);
@@ -1082,56 +1002,14 @@ impl<A: Application> PointerHandler for EngineState<A> {
                 }
                 PointerEventKind::Leave { .. } => {
                     self.current_cursor_icon = None;
-                    // Focus can move mid-gesture (a fullscreen switch, a
-                    // relayout sliding the window away): the real Release
-                    // then lands on another surface, and an armed drag would
-                    // live forever, steered by whatever motion arrives next.
-                    // End held gestures with synthetic releases at the last
-                    // known cursor position before anything else.
-                    if self.buttons_down != 0 {
-                        let (px, py) = self.cursor_pos;
-                        for (bit, btn) in
-                            [(1u32, MouseButton::Left), (2, MouseButton::Right), (4, MouseButton::Middle)]
-                        {
-                            if self.buttons_down & bit == 0 {
-                                continue;
-                            }
-                            let mut rebuild = false;
-                            if let Some(msg) = self.inner.as_mut().unwrap().handle_mouse_input(
-                                btn,
-                                ElementState::Released,
-                                LogicalPosition::new(px, py),
-                                &mut rebuild,
-                            ) {
-                                let mut update_rebuild = false;
-                                self.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut self.exit);
-                                if update_rebuild {
-                                    rebuild = true;
-                                }
-                            }
-                            if rebuild {
-                                self.redraw = true;
-                            }
-                        }
-                        self.buttons_down = 0;
-                    }
-                    // Then clear hover with an off-screen move — safe now
-                    // that no drag is held.
-                    let mut rebuild = false;
-                    self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(-10000.0, -10000.0), &mut rebuild);
-                    if rebuild {
-                        self.redraw = true;
-                    }
+                    let (driver, t) = self.turn();
+                    driver.pointer_leave(t);
                 }
                 PointerEventKind::Motion { .. } => {
-                    let mut rebuild = false;
-                    self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(lx, ly), &mut rebuild);
-                    if rebuild {
-                        self.redraw = true;
-                    }
+                    let (driver, t) = self.turn();
+                    driver.pointer_motion(t, pos);
 
                     let cursor_icon = self.cursor_icon_at(lx, ly);
-
                     if self.current_cursor_icon != Some(cursor_icon) {
                         self.current_cursor_icon = Some(cursor_icon);
                         if let Some(ref themed_pointer) = self.pointer {
@@ -1140,158 +1018,41 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     }
                 }
                 PointerEventKind::Press { button, serial, .. } => {
-                    let btn = match *button {
-                        272 => MouseButton::Left,
-                        273 => MouseButton::Right,
-                        274 => MouseButton::Middle,
-                        _ => continue,
-                    };
+                    let Some(btn) = evdev_button(*button) else { continue };
                     self.last_press_serial = Some(*serial);
-                    self.buttons_down |= match btn {
-                        MouseButton::Left => 1,
-                        MouseButton::Right => 2,
-                        _ => 4,
+                    let seat = self.seats.first().cloned().or_else(|| self.seat_state.seats().next());
+                    let site = PressSite {
+                        size: self.logical_size(),
+                        on_popup,
+                        can_grab: self.window.is_some() && seat.is_some(),
                     };
-
-                    // Client-Side Decorations (CSD) Drag & Resize Handling
-                    let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
-                    // Never on the menu popup: its presses are the menu's, and
-                    // its coordinates, translated into the window's, would
-                    // otherwise read as a resize border or a movable plate.
-                    if btn == MouseButton::Left && !on_popup && !is_status_bar && self.inner.as_ref().unwrap().standard_csd() {
-                        let border = 8.0f32;
-                        let mut edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None;
-                        if !self.inner.as_ref().unwrap().csd_resize_borders() {
-                            // Resize borders are off: the compositor's own band
-                            // outside the window handles it. Fall through to the
-                            // move checks so drag-to-move still works.
-                        } else if ly < border {
-                            if lx < border {
-                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::TopLeft;
-                            } else if lx > self.logical_width - border {
-                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::TopRight;
-                            } else {
-                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::Top;
-                            }
-                        } else if ly > self.logical_height - border {
-                            if lx < border {
-                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::BottomLeft;
-                            } else if lx > self.logical_width - border {
-                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::BottomRight;
-                            } else {
-                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::Bottom;
-                            }
-                        } else if lx < border {
-                            edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::Left;
-                        } else if lx > self.logical_width - border {
-                            edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::Right;
+                    let (driver, t) = self.turn();
+                    let press = driver.pointer_press(t, btn, pos, site);
+                    if let (Some(window), Some(seat)) = (&self.window, &seat) {
+                        match press {
+                            Press::Dispatched => {}
+                            Press::Resize(edge) => window.resize(seat, *serial, xdg_resize_edge(edge)),
+                            Press::Move => window.move_(seat, *serial),
                         }
-
-                        if edge != smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None {
-                            if let Some(ref window) = self.window {
-                                let seat_owned = self.seats.first().cloned().or_else(|| self.seat_state.seats().next());
-                                if let Some(ref seat) = seat_owned {
-                                    window.resize(seat, *serial, edge);
-                                    continue;
-                                }
-                            }
-                        }
-
-                        // Titlebar drag check: y is in [8.0, 32.0], and x is not in the top-right button area
-                        let mut should_move = false;
-                        let mut is_widget = false;
-                        if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
-                            if ctx.is_widget_at(lx, ly) {
-                                is_widget = true;
-                            }
-                        }
-                        if !is_widget
-                            && self.inner.as_ref().unwrap().csd_titlebar_move()
-                            && ly >= border && ly < 32.0 && lx < self.logical_width - 70.0
-                        {
-                            should_move = true;
-                        } else if self.inner.as_ref().unwrap().is_movable_root_plate_at(lx, ly) {
-                            should_move = true;
-                        }
-
-                        if should_move {
-                            if let Some(ref window) = self.window {
-                                let seat_owned = self.seats.first().cloned().or_else(|| self.seat_state.seats().next());
-                                if let Some(ref seat) = seat_owned {
-                                    window.move_(seat, *serial);
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-
-                    // Outside-press close for open popovers, BEFORE the app's
-                    // dispatch: apps commonly region-gate their routing, so an
-                    // open menu's owner may never hear about a press elsewhere.
-                    if btn == MouseButton::Left {
-                        let app = self.inner.as_mut().unwrap();
-                        let offsets: Vec<_> = app
-                            .ui_context()
-                            .map(|ctx| ctx.popover_owners())
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|id| (id, app.popover_offset(id)))
-                            .collect();
-                        if let Some(ctx) = app.ui_context_mut() {
-                            ctx.close_popovers_missed_by_press_with(lx, ly, |id| {
-                                offsets.iter().find(|(o, _)| *o == id).map_or((0.0, 0.0), |&(_, d)| d)
-                            });
-                        }
-                    }
-
-                    let mut rebuild = false;
-                    if let Some(msg) = self.inner.as_mut().unwrap().handle_mouse_input(btn, ElementState::Pressed, LogicalPosition::new(lx, ly), &mut rebuild) {
-                        let mut update_rebuild = false;
-                        self.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut self.exit);
-                        if update_rebuild {
-                            rebuild = true;
-                        }
-                    }
-                    if rebuild {
-                        self.redraw = true;
                     }
                 }
                 PointerEventKind::Release { button, .. } => {
-                    let btn = match *button {
-                        272 => MouseButton::Left,
-                        273 => MouseButton::Right,
-                        274 => MouseButton::Middle,
-                        _ => continue,
-                    };
-                    self.buttons_down &= !match btn {
-                        MouseButton::Left => 1,
-                        MouseButton::Right => 2,
-                        _ => 4,
-                    };
-                    let mut rebuild = false;
-                    if let Some(msg) = self.inner.as_mut().unwrap().handle_mouse_input(btn, ElementState::Released, LogicalPosition::new(lx, ly), &mut rebuild) {
-                        let mut update_rebuild = false;
-                        self.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut self.exit);
-                        if update_rebuild {
-                            rebuild = true;
-                        }
-                    }
-                    if rebuild {
-                        self.redraw = true;
-                    }
+                    let Some(btn) = evdev_button(*button) else { continue };
+                    let (driver, t) = self.turn();
+                    driver.pointer_release(t, btn, pos);
                 }
                 PointerEventKind::Axis { horizontal, vertical, source, .. } => {
-                    coalesced_h += horizontal.absolute;
-                    coalesced_v += vertical.absolute;
-                    discrete_h += horizontal.discrete;
-                    discrete_v += vertical.discrete;
+                    scroll.h += horizontal.absolute;
+                    scroll.v += vertical.absolute;
+                    scroll.discrete_h += horizontal.discrete;
+                    scroll.discrete_v += vertical.discrete;
                     // The source and the finger-lift stop ride in the same
                     // frame as the deltas (or alone, for the lift): they
-                    // decide the smooth-scroll phase below.
-                    if source.is_some() {
-                        axis_source = *source;
+                    // decide the smooth-scroll phase.
+                    if let Some(source) = source {
+                        scroll.source = Some(scroll_source(*source));
                     }
-                    axis_stop |= horizontal.stop || vertical.stop;
+                    scroll.stop |= horizontal.stop || vertical.stop;
                     last_lx = lx;
                     last_ly = ly;
                     has_scroll = true;
@@ -1300,58 +1061,8 @@ impl<A: Application> PointerHandler for EngineState<A> {
         }
 
         if has_scroll {
-            // Per-app scroll factors from input.kdl (`<app>`/`cce-ui` domain
-            // `input { }` blocks); the compositor's global device scaling has
-            // already been applied at the source.
-            let factors = crate::input::scroll_factors();
-            // Smooth-scroll phase for this dispatch: a finger lift is a stop
-            // frame (no delta); finger/continuous sources track 1:1 and may
-            // fling on the lift; everything else is a wheel notch that glides.
-            let no_delta = coalesced_h == 0.0 && coalesced_v == 0.0 && discrete_h == 0 && discrete_v == 0;
-            let phase = if axis_stop && no_delta {
-                crate::widget::ScrollPhase::FingerEnd
-            } else if discrete_h == 0 && discrete_v == 0
-                && matches!(
-                    axis_source,
-                    None | Some(wl_pointer::AxisSource::Finger) | Some(wl_pointer::AxisSource::Continuous)
-                )
-            {
-                crate::widget::ScrollPhase::Finger
-            } else {
-                crate::widget::ScrollPhase::Wheel
-            };
-            crate::widget::scroll_motion::set_scroll_phase(phase);
-            let delta = if discrete_h == 0 && discrete_v == 0 {
-                // Pixel scroll event from touchpad / smooth mouse
-                MouseScrollDelta::PixelDelta(Position {
-                    x: -coalesced_h * factors.trackpad,
-                    y: -coalesced_v * factors.trackpad,
-                })
-            } else {
-                // Discrete scroll event (e.g. wheel clicks)
-                let h_lines = if discrete_h != 0 { discrete_h as f32 } else { coalesced_h as f32 / 10.0 };
-                let v_lines = if discrete_v != 0 { discrete_v as f32 } else { coalesced_v as f32 / 10.0 };
-                MouseScrollDelta::LineDelta(-h_lines * factors.mouse as f32, -v_lines * factors.mouse as f32)
-            };
-            if crate::scroll_debug() {
-                static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-                let t = T0.get_or_init(std::time::Instant::now).elapsed().as_millis();
-                eprintln!(
-                    "[scroll {t}ms] runner: coalesced=({coalesced_h:.2},{coalesced_v:.2}) discrete=({discrete_h},{discrete_v}) source={axis_source:?} stop={axis_stop} phase={phase:?} factors=(tp {:.2}, m {:.2}) -> {delta:?} at ({last_lx:.0},{last_ly:.0})",
-                    factors.trackpad, factors.mouse
-                );
-            }
-            let mut rebuild = false;
-            if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {
-                ctx.ctrl_pressed = self.ctrl_pressed;
-                ctx.shift_pressed = self.shift_pressed;
-                ctx.alt_pressed = self.alt_pressed;
-                ctx.logo_pressed = self.logo_pressed;
-            }
-            self.inner.as_mut().unwrap().handle_mouse_wheel(&delta, LogicalPosition::new(last_lx, last_ly), &mut rebuild);
-            if rebuild {
-                self.redraw = true;
-            }
+            let (driver, t) = self.turn();
+            driver.scroll(t, scroll, LogicalPosition::new(last_lx, last_ly));
         }
 
         // App-driven window move/resize (non-standard CSD; see WindowAction):
@@ -1370,6 +1081,41 @@ impl<A: Application> PointerHandler for EngineState<A> {
     }
 }
 
+/// An evdev button code as one of cce-ui's buttons; the rest are not routed.
+fn evdev_button(code: u32) -> Option<MouseButton> {
+    match code {
+        272 => Some(MouseButton::Left),
+        273 => Some(MouseButton::Right),
+        274 => Some(MouseButton::Middle),
+        _ => None,
+    }
+}
+
+fn xdg_resize_edge(edge: ResizeEdge) -> xdg_toplevel::ResizeEdge {
+    match edge {
+        ResizeEdge::Top => xdg_toplevel::ResizeEdge::Top,
+        ResizeEdge::Bottom => xdg_toplevel::ResizeEdge::Bottom,
+        ResizeEdge::Left => xdg_toplevel::ResizeEdge::Left,
+        ResizeEdge::Right => xdg_toplevel::ResizeEdge::Right,
+        ResizeEdge::TopLeft => xdg_toplevel::ResizeEdge::TopLeft,
+        ResizeEdge::TopRight => xdg_toplevel::ResizeEdge::TopRight,
+        ResizeEdge::BottomLeft => xdg_toplevel::ResizeEdge::BottomLeft,
+        ResizeEdge::BottomRight => xdg_toplevel::ResizeEdge::BottomRight,
+    }
+}
+
+/// A `wl_pointer` axis source as the driver's. Anything newer than the four
+/// known sources scrolls as a wheel, as it did when the runner matched on
+/// the protocol enum itself.
+fn scroll_source(source: wl_pointer::AxisSource) -> ScrollSource {
+    match source {
+        wl_pointer::AxisSource::Finger => ScrollSource::Finger,
+        wl_pointer::AxisSource::Continuous => ScrollSource::Continuous,
+        wl_pointer::AxisSource::WheelTilt => ScrollSource::WheelTilt,
+        _ => ScrollSource::Wheel,
+    }
+}
+
 impl<A: Application> KeyboardHandler for EngineState<A> {
     fn enter(
         &mut self,
@@ -1381,11 +1127,8 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         _raw_modifiers: &[u32],
         _keysyms: &[xkeysym::Keysym],
     ) {
-        let mut rebuild = false;
-        self.inner.as_mut().unwrap().handle_focus_change(true, &mut rebuild);
-        if rebuild {
-            self.redraw = true;
-        }
+        let (driver, t) = self.turn();
+        driver.keyboard_focus(t, true);
     }
 
     fn leave(
@@ -1396,17 +1139,10 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         _surface: &wl_surface::WlSurface,
         _serial: u32,
     ) {
-        self.pressed_key = None;
-        self.ctrl_pressed = false;
-        self.shift_pressed = false;
-        self.alt_pressed = false;
-        let mut rebuild = false;
-        self.inner.as_mut().unwrap().handle_focus_change(false, &mut rebuild);
-        if rebuild {
-            self.redraw = true;
-        }
+        let (driver, t) = self.turn();
+        driver.keyboard_focus(t, false);
     }
-    
+
     fn press_key(
         &mut self,
         _conn: &Connection,
@@ -1417,7 +1153,7 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
     ) {
         self.handle_key(event, ElementState::Pressed);
     }
-    
+
     fn release_key(
         &mut self,
         _conn: &Connection,
@@ -1428,7 +1164,7 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
     ) {
         self.handle_key(event, ElementState::Released);
     }
-    
+
     fn update_modifiers(
         &mut self,
         _conn: &Connection,
@@ -1438,17 +1174,13 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         modifiers: smithay_client_toolkit::seat::keyboard::Modifiers,
         _layout: u32,
     ) {
-        self.ctrl_pressed = modifiers.ctrl;
-        self.shift_pressed = modifiers.shift;
-        self.alt_pressed = modifiers.alt;
-        self.logo_pressed = modifiers.logo;
-
-        if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {
-            ctx.ctrl_pressed = self.ctrl_pressed;
-            ctx.shift_pressed = self.shift_pressed;
-            ctx.alt_pressed = self.alt_pressed;
-            ctx.logo_pressed = self.logo_pressed;
-        }
+        let mods = Modifiers {
+            ctrl: modifiers.ctrl,
+            shift: modifiers.shift,
+            alt: modifiers.alt,
+            logo: modifiers.logo,
+        };
+        self.driver.set_modifiers(self.inner.as_mut().unwrap(), mods);
     }
 
     fn update_repeat_info(
@@ -1469,191 +1201,71 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
 }
 
 impl<A: Application> EngineState<A> {
-    /// The toolkit-wide undo/redo routing: a press matching the `undo` /
-    /// `redo` chord goes to the focused widget first (`ContextAction::Undo`
-    /// / `Redo` — a text box that is editing steps its own typing), then to
-    /// the app's `Application::undo` / `redo`. Returns whether either took
-    /// it; otherwise the key is dispatched as usual, so an app with its own
-    /// scheme is undisturbed. Runs for repeats too — holding the chord walks
-    /// the history like holding Backspace walks the text.
-    /// The toolkit's Tab traversal, for apps that opt in
-    /// (`Application::plate_navigation`): a bare Tab / Shift+Tab press moves
-    /// keyboard focus to the next / previous plate or well. Returns whether it
-    /// moved; otherwise the key is dispatched as usual.
-    fn route_plate_navigation(&mut self, event: &KeyEvent, rebuild: &mut bool) -> bool {
-        if event.state != ElementState::Pressed {
-            return false;
-        }
-        // The group jump first (its chords carry ctrl); then a bare Tab.
-        let group_next = crate::widget::match_key_shortcut(event, &self.group_next_chord);
-        let group_prev = !group_next && crate::widget::match_key_shortcut(event, &self.group_prev_chord);
-        let bare_tab = event.logical_key == Key::Named(NamedKey::Tab)
-            && !self.ctrl_pressed
-            && !self.alt_pressed
-            && !self.logo_pressed;
-        if !group_next && !group_prev && !bare_tab {
-            return false;
-        }
-        let reverse = if bare_tab { self.shift_pressed } else { group_prev };
-        let app = self.inner.as_mut().unwrap();
-        if !app.plate_navigation() {
-            return false;
-        }
-        let moved = app.ui_context_mut().is_some_and(|ctx| if bare_tab { ctx.focus_step(reverse) } else { ctx.focus_step_group(reverse) });
-        if moved {
-            app.focus_stepped();
-            *rebuild = true;
-        }
-        moved
-    }
-
-    fn route_history_chord(&mut self, event: &KeyEvent, rebuild: &mut bool) -> bool {
-        if event.state != ElementState::Pressed {
-            return false;
-        }
-        let undo = crate::widget::match_key_shortcut(event, &self.undo_chord);
-        let redo = !undo && crate::widget::match_key_shortcut(event, &self.redo_chord);
-        if !undo && !redo {
-            return false;
-        }
-        let app = self.inner.as_mut().unwrap();
-        let action = if undo { crate::widget::ContextAction::Undo } else { crate::widget::ContextAction::Redo };
-        if let Some(ctx) = app.ui_context_mut() {
-            if ctx.focused_context_action(action) {
-                *rebuild = true;
-                return true;
-            }
-        }
-        let taken = if undo { app.undo(rebuild) } else { app.redo(rebuild) };
-        if taken {
-            *rebuild = true;
-        }
-        taken
-    }
-
     fn handle_key(&mut self, event: smithay_client_toolkit::seat::keyboard::KeyEvent, state: ElementState) {
-        let logical_key = match event.keysym {
-            xkeysym::Keysym::Escape => Key::Named(NamedKey::Escape),
-            xkeysym::Keysym::Return => Key::Named(NamedKey::Enter),
-            xkeysym::Keysym::BackSpace => Key::Named(NamedKey::Backspace),
-            xkeysym::Keysym::Down => Key::Named(NamedKey::ArrowDown),
-            xkeysym::Keysym::Up => Key::Named(NamedKey::ArrowUp),
-            xkeysym::Keysym::Left => Key::Named(NamedKey::ArrowLeft),
-            xkeysym::Keysym::Right => Key::Named(NamedKey::ArrowRight),
-            // xkb reports Shift+Tab as ISO_Left_Tab; apps see plain Tab plus
-            // the shift modifier, matching winit.
-            xkeysym::Keysym::Tab | xkeysym::Keysym::ISO_Left_Tab => Key::Named(NamedKey::Tab),
-            xkeysym::Keysym::Delete => Key::Named(NamedKey::Delete),
-            xkeysym::Keysym::space => Key::Named(NamedKey::Space),
-            xkeysym::Keysym::Page_Up => Key::Named(NamedKey::PageUp),
-            xkeysym::Keysym::Page_Down => Key::Named(NamedKey::PageDown),
-            xkeysym::Keysym::Home => Key::Named(NamedKey::Home),
-            xkeysym::Keysym::End => Key::Named(NamedKey::End),
-            xkeysym::Keysym::Super_L | xkeysym::Keysym::Super_R => Key::Named(NamedKey::Super),
-            xkeysym::Keysym::Alt_L | xkeysym::Keysym::Alt_R => Key::Named(NamedKey::Alt),
-            xkeysym::Keysym::Control_L | xkeysym::Keysym::Control_R => Key::Named(NamedKey::Control),
-            xkeysym::Keysym::Shift_L | xkeysym::Keysym::Shift_R => Key::Named(NamedKey::Shift),
-            xkeysym::Keysym::F1 => Key::Named(NamedKey::F1),
-            xkeysym::Keysym::F2 => Key::Named(NamedKey::F2),
-            xkeysym::Keysym::F3 => Key::Named(NamedKey::F3),
-            xkeysym::Keysym::F4 => Key::Named(NamedKey::F4),
-            xkeysym::Keysym::F5 => Key::Named(NamedKey::F5),
-            xkeysym::Keysym::F6 => Key::Named(NamedKey::F6),
-            xkeysym::Keysym::F7 => Key::Named(NamedKey::F7),
-            xkeysym::Keysym::F8 => Key::Named(NamedKey::F8),
-            xkeysym::Keysym::F9 => Key::Named(NamedKey::F9),
-            xkeysym::Keysym::F10 => Key::Named(NamedKey::F10),
-            xkeysym::Keysym::F11 => Key::Named(NamedKey::F11),
-            xkeysym::Keysym::F12 => Key::Named(NamedKey::F12),
-            _ => {
-                // With Ctrl held, xkb's utf8 goes through the legacy control-character
-                // transformation (ctrl+j = "\n", ctrl+a = 0x01, ...); the keysym is
-                // untransformed, so prefer it there or ctrl+<letter> shortcuts can
-                // never match their letter.
-                if self.ctrl_pressed {
-                    if let Some(ch) = event.keysym.key_char() {
-                        Key::Character(ch.to_string())
-                    } else if let Some(ref text) = event.utf8 {
-                        Key::Character(text.clone())
-                    } else {
-                        return;
-                    }
+        let Some(logical_key) = xkb_logical_key(&event, self.driver.mods.ctrl) else { return };
+        let (driver, t) = self.turn();
+        driver.key(t, logical_key, event.utf8, state);
+    }
+}
+
+/// An xkb key event as one of cce-ui's keys, or `None` for a key with no
+/// meaning to it (no name here and no text).
+fn xkb_logical_key(event: &smithay_client_toolkit::seat::keyboard::KeyEvent, ctrl: bool) -> Option<Key> {
+    Some(match event.keysym {
+        xkeysym::Keysym::Escape => Key::Named(NamedKey::Escape),
+        xkeysym::Keysym::Return => Key::Named(NamedKey::Enter),
+        xkeysym::Keysym::BackSpace => Key::Named(NamedKey::Backspace),
+        xkeysym::Keysym::Down => Key::Named(NamedKey::ArrowDown),
+        xkeysym::Keysym::Up => Key::Named(NamedKey::ArrowUp),
+        xkeysym::Keysym::Left => Key::Named(NamedKey::ArrowLeft),
+        xkeysym::Keysym::Right => Key::Named(NamedKey::ArrowRight),
+        // xkb reports Shift+Tab as ISO_Left_Tab; apps see plain Tab plus
+        // the shift modifier, matching winit.
+        xkeysym::Keysym::Tab | xkeysym::Keysym::ISO_Left_Tab => Key::Named(NamedKey::Tab),
+        xkeysym::Keysym::Delete => Key::Named(NamedKey::Delete),
+        xkeysym::Keysym::space => Key::Named(NamedKey::Space),
+        xkeysym::Keysym::Page_Up => Key::Named(NamedKey::PageUp),
+        xkeysym::Keysym::Page_Down => Key::Named(NamedKey::PageDown),
+        xkeysym::Keysym::Home => Key::Named(NamedKey::Home),
+        xkeysym::Keysym::End => Key::Named(NamedKey::End),
+        xkeysym::Keysym::Super_L | xkeysym::Keysym::Super_R => Key::Named(NamedKey::Super),
+        xkeysym::Keysym::Alt_L | xkeysym::Keysym::Alt_R => Key::Named(NamedKey::Alt),
+        xkeysym::Keysym::Control_L | xkeysym::Keysym::Control_R => Key::Named(NamedKey::Control),
+        xkeysym::Keysym::Shift_L | xkeysym::Keysym::Shift_R => Key::Named(NamedKey::Shift),
+        xkeysym::Keysym::F1 => Key::Named(NamedKey::F1),
+        xkeysym::Keysym::F2 => Key::Named(NamedKey::F2),
+        xkeysym::Keysym::F3 => Key::Named(NamedKey::F3),
+        xkeysym::Keysym::F4 => Key::Named(NamedKey::F4),
+        xkeysym::Keysym::F5 => Key::Named(NamedKey::F5),
+        xkeysym::Keysym::F6 => Key::Named(NamedKey::F6),
+        xkeysym::Keysym::F7 => Key::Named(NamedKey::F7),
+        xkeysym::Keysym::F8 => Key::Named(NamedKey::F8),
+        xkeysym::Keysym::F9 => Key::Named(NamedKey::F9),
+        xkeysym::Keysym::F10 => Key::Named(NamedKey::F10),
+        xkeysym::Keysym::F11 => Key::Named(NamedKey::F11),
+        xkeysym::Keysym::F12 => Key::Named(NamedKey::F12),
+        _ => {
+            // With Ctrl held, xkb's utf8 goes through the legacy control-character
+            // transformation (ctrl+j = "\n", ctrl+a = 0x01, ...); the keysym is
+            // untransformed, so prefer it there or ctrl+<letter> shortcuts can
+            // never match their letter.
+            if ctrl {
+                if let Some(ch) = event.keysym.key_char() {
+                    Key::Character(ch.to_string())
                 } else if let Some(ref text) = event.utf8 {
                     Key::Character(text.clone())
-                } else if let Some(ch) = event.keysym.key_char() {
-                    Key::Character(ch.to_string())
                 } else {
-                    return;
+                    return None;
                 }
-            }
-        };
-
-        let custom_event = KeyEvent {
-            state,
-            logical_key,
-            text: event.utf8.clone(),
-            repeat: false,
-            ctrl: self.ctrl_pressed,
-            shift: self.shift_pressed,
-            alt: self.alt_pressed,
-        };
-
-        if state == ElementState::Pressed {
-            if is_repeatable_key(&custom_event.logical_key) {
-                self.pressed_key = Some(PressedKey {
-                    logical_key: custom_event.logical_key.clone(),
-                    text: custom_event.text.clone(),
-                    first_pressed: Instant::now(),
-                    last_repeated: Instant::now(),
-                });
+            } else if let Some(ref text) = event.utf8 {
+                Key::Character(text.clone())
+            } else if let Some(ch) = event.keysym.key_char() {
+                Key::Character(ch.to_string())
             } else {
-                self.pressed_key = None;
-            }
-        } else if state == ElementState::Released {
-            if let Some(ref pk) = self.pressed_key {
-                if pk.logical_key == custom_event.logical_key {
-                    self.pressed_key = None;
-                }
+                return None;
             }
         }
-
-        if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {
-            ctx.ctrl_pressed = self.ctrl_pressed;
-            ctx.shift_pressed = self.shift_pressed;
-            ctx.alt_pressed = self.alt_pressed;
-            ctx.logo_pressed = self.logo_pressed;
-        }
-
-        // Escape dismisses the shared context menu before app dispatch — the
-        // toolkit-wide default, mirroring the click-outside dismissal. Consumed:
-        // while a menu is open, Escape means "close it", nothing else.
-        if state == ElementState::Pressed
-            && custom_event.logical_key == Key::Named(NamedKey::Escape)
-            && crate::widget::context_menu::is_visible()
-        {
-            crate::widget::context_menu::hide();
-            self.redraw = true;
-            return;
-        }
-
-        let mut rebuild = false;
-        if self.route_history_chord(&custom_event, &mut rebuild)
-            || self.route_plate_navigation(&custom_event, &mut rebuild)
-        {
-            self.redraw = true;
-            return;
-        }
-        if let Some(msg) = self.inner.as_mut().unwrap().handle_key_input(&custom_event, &mut rebuild) {
-            let mut update_rebuild = false;
-            self.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut self.exit);
-            if update_rebuild {
-                rebuild = true;
-            }
-        }
-        if rebuild {
-            self.redraw = true;
-        }
-    }
+    })
 }
 
 impl<A: Application> wayland_client::Dispatch<wl_registry::WlRegistry, GlobalList, Self> for EngineState<A> {
@@ -1813,54 +1425,12 @@ impl<A: Application> wayland_client::Dispatch<ZwpPointerGesturePinchV1, ()> for 
         _qh: &QueueHandle<Self>,
     ) {
         match event {
-            zwp_pointer_gesture_pinch_v1::Event::Begin { .. } => {
-                state.last_pinch_scale = 1.0;
-            }
+            zwp_pointer_gesture_pinch_v1::Event::Begin { .. } => state.driver.pinch_begin(),
             zwp_pointer_gesture_pinch_v1::Event::Update { scale, .. } => {
-                let scale_f32 = scale as f32;
-                let factor = scale_f32 / state.last_pinch_scale;
-                state.last_pinch_scale = scale_f32;
-
-                let (px, py) = state.cursor_pos;
-                let mut rebuild = false;
-
-                // First offer the gesture as-is: apps with true pinch
-                // surfaces (the designer's 3D viewport) consume it here at
-                // 1:1 scale instead of through the wheel synthesis below.
-                if state.inner.as_mut().unwrap().handle_pinch(factor, LogicalPosition::new(px, py), &mut rebuild) {
-                    if rebuild {
-                        state.redraw = true;
-                    }
-                    return;
-                }
-
-                // Calculate the y_delta for PixelDelta mapping.
-                // Since cce-graph interprets factor = 1.0 + y_delta * 0.015, we reverse it:
-                let y_delta = (factor - 1.0) / 0.015;
-                let delta = MouseScrollDelta::PixelDelta(Position {
-                    x: 0.0,
-                    y: y_delta as f64,
-                });
-
-                if let Some(ctx) = state.inner.as_mut().unwrap().ui_context_mut() {
-                    ctx.ctrl_pressed = true; // Force ctrl_pressed = true for the pinch event
-                }
-                // A synthesized delta, not a scroll gesture: no glide, no fling.
-                crate::widget::scroll_motion::set_scroll_phase(crate::widget::ScrollPhase::Wheel);
-
-                state.inner.as_mut().unwrap().handle_mouse_wheel(&delta, LogicalPosition::new(px, py), &mut rebuild);
-
-                if let Some(ctx) = state.inner.as_mut().unwrap().ui_context_mut() {
-                    ctx.ctrl_pressed = state.ctrl_pressed; // Restore original state
-                }
-
-                if rebuild {
-                    state.redraw = true;
-                }
+                let (driver, t) = state.turn();
+                driver.pinch_update(t, scale as f32);
             }
-            zwp_pointer_gesture_pinch_v1::Event::End { .. } => {
-                state.last_pinch_scale = 1.0;
-            }
+            zwp_pointer_gesture_pinch_v1::Event::End { .. } => state.driver.pinch_end(),
             _ => {}
         }
     }
@@ -2232,15 +1802,7 @@ fn run_session<'l, A: Application>(
         warm_until: None,
         extent_gate_skips: 0,
         first_configure_received: false,
-        ctrl_pressed: false,
-        undo_chord: crate::input::app_chord("undo", "ctrl+z"),
-        redo_chord: crate::input::app_chord("redo", "ctrl+shift+z"),
-        group_next_chord: crate::input::app_chord("focus_next_group", "ctrl+tab"),
-        group_prev_chord: crate::input::app_chord("focus_prev_group", "ctrl+shift+tab"),
-        shift_pressed: false,
-        alt_pressed: false,
-        logo_pressed: false,
-        pressed_key: None,
+        driver: Driver::new(),
         sender,
         current_cursor_icon: None,
         qh: qh.clone(),
@@ -2249,10 +1811,7 @@ fn run_session<'l, A: Application>(
         pinch_gesture: None,
         cce_toplevel: None,
         pending_grid_patch: None,
-        last_pinch_scale: 1.0,
-        cursor_pos: (0.0, 0.0),
         last_press_serial: None,
-        buttons_down: 0,
         dl_text_items: Vec::new(),
     };
 
@@ -2404,9 +1963,6 @@ fn run_session<'l, A: Application>(
         engine_state.inner.as_mut().unwrap().register_sources(&loop_handle);
     }
 
-    const KEY_REPEAT_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
-    const KEY_REPEAT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
-
     /// Same switch as the renderer's present tracer, resolved once — this sits
     /// in the per-iteration path, so a `std::env::var` call here would be I/O
     /// on the loop that is under measurement.
@@ -2552,25 +2108,9 @@ fn run_session<'l, A: Application>(
             dt = dt.min(1.0 / 60.0);
         }
 
-        let mut rebuild = false;
-        let roster_ticks_before =
-            engine_state.inner.as_mut().unwrap().ui_context_mut().map(|ctx| ctx.tick_count());
-        engine_state.inner.as_mut().unwrap().tick(dt, &mut rebuild);
-        if rebuild {
-            engine_state.redraw = true;
-        }
-        // Tick the app's retained UiContext (widget tick_receivers — e.g. an
-        // animating Dropdown popover) for apps that expose it — but only when
-        // the app's own tick did not already do so this frame. Receivers
-        // integrate `dt` (scroll glides, slider inertia), so the old
-        // "double-ticking is harmless" assumption ran every glide at twice
-        // its configured rate in apps that tick the context themselves.
-        if let Some(ctx) = engine_state.inner.as_mut().unwrap().ui_context_mut() {
-            if Some(ctx.tick_count()) == roster_ticks_before {
-                if ctx.tick(dt) {
-                    engine_state.redraw = true;
-                }
-            }
+        {
+            let (driver, t) = engine_state.turn();
+            driver.tick(t, dt);
         }
 
         let just_configured = engine_state.just_configured;
@@ -2612,45 +2152,9 @@ fn run_session<'l, A: Application>(
         }
         engine_state.sync_menu_popup();
 
-        if let Some(ref mut pk) = engine_state.pressed_key {
-            let now = std::time::Instant::now();
-            if now.duration_since(pk.first_pressed) >= KEY_REPEAT_DELAY {
-                if now.duration_since(pk.last_repeated) >= KEY_REPEAT_INTERVAL {
-                    pk.last_repeated = now;
-                    let custom_event = KeyEvent {
-                        state: ElementState::Pressed,
-                        logical_key: pk.logical_key.clone(),
-                        text: pk.text.clone(),
-                        repeat: true,
-                        ctrl: engine_state.ctrl_pressed,
-                        shift: engine_state.shift_pressed,
-                        alt: engine_state.alt_pressed,
-                    };
-
-                    if let Some(ctx) = engine_state.inner.as_mut().unwrap().ui_context_mut() {
-                        ctx.ctrl_pressed = engine_state.ctrl_pressed;
-                        ctx.shift_pressed = engine_state.shift_pressed;
-                        ctx.alt_pressed = engine_state.alt_pressed;
-                        ctx.logo_pressed = engine_state.logo_pressed;
-                    }
-
-                    let mut key_rebuild = false;
-                    if engine_state.route_history_chord(&custom_event, &mut key_rebuild)
-                        || engine_state.route_plate_navigation(&custom_event, &mut key_rebuild)
-                    {
-                        engine_state.redraw = true;
-                    } else if let Some(msg) = engine_state.inner.as_mut().unwrap().handle_key_input(&custom_event, &mut key_rebuild) {
-                        let mut update_rebuild = false;
-                        engine_state.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut engine_state.exit);
-                        if update_rebuild {
-                            key_rebuild = true;
-                        }
-                    }
-                    if key_rebuild {
-                        engine_state.redraw = true;
-                    }
-                }
-            }
+        {
+            let (driver, t) = engine_state.turn();
+            driver.repeat_keys(t);
         }
         let current_title = engine_state.inner.as_ref().unwrap().settings().title;
         if current_title != last_title {
@@ -2736,7 +2240,7 @@ fn run_session<'l, A: Application>(
         let warm = engine_state
             .warm_until
             .is_some_and(|t| std::time::Instant::now() < t);
-        let busy = engine_state.redraw || rendered || warm || engine_state.pressed_key.is_some();
+        let busy = engine_state.redraw || rendered || warm || engine_state.driver.pressed_key.is_some();
         next_timeout = if busy {
             ACTIVE_DISPATCH
         } else {
