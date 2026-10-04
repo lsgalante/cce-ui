@@ -1,0 +1,5 @@
+# web-sys still marks its WebGPU bindings unstable: the browser renderer
+# (src/web) needs them switched on for the wasm target. A client crate that
+# builds cce-ui for the browser needs the same line in its own config.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg=web_sys_unstable_apis"]

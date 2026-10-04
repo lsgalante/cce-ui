@@ -64,3 +64,95 @@ wayland-scanner = "0.31"
 xkeysym = "0.2"
 libc = "0.2"
 rfd = "0.15"
+
+# The browser shell and renderer (W2/W3 of the web port): WebGPU through
+# web-sys, the page through wasm-bindgen.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console",
+    "Window",
+    "Navigator",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Gpu",
+    "GpuAdapter",
+    "GpuDevice",
+    "GpuQueue",
+    "GpuCanvasContext",
+    "GpuCanvasConfiguration",
+    "GpuCanvasAlphaMode",
+    "GpuTextureFormat",
+    "GpuShaderModule",
+    "GpuShaderModuleDescriptor",
+    "GpuBindGroupLayout",
+    "GpuBindGroupLayoutDescriptor",
+    "GpuBindGroupLayoutEntry",
+    "GpuBufferBindingLayout",
+    "GpuBufferBindingType",
+    "GpuTextureBindingLayout",
+    "GpuTextureSampleType",
+    "GpuTextureViewDimension",
+    "GpuSamplerBindingLayout",
+    "GpuSamplerBindingType",
+    "GpuPipelineLayout",
+    "GpuPipelineLayoutDescriptor",
+    "GpuRenderPipeline",
+    "GpuRenderPipelineDescriptor",
+    "GpuVertexState",
+    "GpuVertexBufferLayout",
+    "GpuVertexAttribute",
+    "GpuVertexFormat",
+    "GpuVertexStepMode",
+    "GpuFragmentState",
+    "GpuColorTargetState",
+    "GpuBlendState",
+    "GpuBlendComponent",
+    "GpuBlendFactor",
+    "GpuBlendOperation",
+    "GpuPrimitiveState",
+    "GpuPrimitiveTopology",
+    "GpuBindGroup",
+    "GpuBindGroupDescriptor",
+    "GpuBindGroupEntry",
+    "GpuBufferBinding",
+    "GpuBuffer",
+    "GpuBufferDescriptor",
+    "GpuTexture",
+    "GpuTextureDescriptor",
+    "GpuTextureDimension",
+    "GpuTextureView",
+    "GpuTextureViewDescriptor",
+    "GpuSampler",
+    "GpuSamplerDescriptor",
+    "GpuAddressMode",
+    "GpuFilterMode",
+    "GpuMipmapFilterMode",
+    "GpuCommandEncoder",
+    "GpuCommandEncoderDescriptor",
+    "GpuCommandBuffer",
+    "GpuRenderPassEncoder",
+    "GpuRenderPassDescriptor",
+    "GpuRenderPassColorAttachment",
+    "GpuLoadOp",
+    "GpuStoreOp",
+    "GpuColorDict",
+    "GpuExtent3dDict",
+    "GpuOrigin3dDict",
+    "GpuTexelCopyTextureInfo",
+    "GpuTexelCopyBufferInfo",
+    "GpuTexelCopyBufferLayout",
+    "gpu_buffer_usage",
+    "gpu_texture_usage",
+    "gpu_shader_stage",
+    "gpu_map_mode",
+] }
+
+# The renderer probe: one scene through both renderers (examples/probe/).
+# probe_web is the browser half, a cdylib for wasm-bindgen; natively it is empty.
+[[example]]
+name = "probe_web"
+crate-type = ["cdylib"]

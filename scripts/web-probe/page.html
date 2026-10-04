@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>cce-ui WebGPU probe</title>
+<style>html,body{margin:0;background:#000}canvas{display:block;width:1280px;height:800px}</style>
+<canvas id="c" width="1280" height="800"></canvas>
+<script type="module">
+import init, { probe } from './probe_web.js';
+window.runProbe = async () => {
+  await init();
+  const names = await (await fetch('fonts.json')).json();
+  const fonts = [];
+  for (const n of names) fonts.push(new Uint8Array(await (await fetch('fonts/' + n)).arrayBuffer()));
+  const rgba = await probe(document.getElementById('c'), fonts);
+  let s = '';
+  for (let i = 0; i < rgba.length; i += 0x8000) s += String.fromCharCode.apply(null, rgba.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+window.probeReady = true;
+</script>

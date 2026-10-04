@@ -70,6 +70,33 @@ the browser), and reaches what a renderer draws through `crate::draw`, not `crat
 change that makes portable code call into a native module fails `check-wasm` first — put
 the native half behind the cfg, as `color_selector::place_picker_at_pointer` does.
 
+**It draws in the browser too** (`src/web`, `WebRenderer`, since 2026-10-04): the Vulkan
+renderer's 2D path on WebGPU through web-sys, from the same `Frame2D`, shaders, glyph atlas
+and image queue. web-sys still ships its WebGPU bindings behind `--cfg=web_sys_unstable_apis`;
+`.cargo/config.toml` sets it for the wasm target, and **cargo reads that file from the
+directory it is run in** — so build the browser half from inside `cce-ui` (as
+`check-wasm` does), and a client crate that builds cce-ui for the browser needs the same line
+in its own config. There is no browser shell yet (W3): nothing drives `Pacer::turn` or feeds
+the page's events in.
+
+**The renderer probe holds the two renderers to each other.** `examples/probe/scene.rs`
+is one 1280x800 frame of nearly every prim — root, pane and frosted plates, every control
+stance, fields, carves, bevel, sphere, grooves, vector caps, text at four sizes in two
+families, an image at two sizes. `cargo run --example probe_native` draws it through
+Vulkan (a Wayland session; screenshot it); `scripts/web-probe/run <out.rgba>` builds
+`probe_web` for wasm, binds it with wasm-bindgen-cli (the version in Cargo.lock) and draws
+it in headless Chromium on SwiftShader, reading the frame back from the GPU; and
+`scripts/web-probe/compare.py native.png out.rgba 1280 800` diffs them. Both halves must
+have the same fonts — the native one with `CCE_LOAD_SYSTEM_FONTS=1`, the web one handed the
+DejaVu files (`$PROBE_FONTS_DIR`) — and the screenshot must not carry a cursor (sway:
+`seat * hide_cursor 200`), which is a difference the diff cannot tell from the renderer's.
+Lavapipe against SwiftShader, 2026-10-04: 96.8% of channels equal, every other within 2
+levels but ONE at 3 — rounding at antialiased edges and in the blur, no shading difference.
+Chromium needs `--use-angle=swiftshader --enable-unsafe-swiftshader
+--disable-gpu-compositing` beside the WebGPU flags (`capture.mjs`): headless, with GPU
+compositing it has no shared-image backing for a WebGPU canvas and loses the device on the
+first present ("A valid external Instance reference no longer exists").
+
 Wayland protocol bindings are generated **inline at compile time** by `wayland-scanner` macros in
 `src/protocol.rs` from `protocol/*.xml` (`cce-inspector-v1`, `cce-window-management-v1`) — there is
 no `build.rs` and no codegen step to run.
@@ -1140,6 +1167,11 @@ cce-system-interface) to confirm behavior, not just the test suite.
   `textureSampleLevel(…, 0.0)` because WebGPU rejects implicit-LOD sampling in the
   non-uniform blur branch (the backdrop has one level, so the texel is the same —
   `frost_pair` is identical to the pixel either way).
+- `web/` — wasm32 only: `WebRenderer` (`new(canvas).await`, `resize`, `prepare_text`,
+  `draw_frame_2d`, and `capture_next_frame` / `take_capture().await` to read a frame back).
+  Its module doc lists what differs from the Vulkan path: an sRGB VIEW of the canvas's
+  unorm format, the parameter block as a dynamic-offset uniform, a 1x1 backdrop, the blur
+  snapshot as end-pass / copy / resume, every frame drawn whole.
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
   the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance

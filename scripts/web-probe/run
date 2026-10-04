@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# web-probe/run <out.rgba> — draw the renderer probe (examples/probe/scene.rs)
+# through the WebGPU renderer in headless Chromium and write the frame it read
+# back from the GPU: 1280x800 premultiplied RGBA8.
+#
+# Its other half is the same scene through the Vulkan renderer,
+# `cargo run --example probe_native`, screenshotted in a compositor; compare.py
+# composites this frame over that compositor's background and diffs the two.
+#
+# Needs: the wasm32-unknown-unknown target, wasm-bindgen-cli at the version in
+# Cargo.lock, node with Playwright (see capture.mjs), and the DejaVu fonts
+# ($PROBE_FONTS_DIR, default /usr/share/fonts/truetype/dejavu) — the native
+# half must see the same fonts, or text is the difference you measure.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+out=$(realpath -m "${1:?usage: web-probe/run <out.rgba>}")
+fonts=${PROBE_FONTS_DIR:-/usr/share/fonts/truetype/dejavu}
+cd "$here/../.."
+
+cargo build --release --target wasm32-unknown-unknown --example probe_web
+site=$(mktemp -d)
+trap 'rm -rf "$site"' EXIT
+wasm-bindgen --target web --no-typescript --out-dir "$site" \
+    target/wasm32-unknown-unknown/release/examples/probe_web.wasm
+cp "$here/page.html" "$site/index.html"
+mkdir "$site/fonts"
+cp "$fonts"/*.ttf "$site/fonts/"
+(cd "$site/fonts" && printf '%s\n' *.ttf | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().split()))') > "$site/fonts.json"
+node "$here/capture.mjs" "$site" "$out"
+echo "web-probe: wrote $out"

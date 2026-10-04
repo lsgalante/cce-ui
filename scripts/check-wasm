@@ -4,6 +4,10 @@
 # optional features. The native shell and renderer (Wayland, Vulkan, the
 # compositor IPC) are cfg'd out there; everything else must compile, and a
 # change that reaches for one of them from portable code fails here first.
+# The WebGPU renderer (src/web) and the probe's browser half build here too;
+# they need web-sys's unstable WebGPU bindings, switched on for this crate in
+# .cargo/config.toml — which cargo reads from the directory it runs in, hence
+# the cd below.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if ! rustup target list --installed 2>/dev/null | grep -qx wasm32-unknown-unknown; then
@@ -13,4 +17,5 @@ if ! rustup target list --installed 2>/dev/null | grep -qx wasm32-unknown-unknow
 fi
 cargo check --lib --target wasm32-unknown-unknown
 cargo check --lib --target wasm32-unknown-unknown --features markdown,doc_editor
+cargo check --example probe_web --target wasm32-unknown-unknown
 echo "check-wasm: ok"

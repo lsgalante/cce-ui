@@ -30,6 +30,8 @@ pub mod mcp;
 pub mod motion;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vk;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 
 pub mod colors {
     pub use crate::color::*;
