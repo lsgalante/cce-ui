@@ -267,7 +267,7 @@ impl Button {
             .lock()
             .ok()
             .and_then(|mut fs| {
-                crate::backend::window_runner::shaped_cluster_offsets(&mut fs, label, size, font.as_deref())
+                crate::backend::text::shaped_cluster_offsets(&mut fs, label, size, font.as_deref())
                     .last()
                     .map(|&(_, total)| total)
             })
@@ -732,7 +732,7 @@ mod tests {
         for label in ["Attach...", "Load Images", "Cancel"] {
             let drawn = {
                 let mut fs = crate::geometry_font_system().lock().unwrap();
-                crate::backend::window_runner::shaped_cluster_offsets(&mut fs, label, size, font.as_deref())
+                crate::backend::text::shaped_cluster_offsets(&mut fs, label, size, font.as_deref())
                     .last()
                     .map(|&(_, t)| t)
                     .unwrap()
@@ -775,7 +775,7 @@ mod tests {
         // 8px in from the left.
         let drawn = {
             let mut fs = crate::geometry_font_system().lock().unwrap();
-            crate::backend::window_runner::shaped_cluster_offsets(&mut fs, &text.0, text.2, text.3.as_deref())
+            crate::backend::text::shaped_cluster_offsets(&mut fs, &text.0, text.2, text.3.as_deref())
                 .last()
                 .map(|&(_, t)| t)
                 .unwrap()

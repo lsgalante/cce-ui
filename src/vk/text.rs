@@ -22,38 +22,14 @@ use gpu_allocator::vulkan::{
 };
 use gpu_allocator::MemoryLocation;
 
-use cosmic_text::{Buffer as TextBuffer, CacheKey, SwashContent};
+use cosmic_text::{CacheKey, SwashContent};
 use cosmic_text::{FontSystem, SwashCache};
 
 use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
+pub use crate::draw::TextSpan;
 
 const ATLAS_SIZE: u32 = 1024;
 const ATLAS_PAD: u32 = 1;
-
-/// One shaped text run to draw. `left`/`top` are physical pixels and `scale`
-/// multiplies the shaped (logical) glyph positions — the same contract as
-/// the old glyphon::TextArea, where callers pass `label.x * scale`.
-pub struct TextSpan<'a> {
-    pub buffer: &'a TextBuffer,
-    pub left: f32,
-    pub top: f32,
-    pub scale: f32,
-    /// Physical-pixel clip rect (left, top, right, bottom); None = whole surface.
-    pub bounds: Option<[i32; 4]>,
-    /// 0..=1 sRGB + alpha, applied to glyphs without their own color.
-    pub default_color: [f32; 4],
-    /// Rotate the span's glyph quads by (radians, center_x, center_y) in
-    /// physical pixels — the circular network pane's curved rim labels.
-    pub rotation: Option<(f32, f32, f32)>,
-    /// Fragment circle clip (center_x, center_y, radius) in physical pixels;
-    /// zero radius disables (matches shader.wgsl's clip_circle).
-    pub clip_circle: [f32; 3],
-    /// Rounded-rect clip half-extents (physical px). Zero keeps `clip_circle` a plain
-    /// circle; non-zero reinterprets it as a rounded-rect SDF clip — center
-    /// `clip_circle.xy`, corner radius `clip_circle.z`, inner box half-size
-    /// `clip_extents` — so plate children (labels included) cut off at rounded corners.
-    pub clip_extents: [f32; 2],
-}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]

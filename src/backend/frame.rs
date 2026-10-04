@@ -17,7 +17,7 @@ use cosmic_text::FontSystem;
 use super::app::{Application, LogicalSize};
 use super::tessellate::{quad_vertices, tessellate_display_list, DlBatch, Vertex};
 use super::text::{collect_dl_text, dl_text_spans, TextBounds};
-use crate::vk::{Batch2D, Frame2D, ImageQuad, TextSpan};
+use crate::draw::{Batch2D, Frame2D, ImageQuad, TextSpan};
 use crate::widget::TextItem;
 
 /// One frame, built and owned: the renderer's [`Frame2D`] is a borrow of it

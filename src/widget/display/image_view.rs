@@ -1,7 +1,7 @@
 //! `ImageView` — a GPU-textured image fitted into the widget's rect via
 //! [`fit_rect`]. The view BORROWS its image id: ids come from
-//! [`crate::vk::upload_rgba`] and stay owned by the app, which frees them with
-//! [`crate::vk::free_image`] when done — the widget never uploads or frees GPU
+//! [`crate::draw::upload_rgba`] and stay owned by the app, which frees them with
+//! [`crate::draw::free_image`] when done — the widget never uploads or frees GPU
 //! resources, so one id can back several views and a dropped view leaks
 //! nothing. `image: None` paints only the optional letterbox floor.
 //!

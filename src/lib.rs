@@ -12,6 +12,7 @@ pub mod scale;
 pub mod units;
 pub mod backend;
 pub mod context;
+pub mod draw;
 pub mod scene;
 pub mod file_dialog;
 pub mod icon;
@@ -99,7 +100,7 @@ pub fn upload_icon(name: &str, px: u32) -> Option<(u32, u32, u32)> {
     /// The cached ids, and the renderer epoch they were uploaded to.
     static CACHE: Mutex<Option<(u32, HashMap<(String, u32), Option<(u32, u32, u32)>>)>> =
         Mutex::new(None);
-    let epoch = crate::vk::renderer_epoch();
+    let epoch = crate::draw::renderer_epoch();
     let key = (name.to_string(), px);
     let mut guard = CACHE.lock().unwrap();
     let (cached_epoch, cache) = guard.get_or_insert_with(|| (epoch, HashMap::new()));
@@ -116,7 +117,7 @@ pub fn upload_icon(name: &str, px: u32) -> Option<(u32, u32, u32)> {
         let path = format!("{}/{name}.svg", icons_dir());
         let data = std::fs::read(&path).ok()?;
         let (rgba, w, h) = rasterize_svg(&data, px)?;
-        Some((crate::vk::upload_rgba(rgba, w, h), w, h))
+        Some((crate::draw::upload_rgba(rgba, w, h), w, h))
     })();
     cache.insert(key, loaded);
     loaded

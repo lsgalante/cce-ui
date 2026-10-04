@@ -359,6 +359,7 @@ dependencies = [
  "calloop-wayland-source",
  "cce-vault",
  "cosmic-text",
+ "cursor-icon",
  "glam",
  "gpu-allocator",
  "kdl",

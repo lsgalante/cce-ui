@@ -1110,6 +1110,14 @@ cce-system-interface) to confirm behavior, not just the test suite.
   what a frame contains in `frame.rs` and a pacing change in `shell.rs`, never in the
   Wayland code. A second shell implements `Shell` and calls `Pacer::turn` from its own
   loop (an animation frame, a run-loop observer), sleeping or scheduling for the `Step`. `menu_popup.rs` and `dnd.rs` are Wayland-only.
+- `draw/` — what a renderer draws, with no renderer in it (since 2026-10-04): `Frame2D`,
+  `Batch2D`, `PlatePush` and `batch_push_constants` (the one layout of a batch's 32-float
+  parameter block — Vulkan pushes it, a renderer without push constants puts it in a
+  uniform), `TextSpan`, `ImageQuad`, and `draw::images`, the image-id queue
+  (`upload_rgba`, `update_pixels`, `free_image`, `renderer_epoch`, …) that a renderer
+  drains with `take_pending`. They lived in `vk/` while Vulkan was the only renderer;
+  `vk` re-exports every one at its old path, so `cce_ui::vk::upload_rgba` and the rest
+  are unchanged for clients.
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
   the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance

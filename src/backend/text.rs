@@ -5,7 +5,7 @@
 
 use cosmic_text::{FontSystem, Buffer, Attrs, Metrics};
 use crate::widget::TextItem;
-use crate::vk::TextSpan;
+use crate::draw::TextSpan;
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 struct BufferCacheKey {

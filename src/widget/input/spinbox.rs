@@ -315,7 +315,7 @@ impl Paint for Spinbox {
         // keyed by byte; the editor state is char-indexed.
         let text = self.value_text();
         let clusters =
-            crate::backend::window_runner::shaped_cluster_offsets(fs, &text, 14.0, None);
+            crate::backend::text::shaped_cluster_offsets(fs, &text, 14.0, None);
         let mut offsets = vec![0.0f32; text.chars().count() + 1];
         for (byte, x) in clusters {
             let ci = text[..byte.min(text.len())].chars().count();

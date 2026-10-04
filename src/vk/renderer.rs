@@ -18,35 +18,12 @@ use gpu_allocator::MemoryLocation;
 use crate::engine::Vertex;
 
 use super::core::SurfaceLost;
-use super::image::{ImageQuad, ImageStage};
+use super::image::ImageStage;
+pub use crate::draw::{Batch2D, Frame2D, PlatePush, MAX_PLATE_FEATURES};
+pub(crate) use crate::draw::{batch_push_constants, PUSH_CONSTANT_FLOATS};
 use super::rt::{RtCamera, RtEnvironment, RtImage, RtImageSource, RtMaterial, RtStage, RtTriangle};
 use super::scene::{MeshId, SceneDraw, SceneImage, SceneStage, Vertex3D};
 use super::text::{TextSpan, TextStage};
-
-/// One scissored draw range of a 2D frame. `scissor` is (x, y, w, h) in
-/// physical pixels; None draws with the full-surface scissor. `clip_rrect` is an
-/// optional rounded-rect clip `[cx, cy, bx, by, r]` (center, SDF half-extents, corner
-/// radius; physical px) applied via push constants — fragments outside it discard, so a
-/// plate's children cut off at its rounded corners.
-pub struct Batch2D {
-    pub scissor: Option<(u32, u32, u32, u32)>,
-    pub clip_rrect: Option<[f32; 5]>,
-    pub start: u32,
-    pub end: u32,
-    /// When set, this batch is a single SDF-lit plate cover quad: the params go
-    /// out as push constants and shader2d's plate branch lights it per pixel.
-    pub plate: Option<PlatePush>,
-    /// A blur-behind plate (negative-alpha color): the renderer suspends the UI
-    /// pass, copies the swapchain-so-far into its snapshot image, and resumes —
-    /// so the plate's blur samples everything painted beneath it (background,
-    /// widgets, wires), not just the 3D scene backdrop.
-    pub blur_behind: bool,
-}
-
-/// Floats in the fragment push-constant block: the rounded-rect clip (`rect0`,
-/// `rect1` — 6 clip/flag floats plus the plate mode and corner shape) followed
-/// by [`PlatePush`]'s six vec4s. Field for field, this is shader2d's `RRectClip`.
-pub(crate) const PUSH_CONSTANT_FLOATS: usize = 32;
 
 /// The block in bytes. **This is exactly `maxPushConstantsSize`'s
 /// Vulkan-guaranteed minimum, so the budget is full** — every one of the 32
@@ -70,98 +47,6 @@ const _: () = assert!(
      query limits.max_push_constants_size at device init and add a fallback path \
      before raising PUSH_CONSTANT_FLOATS"
 );
-
-/// The fragment push-constant block for one batch: its rounded-rect clip,
-/// and its plate block when it is a plate cover quad. `feature_base` is the
-/// frame slot's first entry in the feature UBO, added to a plate's (or a
-/// union carve's) feature offset. Shared with the offscreen test harness
-/// (`vk::plate_probe`), so the two cannot push different blocks.
-pub(crate) fn batch_push_constants(batch: &Batch2D, clip_shape: f32, feature_base: usize) -> [f32; PUSH_CONSTANT_FLOATS] {
-    let rr = batch.clip_rrect.unwrap_or([0.0; 5]);
-    let enabled = if batch.clip_rrect.is_some() { 1.0f32 } else { 0.0 };
-    let mut pc = [0.0f32; PUSH_CONSTANT_FLOATS];
-    pc[..5].copy_from_slice(&rr);
-    pc[5] = enabled;
-    pc[7] = clip_shape;
-    if let Some(p) = &batch.plate {
-        pc[6] = p.mode;
-        pc[7] = p.shape;
-        pc[8..12].copy_from_slice(&p.rect);
-        pc[12..16].copy_from_slice(&p.radii);
-        pc[16..20].copy_from_slice(&p.light);
-        pc[20..24].copy_from_slice(&p.material);
-        pc[24..28].copy_from_slice(&p.host);
-        pc[28..32].copy_from_slice(&p.specular_tint);
-        if p.mode == 1.0 || p.mode == 14.0 {
-            // Rebase the feature offset onto this frame's UBO slot (a plate's
-            // CSG carves, or a union carve's boxes).
-            pc[24] += feature_base as f32;
-        }
-    }
-    pc
-}
-
-/// Push-constant block for one SDF-lit plate batch (physical px throughout).
-/// Mirrors the `p_*` fields of shader2d's `RRectClip`.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub struct PlatePush {
-    /// SDF box: center + half-extents. May extend past the cover quad — that is
-    /// how a recess suppresses a wall.
-    pub rect: [f32; 4],
-    /// Per-corner radii [tl, tr, br, bl].
-    pub radii: [f32; 4],
-    /// xyz = unit vector toward the light (+z out of the screen), w = roll width px.
-    pub light: [f32; 4],
-    /// [shading strength, specular strength, shininess, curvature/AO strength].
-    pub material: [f32; 4],
-    /// Mode 1: `[feature offset, feature count, frost z, frost w]` — xy into
-    /// the frame's `plate_features`, the carves CSG'd out of this plate (the
-    /// renderer adds the frame slot's base offset at record time); zw the
-    /// plate's frost recipe, `scene::material::Frost::pack` (compression and
-    /// refraction packed in z, the blur sigma in physical px in w). Mode 14 uses the same
-    /// `[offset, count]` for the union's boxes. Mode 2: the host-plate box
-    /// (center + half-extents) a free recess fades out against; far-away sides
-    /// (±1e5) disable the fade.
-    pub host: [f32; 4],
-    /// RGB multiplies the roll's specular color (w unused). Neutral white
-    /// normally; the focused-pane bevel carries the highlight color here.
-    pub specular_tint: [f32; 4],
-    /// 1.0 = raised lit plate, 2.0 = recess overlay, 3.0 = boss, 4.0 = ridge,
-    /// 5.0 = sphere, 6.0/7.0 = concave fillet (recessed/raised), 8.0 = groove
-    /// (slab carve about a line: `rect` = [cx, cy, half-width, _], `radii.xy` =
-    /// the line's unit normal, `host` = the surface it is engraved into),
-    /// 9.0 = trough, 10.0 = droplet (`radii` = [sag, belly r, belly half-w,
-    /// blend k] px, `host` = [sheet corner r px, clarity, dome amplitude,
-    /// attach r px], `material.w` = fresnel rim, `specular_tint` = [core
-    /// density, _, _, bottom-bow rise px] — droplet glints are always white,
-    /// so the tint RGB is repurposed; see shader2d's MODE_DROPLET).
-    pub mode: f32,
-    /// Corner shape exponent: 2.0 = circular arcs, > 2 = superellipse
-    /// (continuous-curvature) corners — see shader2d's `plate_sdf_grad`.
-    pub shape: f32,
-}
-
-/// A full 2D frame: the display-list vertices (optionally split into scissored
-/// batches), overlay vertices drawn after text, and the clear color (linear;
-/// only used on frames without a backdrop copy).
-pub struct Frame2D<'a> {
-    pub verts: &'a [Vertex],
-    pub batches: &'a [Batch2D],
-    pub overlay_verts: &'a [Vertex],
-    /// User images drawn interleaved with `verts` by each quad's `z_before`.
-    pub images: &'a [ImageQuad],
-    /// Carves CSG'd into this frame's SDF-lit plates, 12 floats each (rect
-    /// center+half-extents, per-corner radii, [width px, depth px, 0, 0]).
-    /// Plate batches reference them by offset+count in `PlatePush::host`.
-    pub plate_features: &'a [[f32; 12]],
-    pub clear_color: [f32; 4],
-    /// The only part of the surface that differs from the previous frame,
-    /// (x, y, w, h) in physical pixels; None = all of it. With a rect the
-    /// renderer keeps the pixels outside it (see [`ImageAge`]) and tells the
-    /// compositor that only the rect changed. The caller vouches for it: a
-    /// pixel that changed outside the rect stays as it was.
-    pub damage: Option<(u32, u32, u32, u32)>,
-}
 
 /// How far a swapchain image's pixels are behind the latest frame. A frame
 /// with [`Frame2D::damage`] repaints only what the image it acquired is
@@ -211,9 +96,6 @@ fn rect_intersect(a: vk::Rect2D, b: vk::Rect2D) -> vk::Rect2D {
 }
 
 pub(crate) const FRAMES_IN_FLIGHT: usize = 2;
-/// Max plate-carve features per frame; the shader's UBO holds one slot of this
-/// size per frame in flight.
-pub const MAX_PLATE_FEATURES: usize = 64;
 pub(crate) const PLATE_FEATURE_BYTES: usize = 48;
 /// shader2d's WindowInfo UBO: [size/clip vec4][bevel-profile meta vec4]
 /// [8 vec4 of profile slope samples].

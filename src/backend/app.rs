@@ -8,7 +8,8 @@ use wayland_client::QueueHandle;
 use cosmic_text::FontSystem;
 use crate::widget::{MouseButton, ElementState, MouseScrollDelta, KeyEvent};
 use crate::vk::VkRenderer;
-use super::window_runner::{EngineState, PointerCursorIcon as CursorIcon};
+use super::window_runner::EngineState;
+use cursor_icon::CursorIcon;
 use super::tessellate::Vertex;
 
 #[derive(Debug, Clone)]

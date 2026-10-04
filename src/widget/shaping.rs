@@ -36,12 +36,12 @@ impl Measure for ShapingMeasure {
         if let Some(w) = self.cache.get(&key) {
             return *w;
         }
-        let buf = crate::backend::window_runner::get_text_buffer_attrs(&mut self.fs, text, size, Some(font), attrs);
+        let buf = crate::backend::text::get_text_buffer_attrs(&mut self.fs, text, size, Some(font), attrs);
         // The glyphs' extent, trailing spaces included — the same measure
         // `offsets` ends on. (A layout run's `line_w` leaves trailing
         // whitespace out, so a width taken from it disagreed with where
         // the next run was placed by a space.)
-        let w = crate::backend::window_runner::normalized_glyph_starts(&buf, text)
+        let w = crate::backend::text::normalized_glyph_starts(&buf, text)
             .into_iter()
             .map(|(_, x, w)| x + w)
             .fold(0.0, f32::max)
@@ -58,8 +58,8 @@ impl ShapingMeasure {
     /// combining mark) takes the cluster's start.
     pub fn offsets(&mut self, text: &str, size: f32, font: &str, attrs: TextAttrs) -> Vec<(usize, f32)> {
         let scale = crate::scale::scale_factor().max(0.01);
-        let buf = crate::backend::window_runner::get_text_buffer_attrs(&mut self.fs, text, size, Some(font), attrs);
-        let glyphs = crate::backend::window_runner::normalized_glyph_starts(&buf, text);
+        let buf = crate::backend::text::get_text_buffer_attrs(&mut self.fs, text, size, Some(font), attrs);
+        let glyphs = crate::backend::text::normalized_glyph_starts(&buf, text);
         let mut starts: Vec<(usize, f32)> = Vec::with_capacity(glyphs.len() + 1);
         let mut width = 0.0f32;
         for (start, x, w) in glyphs {

@@ -1422,7 +1422,7 @@ impl Paint for TextBox {
             display_text.to_string()
         };
 
-        let buffer = crate::backend::window_runner::get_text_buffer(fs, &render_text, self.font_size, font_fam);
+        let buffer = crate::backend::text::get_text_buffer(fs, &render_text, self.font_size, font_fam);
 
         let char_count = render_text.chars().count();
         let mut x_offsets = vec![0.0; char_count + 1];
@@ -1431,14 +1431,14 @@ impl Paint for TextBox {
 
         // One column's advance, from the same shaping path as the labels (buffer-cached,
         // so this is a lookup after the first frame per family/size).
-        let probe = crate::backend::window_runner::get_text_buffer(fs, "MMMMMMMM", self.font_size, font_fam);
+        let probe = crate::backend::text::get_text_buffer(fs, "MMMMMMMM", self.font_size, font_fam);
         self.shaped_char_advance = probe
             .layout_runs()
             .next()
             .and_then(|run| run.glyphs.last().map(|g| (g.x + g.w) / scale / 8.0))
             .unwrap_or(0.0);
 
-        for (start, gx, gw) in crate::backend::window_runner::normalized_glyph_starts(&buffer, &render_text) {
+        for (start, gx, gw) in crate::backend::text::normalized_glyph_starts(&buffer, &render_text) {
             let c_idx = render_text[..start.min(render_text.len())].chars().count();
             if c_idx < x_offsets.len() {
                 x_offsets[c_idx] = gx / scale;
@@ -1480,11 +1480,11 @@ impl Paint for TextBox {
             };
             let (lines, _) = self.wrap_text(max_chars);
             for line in &lines {
-                let line_buffer = crate::backend::window_runner::get_text_buffer(fs, line, self.font_size, font_fam);
+                let line_buffer = crate::backend::text::get_text_buffer(fs, line, self.font_size, font_fam);
                 let n = line.chars().count();
                 let mut offs = vec![0.0f32; n + 1];
                 let mut line_total: f32 = 0.0;
-                for (start, gx, gw) in crate::backend::window_runner::normalized_glyph_starts(&line_buffer, line) {
+                for (start, gx, gw) in crate::backend::text::normalized_glyph_starts(&line_buffer, line) {
                     let c_idx = line[..start.min(line.len())].chars().count();
                     if c_idx < offs.len() {
                         offs[c_idx] = gx / scale;

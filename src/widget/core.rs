@@ -618,7 +618,7 @@ pub mod context_menu {
                         .lock()
                         .ok()
                         .and_then(|mut fs| {
-                            crate::backend::window_runner::shaped_cluster_offsets(&mut fs, s, size, Some(&family))
+                            crate::backend::text::shaped_cluster_offsets(&mut fs, s, size, Some(&family))
                                 .last()
                                 .map(|&(_, total)| total)
                         })
@@ -2131,7 +2131,7 @@ mod context_menu_padding_tests {
         let (family, size) = super::context_menu::label_font();
         let drawn = {
             let mut fs = crate::geometry_font_system().lock().unwrap();
-            crate::backend::window_runner::shaped_cluster_offsets(&mut fs, "● Follow Active Editor", size, Some(&family))
+            crate::backend::text::shaped_cluster_offsets(&mut fs, "● Follow Active Editor", size, Some(&family))
                 .last()
                 .map(|&(_, t)| t)
                 .unwrap()

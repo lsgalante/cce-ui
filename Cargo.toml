@@ -41,6 +41,10 @@ wayland-protocols = { version = "0.31", features = ["client", "unstable"] }
 wayland-backend = "0.3"
 wayland-scanner = "0.31"
 bitflags = "2"
+# The cursor names an app returns. smithay-client-toolkit re-exports this same
+# crate's type, so the Wayland shell hands it over unconverted; depending on it
+# directly keeps the client contract free of the toolkit.
+cursor-icon = "1.2"
 xkeysym = "0.2"
 resvg = "0.41.0"
 # App/tray icon themes are overwhelmingly PNG; resvg covers only the SVG half.

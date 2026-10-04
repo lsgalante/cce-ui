@@ -16,7 +16,7 @@
 use std::time::Instant;
 
 use super::app::{Application, LogicalPosition, LogicalSize};
-use super::window_runner::PointerCursorIcon as CursorIcon;
+use cursor_icon::CursorIcon;
 use crate::widget::{ElementState, Key, KeyEvent, MouseButton, MouseScrollDelta, NamedKey, Position};
 
 /// A key held down, for the runner's own key repeat.

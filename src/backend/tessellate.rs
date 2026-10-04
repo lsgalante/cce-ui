@@ -5,7 +5,7 @@
 //! `window_runner` so another shell can share it.
 
 use crate::widget::WidgetHost;
-use crate::vk::Batch2D;
+use crate::draw::Batch2D;
 
 /// A droplet spec resolved against a concrete rect: the push-constant fields
 /// that define its SILHOUETTE, in logical px.
@@ -1276,8 +1276,8 @@ pub struct DlBatch {
     pub start: u32,
     pub end: u32,
     /// When set, this batch is one SDF-lit plate cover quad (see
-    /// [`crate::vk::PlatePush`]; already in physical px). Never merged.
-    pub plate: Option<crate::vk::PlatePush>,
+    /// [`crate::draw::PlatePush`]; already in physical px). Never merged.
+    pub plate: Option<crate::draw::PlatePush>,
     /// A blur-behind plate (negative-alpha color): before drawing this batch
     /// the renderer snapshots the swapchain-so-far into its snapshot image, so
     /// the blur samples everything painted beneath the plate — not just the 3D
@@ -1462,7 +1462,7 @@ pub fn tessellate_display_list(
 
     for item in &dl.items {
         let mut start = verts.len() as u32;
-        let mut plate: Option<crate::vk::PlatePush> = None;
+        let mut plate: Option<crate::draw::PlatePush> = None;
         // A frosted flat fill promoted to a zero-depth plate batch (below):
         // it carries a recipe like any plate, but it is ordinary geometry to
         // the carve grouping — it opens no host and closes the open ones.
@@ -1701,7 +1701,7 @@ pub fn tessellate_display_list(
                 // A tinted carve also never groups: a CSG feature is geometry only,
                 // so the tint could only land on the whole plate's specular.
                 let full_ring = *edges == (true, true, true, true);
-                let host_plate = if mode < 3.5 && full_ring && tint.is_none() && features.len() < crate::vk::MAX_PLATE_FEATURES {
+                let host_plate = if mode < 3.5 && full_ring && tint.is_none() && features.len() < crate::draw::MAX_PLATE_FEATURES {
                     // The carve's shaded region, for the occlusion test below
                     // (the overlay path's cover-quad inflation).
                     let infl = *depth * 0.5 + 2.0;
@@ -1755,7 +1755,7 @@ pub fn tessellate_display_list(
                         let roll = batches[bi].plate.as_ref().map_or(0.0, |p| p.light[3]) / scale;
                         let later: Vec<crate::scene::layout::Rect> =
                             plate_stack[si + 1..].iter().map(|&(_, r)| r).collect();
-                        let budget_full = features.len() >= crate::vk::MAX_PLATE_FEATURES;
+                        let budget_full = features.len() >= crate::draw::MAX_PLATE_FEATURES;
                         if let Some(why) =
                             near_roll_fallback_reason(rect, *depth, &prect, roll, &later, budget_full)
                         {
@@ -1807,7 +1807,7 @@ pub fn tessellate_display_list(
                                 format!("edge-suppressed {edges:?} — the extended wall would smear across the host")
                             } else if tint.is_some() {
                                 "tinted — a CSG feature is geometry only, it carries no color".into()
-                            } else if features.len() >= crate::vk::MAX_PLATE_FEATURES {
+                            } else if features.len() >= crate::draw::MAX_PLATE_FEATURES {
                                 format!("feature budget full ({} used)", features.len())
                             } else if enclosing.is_empty() {
                                 format!("no enclosing plate ({} open)", plate_stack.len())
@@ -2093,7 +2093,7 @@ pub fn tessellate_display_list(
                 // the disc by 1px for the shader's silhouette anti-aliasing.
                 let d = *radius + 1.0;
                 verts.extend(quad_vertices(cx - d, cy - d, 2.0 * d, 2.0 * d, sw, sh, color));
-                plate = Some(crate::vk::PlatePush {
+                plate = Some(crate::draw::PlatePush {
                     // Center + radius in physical px; the SDF box machinery is
                     // unused in this mode, so .w is free.
                     rect: [cx * scale, cy * scale, radius * scale, 0.0],
@@ -2120,7 +2120,7 @@ pub fn tessellate_display_list(
                 // outside the silhouette.
                 let g = droplet_geom(rect, spec);
                 verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, color));
-                plate = Some(crate::vk::PlatePush {
+                plate = Some(crate::draw::PlatePush {
                     rect: [
                         (rect.x + rect.width * 0.5) * scale,
                         (rect.y + rect.height * 0.5) * scale,
@@ -2160,7 +2160,7 @@ pub fn tessellate_display_list(
                     rect.height + sh_reach,
                     sw, sh, color,
                 ));
-                plate = Some(crate::vk::PlatePush {
+                plate = Some(crate::draw::PlatePush {
                     rect: [
                         (rect.x + rect.width * 0.5) * scale,
                         (rect.y + rect.height * 0.5) * scale,
@@ -2221,7 +2221,7 @@ pub fn tessellate_display_list(
                 let m = *depth * 0.5 + 2.0;
                 let r = *radius + m;
                 verts.extend(quad_vertices(cx - r, cy - r, 2.0 * r, 2.0 * r, sw, sh, [0.0; 4]));
-                plate = Some(crate::vk::PlatePush {
+                plate = Some(crate::draw::PlatePush {
                     rect: [cx * scale, cy * scale, *radius * scale, 0.0],
                     radii: [*a0, 0.0, 0.0, 0.0],
                     light: [plate_light[0], plate_light[1], plate_light[2], *depth * scale],
@@ -2251,7 +2251,7 @@ pub fn tessellate_display_list(
                 let (dx, dy) = (b.0 - a.0, b.1 - a.1);
                 let len = (dx * dx + dy * dy).sqrt();
                 let n = if len > 1e-4 { (-dy / len, dx / len) } else { (1.0, 0.0) };
-                plate = Some(crate::vk::PlatePush {
+                plate = Some(crate::draw::PlatePush {
                     // Centre + slab half-width in physical px; .w unused.
                     rect: [
                         (a.0 + b.0) * 0.5 * scale,
@@ -2333,7 +2333,7 @@ pub fn tessellate_display_list(
                 // fades against a host — its own rect bounds it).
                 let (pw, ph) = (period.0.max(1e-3), period.1.max(1e-3));
                 verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, [0.0; 4]));
-                plate = Some(crate::vk::PlatePush {
+                plate = Some(crate::draw::PlatePush {
                     rect: [origin.0 * scale, origin.1 * scale, cell.0 * 0.5 * scale, cell.1 * 0.5 * scale],
                     radii: [*radius * scale; 4],
                     light: [plate_light[0], plate_light[1], plate_light[2], *depth * scale],
@@ -2351,7 +2351,7 @@ pub fn tessellate_display_list(
                 // carried but unread.
                 let (pw, ph) = (period.0.max(1e-3), period.1.max(1e-3));
                 verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
-                plate = Some(crate::vk::PlatePush {
+                plate = Some(crate::draw::PlatePush {
                     rect: [origin.0 * scale, origin.1 * scale, cell.0 * 0.5 * scale, cell.1 * 0.5 * scale],
                     radii: [*radius * scale; 4],
                     light: [plate_light[0], plate_light[1], plate_light[2], 0.0],
@@ -2371,7 +2371,7 @@ pub fn tessellate_display_list(
                 // and the shader takes the nearest one per pixel. The cover
                 // quad is the union's bounding box grown by the wall's reach;
                 // off-shape corners of it sit at the plateau and shade nothing.
-                let budget = crate::vk::MAX_PLATE_FEATURES.saturating_sub(features.len());
+                let budget = crate::draw::MAX_PLATE_FEATURES.saturating_sub(features.len());
                 let take = boxes.len().min(budget);
                 if take < boxes.len() && plate_debug() {
                     eprintln!(
@@ -2417,7 +2417,7 @@ pub fn tessellate_display_list(
                 // not append past it (its features would no longer be
                 // contiguous), so it is closed here like any other appender.
                 last_feature_plate = None;
-                plate = Some(crate::vk::PlatePush {
+                plate = Some(crate::draw::PlatePush {
                     rect: [
                         (x0 + x1) * 0.5 * scale,
                         (y0 + y1) * 0.5 * scale,
@@ -2537,7 +2537,7 @@ fn flat_frost_push(
     scale: f32,
     light: [f32; 3],
     material: [f32; 4],
-) -> crate::vk::PlatePush {
+) -> crate::draw::PlatePush {
     let mut p = plate_push_raised(rect, radii, 0.0, scale, light, material, false, None);
     let [fz, fw] = crate::scene::material::Material::from_fill(fill).frost.pack(scale);
     p.host[2] = fz;
@@ -2554,7 +2554,7 @@ fn plate_push_raised(
     material: [f32; 4],
     scale_corners: bool,
     shape: Option<f32>,
-) -> crate::vk::PlatePush {
+) -> crate::draw::PlatePush {
     // Floored: a rect already shrunk past its padding (a window dragged
     // below what its layout can hold) has a NEGATIVE extent here, and
     // `clamp(0.0, cap)` with a negative cap is a panic, not a zero radius.
@@ -2570,7 +2570,7 @@ fn plate_push_raised(
     // the nominal-radius squircles of the widget silhouettes around them, and
     // at their few-px roll widths the offset crease is subpixel.
     let rscale = if scale_corners { crate::layout::corner_span_factor_for(shape) } else { 1.0 };
-    crate::vk::PlatePush {
+    crate::draw::PlatePush {
         rect: [
             (rect.x + rect.width * 0.5) * scale,
             (rect.y + rect.height * 0.5) * scale,
