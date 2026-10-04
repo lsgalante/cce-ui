@@ -2007,7 +2007,7 @@ mod tests {
 
     #[test]
     fn dual_geometry_views_stay_consistent() {
-        let mut g = two_nodes();
+        let g = two_nodes();
         let ctx = UiContext::new();
 
         // The plain view (designer path) and the rounded view (render_widget path) describe

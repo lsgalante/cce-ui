@@ -2475,7 +2475,7 @@ impl VkRenderer {
 /// or `present img N...` with no matching completion line is blocked inside
 /// the driver; see the off-viewport freeze notes on the present-mode choice
 /// in `create_swapchain`).
-fn present_debug() -> bool {
+pub(crate) fn present_debug() -> bool {
     static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *FLAG.get_or_init(|| std::env::var_os("CCE_PRESENT_DEBUG").is_some())
 }

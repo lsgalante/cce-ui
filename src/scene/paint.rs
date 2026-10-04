@@ -933,8 +933,8 @@ pub enum AlignV {
 
 /// Box layout for a [`Prim::Text`]: word-wrap width (`Some` ⇒ multiline wrap; `None` ⇒ single
 /// run) and horizontal/vertical alignment within a box of `box_height`. All lengths are logical.
-/// The backend shapes an uncached buffer (`get_text_buffer_laid_out`) so the wrap/align do not
-/// pollute the shared single-run cache, and applies the vertical offset from the shaped height.
+/// The backend shapes it with `get_text_buffer_laid_out`, cached under the box as well as the
+/// text, and applies the vertical offset from the shaped height.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextLayout {
     pub wrap_width: Option<f32>,
@@ -1930,8 +1930,8 @@ impl PaintCtx {
     }
 
     /// Boxed text: word-wrap + horizontal/vertical alignment within a box (a placed text box).
-    /// Unlike [`text_with`](PaintCtx::text_with), the backend shapes this uncached with the box
-    /// layout applied. `x, y` are the box's top-left; the backend applies the vertical offset.
+    /// Unlike [`text_with`](PaintCtx::text_with), the backend shapes this with the box layout
+    /// applied (cached per box). `x, y` are the box's top-left; the backend applies the vertical offset.
     #[allow(clippy::too_many_arguments)]
     pub fn text_boxed(
         &mut self,
