@@ -38,10 +38,11 @@ use calloop_wayland_source::WaylandSource;
 use cosmic_text::FontSystem;
 use crate::widget::{TextItem, MouseButton, ElementState, Key, NamedKey};
 use crate::wayland::detect_scale_factor;
-use crate::vk::{Frame2D, VkRenderer};
+use crate::vk::VkRenderer;
 
 pub use super::app::*;
 pub use super::driver::PressedKey;
+use super::frame::build_frame;
 use super::driver::{Driver, Modifiers, Press, PressSite, ResizeEdge, ScrollFrame, ScrollSource, Turn};
 pub use super::tessellate::*;
 pub use super::text::*;
@@ -415,179 +416,25 @@ impl<A: Application> EngineState<A> {
             }
         }
         
-        // 0. Shape every registered widget against the SAME FontSystem the glyph pass draws
-        // with, before the app builds its frame. A widget's caret/selection/click→index math
-        // reads per-glyph advances its `prepare_text` records; nothing else calls it on the
-        // display-list path (the paint walk is `&dyn`, and apps were left to remember —
-        // cce-list, cce-secrets, and the reference DemoApp all forgot, so their carets fell
-        // back to `measure_text_width("M")`, an inked extent that drifts off the glyphs).
-        // The flat path shapes in `layout::render_widget`; apps that hand-shape still work —
-        // their call and this one hit the same shaped-buffer cache. Pointers are collected
-        // first so the registry borrow ends before any widget is mutated (the missed-press
-        // walk dereferences the same registry the same way).
-        {
-            let ptrs: Vec<*mut (dyn crate::widget::WidgetHost + 'static)> = self
-                .inner
-                .as_ref()
-                .unwrap()
-                .ui_context()
-                .map(|ctx| ctx.tree.iter_registered().map(|(_, p)| p).collect())
-                .unwrap_or_default();
-            if !ptrs.is_empty() {
-                let fs = self.font_system.as_mut().unwrap();
-                for ptr in ptrs {
-                    unsafe {
-                        if let Some(w) = ptr.as_mut() {
-                            w.prepare_text(fs);
-                        }
-                    }
-                }
-            }
-        }
+        // The frame itself, built with no window system in it (`backend::frame`).
+        let frame = build_frame(
+            self.inner.as_mut().unwrap(),
+            self.font_system.as_mut().unwrap(),
+            LogicalSize::new(logical_w, logical_h),
+            scale_factor,
+            &mut self.damage_owed,
+            &mut self.dl_text_items,
+        );
 
-        // 1. The frame's geometry IS the app's display list — the single paint path. Tessellated
-        // below as one batched, GPU-scissor-clipped pass. An app that draws nothing returns
-        // `None`, giving an empty frame (the legacy view*/tuple-wrapping path is gone).
-        let dl = self.inner.as_mut().unwrap()
-            .display_list(LogicalSize::new(logical_w, logical_h), scale_factor)
-            .unwrap_or_else(|| crate::scene::paint::PaintCtx::new().finish());
-        // Taken with the display list it describes. A frame that took the
-        // app's damage and then was not presented owes those pixels, so the
-        // next one that is presented repaints everything.
-        let app_damage = self
-            .inner
-            .as_mut()
-            .unwrap()
-            .take_damage(LogicalSize::new(logical_w, logical_h), scale_factor);
-        let damage = match (app_damage, self.damage_owed) {
-            (Some((x, y, w, h)), false) => {
-                // Outward to whole physical pixels, plus one for an
-                // antialiased edge.
-                let s = scale_factor as f32;
-                let x0 = ((x * s).floor() - 1.0).max(0.0);
-                let y0 = ((y * s).floor() - 1.0).max(0.0);
-                let x1 = ((x + w) * s).ceil() + 1.0;
-                let y1 = ((y + h) * s).ceil() + 1.0;
-                Some((x0 as u32, y0 as u32, (x1 - x0).max(0.0) as u32, (y1 - y0).max(0.0) as u32))
-            }
-            _ => None,
-        };
-        self.damage_owed = true;
-
-        // 1a. Phase 6 display-list text: shape the list's Text prims through the shared buffer
-        // cache and hold them for the glyph pass (the TextSpans built below borrow these).
-        // Clip = the paint walk's item clip ∩ the prim's own bounds, in logical space.
-        self.dl_text_items.clear();
-        if self.inner.as_ref().unwrap().display_list_text() {
-            collect_dl_text(self.font_system.as_mut().unwrap(), &dl, &mut self.dl_text_items);
-        }
-
-        let (mut verts, mut dl_batches, dl_images, plate_features) = tessellate_display_list(&dl, logical_w, logical_h, scale_factor as f32);
-        // A pending height-field export (`CCE_HEIGHTMAP`, or an app's
-        // `scene::heightfield::request`): the plates of THIS frame, sampled
-        // as the geometry the shader is about to shade.
-        if let Some(req) = crate::scene::heightfield::take_request() {
-            let s = scale_factor as f32;
-            let (pw, ph) = ((logical_w * s).round() as usize, (logical_h * s).round() as usize);
-            let hf = crate::scene::heightfield::HeightField::from_frame(&dl_batches, &plate_features, pw, ph, s);
-            let (lo, hi) = hf.range_px();
-            match crate::scene::heightfield::export_png(&hf, &req.path, req.mm_per_sample) {
-                Ok(()) => log::info!(
-                    "[heightfield] wrote {} ({}x{} px, {:.3}..{:.3} mm, metric {})",
-                    req.path.display(), pw, ph, lo / hf.px_per_mm, hi / hf.px_per_mm, hf.source.as_str()
-                ),
-                Err(e) => log::warn!("[heightfield] export to {} failed: {e}", req.path.display()),
-            }
-        }
-        // custom_vertices (e.g. graph geometry) is appended as a final unclipped batch drawn on top.
-        let pre_custom = verts.len() as u32;
-        self.inner.as_mut().unwrap().custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
-        if (verts.len() as u32) > pre_custom {
-            dl_batches.push(DlBatch { scissor: None, clip_rrect: None, start: pre_custom, end: verts.len() as u32, plate: None, blur_behind: false });
-        }
-
-        // 1b. Overlay quads (drawn after the text pass).
-        let mut overlay_quads = Vec::new();
-        self.inner.as_mut().unwrap().overlay_quads(&mut overlay_quads, LogicalSize::new(logical_w, logical_h), scale_factor);
-        let mut overlay_verts = Vec::new();
-        for &(qx, qy, qw, qh, qc) in &overlay_quads {
-            overlay_verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
-        }
-
-        // 2. Prepare text
-        let scale_f32 = scale_factor as f32;
-        let pw = (logical_w * scale_f32) as u32;
-        let ph = (logical_h * scale_f32) as u32;
-
-        let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
-        // All text is display-list text now (the legacy text_items/text_areas path is gone):
-        // map each dl Text prim with the default mapping (scale + surface clamp) plus the
-        // popover-occlusion clamp against the app's registered popovers.
-        let mut dl_overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
-        if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
-            for &pop_id in &ctx.active_popovers {
-                if let Some(ptr) = ctx.tree.get_ptr(pop_id) {
-                    unsafe {
-                        if let Some((x, y, w, h)) = (*ptr).popover_rect() {
-                            let (dx, dy) = self.inner.as_ref().unwrap().popover_offset(pop_id);
-                            dl_overlay_rects.push((x + dx, y + dy, w, h));
-                        }
-                    }
-                }
-            }
-        }
-        // The global context menu draws into the app's display list (the render-only xdg
-        // popup is gone), so it gets the same occlusion: the menu rect clamps list text
-        // beneath, and the menu's own labels are exempt because they carry bounds equal
-        // to the rect.
-        // Hosted in its popup surface, the menu covers the window from above
-        // and nothing of it is in the list.
-        if crate::widget::context_menu::is_visible() && !crate::widget::context_menu::is_hosted() {
-            dl_overlay_rects.push((
-                crate::widget::context_menu::x(),
-                crate::widget::context_menu::y(),
-                crate::widget::context_menu::w(),
-                crate::widget::context_menu::h(),
-            ));
-        }
-        let spans = dl_text_spans(&self.dl_text_items, scale_f32, bounds, &dl_overlay_rects);
-
-        // 3. Frame: display-list batches under their physical scissors, then
-        // text, then overlays. The renderer owns swapchain rebuild/recovery.
-        // An app without display-list text owns the renderer's text state
-        // itself (it stages via stage_renderer below); don't wipe it here.
+        // Upload the frame's glyphs. An app without display-list text owns
+        // the renderer's text state itself (it stages via stage_renderer
+        // below); don't wipe it here. The renderer owns swapchain
+        // rebuild/recovery.
         let renderer = self.renderer.as_mut().unwrap();
-        if self.inner.as_ref().unwrap().display_list_text() {
+        if frame.dl_text {
+            let spans = frame.text_spans(&self.dl_text_items);
             renderer.prepare_text(self.font_system.as_mut().unwrap(), &mut self.swash_cache, &spans);
         }
-
-        let image_quads: Vec<crate::vk::ImageQuad> = dl_images
-            .iter()
-            .map(|di| crate::vk::ImageQuad {
-                image: di.image,
-                rect: (
-                    di.rect.x * scale_f32,
-                    di.rect.y * scale_f32,
-                    di.rect.width * scale_f32,
-                    di.rect.height * scale_f32,
-                ),
-                alpha: di.alpha,
-                z_before: di.at,
-                clip: di.clip.map(|c| {
-                    (
-                        (c.x * scale_f32).max(0.0) as u32,
-                        (c.y * scale_f32).max(0.0) as u32,
-                        (c.width * scale_f32) as u32,
-                        (c.height * scale_f32) as u32,
-                    )
-                }),
-            })
-            .collect();
-
-        let batches = dl_batches_2d(&dl_batches, scale_f32);
-
-        let cc = self.inner.as_ref().unwrap().clear_color();
-        let clear_color = [cc[0].powf(2.2), cc[1].powf(2.2), cc[2].powf(2.2), cc[3]];
 
         // Commit the buffer scale together with a buffer it is legal for: the
         // present inside draw_frame_2d is the only commit on this surface, so
@@ -650,15 +497,7 @@ impl<A: Application> EngineState<A> {
             self.redraw = true;
         }
 
-        if !renderer.draw_frame_2d(Frame2D {
-            verts: &verts,
-            batches: &batches,
-            overlay_verts: &overlay_verts,
-            images: &image_quads,
-            plate_features: &plate_features,
-            clear_color,
-            damage,
-        }) {
+        if !renderer.draw_frame_2d(frame.frame2d()) {
             // No present happened (swapchain out-of-date, or the created
             // swapchain didn't match the requested extent). The frame
             // callback requested above will never latch without a commit —

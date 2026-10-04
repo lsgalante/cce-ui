@@ -201,7 +201,8 @@ nothing.
 ## Rendering: one paint path (the Phase 3 state)
 
 The backend `render()` **always builds a `scene::paint::DisplayList` and tessellates that single
-list** (`EngineState::render` in `window_runner.rs`). Two ways an app feeds it:
+list** (`backend::frame::build_frame`, which the Wayland shell's `EngineState::render` presents).
+Two ways an app feeds it:
 
 1. **Migrated**: return `Some(DisplayList)` from `Application::display_list()`.
 2. **Legacy (default)**: return `None`, and the backend wraps the app's `view*`/`view_vectors`
@@ -1092,10 +1093,15 @@ cce-system-interface) to confirm behavior, not just the test suite.
   key repeat, the undo/redo and plate-navigation chords, the CSD hit zones, the
   outside-press popover close, held-button release on a lost pointer, the scroll phase,
   the pinch fallback — fed in cce-ui's own terms and unit-tested with no compositor),
-  `tessellate.rs`, `text.rs`, and `window_runner.rs`, the Wayland shell: it maps evdev
+  `frame.rs` (`build_frame`: the app's display list, damage, custom vertices and overlays,
+  widget shaping, text and the popover-occlusion rects, tessellated into a `BuiltFrame` the
+  renderer draws — no window system in it, tested with no GPU), `tessellate.rs`, `text.rs`,
+  and `window_runner.rs`, the Wayland shell: it maps evdev
   buttons, xkb keysyms and `wl_pointer` axis frames into driver calls and carries out the
-  grabs and cursors the driver asks for. A routing change belongs in `driver.rs`, never in
-  a Wayland handler. `menu_popup.rs` and `dnd.rs` are Wayland-only.
+  grabs and cursors the driver asks for, and presents what `build_frame` built (grid patch,
+  input region, glyph upload, the extent gate and buffer scale, the frame callback,
+  `stage_renderer`, the draw). A routing change belongs in `driver.rs` and a change to
+  what a frame contains in `frame.rs`, never in the Wayland code. `menu_popup.rs` and `dnd.rs` are Wayland-only.
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
   the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance
