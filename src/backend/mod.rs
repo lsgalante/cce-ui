@@ -1,6 +1,7 @@
 pub mod app;
 pub mod driver;
 pub mod frame;
+pub mod shell;
 pub mod dnd;
 pub mod menu_popup;
 pub mod tessellate;

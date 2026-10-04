@@ -43,12 +43,12 @@ use crate::vk::VkRenderer;
 pub use super::app::*;
 pub use super::driver::PressedKey;
 use super::frame::build_frame;
+use super::shell::{Pacer, Shell, Step, ACTIVE_DISPATCH};
 use super::driver::{Driver, Modifiers, Press, PressSite, ResizeEdge, ScrollFrame, ScrollSource, Turn};
 pub use super::tessellate::*;
 pub use super::text::*;
 
-/// Default cap on the runner's idle sleep — see `Application::idle_poll_interval`.
-pub const IDLE_DISPATCH: std::time::Duration = std::time::Duration::from_millis(1000);
+pub use super::shell::IDLE_DISPATCH;
 
 pub struct EngineState<A: Application> {
     pub registry_state: RegistryState,
@@ -123,13 +123,6 @@ pub struct EngineState<A: Application> {
     /// When the pending frame callback was armed — the starvation fallback's
     /// clock (see the render gate in `run`).
     pub frame_callback_armed_at: Option<std::time::Instant>,
-    /// Keep rendering (vsync-paced) briefly after the last genuine dirty frame.
-    /// Sparse, isolated commits get their frame callbacks serviced multiple
-    /// compositor frames late (measured 22-128ms on cce-fx, growing per sparse
-    /// commit), while a continuously committing surface is serviced in one
-    /// frame (~16ms). A short warm-down keeps interactive sequences (hover,
-    /// typing, scrolling) in the healthy continuous regime; idle still idles.
-    pub warm_until: Option<std::time::Instant>,
     /// Consecutive renders skipped by the extent gate (pending swapchain size
     /// != the size the current logical size and scale call for). Normally 0 or
     /// 1; a persistent count means no frame is presenting and deserves a warn.
@@ -364,15 +357,6 @@ impl<A: Application> EngineState<A> {
         self.sent_popover_region = next;
     }
 
-    /// The driver and the app's turn, borrowed apart: every input dispatch
-    /// is `let (driver, t) = self.turn(); driver.<event>(t, ..)`.
-    fn turn(&mut self) -> (&mut Driver, Turn<'_, A>) {
-        (
-            &mut self.driver,
-            Turn { app: self.inner.as_mut().unwrap(), redraw: &mut self.redraw, exit: &mut self.exit },
-        )
-    }
-
     fn logical_size(&self) -> LogicalSize {
         LogicalSize::new(self.logical_width, self.logical_height)
     }
@@ -506,6 +490,128 @@ impl<A: Application> EngineState<A> {
             self.redraw = true;
         } else {
             self.damage_owed = false;
+        }
+    }
+}
+
+impl<A: Application> Shell for EngineState<A> {
+    type App = A;
+
+    /// The driver and the app's turn, borrowed apart: every input dispatch
+    /// is `let (driver, t) = self.turn(); driver.<event>(t, ..)`.
+    fn turn(&mut self) -> (&mut Driver, Turn<'_, A>) {
+        (
+            &mut self.driver,
+            Turn { app: self.inner.as_mut().unwrap(), redraw: &mut self.redraw, exit: &mut self.exit },
+        )
+    }
+
+    fn app(&self) -> &A {
+        self.inner.as_ref().unwrap()
+    }
+
+    fn redraw(&mut self) -> &mut bool {
+        &mut self.redraw
+    }
+
+    fn exit_requested(&self) -> bool {
+        self.exit
+    }
+
+    fn take_just_configured(&mut self) -> bool {
+        std::mem::replace(&mut self.just_configured, false)
+    }
+
+    fn request_size(&mut self, w: u32, h: u32) {
+        // desired_size is a window-frame size; the surface adds the
+        // right/bottom overflow rim (0 for margin-less apps).
+        let m = self.inner.as_ref().unwrap().overflow_margin() as f32;
+        let (sw, sh) = (w as f32 + m, h as f32 + m);
+        if (self.logical_width - sw).abs() > 0.001 || (self.logical_height - sh).abs() > 0.001 {
+            self.frame_logical = (w as f32, h as f32);
+            self.applied_margin = m;
+            self.resize(sw, sh);
+            self.redraw = true;
+        }
+    }
+
+    fn sync(&mut self) {
+        // Overflow-margin drift (configure-sized apps): the rim can change at
+        // runtime — a popover overhanging the window frame — so re-derive the
+        // surface from the stored frame whenever the app's answer moves. While
+        // the rim is live, re-publish geometry every loop: the input region
+        // tracks the animating popover rects.
+        let m_now = self.inner.as_ref().unwrap().overflow_margin() as f32;
+        if (m_now - self.applied_margin).abs() > 0.001 && self.frame_logical.0 > 0.0 {
+            self.applied_margin = m_now;
+            let (fw, fh) = self.frame_logical;
+            self.resize(fw + m_now, fh + m_now);
+            self.redraw = true;
+        }
+        if self.applied_margin > 0.0 || self.overflow_was_active {
+            self.publish_window_geometry();
+            self.overflow_was_active = self.applied_margin > 0.0;
+        }
+        self.send_popover_region();
+        self.sync_menu_popup();
+    }
+
+    fn set_title(&mut self, title: &str) {
+        if let Some(ref window) = self.window {
+            window.set_title(title);
+            window.commit();
+        }
+    }
+
+    fn frame_pending(&mut self) -> bool {
+        // Frame-callback starvation fallback: the compositor only sends
+        // frame-done for surfaces it actually renders, so a callback armed
+        // while the window sat off-viewport (or the scene went static) may
+        // never fire — and the vsync gate then freezes the app forever
+        // with a perfectly live event loop (input processes, state changes,
+        // nothing repaints). If a redraw has been waiting on a callback well
+        // past any real vsync interval, stop waiting and draw.
+        //
+        // Gated on the renderer's present mode: forcing a present past a
+        // dead callback is only safe under MAILBOX (the present replaces the
+        // queued buffer). Under FIFO the driver's throttle waits on the
+        // previous present's frame event, so the forced present itself
+        // blocks forever inside the driver — the exact freeze this fallback
+        // exists to prevent. There the gate stays closed: pixels may stale
+        // until the next frame-done/configure, but the loop stays alive.
+        if self.redraw
+            && self.frame_callback_pending
+            && self.renderer.as_ref().is_some_and(|r| r.forced_present_safe())
+            && self.frame_callback_armed_at.is_none_or(|t| t.elapsed().as_millis() > 250)
+        {
+            self.frame_callback_pending = false;
+            if std::env::var("CCE_PRESENT_DEBUG").is_ok() {
+                let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() % 100000;
+                eprintln!("[vk] t={} starvation fallback fired (callback never came)", t);
+            }
+        }
+        self.frame_callback_pending
+    }
+
+    fn configured(&self) -> bool {
+        self.first_configure_received
+    }
+
+    fn present(&mut self, fresh: bool) {
+        if !fresh {
+            // A warm-down re-render: the window alone.
+            self.render();
+            return;
+        }
+        // A menu handed over from the window commits first, so
+        // there is no moment with neither (`take_menu_popup_lead`).
+        let lead = self.take_menu_popup_lead();
+        if lead {
+            self.render_menu_popup();
+        }
+        self.render();
+        if !lead {
+            self.render_menu_popup();
         }
     }
 }
@@ -1638,7 +1744,6 @@ fn run_session<'l, A: Application>(
         damage_owed: true,
         frame_callback_pending: false,
         frame_callback_armed_at: None,
-        warm_until: None,
         extent_gate_skips: 0,
         first_configure_received: false,
         driver: Driver::new(),
@@ -1810,25 +1915,6 @@ fn run_session<'l, A: Application>(
         *FLAG.get_or_init(|| std::env::var_os("CCE_PRESENT_DEBUG").is_some())
     }
 
-    /// Loop cadence while something is in motion: one tick per frame.
-    const ACTIVE_DISPATCH: std::time::Duration = std::time::Duration::from_millis(16);
-
-    /// Upper bound on an idle sleep. The loop is woken early by any Wayland
-    /// event or calloop-channel message, so this only caps how long an
-    /// app-side poll that bypasses both (see `Application::idle_poll_interval`)
-    /// can wait. `CCE_UI_IDLE_MS` overrides it — `16` restores the old
-    /// always-ticking loop for a bisect.
-    fn idle_dispatch() -> std::time::Duration {
-        static IDLE: std::sync::OnceLock<std::time::Duration> = std::sync::OnceLock::new();
-        *IDLE.get_or_init(|| {
-            std::env::var("CCE_UI_IDLE_MS")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .map(std::time::Duration::from_millis)
-                .unwrap_or(IDLE_DISPATCH)
-        })
-    }
-
     /// Seconds after session start at which to inject a simulated connection
     /// loss, from `CCE_UI_FAULT_RECONNECT`. Resolved once: this is read from
     /// the per-iteration path.
@@ -1843,19 +1929,13 @@ fn run_session<'l, A: Application>(
         })
     }
 
-    let mut last_title = settings.title.clone();
-    let mut last_tick = std::time::Instant::now();
     let mut end = SessionEnd::AppExit;
     let session_start = std::time::Instant::now();
-    // The loop's cadence. ACTIVE while anything is in motion (a redraw
-    // pending or just done, an animation, a held key, the post-activity
-    // warm-down); otherwise the app's own poll interval or IDLE_DISPATCH.
-    // Before 2026-09-11 this was a flat 16 ms whatever the state: every
-    // cce-ui client woke 60 times a second forever — ~1200 wakeups/s across
-    // a session's twenty clients — and each wake ran tick, desired_size,
-    // title and margin checks for nothing.
+    // The loop's pacing — what a turn does and how long to sleep after it —
+    // is the shared `Pacer`'s (backend::shell); this loop is the Wayland
+    // side: dispatch, the connection's health, the close fade.
+    let mut pacer = Pacer::new(settings.title.clone());
     let mut next_timeout = ACTIVE_DISPATCH;
-    let mut slept_idle = false;
     loop {
         // Frame callbacks arrive with a p50 of 0ms but a ~0.5s tail, while the
         // compositor's own trace shows it firing them within one or two vsyncs
@@ -1909,184 +1989,33 @@ fn run_session<'l, A: Application>(
                 break;
             }
         }
-        if engine_state.exit {
-            // The close dissolve. It is the COMPOSITOR that fades us — it
-            // ramps our scene subtree's opacity, which takes the backdrop
-            // blur, drop shadow and bevel down with the window; all this side
-            // has to do is not vanish before it finishes. So keep the surface
-            // mapped and the loop turning for exactly as long as the
-            // compositor asked for, then leave. Dispatching (rather than
-            // sleeping) keeps the connection pumped and lets any last
-            // animation finish on screen while the window dissolves.
-            let fade = crate::ipc::request_close_fade();
-            if !fade.is_zero() {
-                let until = std::time::Instant::now() + fade;
-                loop {
-                    let left = until.saturating_duration_since(std::time::Instant::now());
-                    if left.is_zero() {
-                        break;
+        match pacer.turn(&mut engine_state) {
+            Step::Sleep(timeout) => next_timeout = timeout,
+            Step::Exit => {
+                // The close dissolve. It is the COMPOSITOR that fades us — it
+                // ramps our scene subtree's opacity, which takes the backdrop
+                // blur, drop shadow and bevel down with the window; all this side
+                // has to do is not vanish before it finishes. So keep the surface
+                // mapped and the loop turning for exactly as long as the
+                // compositor asked for, then leave. Dispatching (rather than
+                // sleeping) keeps the connection pumped and lets any last
+                // animation finish on screen while the window dissolves.
+                let fade = crate::ipc::request_close_fade();
+                if !fade.is_zero() {
+                    let until = std::time::Instant::now() + fade;
+                    loop {
+                        let left = until.saturating_duration_since(std::time::Instant::now());
+                        if left.is_zero() {
+                            break;
+                        }
+                        if event_loop.dispatch(left.min(ACTIVE_DISPATCH), &mut engine_state).is_err() {
+                            break;
+                        }
                     }
-                    if event_loop.dispatch(left.min(ACTIVE_DISPATCH), &mut engine_state).is_err() {
-                        break;
-                    }
                 }
-            }
-            break;
-        }
-
-        let now = std::time::Instant::now();
-        let mut dt = now.duration_since(last_tick).as_secs_f32();
-        last_tick = now;
-        if dt > 0.1 {
-            dt = 0.1;
-        }
-        // Waking from an idle sleep: the interval is not animation time. An
-        // animation an event just started must take its first step at frame
-        // size, not leap 100 ms in one tick.
-        if slept_idle {
-            dt = dt.min(1.0 / 60.0);
-        }
-
-        {
-            let (driver, t) = engine_state.turn();
-            driver.tick(t, dt);
-        }
-
-        let just_configured = engine_state.just_configured;
-        engine_state.just_configured = false;
-
-        if !just_configured {
-            if let Some((w, h)) = engine_state.inner.as_ref().unwrap().desired_size() {
-                // desired_size is a window-frame size; the surface adds the
-                // right/bottom overflow rim (0 for margin-less apps).
-                let m = engine_state.inner.as_ref().unwrap().overflow_margin() as f32;
-                let (sw, sh) = (w as f32 + m, h as f32 + m);
-                if (engine_state.logical_width - sw).abs() > 0.001 || (engine_state.logical_height - sh).abs() > 0.001 {
-                    engine_state.frame_logical = (w as f32, h as f32);
-                    engine_state.applied_margin = m;
-                    engine_state.resize(sw, sh);
-                    engine_state.redraw = true;
-                }
+                break;
             }
         }
-
-        // Overflow-margin drift (configure-sized apps): the rim can change at
-        // runtime — a popover overhanging the window frame — so re-derive the
-        // surface from the stored frame whenever the app's answer moves. While
-        // the rim is live, re-publish geometry every loop: the input region
-        // tracks the animating popover rects.
-        {
-            let m_now = engine_state.inner.as_ref().unwrap().overflow_margin() as f32;
-            if (m_now - engine_state.applied_margin).abs() > 0.001 && engine_state.frame_logical.0 > 0.0 {
-                engine_state.applied_margin = m_now;
-                let (fw, fh) = engine_state.frame_logical;
-                engine_state.resize(fw + m_now, fh + m_now);
-                engine_state.redraw = true;
-            }
-            if engine_state.applied_margin > 0.0 || engine_state.overflow_was_active {
-                engine_state.publish_window_geometry();
-                engine_state.overflow_was_active = engine_state.applied_margin > 0.0;
-            }
-            engine_state.send_popover_region();
-        }
-        engine_state.sync_menu_popup();
-
-        {
-            let (driver, t) = engine_state.turn();
-            driver.repeat_keys(t);
-        }
-        let current_title = engine_state.inner.as_ref().unwrap().settings().title;
-        if current_title != last_title {
-            if let Some(ref window) = engine_state.window {
-                window.set_title(&current_title);
-                window.commit();
-            }
-            last_title = current_title;
-        }
-
-        // Frame-callback starvation fallback: the compositor only sends
-        // frame-done for surfaces it actually renders, so a callback armed
-        // while the window sat off-viewport (or the scene went static) may
-        // never fire — and the vsync gate below then freezes the app forever
-        // with a perfectly live event loop (input processes, state changes,
-        // nothing repaints). If a redraw has been waiting on a callback well
-        // past any real vsync interval, stop waiting and draw.
-        //
-        // Gated on the renderer's present mode: forcing a present past a
-        // dead callback is only safe under MAILBOX (the present replaces the
-        // queued buffer). Under FIFO the driver's throttle waits on the
-        // previous present's frame event, so the forced present itself
-        // blocks forever inside the driver — the exact freeze this fallback
-        // exists to prevent. There the gate stays closed: pixels may stale
-        // until the next frame-done/configure, but the loop stays alive.
-        if engine_state.redraw
-            && engine_state.frame_callback_pending
-            && engine_state
-                .renderer
-                .as_ref()
-                .is_some_and(|r| r.forced_present_safe())
-            && engine_state
-                .frame_callback_armed_at
-                .is_none_or(|t| t.elapsed().as_millis() > 250)
-        {
-            engine_state.frame_callback_pending = false;
-            if std::env::var("CCE_PRESENT_DEBUG").is_ok() {
-                let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() % 100000;
-                eprintln!("[vk] t={} starvation fallback fired (callback never came)", t);
-            }
-        }
-
-        if engine_state.redraw {
-            // Genuine dirt (input, app state, animation) extends the warm window;
-            // warm-down renders below do NOT, so idle decays in one window.
-            engine_state.warm_until =
-                Some(std::time::Instant::now() + std::time::Duration::from_millis(200));
-        }
-        let mut rendered = false;
-        if engine_state.redraw && !engine_state.frame_callback_pending {
-            engine_state.redraw = false;
-            if engine_state.first_configure_received {
-                // A menu handed over from the window commits first, so
-                // there is no moment with neither (`take_menu_popup_lead`).
-                let lead = engine_state.take_menu_popup_lead();
-                if lead {
-                    engine_state.render_menu_popup();
-                }
-                engine_state.render();
-                if !lead {
-                    engine_state.render_menu_popup();
-                }
-                rendered = true;
-            }
-        } else if !engine_state.redraw
-            && !engine_state.frame_callback_pending
-            && engine_state
-                .warm_until
-                .is_some_and(|t| std::time::Instant::now() < t)
-        {
-            // Warm-down re-render of the cached frame, paced by frame callbacks.
-            if engine_state.first_configure_received {
-                engine_state.render();
-                rendered = true;
-            }
-        }
-
-        // Anything still moving keeps the frame cadence; a frame callback
-        // outstanding on its own does not (it arrives as an event) unless a
-        // redraw is queued behind it, which is what the starvation fallback
-        // above times. `redraw` still set here means the frame was withheld
-        // (callback pending, or no configure yet) and must be retried soon.
-        let warm = engine_state
-            .warm_until
-            .is_some_and(|t| std::time::Instant::now() < t);
-        let busy = engine_state.redraw || rendered || warm || engine_state.driver.pressed_key.is_some();
-        next_timeout = if busy {
-            ACTIVE_DISPATCH
-        } else {
-            let app_poll = engine_state.inner.as_ref().unwrap().idle_poll_interval();
-            app_poll.map_or(idle_dispatch(), |d| d.min(idle_dispatch()))
-        };
-        slept_idle = !busy;
     }
 
     // Tear the session down: drop its Wayland source from the persistent loop
