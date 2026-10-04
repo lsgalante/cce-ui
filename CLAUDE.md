@@ -1130,7 +1130,16 @@ cce-system-interface) to confirm behavior, not just the test suite.
   (`upload_rgba`, `update_pixels`, `free_image`, `renderer_epoch`, …) that a renderer
   drains with `take_pending`. They lived in `vk/` while Vulkan was the only renderer;
   `vk` re-exports every one at its old path, so `cce_ui::vk::upload_rgba` and the rest
-  are unchanged for clients.
+  are unchanged for clients. Also here, shared by every renderer: `draw::glyphs`
+  (`GlyphAtlas` — rasterizing, packing and the glyph quads; a renderer uploads
+  `pixels()` when `generation()` moves — and `image_quad_vertices`), `window_info_data`
+  (shader2d's `WindowInfo` block), and `draw::shaders`: `shader2d.wgsl` and `glyph.wgsl`
+  live in `src/draw/` now, one source for both renderers. WebGPU has no push constants,
+  so `shader2d_for_webgpu()` swaps the one push-block line for a `@group(1)` uniform read
+  at a per-batch dynamic offset (`WEBGPU_BLOCK_STRIDE`); the backdrop is sampled with
+  `textureSampleLevel(…, 0.0)` because WebGPU rejects implicit-LOD sampling in the
+  non-uniform blur branch (the backdrop has one level, so the texel is the same —
+  `frost_pair` is identical to the pixel either way).
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
   the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance

@@ -1202,12 +1202,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 // spacing in physical px (sigma = 2 taps); both come from the plate's own
 // push block (MODE_PLATE), or are the no-recipe defaults (droplet, raw
 // vertices). A stride of 0 is a CLEAR plate: one clean sample, tinted.
+//
+// The backdrop is sampled at level 0 explicitly: it has one level, so that is
+// the texel an implicit LOD would pick, and this runs under non-uniform control
+// flow (the blur branch), where WebGPU forbids the derivatives an implicit LOD
+// takes.
 fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32, k_in: f32, stride: f32) -> vec4f {
     let tex_size = vec2f(textureDimensions(t_backdrop));
 
     var backdrop_color = vec4f(0.0);
     if (stride <= 0.0) {
-        backdrop_color = textureSample(t_backdrop, s_backdrop, (pos + refract) / tex_size);
+        backdrop_color = textureSampleLevel(t_backdrop, s_backdrop, (pos + refract) / tex_size, 0.0);
     } else {
         var blurred = vec4f(0.0);
         var total_weight = 0.0;
@@ -1221,7 +1226,7 @@ fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32, k_in: f3
                 let offset = vec2f(x, y) * stride;
                 let sample_uv = (pos + offset) / tex_size;
                 let weight = exp(-(x*x + y*y) / (2.0 * 2.0 * 2.0));
-                blurred += textureSample(t_backdrop, s_backdrop, sample_uv) * weight;
+                blurred += textureSampleLevel(t_backdrop, s_backdrop, sample_uv, 0.0) * weight;
                 total_weight += weight;
             }
         }
@@ -1242,7 +1247,7 @@ fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32, k_in: f3
     // narrow is invisible once the body blur is 49 taps, and paying for it
     // would triple the most expensive path in this shader to be erased.
     if (clarity > 0.001) {
-        let clean = textureSample(t_backdrop, s_backdrop, (pos + refract) / tex_size);
+        let clean = textureSampleLevel(t_backdrop, s_backdrop, (pos + refract) / tex_size, 0.0);
         backdrop_color = mix(backdrop_color, clean, clamp(clarity, 0.0, 1.0));
     }
 

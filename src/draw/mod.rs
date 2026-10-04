@@ -12,7 +12,9 @@
 use crate::backend::tessellate::Vertex;
 use cosmic_text::Buffer as TextBuffer;
 
+pub mod glyphs;
 pub mod images;
+pub mod shaders;
 
 pub use images::{
     free_image, recycle_buffer, renderer_epoch, update_pixels, upload_pixels, upload_rgba,
@@ -164,4 +166,52 @@ pub struct TextSpan<'a> {
     /// `clip_circle.xy`, corner radius `clip_circle.z`, inner box half-size
     /// `clip_extents` — so plate children (labels included) cut off at rounded corners.
     pub clip_extents: [f32; 2],
+}
+
+/// The bytes of one plate feature (a carve CSG'd into a plate): three vec4s,
+/// `[f32; 12]` in `Frame2D::plate_features`.
+pub const PLATE_FEATURE_BYTES: usize = 48;
+
+/// shader2d's WindowInfo UBO: [size/clip vec4][bevel-profile meta vec4]
+/// [8 vec4 of profile slope samples].
+// [size/clip vec4][carve profile meta + 8 vec4][roll profile meta + 8 vec4].
+// [size/clip vec4][carve profile meta][8 carve slopes][roll profile meta]
+// [8 roll slopes][relief heights][backdrop meta] = 21 vec4. Grows only at the
+// END — every offset above is addressed by index from both sides.
+pub const WINDOW_INFO_BYTES: usize = 320;
+
+/// The pinned relief heights (carve, roll) in physical px at `scale`, 0 =
+/// follow the width.
+pub fn relief_px_at(scale: f32) -> (f32, f32) {
+    let s = scale.max(0.001);
+    (
+        crate::layout::bevel_height().map_or(0.0, |h| h * s),
+        crate::layout::roll_height().map_or(0.0, |h| h * s),
+    )
+}
+
+/// shader2d's `WindowInfo` block for a `width` x `height` target whose corners clip
+/// at `clip_corner_radius` (physical px), with the pinned relief heights
+/// `relief` (carve, roll; physical px, 0 = unpinned) — the profiles and the
+/// corner shape from the live style. Shared by every renderer and the offscreen
+/// test harness.
+pub fn window_info_data(width: u32, height: u32, clip_corner_radius: f32, relief: (f32, f32)) -> [f32; WINDOW_INFO_BYTES / 4] {
+    let mut data = [0.0f32; WINDOW_INFO_BYTES / 4];
+    data[0] = width as f32;
+    data[1] = height as f32;
+    data[2] = clip_corner_radius;
+    data[3] = crate::layout::corner_shape();
+    if let Some(slopes) = crate::layout::bevel_profile_slopes() {
+        data[4] = 1.0;
+        data[5] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
+        data[8..8 + slopes.len()].copy_from_slice(&slopes);
+    }
+    if let Some(slopes) = crate::layout::roll_profile_slopes() {
+        data[40] = 1.0;
+        data[41] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
+        data[44..44 + slopes.len()].copy_from_slice(&slopes);
+    }
+    data[76] = relief.0;
+    data[77] = relief.1;
+    data
 }

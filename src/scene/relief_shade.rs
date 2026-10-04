@@ -253,7 +253,7 @@ mod tests {
 
     /// The shader's own source, so the constants below are checked against the
     /// thing they mirror rather than against a comment.
-    const WGSL: &str = include_str!("../vk/shader2d.wgsl");
+    const WGSL: &str = include_str!("../draw/shader2d.wgsl");
 
     fn wgsl_const(name: &str) -> f32 {
         let needle = format!("const {name}: f32 = ");

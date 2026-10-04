@@ -96,48 +96,14 @@ fn rect_intersect(a: vk::Rect2D, b: vk::Rect2D) -> vk::Rect2D {
 }
 
 pub(crate) const FRAMES_IN_FLIGHT: usize = 2;
-pub(crate) const PLATE_FEATURE_BYTES: usize = 48;
-/// shader2d's WindowInfo UBO: [size/clip vec4][bevel-profile meta vec4]
-/// [8 vec4 of profile slope samples].
-// [size/clip vec4][carve profile meta + 8 vec4][roll profile meta + 8 vec4].
-// [size/clip vec4][carve profile meta][8 carve slopes][roll profile meta]
-// [8 roll slopes][relief heights][backdrop meta] = 21 vec4. Grows only at the
-// END — every offset above is addressed by index from both sides.
-pub(crate) const WINDOW_INFO_BYTES: vk::DeviceSize = 320;
+pub(crate) use crate::draw::PLATE_FEATURE_BYTES;
+/// shader2d's WindowInfo uniform, in bytes (layout in `draw::window_info_data`).
+pub(crate) const WINDOW_INFO_BYTES: vk::DeviceSize = crate::draw::WINDOW_INFO_BYTES as vk::DeviceSize;
+pub(crate) use crate::draw::relief_px_at;
 
-/// The pinned relief heights (carve, roll) in physical px at `scale`, 0 =
-/// follow the width.
-pub(crate) fn relief_px_at(scale: f32) -> (f32, f32) {
-    let s = scale.max(0.001);
-    (
-        crate::layout::bevel_height().map_or(0.0, |h| h * s),
-        crate::layout::roll_height().map_or(0.0, |h| h * s),
-    )
-}
-
-/// shader2d's `WindowInfo` block for a target of `extent` whose corners clip
-/// at `clip_corner_radius` (physical px), with the pinned relief heights
-/// `relief` (carve, roll; physical px, 0 = unpinned) — the profiles and the
-/// corner shape from the live style. Shared with the offscreen test harness.
-pub(crate) fn window_info_data(extent: vk::Extent2D, clip_corner_radius: f32, relief: (f32, f32)) -> [f32; WINDOW_INFO_BYTES as usize / 4] {
-    let mut data = [0.0f32; WINDOW_INFO_BYTES as usize / 4];
-    data[0] = extent.width as f32;
-    data[1] = extent.height as f32;
-    data[2] = clip_corner_radius;
-    data[3] = crate::layout::corner_shape();
-    if let Some(slopes) = crate::layout::bevel_profile_slopes() {
-        data[4] = 1.0;
-        data[5] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
-        data[8..8 + slopes.len()].copy_from_slice(&slopes);
-    }
-    if let Some(slopes) = crate::layout::roll_profile_slopes() {
-        data[40] = 1.0;
-        data[41] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
-        data[44..44 + slopes.len()].copy_from_slice(&slopes);
-    }
-    data[76] = relief.0;
-    data[77] = relief.1;
-    data
+/// [`crate::draw::window_info_data`] for a Vulkan extent.
+pub(crate) fn window_info_data(extent: vk::Extent2D, clip_corner_radius: f32, relief: (f32, f32)) -> [f32; crate::draw::WINDOW_INFO_BYTES / 4] {
+    crate::draw::window_info_data(extent.width, extent.height, clip_corner_radius, relief)
 }
 
 pub(crate) struct AllocatedBuffer {
@@ -474,12 +440,12 @@ pub(crate) fn compile_wgsl(source: &str) -> Vec<u32> {
 /// so compile each shader once per process.
 pub(crate) fn shader2d_spirv() -> &'static [u32] {
     static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(include_str!("shader2d.wgsl")))
+    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::SHADER2D))
 }
 
 pub(crate) fn glyph_spirv() -> &'static [u32] {
     static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(include_str!("glyph.wgsl")))
+    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::GLYPH))
 }
 
 pub(crate) fn scene3d_spirv() -> &'static [u32] {
@@ -2436,6 +2402,31 @@ mod tests {
         assert!(!super::shader2d_spirv().is_empty());
     }
 
+    /// The WebGPU variants validate with no capabilities at all — WebGPU has
+    /// no push constants — and the 2D one carries its block as the uniform
+    /// the web renderer binds. naga does not see everything a browser's
+    /// compiler rejects (its derivative-uniformity analysis does not follow
+    /// calls), so the browser probe is the last word; this catches a
+    /// substitution that silently stopped applying.
+    #[test]
+    fn the_webgpu_shaders_validate_without_push_constants() {
+        let web2d = crate::draw::shaders::shader2d_for_webgpu();
+        assert!(!web2d.contains("var<push_constant>"));
+        assert!(web2d.contains("@group(1) @binding(0) var<uniform> rrect_clip: RRectClip;"));
+        for (name, src) in [("shader2d (web)", web2d.as_str()), ("glyph", crate::draw::shaders::GLYPH)] {
+            let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(src)));
+            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("{name} does not validate for WebGPU: {e:?}"));
+        }
+        // And the block's size is what the renderers lay out.
+        let module = naga::front::wgsl::parse_str(&web2d).unwrap();
+        let block = module.types.iter().find(|(_, t)| t.name.as_deref() == Some("RRectClip")).expect("RRectClip").1;
+        let naga::TypeInner::Struct { span, .. } = block.inner else { panic!("RRectClip is a struct") };
+        assert_eq!(span as usize, crate::draw::PUSH_CONSTANT_FLOATS * 4);
+        assert!(span as usize <= crate::draw::shaders::WEBGPU_BLOCK_STRIDE);
+    }
+
     #[test]
     fn scene3d_compiles() {
         assert!(!super::scene3d_spirv().is_empty());
@@ -2457,7 +2448,7 @@ mod tests {
     /// shape here, so it measures the thing it is guarding.
     #[test]
     fn window_info_layout_matches_the_uniform_size() {
-        let src = include_str!("shader2d.wgsl");
+        let src = crate::draw::shaders::SHADER2D;
         let body = src
             .split_once("struct WindowInfo {")
             .expect("WindowInfo moved; this test scans for it")

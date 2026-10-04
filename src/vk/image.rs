@@ -60,33 +60,8 @@ pub(crate) fn mip_level_count(width: u32, height: u32) -> u32 {
     32 - width.max(height).max(1).leading_zeros()
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-/// Must match `GlyphVertex` field-for-field: both pipelines are fed by the same
-/// glyph shader, whose vertex entry point declares locations 0..=4. Omitting
-/// `clip_extents` here left location 4 with no `VkVertexInputAttributeDescription`,
-/// which the validation layer flags (VUID-VkGraphicsPipelineCreateInfo-Input-07904)
-/// and which reads undefined data without `vertexAttributeRobustness`.
-struct ImageVertex {
-    position: [f32; 2],
-    uv: [f32; 2],
-    color: [f32; 4],
-    clip_circle: [f32; 3],
-    clip_extents: [f32; 2],
-}
-
-// The pipeline below hardcodes one offset per shader location. Pin the struct to
-// them so adding, reordering, or resizing a field fails the build instead of
-// silently feeding the shader mis-aligned attributes — the drift that left
-// location 4 undescribed. `text.rs` pins `GlyphVertex` to the same layout.
-const _: () = {
-    assert!(std::mem::size_of::<ImageVertex>() == 52);
-    assert!(std::mem::offset_of!(ImageVertex, position) == 0);
-    assert!(std::mem::offset_of!(ImageVertex, uv) == 8);
-    assert!(std::mem::offset_of!(ImageVertex, color) == 16);
-    assert!(std::mem::offset_of!(ImageVertex, clip_circle) == 32);
-    assert!(std::mem::offset_of!(ImageVertex, clip_extents) == 44);
-};
+/// An image quad's vertex: the glyph shader's, shared with the text stage.
+type ImageVertex = crate::draw::glyphs::GlyphVertex;
 
 struct GpuImage {
     image: vk::Image,
@@ -769,24 +744,7 @@ impl ImageStage {
         images: &[ImageQuad],
         extent: vk::Extent2D,
     ) {
-        let sw = extent.width as f32;
-        let sh = extent.height as f32;
-        let mut verts: Vec<ImageVertex> = Vec::with_capacity(images.len() * 6);
-        for q in images {
-            let (x, y, w, h) = q.rect;
-            let ndc = |px: f32, py: f32| [(px / sw) * 2.0 - 1.0, 1.0 - (py / sh) * 2.0];
-            let color = [1.0, 1.0, 1.0, q.alpha];
-            let clip_circle = [0.0; 3];
-            // Zero extents = the shader's plain-circle clip degenerate case. Inert
-            // while clip_circle.z is 0 (the clip branch never runs), but it must be
-            // a defined value, not whatever the missing attribute used to read.
-            let clip_extents = [0.0; 2];
-            let tl = ImageVertex { position: ndc(x, y), uv: [0.0, 0.0], color, clip_circle, clip_extents };
-            let tr = ImageVertex { position: ndc(x + w, y), uv: [1.0, 0.0], color, clip_circle, clip_extents };
-            let bl = ImageVertex { position: ndc(x, y + h), uv: [0.0, 1.0], color, clip_circle, clip_extents };
-            let br = ImageVertex { position: ndc(x + w, y + h), uv: [1.0, 1.0], color, clip_circle, clip_extents };
-            verts.extend([tl, tr, bl, tr, br, bl]);
-        }
+        let verts = crate::draw::glyphs::image_quad_vertices(images, extent.width, extent.height);
         let bytes: &[u8] = bytemuck::cast_slice(&verts);
         let buf = &mut self.frame_buffers[frame_index];
         if bytes.len() as vk::DeviceSize > buf.size {
