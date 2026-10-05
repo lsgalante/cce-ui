@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>cce-ui</title>
+<!-- The reference app on the browser shell (examples/demo_web.rs). The page
+     owns the canvas's size (fill = Sizing::Page). window.capture() reads the
+     next frame back from the GPU, base64 RGBA8: a headless Chromium leaves
+     a WebGPU canvas out of its screenshots. -->
+<style>html,body{margin:0;background:#3f3f3f;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+<canvas id="c"></canvas>
+<script type="module">
+import init, { start, capture } from './demo_web.js';
+await init();
+const { files, families } = await (await fetch('fonts.json')).json();
+const fonts = [];
+for (const n of files) fonts.push(new Uint8Array(await (await fetch('fonts/' + n)).arrayBuffer()));
+await start(document.getElementById('c'), fonts, families, true);
+window.capture = async () => {
+  const rgba = await capture();
+  let s = '';
+  for (let i = 0; i < rgba.length; i += 0x8000) s += String.fromCharCode.apply(null, rgba.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+window.demoReady = true;
+</script>

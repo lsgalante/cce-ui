@@ -110,6 +110,38 @@ pub struct Capture {
     pub rgba: Vec<u8>,
 }
 
+/// A captured frame still on the GPU: [`read`](Self::read) waits for it.
+pub struct PendingCapture {
+    buffer: GpuBuffer,
+    width: u32,
+    height: u32,
+    /// Bytes per row in the buffer: a copy's rows are 256-byte aligned.
+    row: u32,
+    /// The canvas is BGRA: swap to RGBA on the way out.
+    bgra: bool,
+}
+
+impl PendingCapture {
+    pub async fn read(self) -> Result<Capture, JsValue> {
+        let Self { buffer, width, height, row, bgra } = self;
+        buffer.map_async(map_mode::READ).await?;
+        let mapped = js_sys::Uint8Array::new(&JsValue::from(buffer.get_mapped_range()?));
+        let padded = mapped.to_vec();
+        buffer.unmap();
+        buffer.destroy();
+        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height as usize {
+            rgba.extend_from_slice(&padded[y * row as usize..y * row as usize + width as usize * 4]);
+        }
+        if bgra {
+            for px in rgba.chunks_exact_mut(4) {
+                px.swap(0, 2);
+            }
+        }
+        Ok(Capture { width, height, rgba })
+    }
+}
+
 pub struct WebRenderer {
     /// Held for the device's lifetime: the device is the adapter's, and a
     /// browser may tear the instance under it down once nothing holds it.
@@ -488,22 +520,17 @@ impl WebRenderer {
 
     /// The captured frame, once the GPU has finished it.
     pub async fn take_capture(&mut self) -> Result<Option<Capture>, JsValue> {
-        let Some((buffer, width, height, row)) = self.capture.take() else { return Ok(None) };
-        buffer.map_async(map_mode::READ).await?;
-        let mapped = js_sys::Uint8Array::new(&JsValue::from(buffer.get_mapped_range()?));
-        let padded = mapped.to_vec();
-        buffer.unmap();
-        buffer.destroy();
-        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-        for y in 0..height as usize {
-            rgba.extend_from_slice(&padded[y * row as usize..y * row as usize + width as usize * 4]);
+        match self.take_pending_capture() {
+            Some(pending) => pending.read().await.map(Some),
+            None => Ok(None),
         }
-        if matches!(self.canvas_format, GpuTextureFormat::Bgra8unorm) {
-            for px in rgba.chunks_exact_mut(4) {
-                px.swap(0, 2);
-            }
-        }
-        Ok(Some(Capture { width, height, rgba }))
+    }
+
+    /// The captured frame's buffer, to be read without holding the renderer
+    /// across the wait (the browser shell reads it after the turn that drew it).
+    pub fn take_pending_capture(&mut self) -> Option<PendingCapture> {
+        let (buffer, width, height, row) = self.capture.take()?;
+        Some(PendingCapture { buffer, width, height, row, bgra: matches!(self.canvas_format, GpuTextureFormat::Bgra8unorm) })
     }
 
     /// Apply the image queue: uploads, in-place updates, frees.

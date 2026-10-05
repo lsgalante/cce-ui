@@ -30,8 +30,14 @@ static FONT_DB: OnceLock<resvg::usvg::fontdb::Database> = OnceLock::new();
 pub fn get_font_db() -> &'static resvg::usvg::fontdb::Database {
     FONT_DB.get_or_init(|| {
         let mut db = resvg::usvg::fontdb::Database::new();
-        db.load_system_fonts();
-        db.load_fonts_dir(crate::fonts_dir());
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            db.load_system_fonts();
+            db.load_fonts_dir(crate::fonts_dir());
+        }
+        // A page has neither: the fonts it handed the browser shell.
+        #[cfg(target_arch = "wasm32")]
+        crate::page_fonts::load_into(&mut db);
         db
     })
 }

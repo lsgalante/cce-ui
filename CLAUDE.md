@@ -76,8 +76,58 @@ and image queue. web-sys still ships its WebGPU bindings behind `--cfg=web_sys_u
 `.cargo/config.toml` sets it for the wasm target, and **cargo reads that file from the
 directory it is run in** — so build the browser half from inside `cce-ui` (as
 `check-wasm` does), and a client crate that builds cce-ui for the browser needs the same line
-in its own config. There is no browser shell yet (W3): nothing drives `Pacer::turn` or feeds
-the page's events in.
+in its own config.
+
+**And an `Application` runs in a page** (`web::run::<App>(canvas, fonts, sizing).await`, since
+2026-10-05): the browser shell (`src/web/shell.rs`) is the Wayland shell's counterpart over a
+`<canvas>`, on the same `Driver` and `Pacer`. What it does in the page's terms:
+
+- **Events**: pointer (captured on press, so a drag outside the canvas still ends), wheel,
+  key and focus events on the canvas, mapped by `backend::dom` — `map_key` gives a key the
+  TEXT xkb's `utf8` would (Tab "\t", Enter "\r", Ctrl+letter its control code: the Wayland
+  shell hands widgets exactly that, and a focused text box inserts Tab's), `wheel_frame`
+  reads a whole notch-sized pixel delta (Chromium's 100 px) or a line / page delta as a wheel
+  notch and anything else as a finger, and a finger gesture's lift is synthesized after
+  120 ms without a frame (`FINGER_LIFT`), since a page reports none. The browser's own key
+  repeats are dropped: the driver repeats, as on Wayland. On a Mac, Command is the shortcut
+  key (⌘Z is undo). A page has no grabs, so a press on a CSD border is the app's.
+- **Pacing**: a turn per animation frame at the pacer's ACTIVE cadence, a timer at its idle
+  one; any event, and any `AppSender::send` (through `backend::app::set_wake`), wakes the
+  loop for the next frame. Measured idle: 5 turns in 5 s, the native count.
+- **Size**: `Sizing::App` sizes the canvas from `WindowSettings` and `desired_size` (CSS px),
+  as a window; `Sizing::Page` leaves it to the page's CSS and ignores size requests (a tiling
+  compositor's answer); a ResizeObserver wakes a turn on relayout, and `devicePixelRatio` is
+  the scale. The context menu is drawn in the canvas and kept inside it, as on a layer surface.
+- **Fonts** (`web::Fonts`): the files, and the generic serif / sans / mono families — a page
+  has no font directory and no fontconfig, so it says both. `lib::page_fonts` holds them, and
+  on wasm EVERY font database the toolkit builds loads them: the shell's, the widget-geometry
+  one (`geometry_font_system`) and the text-measurement one (`widget::input::get_font_db`,
+  resvg's — the toggle's label is centred by it). cosmic-text has no family fallback list on
+  wasm (`fallback/other.rs` is empty), where on Linux it walks Noto Sans → DejaVu Sans → …,
+  so `page_fonts::stand_in_for_missing` gives the families the toolkit names (the configured
+  fonts, "Berkeley Mono") the faces of the first family of that Linux list the set has; a
+  family an app names itself must be in the set. Order matters: the measuring fallback is the
+  first face with the glyph.
+- **`web::capture().await`**: the next frame, read back from the GPU. Headless Chromium
+  composites in software and leaves a WebGPU canvas out of its screenshots and `toDataURL`.
+
+Not there yet: the clipboard, IME composition, drag and drop, file dialogs, and an app whose
+text is not the display list's (`display_list_text` false — it stages its own through the
+native-only `stage_renderer`, so draws no text here).
+
+**The reference app runs on both, through one input script.** `examples/demo_web.rs` is
+`src/main.rs`'s `DemoApp` (included by `#[path]`, hence `pub(crate)`) in a page;
+`scripts/web-probe/demo <dir>` builds it, serves it with the machine's fonts and replays the
+native harness's 24 steps (`drive.mjs`: moves, clicks, a drag, a wheel, typing, undo, the
+menu, Tab, held keys, the CSD bands), one captured frame per step, which `compare.py` diffs
+against the native run's screenshots (`--mask` the cursor's box; never sway's
+`hide_cursor`, which clears pointer focus, so the native app drops its hover). Measured
+2026-10-05 against lavapipe: steps 00–18 differ only at the slider band's two pointed tips,
+1 px of rasterizer tie-break (≤ 63 channels beyond 8 levels; everything else within 2),
+with `DEMO_FAMILIES=FreeSerif,FreeSans,FreeMono` — what native's fontdb made of this
+machine's fontconfig, not `fc-match`'s DejaVu. Steps 19–20 hold a key, and the driver
+repeats once per turn: SwiftShader takes ~250 ms a frame, so the page gets fewer repeats
+than native in the same 1.5 s. Timing, not routing.
 
 **The renderer probe holds the two renderers to each other.** `examples/probe/scene.rs`
 is one 1280x800 frame of nearly every prim — root, pane and frosted plates, every control
@@ -93,7 +143,7 @@ DejaVu files (`$PROBE_FONTS_DIR`) — and the screenshot must not carry a cursor
 Lavapipe against SwiftShader, 2026-10-04: 96.8% of channels equal, every other within 2
 levels but ONE at 3 — rounding at antialiased edges and in the blur, no shading difference.
 Chromium needs `--use-angle=swiftshader --enable-unsafe-swiftshader
---disable-gpu-compositing` beside the WebGPU flags (`capture.mjs`): headless, with GPU
+--disable-gpu-compositing` beside the WebGPU flags (`browser.mjs`): headless, with GPU
 compositing it has no shared-image backing for a WebGPU canvas and loses the device on the
 first present ("A valid external Instance reference no longer exists").
 
@@ -1133,7 +1183,8 @@ cce-system-interface) to confirm behavior, not just the test suite.
   key repeat, the undo/redo and plate-navigation chords, the CSD hit zones, the
   outside-press popover close, held-button release on a lost pointer, the scroll phase,
   the pinch fallback — fed in cce-ui's own terms and unit-tested with no compositor),
-  `frame.rs` (`build_frame`: the app's display list, damage, custom vertices and overlays,
+  `dom.rs` (the DOM's key and wheel vocabulary as the driver's: `map_key`, `wheel_frame` —
+  portable, so tested natively), `frame.rs` (`build_frame`: the app's display list, damage, custom vertices and overlays,
   widget shaping, text and the popover-occlusion rects, tessellated into a `BuiltFrame` the
   renderer draws — no window system in it, tested with no GPU), `shell.rs` (the `Shell`
   trait — a window system's side of the run loop: exit, size requests, per-turn sync,
@@ -1168,10 +1219,12 @@ cce-system-interface) to confirm behavior, not just the test suite.
   non-uniform blur branch (the backdrop has one level, so the texel is the same —
   `frost_pair` is identical to the pixel either way).
 - `web/` — wasm32 only: `WebRenderer` (`new(canvas).await`, `resize`, `prepare_text`,
-  `draw_frame_2d`, and `capture_next_frame` / `take_capture().await` to read a frame back).
-  Its module doc lists what differs from the Vulkan path: an sRGB VIEW of the canvas's
-  unorm format, the parameter block as a dynamic-offset uniform, a 1x1 backdrop, the blur
-  snapshot as end-pass / copy / resume, every frame drawn whole.
+  `draw_frame_2d`, and `capture_next_frame` / `take_capture().await` or
+  `take_pending_capture` to read a frame back). Its module doc lists what differs from the
+  Vulkan path: an sRGB VIEW of the canvas's unorm format, the parameter block as a
+  dynamic-offset uniform, a 1x1 backdrop, the blur snapshot as end-pass / copy / resume,
+  every frame drawn whole. And `shell.rs`, the browser shell: `run`, `Fonts`, `Sizing`,
+  `capture` (see "And an `Application` runs in a page" above).
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
   the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance

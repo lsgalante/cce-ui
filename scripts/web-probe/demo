@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# web-probe/demo <out-dir> — run the reference app (src/main.rs) on the
+# browser shell, in headless Chromium, through the native harness's input
+# script (drive.mjs), one screenshot per step into <out-dir>.
+#
+# Fonts: the native demo, run with CCE_LOAD_SYSTEM_FONTS=1, sees every system
+# font, and the generic families fontdb reads from fontconfig; the page is
+# handed the same files in the order fontdb's directory scan finds them
+# ($DEMO_FONTS_DIR, default /usr/share/fonts) and the same generic families
+# ($DEMO_FAMILIES, "serif,sans,mono" — what fontdb's fontconfig reading made
+# of this machine's config, which is not always what `fc-match` says; empty
+# for the shell's defaults). A family the app names and the set lacks falls
+# back through them — the text measurement to the serif family — so with
+# either different, text is the difference you measure. Needs what `run`
+# needs.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+out=$(realpath -m "${1:?usage: web-probe/demo <out-dir>}")
+fonts=${DEMO_FONTS_DIR:-/usr/share/fonts}
+cd "$here/../.."
+
+cargo build --release --target wasm32-unknown-unknown --example demo_web
+site=$(mktemp -d)
+trap 'rm -rf "$site"' EXIT
+wasm-bindgen --target web --no-typescript --out-dir "$site" \
+    target/wasm32-unknown-unknown/release/examples/demo_web.wasm
+cp "$here/demo.html" "$site/demo.html"
+ln -s "$fonts" "$site/fonts"
+(cd "$fonts" && find . \( -type f -o -type l \) \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' -o -iname '*.otc' \) \
+    | sed 's|^\./||' | DEMO_FAMILIES="${DEMO_FAMILIES:-}" python3 -c 'import json,os,sys; print(json.dumps({"files": sys.stdin.read().split(), "families": os.environ["DEMO_FAMILIES"]}))') > "$site/fonts.json"
+node "$here/drive.mjs" "$site" "$out"
+echo "web-probe: screenshots in $out"

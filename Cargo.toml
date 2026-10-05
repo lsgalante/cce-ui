@@ -78,6 +78,17 @@ web-sys = { version = "0.3", features = [
     "Document",
     "Element",
     "HtmlCanvasElement",
+    "HtmlElement",
+    "CssStyleDeclaration",
+    "EventTarget",
+    "Event",
+    "AddEventListenerOptions",
+    "MouseEvent",
+    "PointerEvent",
+    "WheelEvent",
+    "KeyboardEvent",
+    "FocusEvent",
+    "ResizeObserver",
     "Gpu",
     "GpuAdapter",
     "GpuDevice",
@@ -155,4 +166,10 @@ web-sys = { version = "0.3", features = [
 # probe_web is the browser half, a cdylib for wasm-bindgen; natively it is empty.
 [[example]]
 name = "probe_web"
+crate-type = ["cdylib"]
+
+# The reference app (src/main.rs) in a browser, on the browser shell; a
+# cdylib for wasm-bindgen, empty natively.
+[[example]]
+name = "demo_web"
 crate-type = ["cdylib"]

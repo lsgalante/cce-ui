@@ -102,7 +102,8 @@ pub struct RenderContext<'a> {
 /// for a client that still keeps a `calloop::channel::Sender` somewhere. In
 /// the browser it is a `std::sync::mpsc` sender whose receiver the shell
 /// drains every turn — still `Send`, so app code that hands it to a worker
-/// compiles unchanged.
+/// compiles unchanged — and a send wakes the browser shell's loop through
+/// [`set_wake`], as a calloop channel wakes the Wayland one.
 pub struct AppSender<M> {
     #[cfg(not(target_arch = "wasm32"))]
     inner: calloop::channel::Sender<M>,
@@ -114,8 +115,35 @@ impl<M> AppSender<M> {
     /// Post `msg` to the app. Fails, handing it back, only once the loop is
     /// gone: the app has exited.
     pub fn send(&self, msg: M) -> Result<(), std::sync::mpsc::SendError<M>> {
-        self.inner.send(msg)
+        self.inner.send(msg)?;
+        #[cfg(target_arch = "wasm32")]
+        wake();
+        Ok(())
     }
+}
+
+/// Call the hook [`set_wake`] installed, if any.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn wake() {
+    WAKE.with(|w| {
+        if let Some(wake) = w.borrow().as_ref() {
+            wake();
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static WAKE: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// What an [`AppSender::send`] on this thread calls after posting: the
+/// browser shell's "turn the loop soon". Per thread, and the page's app runs
+/// on the one thread a page has; a send from a worker thread posts without
+/// waking, and is drained at the next turn the page takes.
+#[cfg(target_arch = "wasm32")]
+pub fn set_wake(wake: Option<Box<dyn Fn()>>) {
+    WAKE.with(|w| *w.borrow_mut() = wake);
 }
 
 impl<M> Clone for AppSender<M> {

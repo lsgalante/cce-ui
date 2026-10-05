@@ -1,4 +1,5 @@
 pub mod app;
+pub mod dom;
 pub mod driver;
 pub mod frame;
 pub mod shell;
