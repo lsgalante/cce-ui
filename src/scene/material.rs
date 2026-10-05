@@ -529,18 +529,26 @@ mod tests {
         crate::color::set_plate_blur(false);
     }
 
-    /// The finish defaults are the literals the shader shipped with, and the
-    /// push-constant layout is unchanged.
+    /// The finish defaults are the literals the shader shipped with, the DE
+    /// finish reads the three getters, and the push-constant layout is
+    /// unchanged.
+    ///
+    /// Read through `from_style` unpinned, the defaults were whatever the
+    /// process-wide values were: the machine's config, or what a test that
+    /// reloads the knobs had left there — `binding_semantics` left spec 0.5
+    /// until 2026-10-05, so this failed whenever it ran after that one. The
+    /// defaults are checked as the statics' initial values and the getters
+    /// pinned on this thread.
     #[test]
     fn finish_defaults_and_layout() {
-        let f = Finish::from_style();
-        assert_eq!(f.spec, 0.4);
-        assert_eq!(f.shininess, 24.0);
-        assert_eq!(f.curvature, 0.2);
-        assert_eq!(f.to_array(), [f.strength, f.spec, f.shininess, f.curvature]);
+        use crate::color::{FINISH_CURVATURE_DEFAULT, FINISH_SHININESS_DEFAULT, FINISH_SPEC_DEFAULT};
+        assert_eq!((FINISH_SPEC_DEFAULT, FINISH_SHININESS_DEFAULT, FINISH_CURVATURE_DEFAULT), (0.4, 24.0, 0.2));
         crate::color::set_finish_spec(0.9);
-        assert_eq!(Finish::from_style().spec, 0.9);
-        crate::color::set_finish_spec(0.4);
+        crate::color::set_finish_shininess(30.0);
+        crate::color::set_finish_curvature(0.3);
+        let f = Finish::from_style();
+        assert_eq!((f.spec, f.shininess, f.curvature), (0.9, 30.0, 0.3));
+        assert_eq!(f.to_array(), [f.strength, f.spec, f.shininess, f.curvature]);
     }
 
     /// The frost recipe reads the two plate-rung keys and carries the default
@@ -779,6 +787,11 @@ mod tests {
         let _lock = crate::color::test_color_state_lock();
         crate::layout::lazy_init_style_registry();
         let _ = crate::color::plate_blur(); // fire the once-per-process load BEFORE the reload
+        // The DE finish this reload changes is process-wide, and an absent
+        // knob keeps its value through the empty reload below: put back
+        // what was there. (`set_finish_*` cannot — under `cfg(test)` a
+        // setter writes this thread's overlay, not the globals.)
+        let finish_before = Finish::from_style();
         crate::color::reload_colors(r##"
             style {
                 surface {
@@ -807,10 +820,14 @@ mod tests {
         assert_eq!(Material::named("matte").map(|m| m.finish.strength), Some(0.3 / 0.15));
         assert_eq!(Material::control(), Material::legacy(PlateRung::Control), "unknown name = unbound");
         assert!(Frost::from_style().is_frosted(), "an opaque bound pane leaves the DE recipe to the keys");
-        crate::color::set_finish_spec(0.4);
-        crate::color::set_finish_shininess(24.0);
-        crate::color::set_finish_curvature(0.2);
+        // Multi-line: `a { b }` on one line does not parse, and the loader
+        // reads that as an empty document.
+        crate::color::reload_colors(&format!(
+            "style {{\n surface {{\n relief spec=(f64){:?} shininess=(f64){:?} curvature=(f64){:?}\n }}\n}}\n",
+            finish_before.spec, finish_before.shininess, finish_before.curvature,
+        ));
         crate::color::reload_colors("");
+        assert_eq!(Finish::from_style(), finish_before, "the DE finish is back for the tests after this one");
     }
 
     /// A popover is the base colour at menu opacity, frosted — the bytes the
