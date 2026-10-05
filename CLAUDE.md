@@ -56,6 +56,14 @@ scattering of widgets (`text_box`, `slider`, `dropdown`, `treelist`, …). When 
 engine, that module's tests are the fast feedback loop; run `cargo test -p cce-ui scene::` before
 anything else.
 
+CI (`.github/workflows/ci.yml`, every push and PR) builds and tests on Ubuntu 24.04 with
+default and with all features, warnings as errors. It installs `libwayland-dev` (the build
+links libwayland-client through pkg-config) and Mesa's lavapipe, a software Vulkan device,
+so the GPU tests (`vk::compute`, `vk::plate_probe`) RUN there rather than skip — and a
+last step fails the job if they printed a skip note, since a skipped test passes. To match
+it locally: `apt install libwayland-dev mesa-vulkan-drivers`, then
+`RUSTFLAGS="-D warnings" cargo test --all-features`.
+
 Wayland protocol bindings are generated **inline at compile time** by `wayland-scanner` macros in
 `src/protocol.rs` from `protocol/*.xml` (`cce-inspector-v1`, `cce-window-management-v1`) — there is
 no `build.rs` and no codegen step to run.
