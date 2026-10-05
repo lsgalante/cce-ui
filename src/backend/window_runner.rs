@@ -24,7 +24,7 @@ use smithay_client_toolkit::{
 };
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface, wl_registry, wl_region, wl_callback},
+    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_touch, wl_surface, wl_registry, wl_region, wl_callback},
     Connection, QueueHandle, Proxy,
 };
 
@@ -4108,6 +4108,14 @@ pub struct EngineState<A: Application> {
     /// runs the off-screen hover-clear (which would otherwise corrupt the
     /// drag: a ramp key snapped to the graph corner).
     pub buttons_down: u32,
+    /// The touchscreen, once the seat offers one; see `backend/touch.rs`.
+    pub touch: Option<wl_touch::WlTouch>,
+    pub touch_tracker: super::touch::TouchTracker,
+    /// The followed finger's surface offset into window coordinates (the
+    /// menu popup's, or none), fixed at its down.
+    pub touch_offset: (f32, f32),
+    /// Where a touch scroll is dispatched: the finger's down point.
+    pub touch_scroll_at: Option<(f32, f32)>,
     /// This frame's display-list text, shaped and held here so the `TextSpan`s built
     /// in the render pass can borrow the buffers (Phase 6 —
     /// [`Application::display_list_text`]).
@@ -4917,6 +4925,9 @@ impl<A: Application> SeatHandler for EngineState<A> {
             let keyboard = self.seat_state.get_keyboard(qh, &seat, None).unwrap();
             self.keyboard = Some(keyboard);
         }
+        if capability == Capability::Touch && self.touch.is_none() {
+            self.touch = self.seat_state.get_touch(qh, &seat).ok();
+        }
     }
     
     fn remove_capability(
@@ -4932,6 +4943,9 @@ impl<A: Application> SeatHandler for EngineState<A> {
         }
         if capability == Capability::Keyboard {
             self.keyboard = None;
+        }
+        if capability == Capability::Touch {
+            self.touch_lost();
         }
     }
     
@@ -6169,6 +6183,10 @@ fn run_session<'l, A: Application>(
         cursor_pos: (0.0, 0.0),
         last_press_serial: None,
         buttons_down: 0,
+        touch: None,
+        touch_tracker: Default::default(),
+        touch_offset: (0.0, 0.0),
+        touch_scroll_at: None,
         dl_text_items: Vec::new(),
     };
 

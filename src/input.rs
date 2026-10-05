@@ -416,6 +416,17 @@ pub fn force_natural_scroll(natural: Option<bool>) {
     NATURAL_OVERRIDE.with(|f| f.set(natural));
 }
 
+/// Run `f` with [`natural_scroll`] answering `natural`, then put back
+/// whatever override was in force. For an input whose direction is known
+/// regardless of the trackpad setting: a touchscreen finger is always
+/// natural (the runner's touch scroll, `backend/touch.rs`).
+pub fn with_natural_scroll<R>(natural: bool, f: impl FnOnce() -> R) -> R {
+    let prev = NATURAL_OVERRIDE.with(|o| o.replace(Some(natural)));
+    let out = f();
+    NATURAL_OVERRIDE.with(|o| o.set(prev));
+    out
+}
+
 /// This app's effective wheel-delta multipliers, resolved once per process.
 /// Pixel (smooth) deltas scale by `trackpad`, discrete clicks by `mouse`.
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -1446,6 +1446,36 @@ deliberately left alone: a slider's and a ramp key's drift after a scroll
 over them, which changes a VALUE after the hand has stopped.
 `the_animations_switch_stops_the_glide_and_not_the_coast` is the test.
 
+### A finger scrolls (touchscreens, since 2026-10-05)
+
+The runner binds `wl_touch` when the seat offers it, and `backend/touch.rs`
+turns the first finger into pointer input by what it does: a **tap** clicks
+where it landed, a finger that **moves** past `SLOP` (10 px) scrolls — a
+`PixelDelta` equal to the finger's travel, `ScrollPhase::Finger`, dispatched
+at the down point, then `FingerEnd` at the lift so a flick coasts through
+`ScrollMotion` like a trackpad's — and a finger **held** `HOLD_MS` (400 ms)
+before moving is a held left button (a slider thumb, a text selection, a
+scrollbar). The hold needs no timer: nothing is sent while the finger rests
+inside the slop, so the choice is made at the first motion past it. Other
+fingers are ignored until the first lifts. `TouchTracker` is the pure state
+machine (tested in that file); the `TouchHandler` impl and the dispatch are
+beside it, so `window_runner.rs` carries only the fields and the capability
+hook.
+
+A finger is always natural — the content goes where it is pushed — so the
+dispatch runs inside `input::with_natural_scroll(true, …)` and a value
+control's `value_notches_y` reads the finger's real direction whatever the
+trackpad's setting. No per-app trackpad factor either: 1:1 keeps the content
+under the finger. Not by finger: CSD moves/resizes and
+`Application::take_window_action`, since the compositor checks those serials
+against a pointer grab; the runner drains a queued action after a touch so it
+cannot fire on the next pointer press. Binding `wl_touch` is also what moves a
+cce-ui window off the compositor's emulated-pointer route
+(`cce-compositor`'s `cursor::TouchRoute`), where a finger drag was a held
+button and selected rather than scrolled. `CCE_SCROLL_DEBUG=1` logs each
+touch scroll (`[scroll] touch: …`); in a shadow, `ccectl touch down|motion|up`
+drives it.
+
 ### A host may name the phase; a test may pin the settings (2026-09-30)
 
 The phase a wheel event belongs to (`Finger`, `FingerEnd`, `Wheel`) is a
