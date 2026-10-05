@@ -335,9 +335,33 @@ the history, and the box takes no key while it composes. It is applied in `prepa
 and at the top of `handle_key`, against `ime::generation`; a press, or editing ending,
 drops it and asks the input method to cancel (`ime::request_reset`). A composition begun
 over a selection replaces it, as typing would. `a_composition_is_shown_in_place_and_the_
-commit_is_typed` is the test. Not there yet: the Wayland shell does not speak
-`text-input-v3`, so on Linux nothing composes; and `LineEdit` and the `DocEditor` take
-the commit but do not show the composition.
+commit_is_typed` is the test. Not there yet: `LineEdit` and the `DocEditor` take the
+commit but do not show the composition; no shell sends surrounding text, so an input
+method's `delete_surrounding_text` (text-input-v3) is not applied; and a password box is
+announced with the normal content purpose.
+
+**On Wayland it is `text-input-v3`** (`backend/text_input.rs`, since 2026-10-05), relayed
+by the compositor to an `input-method-v2` client (fcitx5, IBus's Wayland frontend). The
+text input is the first keyboard seat's, made with the keyboard. After each render
+(`EngineState::sync_text_input`) it is ENABLED while the seat's text-input focus is on our
+surface (`enter`) and a widget is editing (`ime::caret`), with a normal content type and
+the caret as the cursor rectangle (surface px — the app's logical px times a forced scale,
+as pointer input is divided), re-sent when the caret moves; DISABLED when nothing is
+editing; and disabled-then-enabled for a composition a widget dropped (`ime::take_reset`),
+which resets the input method. Every change is one `commit`, counted (`TextInput::commits`,
+what a current `done`'s serial is). `preedit_string` / `commit_string` /
+`delete_surrounding_text` are double-buffered and applied on `done` in the protocol's
+order (`Batch::apply_order`: the old composition out, the commit typed, the new one in;
+a batch with no `preedit_string` ends the composition, a cursor of -1 hides it); `leave`
+drops the composition. The decisions are pure (`TextInput::plan`, `Batch`) and tested
+with no compositor (`backend::text_input::tests`). Verified end to end under the headless
+sway with a scriptable `input-method-v2` client standing in for fcitx5 (2026-10-05): no
+activation until a box is clicked into; a composition shown underlined at the caret; the
+commit replacing it; a cancel; a press mid-composition dropping it with a
+disable-and-enable; Escape disabling — and under `WAYLAND_DEBUG` the cursor rectangle
+following the caret through every step, each `done`'s serial equal to the commits sent.
+Sway routes text-input focus only while an input method is bound, so with none (the
+24-step harness) nothing changes: 0 px.
 
 Wayland protocol bindings are generated **inline at compile time** by `wayland-scanner` macros in
 `src/protocol.rs` from `protocol/*.xml` (`cce-inspector-v1`, `cce-window-management-v1`) — there is
@@ -1402,7 +1426,7 @@ cce-system-interface) to confirm behavior, not just the test suite.
   `stage_renderer`, the draw). A routing change belongs in `driver.rs`, a change to
   what a frame contains in `frame.rs` and a pacing change in `shell.rs`, never in the
   Wayland code. A second shell implements `Shell` and calls `Pacer::turn` from its own
-  loop (an animation frame, a run-loop observer), sleeping or scheduling for the `Step`. `menu_popup.rs` and `dnd.rs` are Wayland-only.
+  loop (an animation frame, a run-loop observer), sleeping or scheduling for the `Step`. `menu_popup.rs`, `dnd.rs` and `text_input.rs` (`text-input-v3`, the input method's way in) are Wayland-only.
 - `draw/` — what a renderer draws, with no renderer in it (since 2026-10-04): `Frame2D`,
   `Batch2D`, `PlatePush` and `batch_push_constants` (the one layout of a batch's 32-float
   parameter block — Vulkan pushes it, a renderer without push constants puts it in a

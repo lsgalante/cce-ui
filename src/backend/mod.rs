@@ -12,6 +12,8 @@ pub mod dnd;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod menu_popup;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
+pub mod text_input;
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod window_runner;
 
 

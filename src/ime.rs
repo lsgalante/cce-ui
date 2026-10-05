@@ -26,10 +26,12 @@
 //! mid-composition — asks the shell to cancel it in the input method too
 //! ([`request_reset`], drained by the shell with [`take_reset`]).
 //!
+//! The shells that feed it: the Wayland shell through `text-input-v3`
+//! (`backend::text_input`), the browser's through a hidden textarea, the
+//! AppKit shell as an `NSTextInputClient`.
+//!
 //! Per thread, as the context menu is: a window's widgets, its shell and its
-//! frame are one thread's. The Wayland shell does not speak
-//! `text-input-v3` yet, so on Linux nothing sets a composition and this is
-//! inert.
+//! frame are one thread's.
 
 use std::cell::RefCell;
 

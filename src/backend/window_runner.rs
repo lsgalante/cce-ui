@@ -27,6 +27,10 @@ use wayland_client::{
     Connection, QueueHandle, Proxy,
 };
 
+use wayland_protocols::wp::text_input::zv3::client::{
+    zwp_text_input_manager_v3::ZwpTextInputManagerV3,
+    zwp_text_input_v3::{self, ZwpTextInputV3},
+};
 use wayland_protocols::wp::pointer_gestures::zv1::client::{
     zwp_pointer_gesture_pinch_v1::{self, ZwpPointerGesturePinchV1},
     zwp_pointer_gestures_v1::{self as zwp_pointer_gestures, ZwpPointerGesturesV1},
@@ -137,6 +141,12 @@ pub struct EngineState<A: Application> {
     pub just_configured: bool,
     pub pointer_gestures: Option<ZwpPointerGesturesV1>,
     pub pinch_gesture: Option<ZwpPointerGesturePinchV1>,
+    /// `text-input-v3`, when the compositor offers it: the input method's
+    /// way in (see `backend::text_input`). The text input is the first
+    /// keyboard seat's.
+    pub text_input_manager: Option<ZwpTextInputManagerV3>,
+    pub text_input: Option<ZwpTextInputV3>,
+    pub text_input_state: crate::backend::text_input::TextInput,
     /// The cce window-management toplevel handle, held for the window's
     /// lifetime once [`Application::utility`] declared the mode.
     pub cce_toplevel: Option<crate::protocol::cce_window_management_v1::zcce_toplevel_v1::ZcceToplevelV1>,
@@ -490,6 +500,40 @@ impl<A: Application> EngineState<A> {
             self.redraw = true;
         } else {
             self.damage_owed = false;
+        }
+        self.sync_text_input();
+    }
+
+    /// Bring the text input in step with the frame just built: enabled at
+    /// the editing widget's caret, disabled with nothing editing, reset for
+    /// a composition a widget dropped (`backend::text_input`).
+    fn sync_text_input(&mut self) {
+        use crate::backend::text_input::Send;
+        use zwp_text_input_v3::{ContentHint, ContentPurpose};
+        let reset = crate::ime::take_reset();
+        let Some(ti) = self.text_input.clone() else { return };
+        // Forced mode: the surface is the compositor's scale-1 space.
+        let surface_scale = crate::scale::forced_scale().unwrap_or(1.0);
+        match self.text_input_state.plan(crate::ime::caret(), surface_scale, reset) {
+            Send::Nothing => {}
+            Send::Enable { rect: [x, y, w, h], reset } => {
+                if reset {
+                    ti.disable();
+                    ti.commit();
+                }
+                ti.enable();
+                ti.set_content_type(ContentHint::None, ContentPurpose::Normal);
+                ti.set_cursor_rectangle(x, y, w, h);
+                ti.commit();
+            }
+            Send::Move { rect: [x, y, w, h] } => {
+                ti.set_cursor_rectangle(x, y, w, h);
+                ti.commit();
+            }
+            Send::Disable => {
+                ti.disable();
+                ti.commit();
+            }
         }
     }
 }
@@ -876,6 +920,9 @@ impl<A: Application> SeatHandler for EngineState<A> {
         if capability == Capability::Keyboard && self.keyboard.is_none() {
             let keyboard = self.seat_state.get_keyboard(qh, &seat, None).unwrap();
             self.keyboard = Some(keyboard);
+            if let (Some(m), None) = (&self.text_input_manager, &self.text_input) {
+                self.text_input = Some(m.get_text_input(&seat, qh, ()));
+            }
         }
     }
     
@@ -1350,6 +1397,64 @@ impl<A: Application> wayland_client::Dispatch<wl_callback::WlCallback, ()> for E
     }
 }
 
+impl<A: Application> wayland_client::Dispatch<ZwpTextInputManagerV3, ()> for EngineState<A> {
+    fn event(
+        _state: &mut Self,
+        _proxy: &ZwpTextInputManagerV3,
+        _event: <ZwpTextInputManagerV3 as wayland_client::Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+/// The input method's events (see `backend::text_input`): the focus, and
+/// the double-buffered composition, commit and deletion, applied on `done`.
+impl<A: Application> wayland_client::Dispatch<ZwpTextInputV3, ()> for EngineState<A> {
+    fn event(
+        state: &mut Self,
+        _proxy: &ZwpTextInputV3,
+        event: zwp_text_input_v3::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        use crate::backend::text_input::Apply;
+        match event {
+            zwp_text_input_v3::Event::Enter { .. } => {
+                state.text_input_state.enter();
+                // A frame, so the sync after it enables for an editing widget.
+                state.redraw = true;
+            }
+            zwp_text_input_v3::Event::Leave { .. } => {
+                state.text_input_state.leave();
+                let (driver, t) = state.turn();
+                driver.preedit(t, None);
+            }
+            zwp_text_input_v3::Event::PreeditString { text, cursor_begin, cursor_end } => {
+                state.text_input_state.pending.set_preedit(text, cursor_begin, cursor_end);
+            }
+            zwp_text_input_v3::Event::CommitString { text } => {
+                state.text_input_state.pending.commit = text;
+            }
+            zwp_text_input_v3::Event::DeleteSurroundingText { before_length, after_length } => {
+                state.text_input_state.pending.delete = Some((before_length, after_length));
+            }
+            zwp_text_input_v3::Event::Done { .. } => {
+                for step in state.text_input_state.done().apply_order() {
+                    let (driver, t) = state.turn();
+                    match step {
+                        Apply::Preedit(p) => driver.preedit(t, p),
+                        Apply::Commit(text) => driver.commit_text(t, text),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 impl<A: Application> wayland_client::Dispatch<ZwpPointerGesturesV1, ()> for EngineState<A> {
     fn event(
         _state: &mut Self,
@@ -1702,6 +1807,7 @@ fn run_session<'l, A: Application>(
     let output_state = OutputState::new(&globals, &qh);
 
     let pointer_gestures: Option<ZwpPointerGesturesV1> = globals.bind(&qh, 1..=3, ()).ok();
+    let text_input_manager: Option<ZwpTextInputManagerV3> = globals.bind(&qh, 1..=1, ()).ok();
 
     let mut engine_state = EngineState {
         data_device_manager: DataDeviceManagerState::bind(&globals, &qh).ok(),
@@ -1753,6 +1859,9 @@ fn run_session<'l, A: Application>(
         qh: qh.clone(),
         just_configured: false,
         pointer_gestures,
+        text_input_manager,
+        text_input: None,
+        text_input_state: Default::default(),
         pinch_gesture: None,
         cce_toplevel: None,
         pending_grid_patch: None,
