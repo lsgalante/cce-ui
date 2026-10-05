@@ -1,13 +1,14 @@
-// capture-app.mjs <site-dir> <app> <out.rgba> [settle-ms]: open demo.html
-// with ?app=<app> (browser.mjs), let the app run for settle-ms (default
-// 3000), and write the frame `capture()` reads back from the GPU to
+// capture-app.mjs <site-dir> <app> <out.rgba> [settle-ms] [entry]: open
+// demo.html with ?app=<app> (and &entry=<entry>, the app's start function in
+// place of `start`) through browser.mjs, let the app run for settle-ms
+// (default 3000), and write the frame `capture()` reads back from the GPU to
 // <out.rgba> (premultiplied RGBA8, 1280x800).
 import fs from 'fs';
 import { open } from './browser.mjs';
 
-const [root, app, out, settle] = process.argv.slice(2);
+const [root, app, out, settle, entry] = process.argv.slice(2);
 if (!root || !app || !out) { console.error('usage: capture-app.mjs <site-dir> <app> <out.rgba> [settle-ms]'); process.exit(2); }
-const { page, logs, close } = await open(root, 'demo.html', 1280, 800, `?app=${app}`);
+const { page, logs, close } = await open(root, 'demo.html', 1280, 800, `?app=${app}` + (entry ? `&entry=${entry}` : ''));
 let ok = true;
 try {
   await page.waitForFunction(() => window.demoReady === true, null, { timeout: 120000 });

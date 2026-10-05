@@ -12,7 +12,8 @@
 //! blur samples the backdrop the scene left.
 
 use cce_ui::engine::{
-    AppSender, Application, LogicalPosition, LogicalSize, MeshId, SceneDraw, SceneImage, Stage3D, Vertex3D, WindowSettings,
+    AppSender, Application, LogicalPosition, LogicalSize, MeshId, RtCamera, RtImage, RtMaterial, RtTriangle, SceneDraw,
+    SceneImage, Stage3D, Vertex3D, WindowSettings,
 };
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{DisplayList, PaintCtx, PlateSpec};
@@ -25,10 +26,21 @@ pub const H: u32 = 800;
 /// The UI strip's width; the 3D pane is the rest of the window.
 const STRIP: f32 = 300.0;
 
-pub struct Probe3d {
+/// The traced probe's sample count: frames staged before it stops.
+pub const TRACE_FRAMES: u32 = 8;
+
+pub struct Probe3d<const TRACE: bool> {
     image: u32,
     meshes: Option<Meshes>,
+    /// Traced frames staged so far.
+    traced: u32,
 }
+
+pub type Raster = Probe3d<false>;
+pub type Traced = Probe3d<true>;
+
+/// The image's corners in the scene, as both passes place it.
+const IMAGE_CORNERS: [[f32; 3]; 4] = [[-2.6, 1.6, -1.6], [-0.6, 1.6, -1.6], [-0.6, 0.35, -1.6], [-2.6, 0.35, -1.6]];
 
 struct Meshes {
     background: MeshId,
@@ -112,7 +124,25 @@ fn sphere(center: Vec3, radius: f32, stacks: u32, slices: u32) -> (Vec<Vertex3D>
     (tris, lines)
 }
 
-impl Probe3d {
+/// The traced scene: the raster meshes' triangles, a material each.
+fn traced_scene() -> (Vec<RtTriangle>, Vec<RtMaterial>) {
+    let mut tris = Vec::new();
+    let mut mats = Vec::new();
+    let mut add = |verts: Vec<Vertex3D>, albedo: [f32; 3], emission: [f32; 3]| {
+        let m = mats.len() as u32;
+        mats.push(RtMaterial { albedo, emission });
+        for t in verts.chunks_exact(3) {
+            tris.push(RtTriangle { p0: t[0].position, p1: t[1].position, p2: t[2].position, material: m });
+        }
+    };
+    add(cuboid(Vec3::new(0.0, -0.75, 0.0), Vec3::new(3.0, 0.05, 2.4), [[0.3; 3]; 6]), [0.55, 0.57, 0.55], [0.0; 3]);
+    add(cuboid(Vec3::new(-1.6, 0.0, 0.2), Vec3::splat(0.6), [[0.0; 3]; 6]), [0.8, 0.35, 0.25], [0.0; 3]);
+    add(sphere(Vec3::new(0.4, 0.3, -0.4), 0.9, 12, 20).0, [0.45, 0.55, 0.75], [0.0; 3]);
+    add(cuboid(Vec3::new(1.5, 0.1, 1.2), Vec3::splat(0.55), [[0.0; 3]; 6]), [0.3, 0.7, 0.9], [0.4, 0.9, 1.1]);
+    (tris, mats)
+}
+
+impl<const TRACE: bool> Probe3d<TRACE> {
     fn camera(size: LogicalSize, scale: f64) -> (Mat4, (u32, u32, u32, u32)) {
         let s = scale as f32;
         let (pw, ph) = ((size.width - STRIP) * s, size.height * s);
@@ -124,9 +154,19 @@ impl Probe3d {
         let shift = Mat4::from_translation(Vec3::new(1.0 - ndc_w, 0.0, 0.0)) * Mat4::from_scale(Vec3::new(ndc_w, 1.0, 1.0));
         (shift * proj * view, ((STRIP * s) as u32, 0, pw as u32, ph as u32))
     }
+
+    /// The traced pane's camera: the pane's own projection, unshifted —
+    /// the tracer's image is the pane.
+    fn trace_camera(size: LogicalSize, scale: f64) -> RtCamera {
+        let s = scale as f32;
+        let (pw, ph) = ((size.width - STRIP) * s, size.height * s);
+        let proj = Mat4::perspective_rh(40f32.to_radians(), pw / ph, 0.1, 100.0);
+        let view = Mat4::look_at_rh(Vec3::new(3.2, 2.4, 5.6), Vec3::new(0.0, 0.2, 0.0), Vec3::Y);
+        RtCamera { inv_mvp: (proj * view).inverse().to_cols_array_2d() }
+    }
 }
 
-impl Application for Probe3d {
+impl<const TRACE: bool> Application for Probe3d<TRACE> {
     type Message = ();
 
     fn create(_sender: AppSender<()>) -> Self {
@@ -138,7 +178,7 @@ impl Application for Probe3d {
                 px.extend([(x * 255 / (iw - 1)) as u8, (y * 255 / (ih - 1)) as u8, 200, a]);
             }
         }
-        Probe3d { image: cce_ui::draw::upload_rgba(px, iw, ih), meshes: None }
+        Probe3d { image: cce_ui::draw::upload_rgba(px, iw, ih), meshes: None, traced: 0 }
     }
 
     fn settings(&self) -> WindowSettings {
@@ -181,9 +221,24 @@ impl Application for Probe3d {
         let glass_wires = stage.create_mesh(&cuboid_edges(glass_c, Vec3::splat(0.55), [0.9, 0.95, 1.0]));
         stage.set_scene_light([0.6, 0.7, 0.4]);
         self.meshes = Some(Meshes { background, cube, prelit, sphere, sphere_wires, glass, glass_wires });
+        if TRACE {
+            let (tris, mats) = traced_scene();
+            stage.set_rt_scene_with_image(&tris, &mats, Some(RtImage { image: self.image, corners: IMAGE_CORNERS, opacity: 0.9 }));
+        }
     }
 
     fn stage_3d(&mut self, stage: &mut dyn Stage3D, size: LogicalSize, scale: f64) -> bool {
+        if TRACE {
+            // A sample a frame for TRACE_FRAMES frames, then the backdrop
+            // keeps the result.
+            if self.traced >= TRACE_FRAMES {
+                return false;
+            }
+            let (_, pane) = Self::camera(size, scale);
+            stage.stage_rt(pane, Self::trace_camera(size, scale));
+            self.traced += 1;
+            return self.traced < TRACE_FRAMES;
+        }
         let Some(m) = &self.meshes else { return false };
         let (mvp, scissor) = Self::camera(size, scale);
         let mvp = mvp.to_cols_array_2d();
@@ -210,7 +265,7 @@ impl Application for Probe3d {
         stage.stage_scene(scissor, draws);
         stage.stage_scene_images(vec![SceneImage {
             image: self.image,
-            corners: [[-2.6, 1.6, -1.6], [-0.6, 1.6, -1.6], [-0.6, 0.35, -1.6], [-2.6, 0.35, -1.6]],
+            corners: IMAGE_CORNERS,
             mvp,
             opacity: 0.9,
             before: 5,

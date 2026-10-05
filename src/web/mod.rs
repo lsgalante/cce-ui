@@ -11,6 +11,7 @@
 
 mod compute;
 mod renderer;
+mod rt;
 mod scene;
 mod shell;
 

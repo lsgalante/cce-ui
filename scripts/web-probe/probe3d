@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# web-probe/probe3d <out.rgba> — run the 3D probe (examples/probe3d/scene.rs)
-# on the browser shell and WebGPU renderer in headless Chromium, and write a
-# frame read back from the GPU: 1280x800 premultiplied RGBA8.
+# web-probe/probe3d <out.rgba> [traced] — run the 3D probe
+# (examples/probe3d/scene.rs) on the browser shell and WebGPU renderer in
+# headless Chromium, and write a frame read back from the GPU: 1280x800
+# premultiplied RGBA8. With `traced`, the path-traced probe, given time to
+# take its eight samples ($PROBE3D_SETTLE ms, default 60000).
 #
 # Its other half is `cargo run --example probe3d_native`, screenshotted in a
 # compositor; compare.py composites this frame over that compositor's
@@ -10,7 +12,8 @@
 # `run` needs.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-out=$(realpath -m "${1:?usage: web-probe/probe3d <out.rgba>}")
+out=$(realpath -m "${1:?usage: web-probe/probe3d <out.rgba> [traced]}")
+mode=${2:-}
 fonts=${PROBE_FONTS_DIR:-/usr/share/fonts/truetype/dejavu}
 cd "$here/../.."
 cargo build --release --target wasm32-unknown-unknown --example probe3d_web
@@ -22,5 +25,9 @@ cp "$here/demo.html" "$site/demo.html"
 mkdir "$site/fonts"
 cp "$fonts"/*.ttf "$site/fonts/"
 (cd "$site/fonts" && printf '%s\n' *.ttf | python3 -c 'import json,sys; print(json.dumps({"files": sys.stdin.read().split(), "families": ""}))') > "$site/fonts.json"
-node "$here/capture-app.mjs" "$site" probe3d_web "$out"
+if [ "$mode" = traced ]; then
+    node "$here/capture-app.mjs" "$site" probe3d_web "$out" "${PROBE3D_SETTLE:-60000}" start_traced
+else
+    node "$here/capture-app.mjs" "$site" probe3d_web "$out"
+fi
 echo "web-probe: wrote $out"

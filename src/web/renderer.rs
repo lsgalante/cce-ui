@@ -26,7 +26,9 @@
 
 use std::collections::HashMap;
 
+use super::rt::WebRt;
 use super::scene::WebScene;
+use crate::draw::rt::{RtCamera, RtEnvironment, RtImage, RtMaterial, RtTriangle};
 use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Stage3D, Vertex3D};
 
 use wasm_bindgen::{JsCast, JsValue};
@@ -171,6 +173,11 @@ pub struct WebRenderer {
     /// the backdrop) — what the 2D pass binds while a scene is shown.
     scene: WebScene,
     scene_group_0: Option<GpuBindGroup>,
+    /// The path tracer, made by the first `set_rt_scene`; the background and
+    /// environment it is handed at each `stage_rt`, as on Vulkan.
+    rt: Option<WebRt>,
+    rt_background: Option<[f32; 3]>,
+    rt_environment: RtEnvironment,
     blocks: Growable,
     group_1: GpuBindGroup,
     vertices: Growable,
@@ -444,6 +451,9 @@ impl WebRenderer {
             snapshot: None,
             scene,
             scene_group_0: None,
+            rt: None,
+            rt_background: None,
+            rt_environment: RtEnvironment::default(),
             blocks,
             group_1,
             vertices,
@@ -610,7 +620,8 @@ impl WebRenderer {
         let (w, h) = (target.width(), target.height());
         // The scene's backdrop follows the canvas; a resized one holds no
         // scene until the next is drawn into it, as on Vulkan.
-        if self.scene.has_staged() || self.scene.target.is_some() {
+        let rt_staged = self.rt.as_ref().is_some_and(|rt| rt.staged());
+        if self.scene.has_staged() || rt_staged || self.scene.target.is_some() {
             let had = self.scene.target.as_ref().map(|t| (t.width, t.height));
             self.scene.fit(&self.device, w, h)?;
             if had != Some((w, h)) {
@@ -689,6 +700,16 @@ impl WebRenderer {
         let encoder = self.device.create_command_encoder();
         let images_for_scene = &self.images;
         self.scene.record(&self.device, &self.queue, &encoder, &|id| images_for_scene.get(&id).map(|i| i.group.clone()))?;
+        // The traced pane, into the same backdrop after the raster scene.
+        if let (Some(rt), Some(t)) = (self.rt.as_mut(), self.scene.target.as_ref()) {
+            let image_view = |id: u32| {
+                let img = images_for_scene.get(&id)?;
+                Some((img.texture.create_view().ok()?, img.width, img.height))
+            };
+            if rt.record(&self.device, &self.queue, &encoder, &t.view, (t.width, t.height), &image_view)? {
+                self.scene.backdrop_valid = true;
+            }
+        }
         let base_group_0 = match (&self.scene_group_0, &self.scene.target) {
             (Some(group), Some(t)) if self.scene.backdrop_valid => {
                 encoder.copy_texture_to_texture_with_gpu_extent_3d_dict(
@@ -860,5 +881,38 @@ impl Stage3D for WebRenderer {
         if v.length_squared() > 1e-12 {
             self.scene.light = v.normalize().to_array();
         }
+    }
+    fn set_rt_scene_with_image(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial], image: Option<RtImage>) {
+        if self.rt.is_none() {
+            match WebRt::new(&self.device, self.view_format) {
+                Ok(rt) => self.rt = Some(rt),
+                Err(e) => {
+                    web_sys::console::error_2(&"cce-ui: no path tracer:".into(), &e);
+                    return;
+                }
+            }
+        }
+        let rt = self.rt.as_mut().unwrap();
+        if let Err(e) = rt.set_scene(&self.device, &self.queue, triangles, materials, image) {
+            web_sys::console::error_2(&"cce-ui: the traced scene was not uploaded:".into(), &e);
+        }
+    }
+    fn set_rt_environment(&mut self, environment: RtEnvironment) {
+        self.rt_environment = environment;
+    }
+    fn set_rt_background(&mut self, color: Option<[f32; 3]>) {
+        self.rt_background = color;
+    }
+    fn stage_rt(&mut self, pane: (u32, u32, u32, u32), camera: RtCamera) {
+        if let Some(rt) = self.rt.as_mut() {
+            rt.set_background(self.rt_background);
+            rt.set_environment(self.rt_environment);
+            if let Err(e) = rt.stage(&self.device, pane, camera) {
+                web_sys::console::error_2(&"cce-ui: the traced pane was not staged:".into(), &e);
+            }
+        }
+    }
+    fn rt_accumulating(&self) -> bool {
+        self.rt.as_ref().is_some_and(|rt| rt.accumulating())
     }
 }

@@ -12,11 +12,21 @@ mod web {
     use cce_ui::web::{Fonts, Sizing};
     use wasm_bindgen::prelude::*;
 
+    fn fonts(fonts: js_sys::Array) -> Fonts {
+        std::panic::set_hook(Box::new(|info| web_sys::console::error_1(&info.to_string().into())));
+        Fonts::new(fonts.iter().map(|f| js_sys::Uint8Array::new(&f).to_vec()).collect())
+    }
+
+    /// The raster probe.
     #[wasm_bindgen]
     pub async fn start(canvas: web_sys::HtmlCanvasElement, fonts: js_sys::Array, _families: String, _fill: bool) -> Result<(), JsValue> {
-        std::panic::set_hook(Box::new(|info| web_sys::console::error_1(&info.to_string().into())));
-        let fonts = Fonts::new(fonts.iter().map(|f| js_sys::Uint8Array::new(&f).to_vec()).collect());
-        cce_ui::web::run::<super::scene::Probe3d>(canvas, fonts, Sizing::Page).await
+        cce_ui::web::run::<super::scene::Raster>(canvas, self::fonts(fonts), Sizing::Page).await
+    }
+
+    /// The traced probe (`demo.html?app=probe3d_web&entry=start_traced`).
+    #[wasm_bindgen]
+    pub async fn start_traced(canvas: web_sys::HtmlCanvasElement, fonts: js_sys::Array, _families: String, _fill: bool) -> Result<(), JsValue> {
+        cce_ui::web::run::<super::scene::Traced>(canvas, self::fonts(fonts), Sizing::Page).await
     }
 
     #[wasm_bindgen]

@@ -162,6 +162,28 @@ image in the scene before the translucent draw, a host light, frost over the pan
 195 px differ by more than 8 levels, all on 1 px wires (where along its length a line
 steps a row is the rasterizer's), everything else within 2.
 
+**And so does the path tracer** (since 2026-10-05). `Stage3D` carries the tracer's half
+too — `set_rt_scene` / `set_rt_scene_with_image`, `set_rt_environment`,
+`set_rt_background`, `stage_rt`, `rt_accumulating` — and what it traces from moved to
+`draw::rt`: the schema (`RtTriangle`, `RtMaterial`, `RtImage`, `RtCamera`,
+`RtEnvironment`), the binned-SAH BVH and its tests, the buffers (`pack_scene`) and
+parameter blocks (`rt_params`, `denoise_params`) as the shaders read them, and the
+constants; the shaders (`rt_common` / `rt_bvh` / `rt_query` / `rt_denoise`) moved to `draw/`.
+`vk::rt` re-exports the schema and keeps its own state (frames in flight, the ray-query
+tier, `RtOffscreen`) — it now packs and lays out through `draw::rt`, verified by its
+GPU tests (`cargo test --lib rt -- --ignored`, lavapipe). `web/rt.rs` is the compute tier on
+WebGPU: the same shaders and packing, the same rules for restarting the accumulation, one
+sample a frame plus the three à-trous iterations in one compute pass. Two differences:
+WebGPU has no ray tracing, so there is no ray-query tier (the compute tier is what every
+Vulkan device without RT cores runs too); and Vulkan BLITS the tracer's `rgba8unorm`
+image into the sRGB backdrop, converting as it copies, which WebGPU's copies cannot — a
+small render pass loads each texel and writes it through the backdrop's sRGB view, the
+same conversion. The probe's traced mode (`Probe3d<true>`, `PROBE3D_TRACE=1` natively,
+`scripts/web-probe/probe3d <out> traced`) stages exactly eight frames and stops, so both
+are compared at eight samples: 2026-10-05, Vulkan compute tier (`CCE_VK_RT=compute`) on
+lavapipe vs SwiftShader, the traced pane's mean differs by 0.10 of a level, every pixel
+within 8, 47 channels in the frame past 8 — a few paths that diverged.
+
 **The reference app runs on both, through one input script.** `examples/demo_web.rs` is
 `src/main.rs`'s `DemoApp` (included by `#[path]`, hence `pub(crate)`) in a page;
 `scripts/web-probe/demo <dir>` builds it, serves it with the machine's fonts and replays the
@@ -1270,7 +1292,9 @@ cce-system-interface) to confirm behavior, not just the test suite.
   at a per-batch dynamic offset (`WEBGPU_BLOCK_STRIDE`); the backdrop is sampled with
   `textureSampleLevel(…, 0.0)` because WebGPU rejects implicit-LOD sampling in the
   non-uniform blur branch (the backdrop has one level, so the texel is the same —
-  `frost_pair` is identical to the pixel either way).
+  `frost_pair` is identical to the pixel either way). And the 3D halves: `draw::scene`
+  (the raster scene's types, uniforms and the `Stage3D` trait) and `draw::rt` (the path
+  tracer's schema, BVH and parameter blocks), with their shaders beside the 2D ones.
 - `web/` — wasm32 only: `WebRenderer` (`new(canvas).await`, `resize`, `prepare_text`,
   `draw_frame_2d`, and `capture_next_frame` / `take_capture().await` or
   `take_pending_capture` to read a frame back). Its module doc lists what differs from the
@@ -1278,6 +1302,7 @@ cce-system-interface) to confirm behavior, not just the test suite.
   dynamic-offset uniform, a 1x1 backdrop, the blur snapshot as end-pass / copy / resume,
   every frame drawn whole. And `shell.rs`, the browser shell: `run`, `Fonts`, `Sizing`,
   `capture` (see "And an `Application` runs in a page" above); `scene.rs`, the 3D pass;
+  `rt.rs`, the path tracer's compute tier;
   `compute.rs`, the async
   `ComputeDevice`; and `request_device`, the adapter and device every one of them asks
   for (with the limits a caller names raised to the adapter's).

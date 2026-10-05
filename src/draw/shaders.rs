@@ -20,6 +20,19 @@ pub const SCENE3D: &str = include_str!("scene3d.wgsl");
 /// The 3D scene pass's images: textured quads under the meshes' uniforms.
 pub const SCENE3D_IMAGE: &str = include_str!("scene3d_image.wgsl");
 
+/// The path tracer ([`super::rt`]): its shared core, then one trace tier
+/// after it — the compute BVH traversal, or (Vulkan only) hardware ray
+/// queries — and the à-trous denoiser that runs over its output.
+pub const RT_COMMON: &str = include_str!("rt_common.wgsl");
+pub const RT_BVH: &str = include_str!("rt_bvh.wgsl");
+pub const RT_QUERY: &str = include_str!("rt_query.wgsl");
+pub const RT_DENOISE: &str = include_str!("rt_denoise.wgsl");
+
+/// The compute tier's tracer: [`RT_COMMON`] with [`RT_BVH`] after it.
+pub fn rt_bvh_source() -> String {
+    format!("{RT_COMMON}\n{RT_BVH}")
+}
+
 /// The one line that differs between the Vulkan and the WebGPU 2D shader.
 const PUSH_BLOCK: &str = "var<push_constant> rrect_clip: RRectClip;";
 const UNIFORM_BLOCK: &str = "@group(1) @binding(0) var<uniform> rrect_clip: RRectClip;";

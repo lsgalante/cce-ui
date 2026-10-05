@@ -8,7 +8,9 @@
 //! image, scissored to a pane, which the renderer copies beneath the UI pass
 //! and the 2D shader's blur plates sample. A staged scene is drawn once; the
 //! backdrop it leaves is shown under every later frame until the next one.
-//! `scene3d.wgsl` / `scene3d_image.wgsl` (in `draw/`) are the shaders.
+//! `scene3d.wgsl` / `scene3d_image.wgsl` (in `draw/`) are the shaders. A
+//! traced pane ([`super::rt`]) takes the raster scene's place in the same
+//! backdrop, staged through the same trait.
 
 /// Layout-identical to the app's `geometry::Vertex3D` (bytemuck-castable at cutover).
 #[repr(C)]
@@ -128,6 +130,8 @@ pub(crate) struct SceneUniforms {
 /// it with its INWARD derivative normal, said the right way round.
 pub(crate) const DEFAULT_SCENE_LIGHT: [f32; 3] = [0.55, -0.45, -0.7];
 
+use super::rt::{RtCamera, RtEnvironment, RtImage, RtMaterial, RtTriangle};
+
 /// What an app stages a 3D scene through: the renderer's half of the
 /// pass, the same on every renderer (`vk::VkRenderer`, `web::WebRenderer`).
 /// An app takes one in `Application::init_3d` (make its meshes) and
@@ -146,6 +150,28 @@ pub trait Stage3D {
     /// The direction TOWARD the flat shading's light, in world space; set
     /// it once, and light a `prelit` mesh by the same vector.
     fn set_scene_light(&mut self, toward: [f32; 3]);
+
+    /// Replace the path tracer's scene (triangles in the space the camera's
+    /// `inv_mvp` unprojects into); the BVH is built on the CPU. Rare: a
+    /// geometry rebuild. Restarts the accumulation.
+    fn set_rt_scene(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial]) {
+        self.set_rt_scene_with_image(triangles, materials, None);
+    }
+    /// [`set_rt_scene`](Self::set_rt_scene) with an uploaded image standing
+    /// in the scene (the picture the raster pass draws as a `SceneImage`).
+    fn set_rt_scene_with_image(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial], image: Option<RtImage>);
+    /// The traced scene's sky and sun. A change restarts the accumulation.
+    fn set_rt_environment(&mut self, environment: RtEnvironment);
+    /// What a camera ray that meets nothing shows (linear RGB), or `None`
+    /// for the sky. A change restarts the accumulation.
+    fn set_rt_background(&mut self, color: Option<[f32; 3]>);
+    /// Stage one progressive pass into `pane` (physical px) for the next
+    /// frame, in place of the raster scene there. Call it every frame while
+    /// tracing: each adds a sample; a camera, pane or scene change restarts.
+    fn stage_rt(&mut self, pane: (u32, u32, u32, u32), camera: RtCamera);
+    /// True while another staged frame would still refine the traced image
+    /// — the app's cue to keep asking for frames.
+    fn rt_accumulating(&self) -> bool;
 }
 
 /// A staged scene's uniform blocks, in the order its draws use them: one per

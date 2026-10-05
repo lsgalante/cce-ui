@@ -2346,6 +2346,21 @@ impl crate::draw::scene::Stage3D for VkRenderer {
     fn set_scene_light(&mut self, toward: [f32; 3]) {
         VkRenderer::set_scene_light(self, toward)
     }
+    fn set_rt_scene_with_image(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial], image: Option<RtImage>) {
+        VkRenderer::set_rt_scene_with_image(self, triangles, materials, image)
+    }
+    fn set_rt_environment(&mut self, environment: RtEnvironment) {
+        VkRenderer::set_rt_environment(self, environment)
+    }
+    fn set_rt_background(&mut self, color: Option<[f32; 3]>) {
+        VkRenderer::set_rt_background(self, color)
+    }
+    fn stage_rt(&mut self, pane: (u32, u32, u32, u32), camera: RtCamera) {
+        VkRenderer::stage_rt(self, pane, camera)
+    }
+    fn rt_accumulating(&self) -> bool {
+        VkRenderer::rt_accumulating(self)
+    }
 }
 
 impl Drop for VkRenderer {

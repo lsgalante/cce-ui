@@ -5,6 +5,7 @@
 pub use crate::backend::app::{
     Application, AppSender, LogicalPosition, LogicalSize, RenderContext, Stage3D, WindowAction, WindowSettings,
 };
+pub use crate::draw::rt::{RtCamera, RtEnvironment, RtImage, RtMaterial, RtTriangle};
 pub use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
 pub use crate::backend::driver::PressedKey;
 pub use crate::backend::tessellate::{

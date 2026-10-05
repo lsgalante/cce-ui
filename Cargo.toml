@@ -179,6 +179,8 @@ web-sys = { version = "0.3", features = [
     "GpuCullMode",
     "GpuFrontFace",
     "GpuRenderPassDepthStencilAttachment",
+    "GpuStorageTextureAccess",
+    "GpuStorageTextureBindingLayout",
 ] }
 
 # The renderer probe: one scene through both renderers (examples/probe/).
