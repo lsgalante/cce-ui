@@ -115,6 +115,27 @@ Not there yet: the clipboard, IME composition, drag and drop, file dialogs, and 
 text is not the display list's (`display_list_text` false — it stages its own through the
 native-only `stage_renderer`, so draws no text here).
 
+**Compute jobs run in the browser too** (`web::ComputeDevice`, since 2026-10-05). What a job
+IS moved out of `vk` into the portable `crate::compute` — `Kernel`, `Binding`, `BindKind`,
+`workgroups`, `MAX_BINDINGS`, and the rules a job is held to before any device sees it
+(`check_job`, the ping-pong `slot_for` / `result_slot`, `parse_kernel`: naga's WGSL
+frontend, now a dependency on every target, validates a kernel and reads its
+`@workgroup_size` — WebGPU can report neither) — and `vk::compute` re-exports every one at
+its old path. The browser device takes the same jobs and answers them the same way, with
+one difference the platform makes: readback is a promise, so its `run`, `run_over`,
+`run_passes`, `run_passes_over` and `workgroup_size` are `async`. Two things WebGPU does
+differently underneath: its layouts tell read-only storage from read-write (the module
+says which, `ParsedKernel::read_only_storage`), and a device starts at the spec's default
+of eight storage buffers a stage, so it asks for the adapter's own (SwiftShader offers
+ten; a job past the adapter's ceiling is an `Err` naming the limit). What WebGPU rejects
+is caught in a validation error scope and returned. `examples/compute_probe/jobs.rs` is
+the check — a map, a uniform, a 33- and a 34-pass ping-pong, a 2D dispatch, ten bindings,
+a bad kernel and a missing entry, each exact against a CPU reference in f32 — run by
+`compute_native` and by `scripts/web-probe/compute`: the two outputs are identical to the
+bit (lavapipe vs SwiftShader, 2026-10-05). A reference written for a length that is not
+a multiple of four floats must know that `arrayLength` counts the 16-byte padding, on
+both devices.
+
 **The reference app runs on both, through one input script.** `examples/demo_web.rs` is
 `src/main.rs`'s `DemoApp` (included by `#[path]`, hence `pub(crate)`) in a page;
 `scripts/web-probe/demo <dir>` builds it, serves it with the machine's fonts and replays the
@@ -1169,6 +1190,9 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `config.rs` — KDL loading and `kdl_to_json` conversion (see workspace `CLAUDE.md` for paths).
 - `context.rs` — `UiContext`: the retained widget tree, event routing, spatial grid, dirty
   tracking, hit-testing.
+- `compute.rs` — what a compute job is, apart from the device that runs it: `Kernel`,
+  `Binding`, the job rules and naga's parse (see "Compute jobs run in the browser too").
+  `vk::ComputeDevice` and `web::ComputeDevice` run them.
 - `history.rs` — `History<T>`: the undo/redo snapshot stack (cap, gestures, grouped runs).
   The toolkit defines the stack and the routing, never the step — see the trait section.
 - `widget/` — `container/` (vbox/hbox/scroll/menu/treelist/…), `input/` (button/slider/text_box/
@@ -1224,7 +1248,9 @@ cce-system-interface) to confirm behavior, not just the test suite.
   Vulkan path: an sRGB VIEW of the canvas's unorm format, the parameter block as a
   dynamic-offset uniform, a 1x1 backdrop, the blur snapshot as end-pass / copy / resume,
   every frame drawn whole. And `shell.rs`, the browser shell: `run`, `Fonts`, `Sizing`,
-  `capture` (see "And an `Application` runs in a page" above).
+  `capture` (see "And an `Application` runs in a page" above); `compute.rs`, the async
+  `ComputeDevice`; and `request_device`, the adapter and device every one of them asks
+  for (with the limits a caller names raised to the adapter's).
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
   the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance

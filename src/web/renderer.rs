@@ -287,22 +287,7 @@ fn uniform_binding(buffer: &GpuBuffer, size: u32) -> GpuBufferBinding {
 impl WebRenderer {
     /// Ask the browser for a WebGPU device and set `canvas` up to draw into.
     pub async fn new(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
-        let window = web_sys::window().ok_or("no window")?;
-        let gpu = window.navigator().gpu();
-        let adapter = gpu
-            .request_adapter()
-            .await?
-            .into_option()
-            .ok_or("this browser offers no WebGPU adapter")?;
-        let device: GpuDevice = adapter.request_device().await?;
-        // Report what the device rejects and why it was lost, on the console:
-        // a WebGPU validation error is otherwise silent.
-        js_sys::Function::new_with_args(
-            "d",
-            "d.onuncapturederror = (e) => console.error('cce-ui WebGPU:', e.error.message); \
-             d.lost.then((i) => console.error('cce-ui WebGPU device lost:', i.reason, i.message));",
-        )
-        .call1(&JsValue::NULL, &device)?;
+        let (gpu, adapter, device) = super::request_device(&[]).await?;
         let queue = device.queue();
         let context: GpuCanvasContext = canvas
             .get_context("webgpu")?

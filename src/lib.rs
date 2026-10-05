@@ -3,6 +3,7 @@
 // else builds for the browser too: `cargo check --lib --target
 // wasm32-unknown-unknown` is the check.
 pub mod color;
+pub mod compute;
 pub mod widget;
 pub mod config;
 pub mod input;

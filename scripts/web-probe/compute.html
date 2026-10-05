@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>cce-ui compute probe</title>
+<!-- The compute probe's browser half (examples/compute_web.rs). -->
+<script type="module">
+import init, { run_jobs } from './compute_web.js';
+await init();
+window.runJobs = () => run_jobs();
+window.probeReady = true;
+</script>

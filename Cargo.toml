@@ -20,6 +20,10 @@ doc_editor = []
 cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "41ca52bd51ea3655a791c58005be9fce939e4333", optional = true }
 glam = "0.29"
 bytemuck = { version = "1", features = ["derive"] }
+# WGSL parsing and validation everywhere — a compute kernel is checked, and
+# its `@workgroup_size` read, before any device sees it; native adds the
+# SPIR-V writer below.
+naga = { version = "24", features = ["wgsl-in"] }
 # Text shaping. This was reached through glyphon until the wgpu path was retired;
 # every `glyphon::` item cce-ui ever used was a cosmic-text re-export (the sole
 # exception, `TextBounds`, is now defined in backend/text.rs), so depending
@@ -160,12 +164,27 @@ web-sys = { version = "0.3", features = [
     "gpu_texture_usage",
     "gpu_shader_stage",
     "gpu_map_mode",
+    "GpuDeviceDescriptor",
+    "GpuSupportedLimits",
+    "GpuAdapterInfo",
+    "GpuComputePipeline",
+    "GpuComputePipelineDescriptor",
+    "GpuProgrammableStage",
+    "GpuComputePassEncoder",
+    "GpuComputePassDescriptor",
+    "GpuErrorFilter",
+    "GpuError",
 ] }
 
 # The renderer probe: one scene through both renderers (examples/probe/).
 # probe_web is the browser half, a cdylib for wasm-bindgen; natively it is empty.
 [[example]]
 name = "probe_web"
+crate-type = ["cdylib"]
+
+# The compute probe's browser half (examples/compute_probe/); empty natively.
+[[example]]
+name = "compute_web"
 crate-type = ["cdylib"]
 
 # The reference app (src/main.rs) in a browser, on the browser shell; a
