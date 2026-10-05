@@ -17,6 +17,15 @@
 //! - **Frames out.** [`build_frame`] at the canvas's CSS size and the page's
 //!   `devicePixelRatio`, drawn by the [`WebRenderer`].
 //!
+//! **The clipboard** comes through the page's clipboard events, since a page
+//! may read the clipboard only inside a `paste` event: a ⌘/Ctrl+V is held
+//! back from the app until its `paste` event has handed over the text (or,
+//! if none comes, until the task after), so the widget that pastes on it
+//! reads that text (`widget::clipboard`). A ⌘/Ctrl+C or X reaches the app at
+//! once, and the `copy` / `cut` event it raises carries whatever the app
+//! copied. The three keys' defaults are the only ones the canvas lets the
+//! page have.
+//!
 //! The page owns the canvas's place in it; [`Sizing`] says who owns its
 //! size. There is no context-menu popup surface here: the menu is drawn in
 //! the canvas and kept inside it (`context_menu::constrain_to`), as on a
@@ -30,15 +39,15 @@ use std::time::Duration;
 use cursor_icon::CursorIcon;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{AddEventListenerOptions, FocusEvent, HtmlCanvasElement, KeyboardEvent, PointerEvent, WheelEvent};
+use web_sys::{AddEventListenerOptions, ClipboardEvent, FocusEvent, HtmlCanvasElement, KeyboardEvent, PointerEvent, WheelEvent};
 
 use super::renderer::{Capture, WebRenderer};
 use crate::backend::app::{set_wake, AppSender, Application, LogicalPosition, LogicalSize};
-use crate::backend::dom::{map_key, wheel_frame};
+use crate::backend::dom::{clipboard_key, map_key, wheel_frame, ClipKey};
 use crate::backend::driver::{Driver, Modifiers, PressSite, ScrollFrame, ScrollSource, Turn};
 use crate::backend::frame::build_frame;
 use crate::backend::shell::{Pacer, Shell, Step, ACTIVE_DISPATCH};
-use crate::widget::{context_menu, ElementState, MouseButton, TextItem};
+use crate::widget::{clipboard, context_menu, ElementState, Key, MouseButton, TextItem};
 
 /// Who decides the canvas's size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,6 +148,8 @@ pub async fn run<A: Application>(canvas: HtmlCanvasElement, fonts: Fonts, sizing
         timer_cb: RefCell::new(None),
         finger_end_cb: RefCell::new(None),
         finger_timer: Cell::new(None),
+        held_paste: RefCell::new(None),
+        paste_cb: RefCell::new(None),
     });
     lp.shell.borrow_mut().measure();
     lp.shell.borrow_mut().just_configured = true;
@@ -395,6 +406,18 @@ struct Loop<A: Application> {
     finger_end_cb: RefCell<Option<Closure<dyn FnMut()>>>,
     /// The lift timer the last finger frame set; the next frame cancels it.
     finger_timer: Cell<Option<i32>>,
+    /// A ⌘/Ctrl+V held back until its `paste` event, and the timer that
+    /// lets it through if no event comes.
+    held_paste: RefCell<Option<HeldKey>>,
+    paste_cb: RefCell<Option<Closure<dyn FnMut()>>>,
+}
+
+/// A key press, kept to dispatch later: the key, its text and the
+/// modifiers it came with (ctrl, shift, alt, meta).
+struct HeldKey {
+    key: Key,
+    text: Option<String>,
+    mods: (bool, bool, bool, bool),
 }
 
 /// A browser reports no lift for a two-finger scroll: this long without a
@@ -474,6 +497,8 @@ impl<A: Application> Loop<A> {
         }));
         let l = lp.clone();
         *lp.finger_end_cb.borrow_mut() = Some(Closure::new(move || l.finger_lift()));
+        let l = lp.clone();
+        *lp.paste_cb.borrow_mut() = Some(Closure::new(move || l.release_paste()));
         let l = Rc::downgrade(lp);
         set_wake(Some(Box::new(move || {
             if let Some(l) = l.upgrade() {
@@ -568,6 +593,29 @@ impl<A: Application> Loop<A> {
                 })
             })?;
         }
+        // The clipboard's events, raised by the three keys `key` lets
+        // through. They go to the focused element or the body, so they are
+        // heard on the document.
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            let doc: &web_sys::EventTarget = doc.as_ref();
+            let l = lp.clone();
+            listen(doc, "paste", true, move |e: ClipboardEvent| {
+                if let Some(text) = e.clipboard_data().and_then(|d| d.get_data("text/plain").ok()) {
+                    clipboard::pasted(text);
+                }
+                e.prevent_default();
+                l.release_paste();
+            })?;
+            for name in ["copy", "cut"] {
+                listen(doc, name, true, move |e: ClipboardEvent| {
+                    if let (Some(text), Some(data)) = (clipboard::take_copied(), e.clipboard_data()) {
+                        if data.set_data("text/plain", &text).is_ok() {
+                            e.prevent_default();
+                        }
+                    }
+                })?;
+            }
+        }
         // The page laying the canvas out anew is a configure; the turn it
         // wakes measures the box (`sync`).
         let l = lp.clone();
@@ -580,8 +628,11 @@ impl<A: Application> Loop<A> {
     }
 
     fn key(&self, e: &KeyboardEvent, state: ElementState) {
-        let Some((key, text)) = map_key(&e.key(), e.ctrl_key() || e.meta_key()) else { return };
-        if !passes_to_page(e) {
+        let accel = e.ctrl_key() || e.meta_key();
+        let Some((key, text)) = map_key(&e.key(), accel) else { return };
+        let clip = clipboard_key(&e.key(), accel, e.alt_key());
+        // A clipboard key's default is its clipboard event: the page keeps it.
+        if clip.is_none() && !passes_to_page(e) {
             e.prevent_default();
         }
         // The driver repeats a held key itself, at the toolkit's own rate
@@ -590,12 +641,51 @@ impl<A: Application> Loop<A> {
         if e.repeat() {
             return;
         }
+        let mods = (e.ctrl_key(), e.shift_key(), e.alt_key(), e.meta_key());
+        if state == ElementState::Pressed {
+            match clip {
+                // Held until the `paste` event has handed over the text: it
+                // is raised after this listener returns, in the same task,
+                // so a zero timer is the fallback for a browser that raises
+                // none (the clipboard then reads what it read before).
+                Some(ClipKey::Paste) => {
+                    self.release_paste();
+                    *self.held_paste.borrow_mut() = Some(HeldKey { key, text, mods });
+                    if let Some(cb) = self.paste_cb.borrow().as_ref() {
+                        let _ = window().set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 0);
+                    }
+                    return;
+                }
+                // A copy left over from a menu click is not this key's.
+                Some(ClipKey::Copy | ClipKey::Cut) => {
+                    clipboard::take_copied();
+                }
+                None => {}
+            }
+        } else {
+            // A release never overtakes the press it ends.
+            self.release_paste();
+        }
+        self.dispatch_key(HeldKey { key, text, mods }, state);
+    }
+
+    fn dispatch_key(&self, k: HeldKey, state: ElementState) {
+        let (ctrl, shift, alt, meta) = k.mods;
         self.event(|s| {
-            let mods = s.mods_from(e.ctrl_key(), e.shift_key(), e.alt_key(), e.meta_key());
+            let mods = s.mods_from(ctrl, shift, alt, meta);
             s.sync_mods(mods);
             let (driver, t) = s.turn();
-            driver.key(t, key, text, state);
+            driver.key(t, k.key, k.text, state);
         });
+    }
+
+    /// Hand a held ⌘/Ctrl+V to the app, if one is held: its `paste` event
+    /// has come, or will not.
+    fn release_paste(&self) {
+        let held = self.held_paste.borrow_mut().take();
+        if let Some(k) = held {
+            self.dispatch_key(k, ElementState::Pressed);
+        }
     }
 
     fn arm_finger_lift(&self) {

@@ -63,6 +63,30 @@ pub fn map_key(key: &str, accel: bool) -> Option<(Key, Option<String>)> {
     }
 }
 
+/// A clipboard shortcut, as the page's clipboard events are raised by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipKey {
+    Copy,
+    Cut,
+    Paste,
+}
+
+/// Whether a `KeyboardEvent.key` with Ctrl (or ⌘) held, and Alt not, is a
+/// clipboard shortcut: the browser shell lets its default through, since
+/// that default is the `copy`, `cut` or `paste` event — and a page gets the
+/// clipboard's text only inside a `paste` event.
+pub fn clipboard_key(key: &str, accel: bool, alt: bool) -> Option<ClipKey> {
+    if !accel || alt {
+        return None;
+    }
+    match key {
+        "c" | "C" => Some(ClipKey::Copy),
+        "x" | "X" => Some(ClipKey::Cut),
+        "v" | "V" => Some(ClipKey::Paste),
+        _ => None,
+    }
+}
+
 /// A `WheelEvent`'s deltas as a scroll frame in the units the driver takes
 /// (a `wl_pointer` axis frame's: a finger in px, a wheel notch as a discrete
 /// step plus ten units, positive down and right — the DOM's signs too).
@@ -130,6 +154,18 @@ mod tests {
         assert_eq!(map_key("Z", true), Some((Key::Character("Z".into()), Some("\u{1a}".into()))));
         assert_eq!(map_key("1", true), Some((Key::Character("1".into()), Some("1".into()))));
         assert_eq!(map_key("é", false), Some((Key::Character("é".into()), Some("é".into()))));
+    }
+
+    #[test]
+    fn only_an_accelerated_c_x_or_v_is_a_clipboard_shortcut() {
+        assert_eq!(clipboard_key("c", true, false), Some(ClipKey::Copy));
+        assert_eq!(clipboard_key("X", true, false), Some(ClipKey::Cut));
+        assert_eq!(clipboard_key("v", true, false), Some(ClipKey::Paste));
+        // Ctrl+Shift+V, a paste too.
+        assert_eq!(clipboard_key("V", true, false), Some(ClipKey::Paste));
+        assert_eq!(clipboard_key("v", false, false), None);
+        assert_eq!(clipboard_key("v", true, true), None);
+        assert_eq!(clipboard_key("z", true, false), None);
     }
 
     #[test]

@@ -117,8 +117,23 @@ in its own config.
   first face with the glyph.
 - **`web::capture().await`**: the next frame, read back from the GPU. Headless Chromium
   composites in software and leaves a WebGPU canvas out of its screenshots and `toDataURL`.
+- **The clipboard** (since 2026-10-05): `widget::clipboard` is one synchronous text pair
+  (`copy_to_clipboard` / `read_from_clipboard`, every widget's copy, cut and paste) with a
+  backend per platform — `wl-copy` / `wl-paste` (`xclip`) on Wayland, `NSPasteboard` on
+  macOS, and in a page the page's own clipboard events, because a page may read the
+  clipboard only inside a `paste` event. So the canvas lets ⌘/Ctrl+C, X and V keep their
+  defaults (`dom::clipboard_key`), and a ⌘/Ctrl+V is HELD from the app until its `paste`
+  event has handed over the text (then a read answers it) — or, if none comes, until a
+  zero timer, when a read answers the page's own last copy or paste; a release never
+  overtakes it. A copy writes through `navigator.clipboard.writeText` where the page has it
+  (a secure context; checked first, since calling into undefined throws through the wasm
+  frames), and the `copy` / `cut` event the key raises carries it too, which needs no
+  secure context. Until then a copy in a page panicked (`std::thread::spawn`).
+  `scripts/web-probe/clipboard` is the check: copy, paste, copy with `writeText` refused,
+  and paste with the `paste` event swallowed, each read back from the system clipboard —
+  all four pass in headless Chromium (2026-10-05).
 
-Not there yet: the clipboard, IME composition, drag and drop, file dialogs, and an app whose
+Not there yet: IME composition, drag and drop, file dialogs, and an app whose
 text is not the display list's (`display_list_text` false — it stages its own through the
 native-only `stage_renderer`, so draws no text here).
 
@@ -260,8 +275,11 @@ change. What the shell does, in AppKit's terms (module doc in `src/mac/mod.rs`):
   compositor's close does; the run loop is stopped once it has.
 - **Fonts**: the system set is always loaded on macOS (`build_font_system`) — it is what
   cosmic-text's macOS fallback list names.
+- **Clipboard**: the general `NSPasteboard`'s plain-text type, behind the same
+  `widget::clipboard` pair every widget uses; ⌘C / ⌘X / ⌘V reach the widgets as Ctrl+C /
+  X / V do on Linux, since Command reads as `ctrl`.
 
-Not there yet: the clipboard, IME (`NSTextInputClient`), drag and drop, the context menu
+Not there yet: IME (`NSTextInputClient`), drag and drop, the context menu
 in a popup window (it is drawn in the window, as on a layer surface), blur behind the window,
 a menu bar beyond Quit. **None of it has run**: this is Linux, where an Apple target can be
 type-checked but not linked. `scripts/check-mac` type-checks the library, the demo, every
