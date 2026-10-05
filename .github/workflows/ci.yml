@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # The tree builds without warnings; keep it that way. (Dependencies are
+  # capped by cargo and unaffected.)
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # libwayland-dev: wayland-sys links libwayland-client through pkg-config.
+      # mesa-vulkan-drivers: lavapipe, a software Vulkan device, so the GPU
+      # tests (vk::compute, vk::plate_probe) run instead of skipping.
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libwayland-dev libvulkan1 mesa-vulkan-drivers
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (default features)
+        run: cargo build --all-targets
+
+      - name: Test (default features)
+        run: cargo test
+
+      # `markdown` pulls cce-vault (a public git dependency); `doc_editor`
+      # has none.
+      - name: Test (all features)
+        run: cargo test --all-features
+
+      # The GPU tests skip with a note when no Vulkan device opens, and a
+      # skipped test passes. Fail instead if they skipped here, so losing
+      # lavapipe does not quietly drop the only rendered checks.
+      - name: GPU tests ran on a real device
+        shell: bash
+        run: |
+          cargo test --lib vk:: -- --nocapture 2>&1 | tee vk-tests.log
+          if grep -i "skipping" vk-tests.log; then
+            echo "::error::the Vulkan tests skipped: no device opened on the runner"
+            exit 1
+          fi
