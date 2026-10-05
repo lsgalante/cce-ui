@@ -13,9 +13,10 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.json': 'application/json' };
 
-/// Open `page` (a file in `root`) at `width` x `height`. Resolves to
-/// { page, logs, close }; `logs` collects the page's console and errors.
-export async function open(root, file, width, height) {
+/// Open `page` (a file in `root`) at `width` x `height`, with `query` (a
+/// URL query string, `?…`) if given. Resolves to { page, logs, close };
+/// `logs` collects the page's console and errors.
+export async function open(root, file, width, height, query = '') {
   const server = http.createServer((q, r) => {
     const p = decodeURIComponent(q.url.split('?')[0]);
     const f = path.join(root, p === '/' ? file : p);
@@ -38,6 +39,6 @@ export async function open(root, file, width, height) {
   const logs = [];
   page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
   page.on('pageerror', e => logs.push(`[pageerror] ${e}`));
-  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  await page.goto(`http://127.0.0.1:${server.address().port}/${query}`);
   return { page, logs, close: async () => { await browser.close(); server.close(); } };
 }

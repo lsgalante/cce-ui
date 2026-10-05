@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# web-probe/probe3d <out.rgba> — run the 3D probe (examples/probe3d/scene.rs)
+# on the browser shell and WebGPU renderer in headless Chromium, and write a
+# frame read back from the GPU: 1280x800 premultiplied RGBA8.
+#
+# Its other half is `cargo run --example probe3d_native`, screenshotted in a
+# compositor; compare.py composites this frame over that compositor's
+# background and diffs the two. The scene names DejaVu Sans, handed over from
+# $PROBE_FONTS_DIR (default /usr/share/fonts/truetype/dejavu). Needs what
+# `run` needs.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+out=$(realpath -m "${1:?usage: web-probe/probe3d <out.rgba>}")
+fonts=${PROBE_FONTS_DIR:-/usr/share/fonts/truetype/dejavu}
+cd "$here/../.."
+cargo build --release --target wasm32-unknown-unknown --example probe3d_web
+site=$(mktemp -d)
+trap 'rm -rf "$site"' EXIT
+wasm-bindgen --target web --no-typescript --out-dir "$site" \
+    target/wasm32-unknown-unknown/release/examples/probe3d_web.wasm
+cp "$here/demo.html" "$site/demo.html"
+mkdir "$site/fonts"
+cp "$fonts"/*.ttf "$site/fonts/"
+(cd "$site/fonts" && printf '%s\n' *.ttf | python3 -c 'import json,sys; print(json.dumps({"files": sys.stdin.read().split(), "families": ""}))') > "$site/fonts.json"
+node "$here/capture-app.mjs" "$site" probe3d_web "$out"
+echo "web-probe: wrote $out"

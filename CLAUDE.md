@@ -136,6 +136,32 @@ bit (lavapipe vs SwiftShader, 2026-10-05). A reference written for a length that
 a multiple of four floats must know that `arrayLength` counts the 16-byte padding, on
 both devices.
 
+**3D scenes draw in the browser too** (`Stage3D`, since 2026-10-05). What an app stages a
+scene through is a trait, `draw::scene::Stage3D` (`create_mesh`, `update_mesh`,
+`stage_scene`, `stage_scene_images`, `set_scene_light`), implemented by `VkRenderer` (each
+method its inherent one) and `WebRenderer`; the scene's types (`Vertex3D`, `MeshId`,
+`SceneDraw`, `SceneImage`), its uniform blocks (`scene_uniforms`), image quads and the
+wire-base depth bias (`wire_base_bias`) moved to `draw::scene`, and `scene3d.wgsl` /
+`scene3d_image.wgsl` to `draw/`, shared by both renderers; `vk` and `engine` re-export them.
+Two portable `Application` hooks take a `&mut dyn Stage3D`: **`init_3d`** (once per
+renderer — make meshes) and **`stage_3d`** (every frame, just before the draw; true asks
+for another frame). Natively `renderer_init` and `stage_renderer` forward to them by
+default, as `new` forwards to `create`, so an app that overrides the native hooks (the
+designer) is untouched, and one that moves to the portable pair runs on both shells. The
+WebGPU pass (`web/scene.rs`) is the Vulkan `SceneStage`'s port: a full-size backdrop in the
+canvas's sRGB view format with a depth32 buffer, copied into the canvas under a UI pass
+that LOADS it and samples it for blur — and kept, as on Vulkan, until the next staged
+scene. Depth bias is pipeline state in WebGPU, and a WebGPU line is one pixel (no
+wideLines), so the biased fill is a pipeline of its own at `wire_base_bias(1.0)` — what a
+Vulkan device without wideLines uses. `scene3d.wgsl` takes its derivatives at the top of
+`fs_main` (WebGPU rejects one under a branch on a varying); natively pixel-identical.
+`examples/probe3d/scene.rs` is the check, on the portable hooks — background quad, flat and
+prelit fills, a wire-carrying fill and its wires, a see-through fill and its edges, an
+image in the scene before the translucent draw, a host light, frost over the pane — run by
+`probe3d_native` and `scripts/web-probe/probe3d`: 2026-10-05, lavapipe vs SwiftShader,
+195 px differ by more than 8 levels, all on 1 px wires (where along its length a line
+steps a row is the rasterizer's), everything else within 2.
+
 **The reference app runs on both, through one input script.** `examples/demo_web.rs` is
 `src/main.rs`'s `DemoApp` (included by `#[path]`, hence `pub(crate)`) in a page;
 `scripts/web-probe/demo <dir>` builds it, serves it with the machine's fonts and replays the
@@ -209,6 +235,9 @@ Key methods (see the trait def in `backend/app.rs`):
 - **Input**: `handle_pointer_move`, `handle_mouse_input`, `handle_mouse_wheel`,
   `handle_key_input` — most return an optional `Message`. `needs_rebuild: &mut bool` is how a
   handler requests a redraw; the loop is demand-driven and idles when nothing sets it.
+- **3D**: `init_3d(stage)` / `stage_3d(stage, size, scale)` — the portable pair, through
+  `Stage3D` (see "3D scenes draw in the browser too"); the native `renderer_init` /
+  `stage_renderer` take the `VkRenderer` itself and forward to them by default.
 - `ui_context()` / `ui_context_mut()` expose the widget tree (`UiContext`) for apps built on the
   retained widget system rather than immediate drawing.
 - **Undo/redo**: the runner owns the routing. A press matching the `undo` / `redo` chord
@@ -1248,7 +1277,8 @@ cce-system-interface) to confirm behavior, not just the test suite.
   Vulkan path: an sRGB VIEW of the canvas's unorm format, the parameter block as a
   dynamic-offset uniform, a 1x1 backdrop, the blur snapshot as end-pass / copy / resume,
   every frame drawn whole. And `shell.rs`, the browser shell: `run`, `Fonts`, `Sizing`,
-  `capture` (see "And an `Application` runs in a page" above); `compute.rs`, the async
+  `capture` (see "And an `Application` runs in a page" above); `scene.rs`, the 3D pass;
+  `compute.rs`, the async
   `ComputeDevice`; and `request_device`, the adapter and device every one of them asks
   for (with the limits a caller names raised to the adapter's).
 - `protocol.rs` — inline-generated Wayland protocol bindings.

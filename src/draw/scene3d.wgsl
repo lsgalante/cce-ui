@@ -84,6 +84,12 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    // The world position's screen-space derivatives, for the flat shading
+    // below — taken here, in uniform control flow: WebGPU rejects a
+    // derivative under a branch on a varying (`in.lit`), and the values are
+    // the same wherever in the invocation they are read.
+    let world_dx = dpdx(in.world);
+    let world_dy = dpdy(in.world);
     // ~1px feather along the squircle window corner (the pass clears to
     // transparent and blends with straight alpha, so partial coverage fades
     // the scene out exactly at the silhouette).
@@ -101,7 +107,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     // wireframe overlay whose fill occludes the back wires) reads as glued to
     // the camera without it. Two-sided so unculled back faces stay sane.
     if (in.lit > 0.5 && uniforms.is_wire < 0.5 && uniforms.prelit < 0.5) {
-        let n = normalize(cross(dpdx(in.world), dpdy(in.world)));
+        let n = normalize(cross(world_dx, world_dy));
         // A strongly AZIMUTHAL light, wrap-shaded. A near-vertical light (or a
         // two-sided |dot|) yields a latitude-dominated / 180-degree-symmetric
         // brightness pattern — invariant under a yaw orbit, which reads as the

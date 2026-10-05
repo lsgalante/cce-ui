@@ -1,4 +1,5 @@
-//! The 2D and glyph shaders, shared by every renderer: one WGSL source each.
+//! The 2D, glyph and 3D scene shaders, shared by every renderer: one WGSL
+//! source each.
 //!
 //! The Vulkan renderer compiles them to SPIR-V through naga. WebGPU takes WGSL
 //! as it is, with one difference: it has no push constants, so the per-batch
@@ -12,6 +13,12 @@ pub const SHADER2D: &str = include_str!("shader2d.wgsl");
 
 /// Text and image quads.
 pub const GLYPH: &str = include_str!("glyph.wgsl");
+
+/// The 3D scene pass's meshes ([`super::scene`]).
+pub const SCENE3D: &str = include_str!("scene3d.wgsl");
+
+/// The 3D scene pass's images: textured quads under the meshes' uniforms.
+pub const SCENE3D_IMAGE: &str = include_str!("scene3d_image.wgsl");
 
 /// The one line that differs between the Vulkan and the WebGPU 2D shader.
 const PUSH_BLOCK: &str = "var<push_constant> rrect_clip: RRectClip;";

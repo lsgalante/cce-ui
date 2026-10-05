@@ -11,6 +11,7 @@
 
 mod compute;
 mod renderer;
+mod scene;
 mod shell;
 
 pub use compute::ComputeDevice;

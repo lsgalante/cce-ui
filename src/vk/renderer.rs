@@ -450,12 +450,12 @@ pub(crate) fn glyph_spirv() -> &'static [u32] {
 
 pub(crate) fn scene3d_spirv() -> &'static [u32] {
     static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(include_str!("scene3d.wgsl")))
+    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::SCENE3D))
 }
 
 pub(crate) fn scene3d_image_spirv() -> &'static [u32] {
     static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(include_str!("scene3d_image.wgsl")))
+    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::SCENE3D_IMAGE))
 }
 
 /// Like [`compile_wgsl`], but with naga's RAY_QUERY capability and SPIR-V 1.4
@@ -2326,6 +2326,26 @@ impl VkRenderer {
 fn present_debug() -> bool {
     static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *FLAG.get_or_init(|| std::env::var_os("CCE_PRESENT_DEBUG").is_some())
+}
+
+/// The 3D half of the renderer, as an app stages it through
+/// `Application::init_3d` / `stage_3d` — each method is the inherent one.
+impl crate::draw::scene::Stage3D for VkRenderer {
+    fn create_mesh(&mut self, verts: &[Vertex3D]) -> MeshId {
+        VkRenderer::create_mesh(self, verts)
+    }
+    fn update_mesh(&mut self, id: MeshId, verts: &[Vertex3D]) {
+        VkRenderer::update_mesh(self, id, verts)
+    }
+    fn stage_scene(&mut self, scissor: (u32, u32, u32, u32), draws: Vec<SceneDraw>) {
+        VkRenderer::stage_scene(self, scissor, draws)
+    }
+    fn stage_scene_images(&mut self, images: Vec<SceneImage>) {
+        VkRenderer::stage_scene_images(self, images)
+    }
+    fn set_scene_light(&mut self, toward: [f32; 3]) {
+        VkRenderer::set_scene_light(self, toward)
+    }
 }
 
 impl Drop for VkRenderer {

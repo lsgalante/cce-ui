@@ -85,13 +85,16 @@ pub async fn run<A: Application>(canvas: HtmlCanvasElement, fonts: Fonts, sizing
     crate::page_fonts::provide(fonts.files, fonts.serif, fonts.sans_serif, fonts.monospace);
     let fs = crate::create_font_system();
 
-    let renderer = WebRenderer::new(canvas.clone()).await?;
+    let mut renderer = WebRenderer::new(canvas.clone()).await?;
     // The scale is known before the app is built, as the Wayland shell sets
     // it before `create`: a widget may read it as it is made.
     let dpr = device_pixel_ratio();
     crate::scale::set_scale_factor(dpr as f32);
     let (tx, rx) = std::sync::mpsc::channel();
-    let app = A::create(AppSender::from(tx));
+    let mut app = A::create(AppSender::from(tx));
+    // The app's persistent GPU resources, as the Wayland shell's
+    // `renderer_init` makes them: once, before the first frame.
+    app.init_3d(&mut renderer);
     let settings = app.settings();
     crate::scale::set_app_id(settings.app_id.clone());
     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
@@ -332,6 +335,11 @@ impl<A: Application> Shell for WebShell<A> {
         if frame.dl_text {
             let spans = frame.text_spans(&self.items);
             self.renderer.prepare_text(&mut self.fs, &mut self.swash, &spans);
+        }
+        // The app's 3D scene, staged last, as the Wayland shell's
+        // `stage_renderer`; true asks for another frame.
+        if self.app.stage_3d(&mut self.renderer, size, self.scale) {
+            self.redraw = true;
         }
         let waiting = CAPTURES.with(|c| std::mem::take(&mut *c.borrow_mut()));
         if !waiting.is_empty() {

@@ -174,12 +174,22 @@ web-sys = { version = "0.3", features = [
     "GpuComputePassDescriptor",
     "GpuErrorFilter",
     "GpuError",
+    "GpuDepthStencilState",
+    "GpuCompareFunction",
+    "GpuCullMode",
+    "GpuFrontFace",
+    "GpuRenderPassDepthStencilAttachment",
 ] }
 
 # The renderer probe: one scene through both renderers (examples/probe/).
 # probe_web is the browser half, a cdylib for wasm-bindgen; natively it is empty.
 [[example]]
 name = "probe_web"
+crate-type = ["cdylib"]
+
+# The 3D probe's browser half (examples/probe3d/); empty natively.
+[[example]]
+name = "probe3d_web"
 crate-type = ["cdylib"]
 
 # The compute probe's browser half (examples/compute_probe/); empty natively.

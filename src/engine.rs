@@ -3,8 +3,9 @@
 //! native shell's entry point and Wayland-typed items after it.
 
 pub use crate::backend::app::{
-    Application, AppSender, LogicalPosition, LogicalSize, RenderContext, WindowAction, WindowSettings,
+    Application, AppSender, LogicalPosition, LogicalSize, RenderContext, Stage3D, WindowAction, WindowSettings,
 };
+pub use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
 pub use crate::backend::driver::PressedKey;
 pub use crate::backend::tessellate::{
     Vertex, LineCap,

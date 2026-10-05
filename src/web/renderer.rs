@@ -26,6 +26,9 @@
 
 use std::collections::HashMap;
 
+use super::scene::WebScene;
+use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Stage3D, Vertex3D};
+
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
     gpu_buffer_usage as buffer_usage, gpu_map_mode as map_mode, gpu_shader_stage as shader_stage,
@@ -68,15 +71,15 @@ struct WebImage {
 }
 
 /// A grow-only GPU buffer: replaced by a larger one when a frame needs more.
-struct Growable {
-    buffer: GpuBuffer,
+pub(super) struct Growable {
+    pub(super) buffer: GpuBuffer,
     size: u32,
     usage: u32,
     label: &'static str,
 }
 
 impl Growable {
-    fn new(device: &GpuDevice, size: u32, usage: u32, label: &'static str) -> Result<Self, JsValue> {
+    pub(super) fn new(device: &GpuDevice, size: u32, usage: u32, label: &'static str) -> Result<Self, JsValue> {
         let size = size.max(256).next_power_of_two();
         let desc = GpuBufferDescriptor::new(size, usage | buffer_usage::COPY_DST);
         desc.set_label(label);
@@ -85,7 +88,7 @@ impl Growable {
 
     /// Make room for `needed` bytes; true when the buffer was replaced (any
     /// bind group naming it must be rebuilt).
-    fn ensure(&mut self, device: &GpuDevice, needed: u32) -> Result<bool, JsValue> {
+    pub(super) fn ensure(&mut self, device: &GpuDevice, needed: u32) -> Result<bool, JsValue> {
         if needed <= self.size {
             return Ok(false);
         }
@@ -94,7 +97,7 @@ impl Growable {
         Ok(true)
     }
 
-    fn write(&self, queue: &GpuQueue, bytes: &[u8]) -> Result<(), JsValue> {
+    pub(super) fn write(&self, queue: &GpuQueue, bytes: &[u8]) -> Result<(), JsValue> {
         if !bytes.is_empty() {
             queue.write_buffer_with_u32_and_u8_slice(&self.buffer, 0, bytes)?;
         }
@@ -164,6 +167,10 @@ pub struct WebRenderer {
     /// `@group(0)` over the empty backdrop, and over the blur snapshot.
     group_0: GpuBindGroup,
     snapshot: Option<(GpuTexture, GpuBindGroup, u32, u32)>,
+    /// The 3D scene pass, and `@group(0)` over its backdrop (rebuilt with
+    /// the backdrop) — what the 2D pass binds while a scene is shown.
+    scene: WebScene,
+    scene_group_0: Option<GpuBindGroup>,
     blocks: Growable,
     group_1: GpuBindGroup,
     vertices: Growable,
@@ -185,14 +192,14 @@ pub struct WebRenderer {
     capture_requested: bool,
 }
 
-fn shader_module(device: &GpuDevice, code: &str, label: &str) -> web_sys::GpuShaderModule {
+pub(super) fn shader_module(device: &GpuDevice, code: &str, label: &str) -> web_sys::GpuShaderModule {
     let desc = GpuShaderModuleDescriptor::new(code);
     desc.set_label(label);
     device.create_shader_module(&desc)
 }
 
 /// `wgpu::BlendState::ALPHA_BLENDING`, as both Vulkan pipelines blend.
-fn alpha_blending() -> GpuBlendState {
+pub(super) fn alpha_blending() -> GpuBlendState {
     let color = GpuBlendComponent::new();
     color.set_src_factor(GpuBlendFactor::SrcAlpha);
     color.set_dst_factor(GpuBlendFactor::OneMinusSrcAlpha);
@@ -242,14 +249,14 @@ fn sampler(device: &GpuDevice, filter: GpuFilterMode, mipmap: GpuMipmapFilterMod
     device.create_sampler_with_descriptor(&desc)
 }
 
-fn texture(device: &GpuDevice, format: GpuTextureFormat, w: u32, h: u32, usage: u32, label: &str) -> Result<GpuTexture, JsValue> {
+pub(super) fn texture(device: &GpuDevice, format: GpuTextureFormat, w: u32, h: u32, usage: u32, label: &str) -> Result<GpuTexture, JsValue> {
     let size = [js_sys::Number::from(w.max(1)), js_sys::Number::from(h.max(1))];
     let desc = GpuTextureDescriptor::new(format, &size, usage);
     desc.set_label(label);
     device.create_texture(&desc)
 }
 
-fn whole_view(texture: &GpuTexture) -> Result<GpuTextureView, JsValue> {
+pub(super) fn whole_view(texture: &GpuTexture) -> Result<GpuTextureView, JsValue> {
     texture.create_view()
 }
 
@@ -301,7 +308,7 @@ impl WebRenderer {
             other => other,
         };
         let config = GpuCanvasConfiguration::new(&device, canvas_format);
-        config.set_usage(texture_usage::RENDER_ATTACHMENT | texture_usage::COPY_SRC);
+        config.set_usage(texture_usage::RENDER_ATTACHMENT | texture_usage::COPY_SRC | texture_usage::COPY_DST);
         config.set_view_formats(&[js_sys::JsString::from(JsValue::from(view_format))]);
         config.set_alpha_mode(GpuCanvasAlphaMode::Premultiplied);
         context.configure(&config)?;
@@ -408,6 +415,7 @@ impl WebRenderer {
         )?;
         let atlas_sampler = sampler(&device, GpuFilterMode::Nearest, GpuMipmapFilterMode::Nearest);
         let atlas_group = texture_group(&device, &glyph_layout, &whole_view(&atlas_texture)?, &atlas_sampler);
+        let scene = WebScene::new(&device, view_format, &glyph_layout)?;
         let glyph_vertices = Growable::new(&device, 64 * 1024, buffer_usage::VERTEX, "glyph-vertices")?;
 
         // Images: sRGB, linear (as the Vulkan image stage).
@@ -434,6 +442,8 @@ impl WebRenderer {
             backdrop_sampler,
             group_0,
             snapshot: None,
+            scene,
+            scene_group_0: None,
             blocks,
             group_1,
             vertices,
@@ -598,6 +608,23 @@ impl WebRenderer {
         self.process_images()?;
         let target = self.context.get_current_texture()?;
         let (w, h) = (target.width(), target.height());
+        // The scene's backdrop follows the canvas; a resized one holds no
+        // scene until the next is drawn into it, as on Vulkan.
+        if self.scene.has_staged() || self.scene.target.is_some() {
+            let had = self.scene.target.as_ref().map(|t| (t.width, t.height));
+            self.scene.fit(&self.device, w, h)?;
+            if had != Some((w, h)) {
+                let t = self.scene.target.as_ref().expect("fit made one");
+                self.scene_group_0 = Some(Self::group_0(
+                    &self.device,
+                    &self.layout_0,
+                    &t.view,
+                    &self.backdrop_sampler,
+                    &self.window_info,
+                    &self.plate_features,
+                ));
+            }
+        }
         let view_desc = GpuTextureViewDescriptor::new();
         view_desc.set_format(self.view_format);
         let view = target.create_view_with_descriptor(&view_desc)?;
@@ -656,9 +683,25 @@ impl WebRenderer {
         // batch needs one.
         let snapshot = if batches.iter().any(|b| b.blur_behind) { Some(self.snapshot_group(w, h)?) } else { None };
 
-        // Record.
+        // Record. The 3D pass first, into the backdrop; with a scene shown,
+        // the backdrop is copied into the canvas and the UI pass loads it
+        // (rather than clearing) and samples it for its blur plates.
         let encoder = self.device.create_command_encoder();
-        let mut pass = Self::begin_pass(&encoder, &view, Some(frame.clear_color))?;
+        let images_for_scene = &self.images;
+        self.scene.record(&self.device, &self.queue, &encoder, &|id| images_for_scene.get(&id).map(|i| i.group.clone()))?;
+        let base_group_0 = match (&self.scene_group_0, &self.scene.target) {
+            (Some(group), Some(t)) if self.scene.backdrop_valid => {
+                encoder.copy_texture_to_texture_with_gpu_extent_3d_dict(
+                    &GpuTexelCopyTextureInfo::new(&t.backdrop),
+                    &GpuTexelCopyTextureInfo::new(&target),
+                    &extent(w, h),
+                )?;
+                Some(group.clone())
+            }
+            _ => None,
+        };
+        let mut pass = Self::begin_pass(&encoder, &view, if base_group_0.is_some() { None } else { Some(frame.clear_color) })?;
+        let base_group_0 = base_group_0.unwrap_or_else(|| self.group_0.clone());
         let clamp_scissor = |pass: &GpuRenderPassEncoder, (x, y, sw, sh): (u32, u32, u32, u32)| {
             let x = x.min(w);
             let y = y.min(h);
@@ -681,7 +724,7 @@ impl WebRenderer {
         // The `@group(0)` vertex draws bind: the empty backdrop until the
         // first blur snapshot, the snapshot after. Consecutive blur plates
         // share one snapshot; only a non-blur draw invalidates it.
-        let mut active_group_0 = self.group_0.clone();
+        let mut active_group_0 = base_group_0.clone();
         let mut snapshot_fresh = false;
 
         for (bi, batch) in batches.iter().enumerate() {
@@ -764,10 +807,10 @@ impl WebRenderer {
             pass.set_vertex_buffer_with_u32(0, Some(&self.glyph_vertices.buffer), 0);
             pass.draw_with_instance_count_and_first_vertex(glyph_count, 1, 0);
         }
-        // Overlays last, with the default backdrop and a zero parameter block.
+        // Overlays last, with the frame's backdrop and a zero parameter block.
         if overlay_count > 0 {
             pass.set_pipeline(&self.pipeline_2d);
-            pass.set_bind_group(0, Some(&self.group_0));
+            pass.set_bind_group(0, Some(&base_group_0));
             pass.set_bind_group_with_u32_slice_and_u32_and_dynamic_offsets_data_length(
                 1,
                 Some(&self.group_1),
@@ -794,5 +837,28 @@ impl WebRenderer {
 
         self.queue.submit(&[encoder.finish()]);
         Ok(())
+    }
+}
+
+/// The 3D half of the renderer (see `draw::scene::Stage3D`): the scene pass
+/// in `web::scene`.
+impl Stage3D for WebRenderer {
+    fn create_mesh(&mut self, verts: &[Vertex3D]) -> MeshId {
+        self.scene.create_mesh(&self.device, &self.queue, verts)
+    }
+    fn update_mesh(&mut self, id: MeshId, verts: &[Vertex3D]) {
+        self.scene.update_mesh(&self.device, &self.queue, id, verts)
+    }
+    fn stage_scene(&mut self, scissor: (u32, u32, u32, u32), draws: Vec<SceneDraw>) {
+        self.scene.stage(scissor, draws)
+    }
+    fn stage_scene_images(&mut self, images: Vec<SceneImage>) {
+        self.scene.stage_images(images)
+    }
+    fn set_scene_light(&mut self, toward: [f32; 3]) {
+        let v = glam::Vec3::from_array(toward);
+        if v.length_squared() > 1e-12 {
+            self.scene.light = v.normalize().to_array();
+        }
     }
 }

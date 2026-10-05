@@ -13,6 +13,7 @@ use crate::vk::VkRenderer;
 use super::window_runner::EngineState;
 use cursor_icon::CursorIcon;
 use super::tessellate::Vertex;
+pub use crate::draw::scene::Stage3D;
 
 #[derive(Debug, Clone)]
 pub struct WindowSettings {
@@ -473,11 +474,16 @@ pub trait Application: Sized + 'static {
         false
     }
 
-    /// Called once, right after the renderer is created and before the first
-    /// frame: create persistent renderer resources here (3D meshes via
-    /// [`VkRenderer::create_mesh`]). Most 2D apps never need this.
+    /// Called once per renderer, right after it is created and before its
+    /// first frame (a reconnect's replacement too — see "`renderer_init`"
+    /// in CLAUDE.md): create persistent renderer resources here (3D meshes
+    /// via [`VkRenderer::create_mesh`]). Most 2D apps never need this. The
+    /// default hands the renderer to the portable [`init_3d`](Self::init_3d),
+    /// so an app written against that runs here unchanged.
     #[cfg(not(target_arch = "wasm32"))]
-    fn renderer_init(&mut self, _renderer: &mut VkRenderer) {}
+    fn renderer_init(&mut self, renderer: &mut VkRenderer) {
+        self.init_3d(renderer);
+    }
 
     /// Direct renderer staging, called every frame after the engine's own text
     /// prep and immediately before the frame is drawn: stage 3D scene panes
@@ -486,9 +492,25 @@ pub trait Application: Sized + 'static {
     /// from [`display_list_text`](Application::display_list_text) fully owns
     /// the renderer's text state, the engine never touches it). Return `true`
     /// to request another frame immediately (e.g. while a path tracer is still
-    /// accumulating samples).
+    /// accumulating samples). The default is the portable
+    /// [`stage_3d`](Self::stage_3d).
     #[cfg(not(target_arch = "wasm32"))]
-    fn stage_renderer(&mut self, _renderer: &mut VkRenderer, _size: LogicalSize, _scale: f64) -> bool {
+    fn stage_renderer(&mut self, renderer: &mut VkRenderer, size: LogicalSize, scale: f64) -> bool {
+        self.stage_3d(renderer, size, scale)
+    }
+
+    /// The portable [`renderer_init`](Self::renderer_init): once per
+    /// renderer, before its first frame, through [`Stage3D`] — the 3D half
+    /// every renderer has, the Vulkan one natively and the WebGPU one in a
+    /// browser. Make the app's meshes here. Called by the browser shell, and
+    /// natively by `renderer_init`'s default.
+    fn init_3d(&mut self, _stage: &mut dyn Stage3D) {}
+
+    /// The portable [`stage_renderer`](Self::stage_renderer): every frame,
+    /// just before it is drawn, stage the scene through [`Stage3D`]. `size`
+    /// is the window's logical size and `scale` its pixel ratio; a scissor is
+    /// physical px. Return `true` to ask for another frame at once.
+    fn stage_3d(&mut self, _stage: &mut dyn Stage3D, _size: LogicalSize, _scale: f64) -> bool {
         false
     }
 
