@@ -57,11 +57,11 @@ engine, that module's tests are the fast feedback loop; run `cargo test -p cce-u
 anything else.
 
 CI (`.github/workflows/ci.yml`, every push and PR) builds and tests on Ubuntu 24.04 with
-default and with all features, warnings as errors. It installs `libwayland-dev` (the build
-links libwayland-client through pkg-config) and Mesa's lavapipe, a software Vulkan device,
+default and with all features, warnings as errors. It installs `libwayland-dev` and
+`libxkbcommon-dev` (the two native libraries the build links, through pkg-config) and Mesa's lavapipe, a software Vulkan device,
 so the GPU tests (`vk::compute`, `vk::plate_probe`) RUN there rather than skip — and a
 last step fails the job if they printed a skip note, since a skipped test passes. To match
-it locally: `apt install libwayland-dev mesa-vulkan-drivers`, then
+it locally: `apt install libwayland-dev libxkbcommon-dev mesa-vulkan-drivers`, then
 `RUSTFLAGS="-D warnings" cargo test --all-features`.
 
 Wayland protocol bindings are generated **inline at compile time** by `wayland-scanner` macros in
