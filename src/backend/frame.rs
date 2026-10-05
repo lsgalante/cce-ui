@@ -18,7 +18,7 @@ use super::app::{Application, LogicalSize};
 use super::tessellate::{quad_vertices, tessellate_display_list, DlBatch, Vertex};
 use super::text::{collect_dl_text, dl_text_spans, TextBounds};
 use crate::draw::{Batch2D, Frame2D, ImageQuad, TextSpan};
-use crate::widget::TextItem;
+use super::text::DlText;
 
 /// One frame, built and owned: the renderer's [`Frame2D`] is a borrow of it
 /// ([`frame2d`](Self::frame2d)). Its display-list text is shaped into the
@@ -49,7 +49,7 @@ pub struct BuiltFrame {
 impl BuiltFrame {
     /// The display-list text as glyph spans, borrowing `items` — the vector
     /// [`build_frame`] shaped this frame's text into.
-    pub fn text_spans<'a>(&self, items: &'a [TextItem]) -> Vec<TextSpan<'a>> {
+    pub fn text_spans<'a>(&self, items: &'a [DlText]) -> Vec<TextSpan<'a>> {
         let (pw, ph) = self.physical;
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
         // All text is display-list text: each Text prim with the default
@@ -84,7 +84,7 @@ pub fn build_frame<A: Application>(
     size: LogicalSize,
     scale: f64,
     damage_owed: &mut bool,
-    text_items: &mut Vec<TextItem>,
+    text_items: &mut Vec<DlText>,
 ) -> BuiltFrame {
     let (logical_w, logical_h) = (size.width, size.height);
 

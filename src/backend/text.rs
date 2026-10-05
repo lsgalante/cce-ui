@@ -4,26 +4,119 @@
 //! system; moved out of `window_runner` so another shell can share it.
 
 use cosmic_text::{FontSystem, Buffer, Attrs, Metrics};
-use crate::widget::TextItem;
+use std::rc::Rc;
 use crate::draw::TextSpan;
 
-#[derive(Hash, PartialEq, Eq, Clone)]
-struct BufferCacheKey {
-    text: String,
+/// One shaped buffer in the text cache, keyed by everything that shapes it
+/// beyond its text (the text is the outer map's key, so a lookup borrows it
+/// rather than allocating).
+struct CachedBuffer {
+    /// Physical font size, in thousandths of a px.
     size_milli: u32,
+    /// The family as the font string names it, size stripped.
     font: Option<String>,
     is_vertical: bool,
     attrs: crate::scene::paint::TextAttrs,
+    /// The scale factor's bits: a laid-out buffer's wrap width and box are
+    /// logical px turned physical by it.
+    scale_bits: u32,
+    /// `Some` for a boxed [`Prim::Text`](crate::scene::paint::Prim::Text) laid
+    /// out by [`get_text_buffer_laid_out`]; `None` for a single run.
+    layout: Option<crate::scene::paint::TextLayout>,
+    /// The laid-out buffer's vertical offset in its box (0 for a single run).
+    voff: f32,
+    /// Shared, not cloned, on a hit: a `Buffer` owns every shaped line and
+    /// glyph, and the frame used to deep-copy one per text prim per frame.
+    buffer: Rc<Buffer>,
+    /// [`BUFFER_TICK`] at the last hit, for least-recently-used eviction.
+    last_used: u64,
 }
 
-#[derive(Clone)]
-struct CachedBuffer {
-    buffer: Buffer,
-    last_accessed: web_time::Instant,
+impl CachedBuffer {
+    fn matches(&self, k: &BufferKey<'_>) -> bool {
+        self.size_milli == k.size_milli
+            && self.font.as_deref() == k.font
+            && self.is_vertical == k.is_vertical
+            && self.attrs == k.attrs
+            && self.scale_bits == k.scale_bits
+            && self.layout == k.layout
+    }
 }
+
+/// A cache lookup's key, borrowed from the caller.
+struct BufferKey<'a> {
+    size_milli: u32,
+    font: Option<&'a str>,
+    is_vertical: bool,
+    attrs: crate::scene::paint::TextAttrs,
+    scale_bits: u32,
+    layout: Option<crate::scene::paint::TextLayout>,
+}
+
+/// The text cache holds at most this many buffers; past it the least
+/// recently used [`BUFFER_EVICT`] go.
+const BUFFER_CAP: usize = 2000;
+const BUFFER_EVICT: usize = 100;
 
 std::thread_local! {
-    static BUFFER_CACHE: std::cell::RefCell<std::collections::HashMap<BufferCacheKey, CachedBuffer>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Text → every shaped variant of it. Variants per text are few (a size,
+    /// a weight, a box), so they are scanned rather than hashed.
+    static BUFFER_CACHE: std::cell::RefCell<std::collections::HashMap<String, Vec<CachedBuffer>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    static BUFFER_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static BUFFER_TICK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn buffer_tick() -> u64 {
+    BUFFER_TICK.with(|t| {
+        let n = t.get() + 1;
+        t.set(n);
+        n
+    })
+}
+
+/// The cached buffer for `text` under `key`, and its vertical offset.
+fn buffer_cache_get(text: &str, key: &BufferKey<'_>) -> Option<(Rc<Buffer>, f32)> {
+    BUFFER_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let hit = cache.get_mut(text)?.iter_mut().find(|e| e.matches(key))?;
+        hit.last_used = buffer_tick();
+        Some((Rc::clone(&hit.buffer), hit.voff))
+    })
+}
+
+fn buffer_cache_put(text: &str, key: &BufferKey<'_>, buffer: Rc<Buffer>, voff: f32) {
+    BUFFER_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if BUFFER_COUNT.with(|c| c.get()) >= BUFFER_CAP {
+            let mut ticks: Vec<u64> = cache.values().flatten().map(|e| e.last_used).collect();
+            ticks.sort_unstable();
+            let cutoff = ticks[BUFFER_EVICT.min(ticks.len()) - 1];
+            cache.retain(|_, v| {
+                v.retain(|e| e.last_used > cutoff);
+                !v.is_empty()
+            });
+            BUFFER_COUNT.with(|c| c.set(cache.values().map(Vec::len).sum()));
+        }
+        let entry = CachedBuffer {
+            size_milli: key.size_milli,
+            font: key.font.map(str::to_owned),
+            is_vertical: key.is_vertical,
+            attrs: key.attrs,
+            scale_bits: key.scale_bits,
+            layout: key.layout,
+            voff,
+            buffer,
+            last_used: buffer_tick(),
+        };
+        match cache.get_mut(text) {
+            Some(v) => v.push(entry),
+            None => {
+                cache.insert(text.to_owned(), vec![entry]);
+            }
+        }
+        BUFFER_COUNT.with(|c| c.set(c.get() + 1));
+    });
 }
 
 fn find_cased_family(fs: &FontSystem, name: &str) -> Option<String> {
@@ -98,40 +191,40 @@ pub fn get_text_buffer_attrs(
     font: Option<&str>,
     text_attrs: crate::scene::paint::TextAttrs,
 ) -> Buffer {
+    Buffer::clone(&shared_text_buffer(fs, text, size, font, text_attrs))
+}
+
+/// [`get_text_buffer_attrs`] without the copy: the cached buffer itself,
+/// shared. What the frame and the toolkit's own measuring use — a `Buffer`
+/// owns every shaped line and glyph, so the clone the public functions hand
+/// out costs as much as the text is long.
+pub(crate) fn shared_text_buffer(
+    fs: &mut FontSystem,
+    text: &str,
+    size: f32,
+    font: Option<&str>,
+    text_attrs: crate::scene::paint::TextAttrs,
+) -> Rc<Buffer> {
     let scale = crate::scale::scale_factor();
-    let mut font_size = size;
-    let mut family_name = None;
-
-    if let Some(font_str) = font {
-        let (parsed_family, parsed_size) = crate::layout::parse_font_string(font_str);
-        if let Some(ps) = parsed_size {
-            font_size = ps;
+    let (family_name, font_size) = match font {
+        Some(font_str) => {
+            let (family, parsed_size) = crate::layout::split_font_string(font_str);
+            (Some(family), parsed_size.unwrap_or(size))
         }
-        family_name = Some(parsed_family);
-    }
-
-    let physical_size = font_size * scale;
-    let size_key = (physical_size * 1000.0).round() as u32;
-    let is_vertical = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
-    let key = BufferCacheKey {
-        text: text.to_string(),
-        size_milli: size_key,
-        font: family_name.clone(),
-        is_vertical,
-        attrs: text_attrs,
+        None => (None, size),
     };
 
-    let cached = BUFFER_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(cached_item) = cache.get_mut(&key) {
-            cached_item.last_accessed = web_time::Instant::now();
-            Some(cached_item.buffer.clone())
-        } else {
-            None
-        }
-    });
-
-    if let Some(buf) = cached {
+    let physical_size = font_size * scale;
+    let is_vertical = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
+    let key = BufferKey {
+        size_milli: (physical_size * 1000.0).round() as u32,
+        font: family_name,
+        is_vertical,
+        attrs: text_attrs,
+        scale_bits: scale.to_bits(),
+        layout: None,
+    };
+    if let Some((buf, _)) = buffer_cache_get(text, &key) {
         return buf;
     }
 
@@ -146,7 +239,7 @@ pub fn get_text_buffer_attrs(
 
     let (sans_fallback, serif_fallback, mono_fallback, _) = crate::layout::read_preferred_fonts();
 
-    let resolved_storage = family_name.as_deref().and_then(|font_name| match font_name {
+    let resolved_storage = family_name.and_then(|font_name| match font_name {
         "monospace" if !mono_fallback.is_empty() => find_cased_family(fs, &mono_fallback),
         "sans-serif" if !sans_fallback.is_empty() => find_cased_family(fs, &sans_fallback),
         "serif" if !serif_fallback.is_empty() => find_cased_family(fs, &serif_fallback),
@@ -159,8 +252,8 @@ pub fn get_text_buffer_attrs(
         None
     };
 
-    let family = if let Some(ref font_family) = family_name {
-        match font_family.as_str() {
+    let family = if let Some(font_family) = family_name {
+        match font_family {
             "monospace" => {
                 if !mono_fallback.is_empty() {
                     if let Some(ref cased) = resolved_storage {
@@ -218,24 +311,8 @@ pub fn get_text_buffer_attrs(
     buf.set_text(fs, text, attrs, shaping);
     buf.shape_until_scroll(fs, true);
 
-    BUFFER_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if cache.len() >= 2000 {
-            let mut items: Vec<(BufferCacheKey, web_time::Instant)> = cache
-                .iter()
-                .map(|(k, v)| (k.clone(), v.last_accessed))
-                .collect();
-            items.sort_by_key(|&(_, time)| time);
-            for (k, _) in items.iter().take(100) {
-                cache.remove(k);
-            }
-        }
-        cache.insert(key, CachedBuffer {
-            buffer: buf.clone(),
-            last_accessed: web_time::Instant::now(),
-        });
-    });
-
+    let buf = Rc::new(buf);
+    buffer_cache_put(text, &key, Rc::clone(&buf), 0.0);
     buf
 }
 
@@ -254,7 +331,7 @@ pub fn shaped_cluster_offsets(
     font: Option<&str>,
 ) -> Vec<(usize, f32)> {
     let scale = crate::scale::scale_factor().max(1.0);
-    let buffer = get_text_buffer(fs, text, size, font);
+    let buffer = shared_text_buffer(fs, text, size, font, crate::scene::paint::TextAttrs::default());
     let mut out: Vec<(usize, f32)> = Vec::new();
     let mut total: f32 = 0.0;
     for (start, x, w) in normalized_glyph_starts(&buffer, text) {
@@ -303,11 +380,10 @@ pub(crate) fn normalized_glyph_starts(buffer: &Buffer, text: &str) -> Vec<(usize
 }
 
 /// Shape a boxed [`Prim::Text`] (word-wrap + alignment) and return `(buffer, vertical_offset)`.
-/// Reuses [`get_text_buffer_attrs`] for all the family resolution — that returns a *clone* of the
-/// cached single-run buffer, so re-applying metrics/size/align here does not touch the cache — then
-/// re-lays-it-out: a 1.4 line-height (the placed-text convention), the wrap width, per-line
-/// horizontal alignment, and re-shapes. The vertical offset positions the shaped block inside the
-/// box per `align_v`. Uncached by construction (each box may differ in width/align).
+/// Starts from [`get_text_buffer_attrs`]'s single run for all the family resolution, then
+/// re-lays it out: a 1.4 line-height (the placed-text convention), the wrap width, per-line
+/// horizontal alignment, and re-shapes. The vertical offset positions the shaped block inside
+/// the box per `align_v`. Cached beside the single runs, keyed by the box as well.
 pub fn get_text_buffer_laid_out(
     fs: &mut FontSystem,
     text: &str,
@@ -316,20 +392,47 @@ pub fn get_text_buffer_laid_out(
     text_attrs: crate::scene::paint::TextAttrs,
     layout: crate::scene::paint::TextLayout,
 ) -> (Buffer, f32) {
+    let (buf, voff) = shared_laid_out_buffer(fs, text, size, font, text_attrs, layout);
+    (Buffer::clone(&buf), voff)
+}
+
+/// [`get_text_buffer_laid_out`] without the copy, as [`shared_text_buffer`] is to
+/// [`get_text_buffer_attrs`]. Until 2026-10-04 a boxed text was re-shaped from scratch
+/// every frame it was drawn; the box is part of the key now.
+pub(crate) fn shared_laid_out_buffer(
+    fs: &mut FontSystem,
+    text: &str,
+    size: f32,
+    font: Option<&str>,
+    text_attrs: crate::scene::paint::TextAttrs,
+    layout: crate::scene::paint::TextLayout,
+) -> (Rc<Buffer>, f32) {
     use crate::scene::paint::{AlignH, AlignV};
     let scale = crate::scale::scale_factor();
 
-    // Resolved family + attrs come for free (a cache clone we are free to mutate).
-    let mut buf = get_text_buffer_attrs(fs, text, size, font, text_attrs);
-
-    // The font string may override the size ("family:size") — mirror get_text_buffer_attrs.
-    let mut font_size = size;
-    if let Some(font_str) = font {
-        if let (_, Some(ps)) = crate::layout::parse_font_string(font_str) {
-            font_size = ps;
+    // The font string may override the size ("family:size") — mirror shared_text_buffer.
+    let (family, font_size) = match font {
+        Some(font_str) => {
+            let (family, parsed_size) = crate::layout::split_font_string(font_str);
+            (Some(family), parsed_size.unwrap_or(size))
         }
-    }
+        None => (None, size),
+    };
     let physical_size = font_size * scale;
+    let key = BufferKey {
+        size_milli: (physical_size * 1000.0).round() as u32,
+        font: family,
+        is_vertical: crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed),
+        attrs: text_attrs,
+        scale_bits: scale.to_bits(),
+        layout: Some(layout),
+    };
+    if let Some(hit) = buffer_cache_get(text, &key) {
+        return hit;
+    }
+
+    // Resolved family + attrs come from the single run; this copy is ours to re-lay-out.
+    let mut buf = Buffer::clone(&shared_text_buffer(fs, text, size, font, text_attrs));
     let line_height = physical_size * 1.4;
     buf.set_metrics(fs, Metrics::new(physical_size, line_height));
     buf.set_size(fs, layout.wrap_width.map(|w| w * scale), Some(layout.box_height * scale));
@@ -352,6 +455,8 @@ pub fn get_text_buffer_laid_out(
         AlignV::Middle => ((layout.box_height - total_h) / 2.0).max(0.0),
         AlignV::Bottom => (layout.box_height - total_h).max(0.0),
     };
+    let buf = Rc::new(buf);
+    buffer_cache_put(text, &key, Rc::clone(&buf), voff);
     (buf, voff)
 }
 
@@ -367,11 +472,25 @@ pub struct TextBounds {
     pub bottom: i32,
 }
 
+/// A display-list text prim ready for the glyph pass: a [`TextItem`](crate::widget::TextItem) whose
+/// buffer is the cache's own, shared rather than copied. Public so a shell
+/// outside the crate can hold what [`build_frame`](super::frame::build_frame)
+/// fills; its fields are the frame's own.
+pub struct DlText {
+    pub(crate) buffer: Rc<Buffer>,
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) color: cosmic_text::Color,
+    pub(crate) bounds: Option<[f32; 4]>,
+    pub(crate) clip_circle: Option<[f32; 3]>,
+    pub(crate) clip_rrect: Option<[f32; 5]>,
+}
+
 /// The display list's Text prims, shaped through the shared buffer cache and
 /// held for the glyph pass (the [`TextSpan`]s built by [`dl_text_spans`] borrow
 /// these). Clip = the paint walk's item clip ∩ the prim's own bounds, in
 /// logical space. Shared by the window's frame and the context-menu popup's.
-pub(crate) fn collect_dl_text(fs: &mut FontSystem, dl: &crate::scene::paint::DisplayList, out: &mut Vec<TextItem>) {
+pub(crate) fn collect_dl_text(fs: &mut FontSystem, dl: &crate::scene::paint::DisplayList, out: &mut Vec<DlText>) {
     for item in &dl.items {
         if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, alpha, font, bounds, attrs, layout } = &item.prim {
             let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
@@ -380,13 +499,13 @@ pub(crate) fn collect_dl_text(fs: &mut FontSystem, dl: &crate::scene::paint::Dis
                 (Some(a), None) => Some(a),
                 (None, b) => b,
             };
-            // Boxed text (wrap/align) shapes uncached and shifts down by the vertical
-            // offset; ordinary labels take the shared cached buffer.
+            // Boxed text (wrap/align) is laid out in its box and shifts down by the
+            // vertical offset; ordinary labels are a single run. Both cached.
             let (buffer, y_off) = match layout {
-                Some(l) => get_text_buffer_laid_out(fs, text, *font_size, font.as_deref(), *attrs, *l),
-                None => (get_text_buffer_attrs(fs, text, *font_size, font.as_deref(), *attrs), 0.0),
+                Some(l) => shared_laid_out_buffer(fs, text, *font_size, font.as_deref(), *attrs, *l),
+                None => (shared_text_buffer(fs, text, *font_size, font.as_deref(), *attrs), 0.0),
             };
-            out.push(TextItem {
+            out.push(DlText {
                 buffer,
                 x: *x,
                 y: *y + y_off,
@@ -407,7 +526,7 @@ pub(crate) fn collect_dl_text(fs: &mut FontSystem, dl: &crate::scene::paint::Dis
 /// The glyph pass's spans for `items`: each clamped to the surface and its
 /// own bounds, then by the popover-occlusion clamp against `overlays`.
 pub(crate) fn dl_text_spans<'a>(
-    items: &'a [TextItem],
+    items: &'a [DlText],
     scale_f32: f32,
     bounds: TextBounds,
     overlays: &[(f32, f32, f32, f32)],
@@ -478,7 +597,7 @@ pub(crate) fn dl_text_spans<'a>(
 /// of, and showed as a plate with no legible entries.
 fn popover_occlusion_clamp(
     overlay_rects: &[(f32, f32, f32, f32)],
-    ti: &TextItem,
+    ti: &DlText,
     scale_f32: f32,
     item_bounds: &mut TextBounds,
 ) {
@@ -524,5 +643,85 @@ fn popover_occlusion_clamp(
                 item_bounds.left = item_bounds.left.max(or);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod text_cache_tests {
+    use super::*;
+    use crate::scene::paint::{AlignH, AlignV, TextAttrs, TextLayout};
+
+    fn boxed(wrap: f32) -> TextLayout {
+        TextLayout { wrap_width: Some(wrap), box_height: 80.0, align_h: AlignH::Center, align_v: AlignV::Middle }
+    }
+
+    /// A hit hands back the cached buffer itself: the frame used to deep-copy
+    /// every text prim's shaped buffer, every frame.
+    #[test]
+    fn a_hit_shares_the_buffer_rather_than_copying_it() {
+        let mut fs = crate::geometry_font_system().lock().unwrap();
+        let attrs = TextAttrs::default();
+        let a = shared_text_buffer(&mut fs, "shared run", 14.0, Some("monospace"), attrs);
+        let b = shared_text_buffer(&mut fs, "shared run", 14.0, Some("monospace"), attrs);
+        assert!(Rc::ptr_eq(&a, &b));
+        let bold = shared_text_buffer(&mut fs, "shared run", 14.0, Some("monospace"), TextAttrs { weight: Some(700), ..attrs });
+        assert!(!Rc::ptr_eq(&a, &bold), "attrs are part of the key");
+        let sized = shared_text_buffer(&mut fs, "shared run", 14.0, Some("monospace 18"), attrs);
+        assert!(!Rc::ptr_eq(&a, &sized), "a size in the font string is part of the key");
+    }
+
+    /// Boxed text is cached by its box, and a hit is what a fresh layout of
+    /// the same box would be.
+    #[test]
+    fn a_laid_out_buffer_is_cached_by_its_box() {
+        let mut fs = crate::geometry_font_system().lock().unwrap();
+        let text = "a line long enough to wrap inside a narrow box";
+        let attrs = TextAttrs::default();
+        let (a, va) = shared_laid_out_buffer(&mut fs, text, 14.0, None, attrs, boxed(90.0));
+        let (b, vb) = shared_laid_out_buffer(&mut fs, text, 14.0, None, attrs, boxed(90.0));
+        assert!(Rc::ptr_eq(&a, &b));
+        assert_eq!(va, vb);
+        let (wide, _) = shared_laid_out_buffer(&mut fs, text, 14.0, None, attrs, boxed(400.0));
+        assert!(!Rc::ptr_eq(&a, &wide), "a different box is a different layout");
+        let single = shared_text_buffer(&mut fs, text, 14.0, None, attrs);
+        assert!(!Rc::ptr_eq(&a, &single), "a box never answers for the single run");
+
+        // The cached layout against one shaped from nothing.
+        BUFFER_CACHE.with(|c| c.borrow_mut().clear());
+        BUFFER_COUNT.with(|c| c.set(0));
+        let (fresh, vf) = shared_laid_out_buffer(&mut fs, text, 14.0, None, attrs, boxed(90.0));
+        assert!(!Rc::ptr_eq(&a, &fresh));
+        assert_eq!(va, vf);
+        let runs = |b: &Buffer| b.layout_runs().map(|r| (r.line_y, r.line_w, r.glyphs.len())).collect::<Vec<_>>();
+        assert_eq!(runs(&a), runs(&fresh));
+    }
+
+    /// The cache holds at most `BUFFER_CAP` buffers, and eviction takes the
+    /// least recently used, not the oldest inserted.
+    #[test]
+    fn eviction_keeps_the_cap_and_the_recently_used() {
+        BUFFER_CACHE.with(|c| c.borrow_mut().clear());
+        BUFFER_COUNT.with(|c| c.set(0));
+        let key = |size_milli| BufferKey {
+            size_milli,
+            font: None,
+            is_vertical: false,
+            attrs: TextAttrs::default(),
+            scale_bits: 1.0f32.to_bits(),
+            layout: None,
+        };
+        let empty = || Rc::new(Buffer::new_empty(Metrics::new(10.0, 10.0)));
+        for i in 0..BUFFER_CAP as u32 {
+            buffer_cache_put(&format!("t{i}"), &key(i), empty(), 0.0);
+        }
+        // The first inserted is touched, so it is no longer the least recent.
+        assert!(buffer_cache_get("t0", &key(0)).is_some());
+        buffer_cache_put("over", &key(0), empty(), 0.0);
+        let count = BUFFER_CACHE.with(|c| c.borrow().values().map(Vec::len).sum::<usize>());
+        assert_eq!(count, BUFFER_CAP - BUFFER_EVICT + 1);
+        assert_eq!(BUFFER_COUNT.with(|c| c.get()), count);
+        assert!(buffer_cache_get("t0", &key(0)).is_some(), "recently used survives");
+        assert!(buffer_cache_get("t1", &key(1)).is_none(), "least recently used goes");
+        assert!(buffer_cache_get("over", &key(0)).is_some());
     }
 }

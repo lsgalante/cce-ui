@@ -724,6 +724,12 @@ mod tests {
     /// the shaped label is equal. Measuring in a face the label is not drawn
     /// in (first the inked button family, then the UI sans) left labels off
     /// centre and, worse, under-measured for `intrinsic_size`.
+    ///
+    /// The button is sized from the label, so it fits in whatever face this
+    /// machine shapes it in. At a fixed 160 px it did not everywhere: a font
+    /// system holding only a colour-emoji face draws every glyph ~15 px wide,
+    /// "Load Images" came to 164 px, and an overflowing label is left-aligned
+    /// and clipped by design (`button_label_stays_inside_the_button`).
     #[test]
     fn a_label_is_centred_on_its_drawn_width() {
         let b = Button::model(ButtonKind::Primary);
@@ -737,8 +743,9 @@ mod tests {
                     .map(|&(_, t)| t)
                     .unwrap()
             };
-            let (x, _) = painted_label(label, 160.0);
-            let (left, right) = (x - 10.0, 170.0 - (x + drawn));
+            let w = drawn + 80.0;
+            let (x, _) = painted_label(label, w);
+            let (left, right) = (x - 10.0, 10.0 + w - (x + drawn));
             assert!((left - right).abs() < 1.0, "{label:?}: {left:.1}px left vs {right:.1}px right");
         }
     }
@@ -900,4 +907,3 @@ mod focus_ring_tests {
         assert_eq!(edges(&b), vec![None]);
     }
 }
-

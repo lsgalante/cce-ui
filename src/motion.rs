@@ -18,9 +18,7 @@
 //! half a second and nothing needs restarting or reloading. `CCE_ANIMATIONS`
 //! (`0`/`off` or `1`/`on`) overrides the file for one process, for testing.
 
-use std::sync::Mutex;
 use std::time::Duration;
-use web_time::Instant;
 
 /// Where the switch lives. Shared with `cce-power-apply`, the writer.
 pub const STATE_PATH: &str = "/run/cce/animations";
@@ -43,8 +41,6 @@ pub fn parse(text: &str) -> Option<bool> {
 pub fn read_state() -> Option<bool> {
     parse(&std::fs::read_to_string(STATE_PATH).ok()?)
 }
-
-static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
 
 // Under `cfg(test)` the switch is the SUITE's, not the machine's: on,
 // unless a test forces it with [`force_for_test`]. Until 2026-09-28
@@ -88,6 +84,9 @@ fn enabled_on_this_machine() -> bool {
     if let Some(forced) = *ENV.get_or_init(|| std::env::var("CCE_ANIMATIONS").ok().and_then(|v| parse(&v))) {
         return forced;
     }
+    use std::sync::Mutex;
+    use web_time::Instant;
+    static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let now = Instant::now();
     match *cache {

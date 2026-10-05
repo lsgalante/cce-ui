@@ -357,8 +357,8 @@ through the line as drawn. `a_composition_is_shown_at_the_caret_and_never_held` 
 this tree, was driven under the headless sway with the stand-in input method (2026-10-05):
 the composition underlined at the caret, the commit typed, a second composition left up
 through the editor's autosave and then dropped by a click — and the note on disk held the
-commit and never the composition. No `LineEdit` host calls the three methods yet
-(cce-browser's URL bar and dialog fields; it cannot be built here, for WPE).
+commit and never the composition. cce-browser's URL bar, bookmarks search and dialog
+fields are the `LineEdit` hosts (its `keyboard_field` / `sync_ime`, lsgalante/cce-browser#1).
 
 Not there yet: no shell sends surrounding text, so an input
 method's `delete_surrounding_text` (text-input-v3) is not applied; and a password box is
@@ -386,6 +386,14 @@ disable-and-enable; Escape disabling — and under `WAYLAND_DEBUG` the cursor re
 following the caret through every step, each `done`'s serial equal to the commits sent.
 Sway routes text-input focus only while an input method is bound, so with none (the
 24-step harness) nothing changes: 0 px.
+
+CI (`.github/workflows/ci.yml`, every push and PR) builds and tests on Ubuntu 24.04 with
+default and with all features, warnings as errors. It installs `libwayland-dev` and
+`libxkbcommon-dev` (the two native libraries the build links, through pkg-config) and Mesa's lavapipe, a software Vulkan device,
+so the GPU tests (`vk::compute`, `vk::plate_probe`) RUN there rather than skip — and a
+last step fails the job if they printed a skip note, since a skipped test passes. To match
+it locally: `apt install libwayland-dev libxkbcommon-dev mesa-vulkan-drivers`, then
+`RUSTFLAGS="-D warnings" cargo test --all-features`.
 
 Wayland protocol bindings are generated **inline at compile time** by `wayland-scanner` macros in
 `src/protocol.rs` from `protocol/*.xml` (`cce-inspector-v1`, `cce-window-management-v1`) — there is
@@ -1852,6 +1860,37 @@ input.kdl's `kinetic_scroll`. Two value controls still follow the switch,
 deliberately left alone: a slider's and a ramp key's drift after a scroll
 over them, which changes a VALUE after the hand has stopped.
 `the_animations_switch_stops_the_glide_and_not_the_coast` is the test.
+
+### A finger scrolls (touchscreens, since 2026-10-05)
+
+The runner binds `wl_touch` when the seat offers it, and `backend/touch.rs`
+turns the first finger into pointer input by what it does: a **tap** clicks
+where it landed, a finger that **moves** past `SLOP` (10 px) scrolls — a
+`PixelDelta` equal to the finger's travel, `ScrollPhase::Finger`, dispatched
+at the down point, then `FingerEnd` at the lift so a flick coasts through
+`ScrollMotion` like a trackpad's — and a finger **held** `HOLD_MS` (400 ms)
+before moving is a held left button (a slider thumb, a text selection, a
+scrollbar). The hold needs no timer: nothing is sent while the finger rests
+inside the slop, so the choice is made at the first motion past it. Other
+fingers are ignored until the first lifts. `TouchTracker` is the pure state
+machine (tested in that file, and portable); what its actions do is the
+driver's (`Driver::touch`, routing like every other input), and only the
+`TouchHandler` impl beside the tracker is Wayland's, so `window_runner.rs`
+carries only the fields and the capability hook.
+
+A finger is always natural — the content goes where it is pushed — so the
+dispatch runs inside `input::with_natural_scroll(true, …)` and a value
+control's `value_notches_y` reads the finger's real direction whatever the
+trackpad's setting. No per-app trackpad factor either: 1:1 keeps the content
+under the finger. Not by finger: CSD moves/resizes and
+`Application::take_window_action`, since the compositor checks those serials
+against a pointer grab; the runner drains a queued action after a touch so it
+cannot fire on the next pointer press. Binding `wl_touch` is also what moves a
+cce-ui window off the compositor's emulated-pointer route
+(`cce-compositor`'s `cursor::TouchRoute`), where a finger drag was a held
+button and selected rather than scrolled. `CCE_SCROLL_DEBUG=1` logs each
+touch scroll (`[scroll] touch: …`); in a shadow, `ccectl touch down|motion|up`
+drives it.
 
 ### A host may name the phase; a test may pin the settings (2026-09-30)
 

@@ -77,7 +77,8 @@ use crate::backend::driver::{Driver, Press, PressSite, Turn};
 use crate::backend::frame::build_frame;
 use crate::backend::shell::{Pacer, Shell, Step, ACTIVE_DISPATCH};
 use crate::vk::{SurfaceTarget, VkRenderer};
-use crate::widget::{context_menu, ElementState, Key, TextItem};
+use crate::widget::{context_menu, ElementState, Key};
+use crate::backend::text::DlText;
 
 /// Run `A` in a window until it exits. Must be called on the main thread
 /// (a process's `main`), as AppKit requires.
@@ -261,7 +262,7 @@ struct MacShell<A: Application> {
     rx: Receiver<A::Message>,
     fs: cosmic_text::FontSystem,
     swash: cosmic_text::SwashCache,
-    items: Vec<TextItem>,
+    items: Vec<DlText>,
     damage_owed: bool,
     /// The view's size in points, and the window's backing scale.
     logical: (f32, f32),

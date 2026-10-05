@@ -17,7 +17,7 @@ use web_time::Instant;
 
 use super::app::{Application, LogicalPosition, LogicalSize};
 use cursor_icon::CursorIcon;
-use crate::widget::{ElementState, Key, KeyEvent, MouseButton, MouseScrollDelta, NamedKey, Position};
+use crate::widget::{ElementState, Key, KeyEvent, MouseButton, MouseScrollDelta, NamedKey, Position, ScrollPhase};
 
 /// A key held down, for the runner's own key repeat.
 pub struct PressedKey {
@@ -170,6 +170,9 @@ pub struct Driver {
     /// the plate-navigation group jump, for apps that opt in.
     pub group_next_chord: String,
     pub group_prev_chord: String,
+    /// Whether the app is the status bar, asked once (see
+    /// [`is_status_bar`](Self::is_status_bar)).
+    status_bar: std::cell::OnceCell<bool>,
 }
 
 impl Default for Driver {
@@ -180,6 +183,24 @@ impl Default for Driver {
 
 /// The CSD border's width, in logical px.
 const CSD_BORDER: f32 = 8.0;
+
+/// Close the open popovers a left press at (lx, ly) misses, BEFORE the app's
+/// dispatch: apps commonly region-gate their routing, so an open menu's owner
+/// may never hear about a press elsewhere.
+fn close_popovers_missed_by<A: Application>(app: &mut A, lx: f32, ly: f32) {
+    let offsets: Vec<_> = app
+        .ui_context()
+        .map(|ctx| ctx.popover_owners())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|id| (id, app.popover_offset(id)))
+        .collect();
+    if let Some(ctx) = app.ui_context_mut() {
+        ctx.close_popovers_missed_by_press_with(lx, ly, |id| {
+            offsets.iter().find(|(o, _)| *o == id).map_or((0.0, 0.0), |&(_, d)| d)
+        });
+    }
+}
 
 fn button_bit(btn: MouseButton) -> u32 {
     match btn {
@@ -201,7 +222,16 @@ impl Driver {
             redo_chord: crate::input::app_chord("redo", "ctrl+shift+z"),
             group_next_chord: crate::input::app_chord("focus_next_group", "ctrl+tab"),
             group_prev_chord: crate::input::app_chord("focus_prev_group", "ctrl+shift+tab"),
+            status_bar: std::cell::OnceCell::new(),
         }
+    }
+
+    /// The app is the status bar (`app_id` `cce-status…`): no CSD move,
+    /// resize or resize cursors. Read from `settings()` once per session —
+    /// the checks it serves run on every pointer motion and press, and
+    /// `settings()` builds two `String`s each call.
+    fn is_status_bar<A: Application>(&self, app: &A) -> bool {
+        *self.status_bar.get_or_init(|| app.settings().app_id.starts_with("cce-status"))
     }
 
     /// Copy the modifiers into the app's widget context, where widgets read them.
@@ -228,7 +258,7 @@ impl Driver {
         if let Some(icon) = app.cursor_icon(lx, ly) {
             return icon;
         }
-        if app.settings().app_id.starts_with("cce-status")
+        if self.is_status_bar(app)
             || !app.standard_csd()
             || !app.csd_resize_borders()
         {
@@ -315,7 +345,7 @@ impl Driver {
         if site.can_grab
             && btn == MouseButton::Left
             && !site.on_popup
-            && !t.app.settings().app_id.starts_with("cce-status")
+            && !self.is_status_bar(t.app)
             && t.app.standard_csd()
         {
             // Resize borders off: the compositor's own band outside the
@@ -343,19 +373,7 @@ impl Driver {
         // apps commonly region-gate their routing, so an open menu's owner may
         // never hear about a press elsewhere.
         if btn == MouseButton::Left {
-            let app = &mut *t.app;
-            let offsets: Vec<_> = app
-                .ui_context()
-                .map(|ctx| ctx.popover_owners())
-                .unwrap_or_default()
-                .into_iter()
-                .map(|id| (id, app.popover_offset(id)))
-                .collect();
-            if let Some(ctx) = app.ui_context_mut() {
-                ctx.close_popovers_missed_by_press_with(lx, ly, |id| {
-                    offsets.iter().find(|(o, _)| *o == id).map_or((0.0, 0.0), |&(_, d)| d)
-                });
-            }
+            close_popovers_missed_by(t.app, lx, ly);
         }
 
         let mut rebuild = false;
@@ -396,6 +414,82 @@ impl Driver {
         if rebuild {
             *t.redraw = true;
         }
+    }
+
+    /// What a touchscreen finger did, as pointer input (the shell's
+    /// [`TouchTracker`](super::touch::TouchTracker) decides which): a hover
+    /// or drag moves the pointer, a press and release are the left button's,
+    /// and a scroll is a trackpad finger scroll dispatched at `scroll_at`,
+    /// where the finger went down — the gesture belongs to what it began on,
+    /// however far the content moves.
+    ///
+    /// Never a CSD move or resize, and never an app's window action: a touch
+    /// serial does not satisfy the compositor's pointer-grab check, and an
+    /// action left queued would run on the next pointer press with that
+    /// press's serial, so one a touch queued is dropped.
+    pub fn touch<A: Application>(
+        &mut self,
+        mut t: Turn<'_, A>,
+        actions: Vec<super::touch::TouchAction>,
+        scroll_at: Option<(f32, f32)>,
+    ) {
+        use super::touch::TouchAction;
+        for action in actions {
+            let mut rebuild = false;
+            let mut msg = None;
+            match action {
+                TouchAction::Hover(x, y) | TouchAction::Drag(x, y) => {
+                    t.app.handle_pointer_move(LogicalPosition::new(x, y), &mut rebuild);
+                }
+                TouchAction::Leave => {
+                    t.app.handle_pointer_move(LogicalPosition::new(-10000.0, -10000.0), &mut rebuild);
+                }
+                TouchAction::Press(x, y) => {
+                    // Outside-press close for open popovers, as the pointer's
+                    // press does before the app's own dispatch.
+                    close_popovers_missed_by(t.app, x, y);
+                    let pos = LogicalPosition::new(x, y);
+                    msg = t.app.handle_mouse_input(MouseButton::Left, ElementState::Pressed, pos, &mut rebuild);
+                }
+                TouchAction::Release(x, y) => {
+                    let pos = LogicalPosition::new(x, y);
+                    msg = t.app.handle_mouse_input(MouseButton::Left, ElementState::Released, pos, &mut rebuild);
+                }
+                TouchAction::Scroll(dx, dy) => self.touch_scroll(t.app, scroll_at, ScrollPhase::Finger, dx, dy, &mut rebuild),
+                TouchAction::ScrollEnd => {
+                    self.touch_scroll(t.app, scroll_at, ScrollPhase::FingerEnd, 0.0, 0.0, &mut rebuild)
+                }
+            }
+            t.deliver(msg, rebuild);
+        }
+        let _ = t.app.take_window_action();
+    }
+
+    /// Finger travel as a trackpad pixel scroll. A finger is always
+    /// "natural" — the content goes where it is pushed — so the dispatch runs
+    /// with natural scrolling on whatever the trackpad's setting, and a value
+    /// control (`MouseScrollDelta::value_notches_y`) reads the finger's real
+    /// direction. 1:1, without the trackpad's per-app factor: the content
+    /// stays under the finger.
+    fn touch_scroll<A: Application>(
+        &self,
+        app: &mut A,
+        scroll_at: Option<(f32, f32)>,
+        phase: ScrollPhase,
+        dx: f32,
+        dy: f32,
+        rebuild: &mut bool,
+    ) {
+        let Some((x, y)) = scroll_at else { return };
+        crate::widget::scroll_motion::set_scroll_phase(phase);
+        let delta = MouseScrollDelta::PixelDelta(Position { x: dx as f64, y: dy as f64 });
+        if crate::scroll_debug() {
+            eprintln!("[scroll] touch: phase={phase:?} -> {delta:?} at ({x:.0},{y:.0})");
+        }
+        self.sync_mods(app);
+        crate::input::with_natural_scroll(true, || {
+            app.handle_mouse_wheel(&delta, LogicalPosition::new(x, y), rebuild);
+        });
     }
 
     /// A pinch gesture began.
@@ -1002,6 +1096,35 @@ mod tests {
         // Logo is left as it was, as the runner always left it.
         assert_eq!(d.mods, Modifiers { ctrl: false, shift: false, alt: false, logo: true });
         assert_eq!(app.seen.last(), Some(&Seen::Focus(false)));
+    }
+
+    #[test]
+    fn a_finger_is_the_left_button_and_never_the_windows() {
+        // Only the tap and the hold: a touch scroll publishes the scroll
+        // phase process-wide, which a parallel suite must not race.
+        use crate::backend::touch::TouchAction::*;
+        let (mut app, mut d) = (mock(), driver());
+        app.csd = true;
+        app.press_msg = Some(7);
+        let mut f = Flags { redraw: false, exit: false };
+        // A tap on the resize border: a click there, not a resize.
+        d.touch(turn(&mut app, &mut f), vec![Hover(2.0, 2.0), Press(2.0, 2.0), Release(2.0, 2.0), Leave], None);
+        assert_eq!(
+            app.seen,
+            vec![
+                Seen::Move(2.0, 2.0),
+                Seen::Button(MouseButton::Left, ElementState::Pressed, 2.0, 2.0),
+                Seen::Update(7),
+                Seen::Button(MouseButton::Left, ElementState::Released, 2.0, 2.0),
+                Seen::Move(-10000.0, -10000.0),
+            ]
+        );
+        assert!(f.redraw, "the press's message asked for a frame");
+        // A hold, then a drag: the held left button's motion.
+        app.seen.clear();
+        d.touch(turn(&mut app, &mut f), vec![Press(10.0, 10.0), Drag(40.0, 10.0), Release(40.0, 10.0)], None);
+        assert_eq!(app.seen[2], Seen::Move(40.0, 10.0));
+        assert_eq!(d.buttons_down, 0, "a finger holds no pointer button");
     }
 
     #[test]

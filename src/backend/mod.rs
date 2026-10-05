@@ -6,6 +6,7 @@ pub mod frame;
 pub mod shell;
 pub mod tessellate;
 pub mod text;
+pub mod touch;
 // The Wayland shell: native, but for macOS.
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod dnd;

@@ -66,7 +66,8 @@ use crate::backend::dom::{clipboard_key, map_key, utf16_range_to_bytes, wheel_fr
 use crate::backend::driver::{Driver, Modifiers, PressSite, ScrollFrame, ScrollSource, Turn};
 use crate::backend::frame::build_frame;
 use crate::backend::shell::{Pacer, Shell, Step, ACTIVE_DISPATCH};
-use crate::widget::{clipboard, context_menu, ElementState, Key, MouseButton, TextItem};
+use crate::widget::{clipboard, context_menu, ElementState, Key, MouseButton};
+use crate::backend::text::DlText;
 
 /// Who decides the canvas's size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,7 +214,7 @@ struct WebShell<A: Application> {
     fs: cosmic_text::FontSystem,
     swash: cosmic_text::SwashCache,
     /// The frame's display-list text, shaped by [`build_frame`].
-    items: Vec<TextItem>,
+    items: Vec<DlText>,
     damage_owed: bool,
     canvas: HtmlCanvasElement,
     sizing: Sizing,

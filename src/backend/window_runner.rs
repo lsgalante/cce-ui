@@ -23,7 +23,7 @@ use smithay_client_toolkit::{
 };
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface, wl_registry, wl_region, wl_callback},
+    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_touch, wl_surface, wl_registry, wl_region, wl_callback},
     Connection, QueueHandle, Proxy,
 };
 
@@ -40,7 +40,7 @@ pub use smithay_client_toolkit::seat::pointer::CursorIcon as PointerCursorIcon;
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
 use cosmic_text::FontSystem;
-use crate::widget::{TextItem, MouseButton, ElementState, Key, NamedKey};
+use crate::widget::{MouseButton, ElementState, Key, NamedKey};
 use crate::wayland::detect_scale_factor;
 use crate::vk::VkRenderer;
 
@@ -53,6 +53,14 @@ pub use super::tessellate::*;
 pub use super::text::*;
 
 pub use super::shell::IDLE_DISPATCH;
+
+/// The `CCE_PRESENT_DEBUG` traces' timestamp: wall-clock milliseconds, mod
+/// 100 s, short enough to read down a column of lines.
+fn debug_clock_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() % 100_000)
+}
 
 pub struct EngineState<A: Application> {
     pub registry_state: RegistryState,
@@ -156,10 +164,24 @@ pub struct EngineState<A: Application> {
     /// Serial of the most recent pointer press, kept for
     /// [`Application::take_window_action`] move/resize grabs.
     pub last_press_serial: Option<u32>,
+    /// The touchscreen, once the seat offers one; see `backend/touch.rs`.
+    pub touch: Option<wl_touch::WlTouch>,
+    pub touch_tracker: super::touch::TouchTracker,
+    /// The followed finger's surface offset into window coordinates (the
+    /// menu popup's, or none), fixed at its down.
+    pub touch_offset: (f32, f32),
+    /// Where a touch scroll is dispatched: the finger's down point.
+    pub touch_scroll_at: Option<(f32, f32)>,
     /// This frame's display-list text, shaped and held here so the `TextSpan`s built
     /// in the render pass can borrow the buffers (Phase 6 —
     /// [`Application::display_list_text`]).
-    pub dl_text_items: Vec<TextItem>,
+    pub(crate) dl_text_items: Vec<DlText>,
+
+    /// The app is the status bar (`app_id` `cce-status…`): no CSD move,
+    /// resize or resize cursors. Read from `settings()` once per session —
+    /// the checks it serves run on every pointer motion and press, and
+    /// `settings()` builds two `String`s each call.
+    pub(crate) is_status_bar: bool,
 
     /// Drag-and-drop destination state (see [`crate::backend::dnd`]). The
     /// manager is absent when the compositor exposes no wl_data_device_manager;
@@ -476,8 +498,8 @@ impl<A: Application> EngineState<A> {
             let _callback = surface.frame(&self.qh, ());
             self.frame_callback_pending = true;
             self.frame_callback_armed_at = Some(std::time::Instant::now());
-            if std::env::var("CCE_PRESENT_DEBUG").is_ok() {
-                let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() % 100000;
+            if crate::vk::present_debug() {
+                let t = debug_clock_ms();
                 eprintln!("[vk] t={} armed frame callback", t);
             }
         }
@@ -629,8 +651,8 @@ impl<A: Application> Shell for EngineState<A> {
             && self.frame_callback_armed_at.is_none_or(|t| t.elapsed().as_millis() > 250)
         {
             self.frame_callback_pending = false;
-            if std::env::var("CCE_PRESENT_DEBUG").is_ok() {
-                let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() % 100000;
+            if crate::vk::present_debug() {
+                let t = debug_clock_ms();
                 eprintln!("[vk] t={} starvation fallback fired (callback never came)", t);
             }
         }
@@ -924,6 +946,9 @@ impl<A: Application> SeatHandler for EngineState<A> {
                 self.text_input = Some(m.get_text_input(&seat, qh, ()));
             }
         }
+        if capability == Capability::Touch && self.touch.is_none() {
+            self.touch = self.seat_state.get_touch(qh, &seat).ok();
+        }
     }
     
     fn remove_capability(
@@ -939,6 +964,9 @@ impl<A: Application> SeatHandler for EngineState<A> {
         }
         if capability == Capability::Keyboard {
             self.keyboard = None;
+        }
+        if capability == Capability::Touch {
+            self.touch_lost();
         }
     }
     
@@ -1388,8 +1416,8 @@ impl<A: Application> wayland_client::Dispatch<wl_callback::WlCallback, ()> for E
     ) {
         if let wl_callback::Event::Done { .. } = event {
             state.frame_callback_pending = false;
-            if std::env::var("CCE_PRESENT_DEBUG").is_ok() {
-                let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() % 100000;
+            if crate::vk::present_debug() {
+                let t = debug_clock_ms();
                 let waited = state.frame_callback_armed_at.map(|a| a.elapsed().as_millis()).unwrap_or(0);
                 eprintln!("[vk] t={} frame-done (waited {}ms)", t, waited);
             }
@@ -1866,7 +1894,12 @@ fn run_session<'l, A: Application>(
         cce_toplevel: None,
         pending_grid_patch: None,
         last_press_serial: None,
+        touch: None,
+        touch_tracker: Default::default(),
+        touch_offset: (0.0, 0.0),
+        touch_scroll_at: None,
         dl_text_items: Vec::new(),
+        is_status_bar: false,
     };
 
     if let Err(e) = event_queue.roundtrip(&mut engine_state) {
@@ -1888,6 +1921,7 @@ fn run_session<'l, A: Application>(
     };
     let settings = inner.settings();
     crate::scale::set_app_id(settings.app_id.clone());
+    engine_state.is_status_bar = settings.app_id.starts_with("cce-status");
     engine_state.logical_width = settings.width as f32;
     engine_state.logical_height = settings.height as f32;
     engine_state.inner = Some(inner);
@@ -1912,7 +1946,7 @@ fn run_session<'l, A: Application>(
     surface.set_buffer_scale(buffer_scale);
     engine_state.committed_buffer_scale = buffer_scale;
 
-    if settings.app_id.starts_with("cce-status") {
+    if engine_state.is_status_bar {
         let compositor = engine_state.compositor_state.wl_compositor();
         let region = compositor.create_region(&qh, ());
         region.add(0, 0, settings.width as i32, settings.height as i32);
@@ -2021,8 +2055,7 @@ fn run_session<'l, A: Application>(
     /// in the per-iteration path, so a `std::env::var` call here would be I/O
     /// on the loop that is under measurement.
     fn loop_debug() -> bool {
-        static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *FLAG.get_or_init(|| std::env::var_os("CCE_PRESENT_DEBUG").is_some())
+        crate::vk::present_debug()
     }
 
     /// Seconds after session start at which to inject a simulated connection
@@ -2063,11 +2096,7 @@ fn run_session<'l, A: Application>(
             break;
         }
         if let Some(start) = iter_start {
-            let t = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-                % 100000;
+            let t = debug_clock_ms();
             eprintln!(
                 "[vk] t={} loop dispatch={}us pending_cb={}",
                 t,

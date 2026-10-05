@@ -1175,11 +1175,11 @@ impl ParametersBg {
             if self.inline_row(i) {
                 // The pane's own label, in the column beside an unlabelled
                 // control: vertically centred on the row, tail-truncated to
-                // the column.
-                let em = crate::widget::display::measure_text_width("M", &family, size).max(1.0);
-                let cols = ((lw - Self::LABEL_GAP) / em).floor().max(0.0) as usize;
+                // the column — by the measure the column is sized with, so
+                // a label it was sized to hold is never cut (it was cut to
+                // as many chars as the column holds M's).
                 labels.push(TextLabel {
-                    text: crate::widget::display::truncate_tail(name, cols),
+                    text: fit_tail(name, lw - Self::LABEL_GAP, &family, size),
                     x: r.0,
                     y: r.1 + (r.3 - size) * 0.5,
                     font_size: size,
@@ -3466,6 +3466,21 @@ fn parse_slider_range(ptype: &str) -> (f32, f32) {
     (0.0, 2.0)
 }
 
+/// `text` whole if it measures within `avail` px, else its longest head
+/// with "..." that does.
+fn fit_tail(text: &str, avail: f32, family: &str, size: f32) -> String {
+    use crate::widget::display::{measure_text_width, truncate_tail};
+    let fits = |t: &str| measure_text_width(t, family, size) <= avail;
+    if fits(text) {
+        return text.to_string();
+    }
+    (0..text.chars().count())
+        .rev()
+        .map(|n| truncate_tail(text, n))
+        .find(|t| fits(t))
+        .unwrap_or_default()
+}
+
 fn parse_hex_to_rgb(s: &str) -> Option<[u8; 3]> {
     crate::color::parse_hex_bytes(s).map(|[r, g, b, _]| [r, g, b])
 }
@@ -4700,6 +4715,34 @@ mod tests {
         p.on_cursor_moved(-9999.0, -9999.0, &mut ctx);
         assert!(hovered(&p).is_empty());
         assert_eq!(p.hover_row, None);
+    }
+
+    /// An inline label is cut only when it does not fit its column, by the
+    /// measure the column is sized with. It used to be cut to as many
+    /// characters as the column holds M's: in a proportional face a label
+    /// of narrow letters is far narrower than that many M's, so a label the
+    /// column was sized to hold lost its tail. On a runner whose fallback
+    /// face drew "M" a pixel wider, "Count" became "C..." in a column with
+    /// 30 px to spare.
+    #[test]
+    fn an_inline_label_is_cut_only_when_it_does_not_fit() {
+        use crate::widget::display::measure_text_width;
+        let narrow = "iiiiiiiiiiii";
+        let long = "A parameter name far too long for any label column of this pane";
+        let mut p = panel_with(&[(narrow, "x", "text"), ("Count", "3", "spinbox:0:10"), (long, "y", "text")]);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 400.0);
+        let (family, size) = ParametersBg::inline_label_font();
+        let avail = p.label_col_w() - ParametersBg::LABEL_GAP;
+        assert!(avail > 0.0, "the pane lays its labels out inline");
+        let texts: Vec<String> = p.own_text_labels().into_iter().map(|l| l.text).collect();
+        for name in [narrow, "Count"] {
+            if measure_text_width(name, &family, size) <= avail {
+                assert!(texts.iter().any(|t| t == name), "{name:?} fits its {avail} px column and is drawn whole: {texts:?}");
+            }
+        }
+        assert!(measure_text_width(long, &family, size) > avail, "the long label cannot fit");
+        let cut = texts.iter().find(|t| t.starts_with("A p") && t.ends_with("...")).expect("the long label is cut");
+        assert!(measure_text_width(cut, &family, size) <= avail, "and what is left fits: {cut:?}");
     }
 
     /// The hover cue is the row's LABEL and the row's OWN carves lit through

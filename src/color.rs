@@ -1951,9 +1951,14 @@ static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
 /// (0.4 / 24 / 0.2); the getters exist so the DE's plastic can be edited and
 /// so a named material (RFC material, step 4) has somewhere to land. No config
 /// path yet: the defaults ARE the shipped look.
-static FINISH_SPEC: RwLock<f32> = RwLock::new(0.4);
-static FINISH_SHININESS: RwLock<f32> = RwLock::new(24.0);
-static FINISH_CURVATURE: RwLock<f32> = RwLock::new(0.2);
+static FINISH_SPEC: RwLock<f32> = RwLock::new(FINISH_SPEC_DEFAULT);
+static FINISH_SHININESS: RwLock<f32> = RwLock::new(FINISH_SHININESS_DEFAULT);
+static FINISH_CURVATURE: RwLock<f32> = RwLock::new(FINISH_CURVATURE_DEFAULT);
+/// The finish a config without `relief spec` / `shininess` / `curvature`
+/// gets: the literals the shader shipped with.
+pub(crate) const FINISH_SPEC_DEFAULT: f32 = 0.4;
+pub(crate) const FINISH_SHININESS_DEFAULT: f32 = 24.0;
+pub(crate) const FINISH_CURVATURE_DEFAULT: f32 = 0.2;
 
 /// The default material's blur radius (`style.surface.plate.frost.radius`,
 /// the kernel sigma in logical px) — [`crate::scene::Frost::DEFAULT_RADIUS`]
