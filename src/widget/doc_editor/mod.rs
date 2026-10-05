@@ -87,6 +87,13 @@ pub struct DocEditor {
     follow_caret: bool,
     /// The host's embedded images, by link text (see [`DocEditor::set_images`]).
     images: Option<Box<dyn Fn(&str) -> Option<EmbedImage>>>,
+    /// An input method's composition (see `crate::ime`), at the source
+    /// position it began, and the `ime::generation` it was taken at. It is
+    /// in the caret line's LAYOUT, never in the buffer — the buffer is what
+    /// the host saves — so every column read off that line's layout is
+    /// mapped across it (`laid_col`, `source_col`).
+    composition: Option<(Pos, crate::ime::Preedit)>,
+    ime_seen: u64,
 }
 
 impl DocEditor {
@@ -117,6 +124,8 @@ impl DocEditor {
             viewport: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             follow_caret: false,
             images: None,
+            composition: None,
+            ime_seen: 0,
         };
         e.sync();
         e.caret_to_body();
@@ -301,7 +310,13 @@ impl DocEditor {
         }
         let act = self.shown_active;
         let active = self.is_active(i, act);
-        let text = self.buf.line(i);
+        // The caret line with a composition in it, laid out as typed.
+        let composed = self.composition.as_ref().filter(|(at, _)| at.line == i).map(|(at, p)| {
+            let mut t = self.buf.line(i).to_string();
+            t.insert_str(at.col.min(t.len()), &p.text);
+            t
+        });
+        let text = composed.as_deref().unwrap_or(self.buf.line(i));
         let line = match self.props.get(i) {
             Some(Some(p)) if !active => {
                 let key = match p {
@@ -357,14 +372,94 @@ impl DocEditor {
         (self.content_height() - self.viewport.height).max(0.0)
     }
 
+    // ---- the input method ---------------------------------------------------
+
+    /// Take up the input method's composition, if it has moved since the
+    /// editor last did: the caret line relaid out with it in. A composition
+    /// begun over a selection replaces it, as typing would.
+    fn sync_ime(&mut self) {
+        let generation = crate::ime::generation();
+        if generation == self.ime_seen {
+            return;
+        }
+        self.ime_seen = generation;
+        let next = crate::ime::preedit();
+        if next.is_some() && self.composition.is_none() && self.buf.delete_selection() {
+            self.sync();
+        }
+        if let Some((at, _)) = self.composition.take() {
+            self.relayout(at.line);
+        }
+        if let Some(p) = next {
+            let at = self.buf.caret;
+            self.buf.anchor = None;
+            self.composition = Some((at, p));
+            self.relayout(at.line);
+            self.follow_caret = true;
+        }
+    }
+
+    /// The editor lost the keyboard, or a press moved its caret: a
+    /// composition it was showing is dropped, and the input method asked to
+    /// cancel it.
+    pub fn drop_composition(&mut self) {
+        if let Some((at, _)) = self.composition.take() {
+            self.relayout(at.line);
+            crate::ime::request_reset();
+        }
+        self.ime_seen = crate::ime::generation();
+    }
+
+    /// Whether an input method's composition is showing.
+    pub fn composing(&self) -> bool {
+        self.composition.is_some()
+    }
+
+    fn relayout(&mut self, line: usize) {
+        if let Some(l) = self.layouts.get_mut(line) {
+            *l = None;
+        }
+        self.tops_dirty = true;
+    }
+
+    /// The composition on `line`: its source column, its length in bytes,
+    /// and the bytes into it the input method has its cursor.
+    fn composition_on(&self, line: usize) -> Option<(usize, usize, usize)> {
+        let (at, p) = self.composition.as_ref().filter(|(at, _)| at.line == line)?;
+        let caret = p.text.char_indices().nth(p.caret_chars()).map_or(p.text.len(), |(b, _)| b);
+        Some((at.col, p.text.len(), caret))
+    }
+
+    /// A source column of `line` as a column of its layout: past a
+    /// composition there, moved over it; the caret itself, where the input
+    /// method has its cursor in it.
+    fn laid_col(&self, line: usize, col: usize, is_caret: bool) -> usize {
+        match self.composition_on(line) {
+            Some((c, _, caret)) if is_caret && col == c => c + caret,
+            Some((c, len, _)) if col > c => col + len,
+            _ => col,
+        }
+    }
+
+    /// A column of `line`'s layout as a source column: inside a composition
+    /// is where it began.
+    fn source_col(&self, line: usize, col: usize) -> usize {
+        match self.composition_on(line) {
+            Some((c, len, _)) if col > c && col < c + len => c,
+            Some((c, len, _)) if col >= c + len => col - len,
+            _ => col,
+        }
+    }
+
     // ---- caret geometry -----------------------------------------------------
 
     /// The caret's (x, y) in content space and its row height.
     fn caret_point(&mut self, p: Pos) -> (f32, f32, f32) {
         self.ensure(p.line);
         self.retop();
+        let col = self.laid_col(p.line, p.col, p == self.buf.caret);
         let l = self.layouts[p.line].as_ref().expect("laid out");
-        let (x, row) = l.caret_xy(p.col);
+        let (x, row) = l.caret_xy(col);
         (x, self.tops[p.line] + row as f32 * l.row_h, l.row_h)
     }
 
@@ -387,7 +482,8 @@ impl DocEditor {
         self.retop();
         let l = self.layouts[i].as_ref().unwrap();
         let row = (((y - self.tops[i]) / l.row_h).floor().max(0.0) as usize).min(l.rows - 1);
-        Pos::new(i, l.col_at(x, row))
+        let col = l.col_at(x, row);
+        Pos::new(i, self.source_col(i, col))
     }
 
     fn scroll_to_caret(&mut self) {
@@ -448,6 +544,12 @@ impl DocEditor {
     /// sends them to `Application::undo`); call [`DocEditor::undo`] there.
     pub fn key(&mut self, ev: &KeyEvent) -> Response {
         self.sync();
+        // While an input method composes, its keys are its own: a shell does
+        // not deliver them, and one that does is not editing this text.
+        self.sync_ime();
+        if self.composition.is_some() {
+            return Response::None;
+        }
         let rev = self.buf.revision;
         let caret = (self.buf.caret, self.buf.anchor);
         let (ctrl, shift) = (ev.ctrl, ev.shift);
@@ -700,6 +802,16 @@ impl DocEditor {
         self.sync();
         let rev = self.buf.revision;
         let before = (self.buf.caret, self.buf.anchor);
+        // A press mid-composition places the caret, read through the line
+        // as it is drawn, and the composition is left there, cancelled.
+        if self.composition.is_some() {
+            let p = self.pos_at(sx, sy);
+            self.drop_composition();
+            self.buf.set_caret(p, false);
+            self.dragging = true;
+            self.want_x = None;
+            return self.after_edit(rev, before);
+        }
         let (x, y) = (sx - self.origin.0, sy - self.origin.1 + self.scroll);
         if y >= 0.0 && !shift {
             let i = self.line_at_y(y);
@@ -857,6 +969,7 @@ impl DocEditor {
         self.viewport = rect;
         self.origin = (rect.x + (rect.width - width) / 2.0, rect.y + self.pad);
         self.sync();
+        self.sync_ime();
         if std::mem::take(&mut self.follow_caret) {
             self.scroll_to_caret();
         }
@@ -887,6 +1000,8 @@ impl DocEditor {
         let (ox, oy) = (self.origin.0, self.origin.1 - self.scroll);
         let sel = self.buf.selection();
         let caret = self.buf.caret;
+        let caret_col = self.laid_col(caret.line, caret.col, true);
+        let composition = self.composition_on(caret.line);
         let th = self.theme.clone();
         let first = self.line_at_y(self.scroll - self.pad);
         pc.clip(rect, |pc| {
@@ -945,11 +1060,29 @@ impl DocEditor {
                         pc.vector(ox + r.x, sy, ox + r.x + r.w, sy, 1.0, r.color, Cap::Flat);
                     }
                 }
+                if let Some((c, len, _)) = composition {
+                    if i == caret.line {
+                        // The composition's underline, a row at a time.
+                        let (from, to) = (l.caret_xy(c), l.caret_xy(c + len));
+                        for row in from.1..=to.1 {
+                            let x0 = if row == from.1 { from.0 } else { l.content_x };
+                            let x1 = if row == to.1 { to.0 } else { l.runs.iter().filter(|r| r.row == row).map(|r| r.x + r.w).fold(x0, f32::max) };
+                            if x1 > x0 {
+                                let uy = top + (row + 1) as f32 * l.row_h - 3.0;
+                                pc.quad(Rect { x: ox + x0, y: uy, width: x1 - x0, height: 1.5 }, th.caret);
+                            }
+                        }
+                    }
+                }
                 if focused && i == caret.line {
-                    let (x, row) = l.caret_xy(caret.col);
+                    let (x, row) = l.caret_xy(caret_col);
                     let h = l.row_h * 0.8;
                     let y = top + row as f32 * l.row_h + (l.row_h - h) / 2.0;
                     pc.quad(Rect { x: ox + x - 0.5, y, width: 2.0, height: h }, th.caret);
+                    // Where an input method puts its candidates, and that
+                    // text is wanted at all.
+                    let (dx, dy) = pc.offset();
+                    crate::ime::report_caret(ox + x - 0.5 + dx, y + dy, 2.0, h);
                 }
                 i += 1;
             }
@@ -984,6 +1117,57 @@ mod tests {
         let mut pc = PaintCtx::new();
         e.paint(&mut pc, Rect { x: 0.0, y: 0.0, width: 600.0, height: 400.0 }, true);
         e
+    }
+
+    /// A composition is in the caret line's layout and never in the buffer:
+    /// drawn as typed and underlined, the caret where the input method has
+    /// its cursor, columns read off the line mapped across it; keys wait
+    /// while it is up; the commit is typed; a press drops it, asks the input
+    /// method to cancel, and places the caret; the caret is reported.
+    #[test]
+    fn a_composition_is_laid_out_in_place_and_never_held() {
+        use crate::ime::{self, Preedit};
+        let rect = Rect { x: 0.0, y: 0.0, width: 600.0, height: 400.0 };
+        let mut e = editor("ab\ncd");
+        e.buf.caret = Pos::new(0, 1);
+        e.buf.anchor = None;
+        let mut pc = PaintCtx::new();
+        e.paint(&mut pc, rect, true);
+        let plain_caret = e.caret_rect().x;
+        let _ = ime::take_reset();
+
+        ime::set_preedit(Some(Preedit::new("にほ", Some((3, 3)))));
+        ime::begin_frame();
+        e.paint(&mut pc, rect, true);
+        ime::end_frame();
+        assert_eq!(e.text(), "ab\ncd", "never in the buffer");
+        let l = e.layouts[0].as_ref().unwrap();
+        let drawn: String = l.runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(drawn, "aにほb");
+        assert!(e.caret_rect().x > plain_caret, "the caret is after に");
+        assert!(ime::caret().is_some(), "the caret is reported");
+        // Past the composition on its line is the source's end of line.
+        assert_eq!(e.pos_at(rect.x + 590.0, rect.y + e.pad + 2.0), Pos::new(0, 2));
+        assert_eq!(e.key(&typed("x")), Response::None);
+        assert_eq!(e.text(), "ab\ncd");
+
+        // The commit: the composition ends, its text is typed.
+        ime::set_preedit(None);
+        assert_eq!(e.key(&typed("日本")), Response::Changed);
+        assert_eq!(e.text(), "a日本b\ncd");
+        assert_eq!(e.buf.caret, Pos::new(0, 7));
+
+        // A press drops a composition, asks for it to be cancelled, and
+        // places the caret.
+        ime::set_preedit(Some(Preedit::new("か", None)));
+        e.paint(&mut pc, rect, true);
+        assert!(e.composing());
+        e.press(rect.x + 590.0, rect.y + e.pad + 2.0, false, false);
+        e.release();
+        assert!(!e.composing());
+        assert!(ime::take_reset());
+        assert_eq!(e.text(), "a日本b\ncd");
+        assert_eq!(e.buf.caret, Pos::new(0, "a日本b".len()));
     }
 
     #[test]

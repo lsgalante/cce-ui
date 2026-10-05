@@ -335,8 +335,32 @@ the history, and the box takes no key while it composes. It is applied in `prepa
 and at the top of `handle_key`, against `ime::generation`; a press, or editing ending,
 drops it and asks the input method to cancel (`ime::request_reset`). A composition begun
 over a selection replaces it, as typing would. `a_composition_is_shown_in_place_and_the_
-commit_is_typed` is the test. Not there yet: `LineEdit` and the `DocEditor` take the
-commit but do not show the composition; no shell sends surrounding text, so an input
+commit_is_typed` is the test.
+
+**`LineEdit` and the `DocEditor` show it too** (since 2026-10-05), each without letting it
+into what it holds — a host reads `LineEdit::text` directly and saves the `DocEditor`'s
+buffer, so neither ever contains it. `LineEdit` splices it into `display()` at the caret,
+and `display_index` / `text_index` map across it (the caret lands where the input method
+has its cursor, a point inside the composition is the caret, one after it is the text it is
+drawn after); `composition_range` is the span to underline, a masked field shows bullets.
+The app, which draws the field, calls `sync_ime` each frame the field has the keyboard,
+reports the caret it draws (`ime::report_caret` — also what tells the shell text is
+wanted), and `drop_composition` when the field loses it. The `DocEditor` lays out the
+caret's line WITH the composition (an active line, raw anyway) and maps every column read
+off that layout across it (`laid_col` / `source_col`: the caret, `caret_rect`, `pos_at`);
+it underlines it, and reports its caret itself while painted focused; a host calls
+`drop_composition` when the editor loses the keyboard. Both take no key while a
+composition is up, take the commit as typed, and treat a press as dropping the
+composition (cancelled in the input method) and placing the caret — the `DocEditor`'s read
+through the line as drawn. `a_composition_is_shown_at_the_caret_and_never_held` and
+`a_composition_is_laid_out_in_place_and_never_held` are the tests; cce-notes, built against
+this tree, was driven under the headless sway with the stand-in input method (2026-10-05):
+the composition underlined at the caret, the commit typed, a second composition left up
+through the editor's autosave and then dropped by a click — and the note on disk held the
+commit and never the composition. No `LineEdit` host calls the three methods yet
+(cce-browser's URL bar and dialog fields; it cannot be built here, for WPE).
+
+Not there yet: no shell sends surrounding text, so an input
 method's `delete_surrounding_text` (text-input-v3) is not applied; and a password box is
 announced with the normal content purpose.
 
