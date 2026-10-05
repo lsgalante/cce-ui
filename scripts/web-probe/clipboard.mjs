@@ -5,8 +5,11 @@
 //   2. paste — Ctrl+V with other text there — takes it (copied back out);
 //   3. copy with the page's writeText refused: the `copy` event alone
 //      carries it (what an insecure context has);
-//   4. paste with the `paste` event swallowed: the held key goes through on
-//      its timer and pastes the page's own last copy.
+//   4. paste with the `paste` event swallowed but its default kept: the text
+//      the browser pastes into the keyboard sink is the clipboard's;
+//   5. paste with the `paste` event swallowed and cancelled: the held key
+//      goes through on its timer and pastes the page's own last copy or
+//      paste (4's read-back copy of the box).
 import { open } from './browser.mjs';
 
 const [root] = process.argv.slice(2);
@@ -62,11 +65,21 @@ await session(async t => {
   await t.focusBox(); await t.type('via the event');
   await t.chord('a'); await t.chord('c');
   check('copy, the copy event alone', await t.read(), 'via the event');
-  await t.page.evaluate(() => window.addEventListener('paste', e => e.stopImmediatePropagation(), true));
+  // Ahead of the shell's listener: swallow the event, and with
+  // `cancelPaste` set cancel its default too.
+  await t.page.evaluate(() => window.addEventListener('paste', e => {
+    e.stopImmediatePropagation();
+    if (window.cancelPaste) e.preventDefault();
+  }, true));
+  await t.write(' and the system');
+  await t.focusBox(); await t.key('End'); await t.chord('v');
+  await t.chord('a'); await t.chord('c');
+  check('paste, the event swallowed', await t.read(), 'via the event and the system');
+  await t.page.evaluate(() => { window.cancelPaste = true; });
   await t.write('system text the page never sees');
   await t.focusBox(); await t.key('End'); await t.chord('v');
   await t.chord('a'); await t.chord('c');
-  check('paste, no paste event', await t.read(), 'via the eventvia the event');
+  check('paste, no paste event at all', await t.read(), 'via the event and the systemvia the event and the system');
 });
 
 process.exit(ok ? 0 : 1);

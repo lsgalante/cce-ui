@@ -17,6 +17,22 @@
 //! - **Frames out.** [`build_frame`] at the canvas's CSS size and the page's
 //!   `devicePixelRatio`, drawn by the [`WebRenderer`].
 //!
+//! **The keyboard is a hidden `<textarea>`'s**, not the canvas's: a page can
+//! compose input-method text (Japanese, Chinese, Korean, a dead key, an
+//! emoji panel) only into an editable element. It takes the focus a press
+//! on the canvas would have given the canvas (and the canvas, focused some
+//! other way, hands it over), its key events are the app's as the canvas's
+//! were, and its composition is the input method's: a key the input method
+//! takes (`Process`, keyCode 229, or one sent mid-composition) is left to
+//! it, `input` events while composing are the composition
+//! (`Driver::preedit`), `compositionend` its commit (`Driver::commit_text`),
+//! and text that arrives with no composition (an emoji panel, dictation) is
+//! committed as it comes. After each frame it is moved to the editing
+//! widget's caret (`ime::caret`), where the input method puts its
+//! candidates. A widget that drops a composition (`ime::take_reset`) has it
+//! cancelled by taking the focus off the textarea and back, inside the turn,
+//! where the events that raises are not the app's.
+//!
 //! **The clipboard** comes through the page's clipboard events, since a page
 //! may read the clipboard only inside a `paste` event: a ⌘/Ctrl+V is held
 //! back from the app until its `paste` event has handed over the text (or,
@@ -39,11 +55,14 @@ use std::time::Duration;
 use cursor_icon::CursorIcon;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{AddEventListenerOptions, ClipboardEvent, FocusEvent, HtmlCanvasElement, KeyboardEvent, PointerEvent, WheelEvent};
+use web_sys::{
+    AddEventListenerOptions, ClipboardEvent, CompositionEvent, FocusEvent, HtmlCanvasElement, HtmlTextAreaElement, InputEvent,
+    KeyboardEvent, PointerEvent, WheelEvent,
+};
 
 use super::renderer::{Capture, WebRenderer};
 use crate::backend::app::{set_wake, AppSender, Application, LogicalPosition, LogicalSize};
-use crate::backend::dom::{clipboard_key, map_key, wheel_frame, ClipKey};
+use crate::backend::dom::{clipboard_key, map_key, utf16_range_to_bytes, wheel_frame, ClipKey};
 use crate::backend::driver::{Driver, Modifiers, PressSite, ScrollFrame, ScrollSource, Turn};
 use crate::backend::frame::build_frame;
 use crate::backend::shell::{Pacer, Shell, Step, ACTIVE_DISPATCH};
@@ -114,12 +133,13 @@ pub async fn run<A: Application>(canvas: HtmlCanvasElement, fonts: Fonts, sizing
     if sizing == Sizing::App {
         set_css_size(&canvas, settings.width, settings.height);
     }
-    // The canvas takes the keyboard (it is focused on a press), draws no
-    // focus outline of its own, and keeps touches for the app rather than
-    // panning the page.
+    // The canvas can be focused (it hands the focus to the keyboard sink),
+    // draws no focus outline of its own, and keeps touches for the app
+    // rather than panning the page.
     canvas.set_tab_index(0);
     let _ = style.set_property("outline", "none");
     let _ = style.set_property("touch-action", "none");
+    let sink = keyboard_sink()?;
 
     let shell = WebShell {
         app,
@@ -139,6 +159,8 @@ pub async fn run<A: Application>(canvas: HtmlCanvasElement, fonts: Fonts, sizing
         just_configured: false,
         cursor: CursorIcon::Default,
         mac: is_mac(),
+        sink: sink.clone(),
+        sink_at: None,
     };
     let lp = Rc::new(Loop {
         shell: RefCell::new(shell),
@@ -153,7 +175,7 @@ pub async fn run<A: Application>(canvas: HtmlCanvasElement, fonts: Fonts, sizing
     });
     lp.shell.borrow_mut().measure();
     lp.shell.borrow_mut().just_configured = true;
-    Loop::install(&lp, &canvas)?;
+    Loop::install(&lp, &canvas, &sink)?;
     lp.wake();
     Ok(())
 }
@@ -202,6 +224,10 @@ struct WebShell<A: Application> {
     cursor: CursorIcon,
     /// Command is the shortcut key here: ⌘Z is undo, as every Mac app has it.
     mac: bool,
+    /// The hidden textarea that holds the keyboard (see the module doc), and
+    /// where it was last put (page px: left, top, height).
+    sink: HtmlTextAreaElement,
+    sink_at: Option<(f64, f64, f64)>,
 }
 
 impl<A: Application> WebShell<A> {
@@ -264,6 +290,39 @@ impl<A: Application> WebShell<A> {
         let (x, y) = (e.offset_x() as f32, e.offset_y() as f32);
         self.driver.cursor_pos = (x, y);
         LogicalPosition::new(x, y)
+    }
+
+    /// Put the keyboard sink at the editing widget's caret (the canvas's
+    /// corner when nothing is editing), so the input method's candidates
+    /// open there; and cancel a composition a widget dropped. Inside the
+    /// turn: the shell is borrowed, so the blur and focus this raises (and
+    /// the composition's end) reach no handler.
+    fn place_sink(&mut self) {
+        let r = self.canvas.get_bounding_client_rect();
+        let (left, top, h) = match crate::ime::caret() {
+            Some([x, y, _, h]) => (r.left() + x as f64, r.top() + y as f64, (h as f64).max(8.0)),
+            None => (r.left(), r.top(), 16.0),
+        };
+        if self.sink_at != Some((left, top, h)) {
+            self.sink_at = Some((left, top, h));
+            let st = self.sink.style();
+            let _ = st.set_property("left", &format!("{left}px"));
+            let _ = st.set_property("top", &format!("{top}px"));
+            let _ = st.set_property("height", &format!("{h}px"));
+            let _ = st.set_property("font-size", &format!("{}px", (h * 0.8).round()));
+            let _ = st.set_property("line-height", &format!("{h}px"));
+        }
+        if crate::ime::take_reset() {
+            let focused = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+                .is_some_and(|a| a == *self.sink.unchecked_ref::<web_sys::Element>());
+            self.sink.set_value("");
+            if focused {
+                let _ = self.sink.blur();
+                let _ = self.sink.focus();
+            }
+        }
     }
 
     fn update_cursor(&mut self) {
@@ -363,6 +422,7 @@ impl<A: Application> Shell for WebShell<A> {
                 self.redraw = true;
             }
         }
+        self.place_sink();
         if waiting.is_empty() {
             return;
         }
@@ -487,7 +547,7 @@ impl<A: Application> Loop<A> {
     }
 
     /// The callbacks: the loop's own two, the wake hook, and the canvas's events.
-    fn install(lp: &Rc<Self>, canvas: &HtmlCanvasElement) -> Result<(), JsValue> {
+    fn install(lp: &Rc<Self>, canvas: &HtmlCanvasElement, sink: &HtmlTextAreaElement) -> Result<(), JsValue> {
         let l = lp.clone();
         *lp.frame_cb.borrow_mut() = Some(Closure::new(move |_t: f64| l.on_frame()));
         let l = lp.clone();
@@ -534,13 +594,14 @@ impl<A: Application> Loop<A> {
         })?;
         let l = lp.clone();
         let c = canvas.clone();
+        let k = sink.clone();
         listen(target, "pointerdown", true, move |e: PointerEvent| {
             let Some(btn) = dom_button(e.button()) else { return };
             // Take the keyboard first: the focus event this fires is
             // dispatched now, before the shell is borrowed below. Capture
             // keeps a drag's moves and its release coming to the canvas when
             // the pointer leaves it, as a Wayland implicit grab does.
-            let _ = c.focus();
+            let _ = k.focus();
             let _ = c.set_pointer_capture(e.pointer_id());
             e.prevent_default();
             l.event(|s| {
@@ -580,19 +641,74 @@ impl<A: Application> Loop<A> {
                 l.arm_finger_lift();
             }
         })?;
+        // The canvas focused some other way (Tab, the page's script) hands
+        // the keyboard to the sink.
+        let k = sink.clone();
+        listen(target, "focus", false, move |_e: FocusEvent| {
+            let _ = k.focus();
+        })?;
+        let keys: &web_sys::EventTarget = sink.as_ref();
         let l = lp.clone();
-        listen(target, "keydown", true, move |e: KeyboardEvent| l.key(&e, ElementState::Pressed))?;
+        listen(keys, "keydown", true, move |e: KeyboardEvent| l.key(&e, ElementState::Pressed))?;
         let l = lp.clone();
-        listen(target, "keyup", true, move |e: KeyboardEvent| l.key(&e, ElementState::Released))?;
+        listen(keys, "keyup", true, move |e: KeyboardEvent| l.key(&e, ElementState::Released))?;
         for (name, focused) in [("focus", true), ("blur", false)] {
             let l = lp.clone();
-            listen(target, name, false, move |_e: FocusEvent| {
+            let c = canvas.clone();
+            listen(keys, name, false, move |e: FocusEvent| {
+                // Over to the canvas is on its way back.
+                let to_canvas = e.related_target().is_some_and(|r| AsRef::<JsValue>::as_ref(&r) == AsRef::<JsValue>::as_ref(&c));
+                if !focused && to_canvas {
+                    return;
+                }
                 l.event(|s| {
                     let (driver, t) = s.turn();
                     driver.keyboard_focus(t, focused);
                 })
             })?;
         }
+        // The input method's half.
+        let l = lp.clone();
+        let k = sink.clone();
+        listen(keys, "input", false, move |e: InputEvent| {
+            if e.is_composing() {
+                let text = k.value();
+                let cursor = utf16_range_to_bytes(&text, k.selection_start().ok().flatten(), k.selection_end().ok().flatten());
+                l.event(|s| {
+                    let (driver, t) = s.turn();
+                    driver.preedit(t, Some(crate::ime::Preedit { text, cursor }));
+                });
+            } else if e.input_type() == "insertFromPaste" {
+                // A paste that reached the sink by the browser's default (a
+                // handler of the page's swallowed its `paste` event): the
+                // clipboard's text all the same, for the held ⌘/Ctrl+V.
+                clipboard::pasted(k.value());
+                k.set_value("");
+                l.release_paste();
+            } else {
+                // Text with no composition: an emoji panel, dictation.
+                let text = k.value();
+                k.set_value("");
+                if !text.is_empty() {
+                    l.event(|s| {
+                        let (driver, t) = s.turn();
+                        driver.commit_text(t, text);
+                    });
+                }
+            }
+        })?;
+        let l = lp.clone();
+        let k = sink.clone();
+        listen(keys, "compositionend", false, move |e: CompositionEvent| {
+            let text = e.data().unwrap_or_default();
+            k.set_value("");
+            l.event(|s| {
+                let (driver, t) = s.turn();
+                driver.preedit(t, None);
+                let (driver, t) = s.turn();
+                driver.commit_text(t, text);
+            });
+        })?;
         // The clipboard's events, raised by the three keys `key` lets
         // through. They go to the focused element or the body, so they are
         // heard on the document.
@@ -628,6 +744,12 @@ impl<A: Application> Loop<A> {
     }
 
     fn key(&self, e: &KeyboardEvent, state: ElementState) {
+        // The input method's key: it composes with it (and a browser that
+        // sends the key confirming a composition after its end still marks
+        // it 229).
+        if e.is_composing() || e.key_code() == 229 {
+            return;
+        }
         let accel = e.ctrl_key() || e.meta_key();
         let Some((key, text)) = map_key(&e.key(), accel) else { return };
         let clip = clipboard_key(&e.key(), accel, e.alt_key());
@@ -714,6 +836,40 @@ impl<A: Application> Loop<A> {
             driver.scroll(t, frame, LogicalPosition::new(x, y));
         });
     }
+}
+
+/// The hidden textarea the keyboard goes to (see the module doc): fixed in
+/// the page, invisible, never hit, and no help offered on what is typed.
+fn keyboard_sink() -> Result<HtmlTextAreaElement, JsValue> {
+    let doc = window().document().ok_or_else(|| JsValue::from_str("cce-ui: no document"))?;
+    let sink: HtmlTextAreaElement = doc.create_element("textarea")?.dyn_into()?;
+    for (k, v) in [("autocomplete", "off"), ("autocorrect", "off"), ("autocapitalize", "off"), ("spellcheck", "false"), ("aria-hidden", "true")] {
+        sink.set_attribute(k, v)?;
+    }
+    let st = sink.style();
+    for (k, v) in [
+        ("position", "fixed"),
+        ("left", "0px"),
+        ("top", "0px"),
+        ("width", "1px"),
+        ("height", "16px"),
+        ("padding", "0"),
+        ("border", "0"),
+        ("margin", "0"),
+        ("outline", "none"),
+        ("resize", "none"),
+        ("overflow", "hidden"),
+        ("white-space", "pre"),
+        ("opacity", "0"),
+        ("pointer-events", "none"),
+        ("caret-color", "transparent"),
+        ("color", "transparent"),
+        ("background", "transparent"),
+    ] {
+        st.set_property(k, v)?;
+    }
+    doc.body().ok_or_else(|| JsValue::from_str("cce-ui: no body"))?.append_child(&sink)?;
+    Ok(sink)
 }
 
 fn window() -> web_sys::Window {

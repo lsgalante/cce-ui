@@ -10,6 +10,7 @@ pub mod widget;
 pub mod config;
 pub mod input;
 pub mod history;
+pub mod ime;
 pub mod layout;
 pub mod relief_spec;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]

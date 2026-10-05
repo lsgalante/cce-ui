@@ -131,9 +131,27 @@ in its own config.
   secure context. Until then a copy in a page panicked (`std::thread::spawn`).
   `scripts/web-probe/clipboard` is the check: copy, paste, copy with `writeText` refused,
   and paste with the `paste` event swallowed, each read back from the system clipboard —
-  all four pass in headless Chromium (2026-10-05).
+  all four pass in headless Chromium (2026-10-05). (Five since the IME: a `paste`
+  swallowed with its default kept pastes into the keyboard sink, an `input` of type
+  `insertFromPaste`, which is the paste too.)
+- **The keyboard is a hidden `<textarea>`'s** (the keyboard sink, since 2026-10-05), not
+  the canvas's: a page composes input-method text only into an editable element. It takes
+  the focus a press on the canvas gave the canvas (a canvas focused another way hands it
+  over, and a blur over to the canvas is not a focus loss); its keys are the app's as the
+  canvas's were, except one the input method takes (`isComposing`, keyCode 229); its
+  `input` events while composing are the composition (`Driver::preedit`, the cursor from
+  its selection via `dom::utf16_range_to_bytes`), `compositionend` the commit, and text
+  with no composition (an emoji panel, dictation) a commit as it comes. After each frame
+  it is moved to the editing widget's caret (`ime::caret`), where the candidates open; a
+  composition a widget dropped (`ime::take_reset`) is cancelled by blurring and refocusing
+  it INSIDE the turn, where the events that raises reach no handler.
+  `scripts/web-probe/ime` is the check, through Chromium's own IME path (CDP
+  `Input.imeSetComposition` / `insertText`): a composition shown with the sink at its
+  caret, the commit replacing it, a cancelled one leaving the box, a no-composition
+  insert, and plain keys — all six pass (2026-10-05), and the 24-step demo replay is
+  identical to the pixel to the run before the sink through step 18.
 
-Not there yet: IME composition, drag and drop, file dialogs, and an app whose
+Not there yet: drag and drop, file dialogs, and an app whose
 text is not the display list's (`display_list_text` false — it stages its own through the
 native-only `stage_renderer`, so draws no text here).
 
@@ -278,8 +296,18 @@ change. What the shell does, in AppKit's terms (module doc in `src/mac/mod.rs`):
 - **Clipboard**: the general `NSPasteboard`'s plain-text type, behind the same
   `widget::clipboard` pair every widget uses; ⌘C / ⌘X / ⌘V reach the widgets as Ctrl+C /
   X / V do on Linux, since Command reads as `ctrl`.
+- **Input methods**: the view is an `NSTextInputClient`. While a widget is editing text
+  (`ime::caret` is set) a key press without ⌘ goes through `interpretKeyEvents:` first:
+  `setMarkedText:` is the composition, `insertText:` the commit — unless it is a plain
+  key typing its own characters with nothing marked, which is left to the key path so it
+  keeps its named key and the driver's repeat — and `doCommandBySelector:` leaves the key
+  to the key path. `firstRectForCharacterRange:` is the caret in screen coordinates. With
+  nothing editing, keys skip the input method, so one left on does not eat an app's
+  single-key commands. After each frame a dropped composition is discarded through the
+  input context (the marked text cleared first, so the `unmarkText` that may call commits
+  nothing) and a moved caret invalidates the character coordinates.
 
-Not there yet: IME (`NSTextInputClient`), drag and drop, the context menu
+Not there yet: drag and drop, the context menu
 in a popup window (it is drawn in the window, as on a layer surface), blur behind the window,
 a menu bar beyond Quit. **None of it has run**: this is Linux, where an Apple target can be
 type-checked but not linked. `scripts/check-mac` type-checks the library, the demo, every
@@ -288,6 +316,28 @@ the four examples that still used the legacy `new(qh, …)` moved to `create`, a
 `plate_probe` / two integration tests reach the tessellator at `backend::tessellate` rather
 than through `window_runner`. On a Mac, MoltenVK and the Vulkan loader must be installed
 (the LunarG SDK, or Homebrew's `molten-vk` and `vulkan-loader`); `cargo run` is the test.
+
+**Input-method composition is one model for every shell** (`crate::ime`, since
+2026-10-05). Three things cross between the text widget and the shell's input method:
+the COMMIT is delivered as typed text (`Driver::commit_text`: a press of a key whose text
+it is, then its release — never a shortcut, never repeated, past the chords), so every
+widget that inserts a key's text takes it unchanged (`TextBox`, `LineEdit`, the
+`DocEditor`, an app's own field); the COMPOSITION (`ime::Preedit`: text and the input
+method's cursor as a byte range) is shared per thread, set through `Driver::preedit`; and
+the CARET goes back — a widget editing text reports it as it paints
+(`ime::report_caret`, in window px with the `PaintCtx` offset), `build_frame` brackets
+the frame (`begin_frame` / `end_frame`), and `ime::caret()` is where the candidates go and
+whether text is wanted at all. **`TextBox` shows a composition as a PROVISIONAL run** in
+`edit_buffer` (`composing`: its char start and length), so wrap, scroll, caret and the
+glyph advances draw it as typed text, and `selection_quads` underlines it; it is never
+held (`committed_buffer`, which `take_change` publishes under `update_on_type`), never in
+the history, and the box takes no key while it composes. It is applied in `prepare_text`
+and at the top of `handle_key`, against `ime::generation`; a press, or editing ending,
+drops it and asks the input method to cancel (`ime::request_reset`). A composition begun
+over a selection replaces it, as typing would. `a_composition_is_shown_in_place_and_the_
+commit_is_typed` is the test. Not there yet: the Wayland shell does not speak
+`text-input-v3`, so on Linux nothing composes; and `LineEdit` and the `DocEditor` take
+the commit but do not show the composition.
 
 Wayland protocol bindings are generated **inline at compile time** by `wayland-scanner` macros in
 `src/protocol.rs` from `protocol/*.xml` (`cce-inspector-v1`, `cce-window-management-v1`) — there is
@@ -1317,6 +1367,9 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `compute.rs` — what a compute job is, apart from the device that runs it: `Kernel`,
   `Binding`, the job rules and naga's parse (see "Compute jobs run in the browser too").
   `vk::ComputeDevice` and `web::ComputeDevice` run them.
+- `ime.rs` — input-method composition shared between the editing widget and the shell:
+  `Preedit`, the composition and its generation, the reported caret, the reset request
+  (see "Input-method composition is one model for every shell").
 - `history.rs` — `History<T>`: the undo/redo snapshot stack (cap, gestures, grouped runs).
   The toolkit defines the stack and the routing, never the step — see the trait section.
 - `widget/` — `container/` (vbox/hbox/scroll/menu/treelist/…), `input/` (button/slider/text_box/

@@ -88,6 +88,10 @@ pub fn build_frame<A: Application>(
 ) -> BuiltFrame {
     let (logical_w, logical_h) = (size.width, size.height);
 
+    // The editing widget reports its caret as it paints (`ime::report_caret`):
+    // where an input method's candidates go, and whether text is wanted.
+    crate::ime::begin_frame();
+
     // 0. Shape every registered widget against the SAME FontSystem the glyph pass draws
     // with, before the app builds its frame. A widget's caret/selection/click→index math
     // reads per-glyph advances its `prepare_text` records; nothing else calls it on the
@@ -118,6 +122,7 @@ pub fn build_frame<A: Application>(
     let dl = app
         .display_list(size, scale)
         .unwrap_or_else(|| crate::scene::paint::PaintCtx::new().finish());
+    crate::ime::end_frame();
     // Taken with the display list it describes. A frame that took the
     // app's damage and then was not presented owes those pixels, so the
     // next one that is presented repaints everything.

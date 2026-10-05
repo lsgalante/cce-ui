@@ -32,10 +32,16 @@
 //! The menu is a minimal one (Quit, ⌘Q), whose quit — like the close
 //! button — asks the app to exit the way a compositor's close does.
 //!
-//! Not there yet: the clipboard, IME composition (`NSTextInputClient`),
-//! drag and drop, the context menu in a popup window (it is drawn in the
-//! window and kept inside it, as on a layer surface), and blur behind the
-//! window (`NSVisualEffectView`).
+//! - **Input methods.** The view is an `NSTextInputClient`: while a widget
+//!   is editing text, a key press goes through `interpretKeyEvents:`, whose
+//!   marked text is the composition and whose inserted text the commit
+//!   (`crate::ime`); the candidate window is put under the caret the
+//!   widget reported. The clipboard is the general `NSPasteboard`
+//!   (`widget::clipboard`).
+//!
+//! Not there yet: drag and drop, the context menu in a popup window (it is
+//! drawn in the window and kept inside it, as on a layer surface), and blur
+//! behind the window (`NSVisualEffectView`).
 //!
 //! **This module has never been run.** It is written against objc2's
 //! AppKit bindings and type-checked for `aarch64-apple-darwin`
@@ -43,23 +49,24 @@
 //! needs a Mac, with MoltenVK installed (the Vulkan SDK, or Homebrew's
 //! `molten-vk` and `vulkan-loader`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use cursor_icon::CursorIcon;
 use dispatch2::{DispatchQueue, DispatchTime};
 use objc2::rc::Retained;
-use objc2::runtime::{NSObject, ProtocolObject};
-use objc2::{define_class, msg_send, sel, AnyThread, MainThreadOnly};
+use objc2::runtime::{AnyObject, NSObject, ProtocolObject, Sel};
+use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSApplicationTerminateReply,
     NSBackingStoreType, NSColor, NSCursor, NSEvent, NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem,
-    NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSTextInputClient, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
     NSWindowTitleVisibility,
 };
 use objc2_foundation::{
-    ns_string, MainThreadMarker, NSNotification, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+    ns_string, MainThreadMarker, NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound, NSNotification,
+    NSObjectProtocol, NSPoint, NSRange, NSRangePointer, NSRect, NSSize, NSString, NSUInteger,
 };
 use objc2_quartz_core::CAMetalLayer;
 use web_time::Instant;
@@ -171,6 +178,7 @@ pub fn run<A: Application>() {
         due: None,
         last_turn: Instant::now(),
         stopped: false,
+        ime_caret: None,
         mtm,
         layer,
         view: view.clone(),
@@ -211,6 +219,10 @@ enum Ev {
     Scrolled { dx: f64, dy: f64, precise: bool, inverted: bool, phase: u64, momentum: u64, flags: u64, x: f32, y: f32 },
     Magnified { phase: u64, magnification: f64 },
     Keyed { code: u16, chars: String, unmodified: String, flags: u64, down: bool },
+    /// The input method's composition changed (marked text).
+    Preedit(Option<crate::ime::Preedit>),
+    /// The input method committed text.
+    Commit(String),
     FlagsChanged { code: u16, flags: u64 },
     Focused(bool),
     /// The window's size or backing scale changed.
@@ -264,6 +276,8 @@ struct MacShell<A: Application> {
     due: Option<Instant>,
     last_turn: Instant,
     stopped: bool,
+    /// The caret the input method was last told of.
+    ime_caret: Option<[f32; 4]>,
     mtm: MainThreadMarker,
     layer: Retained<CAMetalLayer>,
     view: Retained<CceView>,
@@ -350,6 +364,16 @@ impl<A: Application> MacShell<A> {
                 let state = if down { ElementState::Pressed } else { ElementState::Released };
                 let (driver, t) = self.turn();
                 driver.key(t, key, text, state);
+            }
+            Ev::Preedit(preedit) => {
+                let (driver, t) = self.turn();
+                driver.preedit(t, preedit);
+            }
+            Ev::Commit(text) => {
+                let (driver, t) = self.turn();
+                driver.preedit(t, None);
+                let (driver, t) = self.turn();
+                driver.commit_text(t, text);
             }
             Ev::FlagsChanged { code, flags } => {
                 // A modifier key went down or up: the new state, and the key
@@ -469,6 +493,30 @@ impl<A: Application> MacShell<A> {
         true
     }
 
+    /// Keep the input method in step with the frame just drawn: a
+    /// composition a widget dropped, or one with no widget editing any more,
+    /// is discarded (the marked text cleared first, so the `unmarkText` this
+    /// may call commits nothing); a caret that moved has the candidate
+    /// window follow it.
+    fn sync_input_method(&mut self) {
+        let caret = crate::ime::caret();
+        let drop = crate::ime::take_reset() || (caret.is_none() && !self.view.ivars().marked.borrow().is_empty());
+        let context = self.view.inputContext();
+        if drop {
+            self.view.ivars().marked.borrow_mut().clear();
+            crate::ime::set_preedit(None);
+            if let Some(c) = &context {
+                c.discardMarkedText();
+            }
+        }
+        if caret != self.ime_caret {
+            self.ime_caret = caret;
+            if let Some(c) = &context {
+                c.invalidateCharacterCoordinates();
+            }
+        }
+    }
+
     fn size(&self) -> LogicalSize {
         LogicalSize::new(self.logical.0, self.logical.1)
     }
@@ -569,6 +617,7 @@ impl<A: Application> Shell for MacShell<A> {
         } else {
             self.redraw = true;
         }
+        self.sync_input_method();
     }
 }
 
@@ -631,14 +680,132 @@ fn location(view: &NSView, event: &NSEvent) -> (f32, f32) {
     (p.x as f32, p.y as f32)
 }
 
+/// The view's input-method state, for the `NSTextInputClient` methods.
+#[derive(Default)]
+struct ViewIme {
+    /// The marked text (the composition) as the input method last set it.
+    marked: RefCell<String>,
+    /// Inside `interpretKeyEvents:` for a key press, whose characters are
+    /// these; and whether the input method took the press.
+    in_key: Cell<bool>,
+    consumed: Cell<bool>,
+    key_chars: RefCell<String>,
+}
+
+/// The text of what an input method hands over: an `NSString`, or an
+/// `NSAttributedString` around one.
+fn ns_text(obj: &AnyObject) -> String {
+    if let Some(a) = obj.downcast_ref::<NSAttributedString>() {
+        a.string().to_string()
+    } else if let Some(s) = obj.downcast_ref::<NSString>() {
+        s.to_string()
+    } else {
+        String::new()
+    }
+}
+
 define_class!(
     // SAFETY: NSView has no subclassing requirements, and CceView no Drop.
     #[unsafe(super(NSView, objc2_app_kit::NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "CceUiView"]
+    #[ivars = ViewIme]
     struct CceView;
 
     unsafe impl NSObjectProtocol for CceView {}
+
+    // The input method's side of the view: AppKit calls these from inside
+    // `interpretKeyEvents:` (see `key`), and the candidate window asks where
+    // the caret is.
+    unsafe impl NSTextInputClient for CceView {
+        #[unsafe(method(insertText:replacementRange:))]
+        unsafe fn insert_text(&self, string: &AnyObject, _replacement: NSRange) {
+            let text = ns_text(string);
+            let ime = self.ivars();
+            let was_marked = !std::mem::take(&mut *ime.marked.borrow_mut()).is_empty();
+            // A plain key typing its own character is left to the key path,
+            // which keeps its named keys and the driver's repeat.
+            if ime.in_key.get() && !was_marked && text == *ime.key_chars.borrow() {
+                return;
+            }
+            ime.consumed.set(true);
+            send(Ev::Commit(text));
+        }
+
+        #[unsafe(method(doCommandBySelector:))]
+        unsafe fn do_command(&self, _selector: Sel) {
+            // A key the input method does not take (Return, Backspace, an
+            // arrow): left to the key path.
+        }
+
+        #[unsafe(method(setMarkedText:selectedRange:replacementRange:))]
+        unsafe fn set_marked_text(&self, string: &AnyObject, selected: NSRange, _replacement: NSRange) {
+            let text = ns_text(string);
+            let ime = self.ivars();
+            ime.consumed.set(true);
+            *ime.marked.borrow_mut() = text.clone();
+            let cursor = crate::backend::dom::utf16_range_to_bytes(
+                &text,
+                Some(selected.location as u32),
+                Some((selected.location + selected.length) as u32),
+            );
+            send(Ev::Preedit((!text.is_empty()).then(|| crate::ime::Preedit { text, cursor })));
+        }
+
+        #[unsafe(method(unmarkText))]
+        fn unmark_text(&self) {
+            // Accept the composition as it stands.
+            let text = std::mem::take(&mut *self.ivars().marked.borrow_mut());
+            if !text.is_empty() {
+                send(Ev::Commit(text));
+            }
+        }
+
+        #[unsafe(method(selectedRange))]
+        fn selected_range(&self) -> NSRange {
+            NSRange::new(NSNotFound as usize, 0)
+        }
+
+        #[unsafe(method(markedRange))]
+        fn marked_range(&self) -> NSRange {
+            let marked = self.ivars().marked.borrow();
+            if marked.is_empty() {
+                NSRange::new(NSNotFound as usize, 0)
+            } else {
+                NSRange::new(0, marked.encode_utf16().count())
+            }
+        }
+
+        #[unsafe(method(hasMarkedText))]
+        fn has_marked_text(&self) -> bool {
+            !self.ivars().marked.borrow().is_empty()
+        }
+
+        #[unsafe(method_id(attributedSubstringForProposedRange:actualRange:))]
+        unsafe fn attributed_substring(&self, _range: NSRange, _actual: NSRangePointer) -> Option<Retained<NSAttributedString>> {
+            None
+        }
+
+        #[unsafe(method_id(validAttributesForMarkedText))]
+        fn valid_attributes(&self) -> Retained<NSArray<NSAttributedStringKey>> {
+            NSArray::new()
+        }
+
+        /// Where the candidate window goes: under the editing widget's caret,
+        /// in screen coordinates.
+        #[unsafe(method(firstRectForCharacterRange:actualRange:))]
+        unsafe fn first_rect(&self, _range: NSRange, _actual: NSRangePointer) -> NSRect {
+            let [x, y, w, h] = crate::ime::caret().unwrap_or([0.0, 0.0, 1.0, 16.0]);
+            let caret = NSRect::new(NSPoint::new(x as f64, y as f64), NSSize::new(w.max(1.0) as f64, h as f64));
+            let in_window = self.convertRect_toView(caret, None);
+            self.window().map_or(in_window, |w| w.convertRectToScreen(in_window))
+        }
+
+        #[unsafe(method(characterIndexForPoint:))]
+        fn character_index(&self, _point: NSPoint) -> NSUInteger {
+            NSNotFound as NSUInteger
+        }
+    }
 
     impl CceView {
         #[unsafe(method(isFlipped))]
@@ -761,7 +928,7 @@ define_class!(
 
 impl CceView {
     fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(());
+        let this = Self::alloc(mtm).set_ivars(ViewIme::default());
         // SAFETY: NSView's designated initializer.
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         // Enter, exit and motion wherever the view is, window key or not.
@@ -799,12 +966,30 @@ impl CceView {
     }
 
     fn key(&self, event: &NSEvent, down: bool) {
+        let text = |s: Option<Retained<NSString>>| s.map(|s| s.to_string()).unwrap_or_default();
+        let flags = event.modifierFlags().0 as u64;
+        // While a widget is editing text, a key press goes to the input
+        // method first (`interpretKeyEvents:`, which calls back into the
+        // `NSTextInputClient` methods above); what it takes is composition
+        // or a commit, what it leaves takes the key path below. A ⌘
+        // shortcut never goes, and nothing does while nothing is editing,
+        // so an input method left on does not eat an app's single-key
+        // commands.
+        let ime = self.ivars();
+        if down && flags & appkit::flags::COMMAND == 0 && crate::ime::caret().is_some() {
+            ime.in_key.set(true);
+            ime.consumed.set(false);
+            *ime.key_chars.borrow_mut() = text(event.characters());
+            self.interpretKeyEvents(&NSArray::from_slice(&[event]));
+            ime.in_key.set(false);
+            if ime.consumed.get() {
+                return;
+            }
+        }
         // The driver repeats a held key itself, as it does on Wayland.
         if event.isARepeat() {
             return;
         }
-        let text = |s: Option<Retained<NSString>>| s.map(|s| s.to_string()).unwrap_or_default();
-        let flags = event.modifierFlags().0 as u64;
         let keyed = |down| Ev::Keyed {
             code: event.keyCode(),
             chars: text(event.characters()),

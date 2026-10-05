@@ -76,8 +76,8 @@ xkeysym = "0.2"
 # The AppKit shell (`src/mac`): the window, its CAMetalLayer, the run loop.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "NSNotification", "NSObject", "NSDate", "NSDictionary"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSView", "NSResponder", "NSEvent", "NSScreen", "NSCursor", "NSMenu", "NSMenuItem", "NSPasteboard", "NSColor", "NSTrackingArea", "NSGraphics", "NSGraphicsContext", "NSRunningApplication", "objc2-quartz-core", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "NSNotification", "NSObject", "NSDate", "NSDictionary", "NSArray", "NSAttributedString", "NSRange", "NSObjCRuntime"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSView", "NSResponder", "NSEvent", "NSScreen", "NSCursor", "NSMenu", "NSMenuItem", "NSPasteboard", "NSTextInputClient", "NSTextInputContext", "NSColor", "NSTrackingArea", "NSGraphics", "NSGraphicsContext", "NSRunningApplication", "objc2-quartz-core", "objc2-core-foundation"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "CAMetalLayer", "objc2-core-foundation"] }
 dispatch2 = "0.3"
 
@@ -98,6 +98,11 @@ web-sys = { version = "0.3", features = [
     "Element",
     "HtmlCanvasElement",
     "HtmlElement",
+    "HtmlTextAreaElement",
+    "CompositionEvent",
+    "InputEvent",
+    "DomRect",
+    "Node",
     "CssStyleDeclaration",
     "EventTarget",
     "Event",

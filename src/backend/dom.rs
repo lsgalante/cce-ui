@@ -87,6 +87,24 @@ pub fn clipboard_key(key: &str, accel: bool, alt: bool) -> Option<ClipKey> {
     }
 }
 
+/// A text control's selection — UTF-16 offsets, as the DOM counts — as a
+/// byte range in its text: where an input method has its cursor in a
+/// composition. An offset past the end is the end; inside a surrogate pair,
+/// the char it splits.
+pub fn utf16_range_to_bytes(text: &str, start: Option<u32>, end: Option<u32>) -> Option<(usize, usize)> {
+    let byte_at = |u: u32| {
+        let mut units = 0u32;
+        for (b, c) in text.char_indices() {
+            if units >= u {
+                return b;
+            }
+            units += c.len_utf16() as u32;
+        }
+        text.len()
+    };
+    Some((byte_at(start?), byte_at(end?)))
+}
+
 /// A `WheelEvent`'s deltas as a scroll frame in the units the driver takes
 /// (a `wl_pointer` axis frame's: a finger in px, a wheel notch as a discrete
 /// step plus ten units, positive down and right — the DOM's signs too).
@@ -166,6 +184,15 @@ mod tests {
         assert_eq!(clipboard_key("v", false, false), None);
         assert_eq!(clipboard_key("v", true, true), None);
         assert_eq!(clipboard_key("z", true, false), None);
+    }
+
+    #[test]
+    fn a_dom_selection_is_counted_in_utf16_and_given_in_bytes() {
+        // "に" is one UTF-16 unit and three bytes; "😀" two units, four bytes.
+        assert_eq!(utf16_range_to_bytes("にほ", Some(1), Some(1)), Some((3, 3)));
+        assert_eq!(utf16_range_to_bytes("😀a", Some(2), Some(3)), Some((4, 5)));
+        assert_eq!(utf16_range_to_bytes("ab", Some(0), Some(9)), Some((0, 2)));
+        assert_eq!(utf16_range_to_bytes("ab", None, Some(1)), None);
     }
 
     #[test]

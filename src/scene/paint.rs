@@ -1140,6 +1140,12 @@ impl PaintCtx {
         out
     }
 
+    /// The translation applied to what is emitted now: a widget's own rect
+    /// plus this is where it lands in the window.
+    pub fn offset(&self) -> (f32, f32) {
+        self.offset
+    }
+
     fn apply_offset(&self, r: Rect) -> Rect {
         Rect { x: r.x + self.offset.0, y: r.y + self.offset.1, width: r.width, height: r.height }
     }

@@ -537,6 +537,47 @@ impl Driver {
         t.deliver(msg, rebuild);
     }
 
+    /// Text an input method committed. It is delivered as TYPED — a press
+    /// of a key whose text it is, then that key's release — so a widget
+    /// that inserts what a key types takes it as it is (see `crate::ime`).
+    /// Never a shortcut (no Ctrl, no Alt, whatever is held: an input method
+    /// commits on its own keys), never repeated, and past the chords: a
+    /// commit of "z" is a "z", not half of an undo.
+    pub fn commit_text<A: Application>(&mut self, t: Turn<'_, A>, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        let mut rebuild = false;
+        for state in [ElementState::Pressed, ElementState::Released] {
+            let event = KeyEvent {
+                state,
+                logical_key: Key::Character(text.clone()),
+                text: (state == ElementState::Pressed).then(|| text.clone()),
+                repeat: false,
+                ctrl: false,
+                shift: self.mods.shift,
+                alt: false,
+            };
+            let msg = t.app.handle_key_input(&event, &mut rebuild);
+            if let Some(msg) = msg {
+                let mut update_rebuild = false;
+                t.app.update(msg, &mut update_rebuild, t.exit);
+                rebuild |= update_rebuild;
+            }
+        }
+        *t.redraw |= rebuild;
+        // The editing widget shows the text it now holds.
+        *t.redraw = true;
+    }
+
+    /// The input method's composition changed (`None`: it ended without a
+    /// commit, or the commit follows). The editing widget shows it from the
+    /// next frame.
+    pub fn preedit<A: Application>(&mut self, t: Turn<'_, A>, preedit: Option<crate::ime::Preedit>) {
+        crate::ime::set_preedit(preedit);
+        *t.redraw = true;
+    }
+
     /// The runner's key repeat: once a held key has been down
     /// [`KEY_REPEAT_DELAY`], deliver it again every [`KEY_REPEAT_INTERVAL`].
     /// Called once per loop turn.
@@ -892,6 +933,21 @@ mod tests {
         app.press_msg = Some(7);
         d.pointer_press(turn(&mut app, &mut f), MouseButton::Right, LogicalPosition::new(9.0, 9.0), site(true));
         assert_eq!(app.seen.last(), Some(&Seen::Update(7)));
+        assert!(f.redraw);
+    }
+
+    #[test]
+    fn a_commit_is_typed_text_and_never_a_shortcut_or_a_held_key() {
+        let (mut d, mut app, mut f) = (driver(), mock(), Flags { redraw: false, exit: false });
+        app.takes_undo = true;
+        // Ctrl held as the input method commits "z": typed, not an undo.
+        d.set_modifiers(&mut app, Modifiers { ctrl: true, ..Modifiers::default() });
+        d.commit_text(turn(&mut app, &mut f), "z".into());
+        d.commit_text(turn(&mut app, &mut f), "日本".into());
+        d.commit_text(turn(&mut app, &mut f), String::new());
+        let typed = |t: &str| Seen::Key(Key::Character(t.into()), false);
+        assert_eq!(app.seen, vec![typed("z"), typed("z"), typed("日本"), typed("日本")]);
+        assert!(d.pressed_key.is_none(), "nothing left held to repeat");
         assert!(f.redraw);
     }
 
