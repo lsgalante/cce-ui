@@ -12,12 +12,11 @@
 //! Run it ONLY in a shadow session (`cce-shadow spawn`), never from the live
 //! shell.
 
-use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
+use cce_ui::engine::{AppSender, Application, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{DisplayList, PaintCtx, PlateSpec};
 use cce_ui::scene::{Frost, Material};
 use cce_ui::widget::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
-use wayland_client::QueueHandle;
 
 /// Logical layout: 12 checker columns of `COL` px; three plates in thirds.
 pub const COL: f32 = 35.0;
@@ -43,7 +42,7 @@ struct FrostPair;
 impl Application for FrostPair {
     type Message = ();
 
-    fn new(_qh: &QueueHandle<EngineState<Self>>, _sender: calloop::channel::Sender<Self::Message>) -> Self {
+    fn create(_sender: AppSender<Self::Message>) -> Self {
         FrostPair
     }
 

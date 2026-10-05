@@ -1,7 +1,9 @@
-// Modules under `cfg(not(target_arch = "wasm32"))` are the native shell and
-// renderer (Wayland, Vulkan, the compositor IPC, file dialogs). Everything
-// else builds for the browser too: `cargo check --lib --target
-// wasm32-unknown-unknown` is the check.
+// Modules under `cfg(not(target_arch = "wasm32"))` are the native renderer
+// and services (Vulkan, the compositor IPC, file dialogs); those under
+// `cfg(not(any(target_arch = "wasm32", target_os = "macos")))` are the
+// Wayland shell's, which macOS replaces with `mac` (AppKit). Everything else
+// builds for the browser too: `scripts/check-wasm` is the check, and
+// `scripts/check-mac` the macOS one.
 pub mod color;
 pub mod compute;
 pub mod widget;
@@ -10,9 +12,9 @@ pub mod input;
 pub mod history;
 pub mod layout;
 pub mod relief_spec;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod wayland;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod protocol;
 pub mod engine;
 pub mod scale;
@@ -26,13 +28,15 @@ pub mod file_dialog;
 pub mod icon;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ipc;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod mcp;
 pub mod motion;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vk;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
+#[cfg(target_os = "macos")]
+pub mod mac;
 
 pub mod colors {
     pub use crate::color::*;
@@ -261,7 +265,11 @@ fn build_font_system(load_system_fonts: bool) -> cosmic_text::FontSystem {
     {
         db.load_fonts_dir(fonts_dir());
         load_fallback_fonts(&mut db);
-        if load_system_fonts || std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
+        // On macOS the system set is always loaded: it is a curated one,
+        // and what cosmic-text's fallback list there names ("Apple Color
+        // Emoji", "PingFang SC", …) — where on Linux the probe above finds
+        // the Noto faces in its place.
+        if load_system_fonts || cfg!(target_os = "macos") || std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
             db.load_system_fonts();
         }
         // An empty database guarantees a panic on the first shaped glyph

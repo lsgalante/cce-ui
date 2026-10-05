@@ -411,7 +411,10 @@ thread_local! {
 /// Force what [`natural_scroll`] answers on this thread, for a test that
 /// drives a value control with a finger; `None` lifts it. Thread-local,
 /// because a suite runs its tests in parallel and a process-wide override
-/// set by one would race every other test's read.
+/// set by one would race every other test's read. The macOS shell sets it
+/// too, on the main thread its events arrive on, from each trackpad
+/// event's `isDirectionInvertedFromDevice`: there the system's setting is
+/// the one in force, not input.kdl's.
 pub fn force_natural_scroll(natural: Option<bool>) {
     NATURAL_OVERRIDE.with(|f| f.set(natural));
 }

@@ -8,12 +8,11 @@
 //! Run inside a Wayland session (a cce-shadow instance works):
 //! `cargo run --release -p cce-ui --example grouped_recess_probe`.
 
-use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
+use cce_ui::engine::{AppSender, Application, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
 use cce_ui::scene::Material;
 use cce_ui::widget::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
-use wayland_client::QueueHandle;
 
 struct ProbeApp;
 
@@ -35,7 +34,7 @@ fn recesses(x: f32, y: f32) -> Vec<(Rect, f32, f32)> {
 impl Application for ProbeApp {
     type Message = ();
 
-    fn new(_qh: &QueueHandle<EngineState<Self>>, _sender: calloop::channel::Sender<()>) -> Self {
+    fn create(_sender: AppSender<()>) -> Self {
         Self
     }
 

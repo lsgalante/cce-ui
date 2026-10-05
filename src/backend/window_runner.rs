@@ -970,6 +970,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         size: self.logical_size(),
                         on_popup,
                         can_grab: self.window.is_some() && seat.is_some(),
+                        own_edges: false,
                     };
                     let (driver, t) = self.turn();
                     let press = driver.pointer_press(t, btn, pos, site);

@@ -590,10 +590,29 @@ impl VkRenderer {
         height: u32,
         corner_radius_px: f32,
     ) -> Result<Self, SurfaceLost> {
+        Self::try_new_for(
+            super::core::SurfaceTarget::Wayland { display: display_ptr, surface: surface_ptr },
+            width,
+            height,
+            corner_radius_px,
+        )
+    }
+
+    /// A renderer presenting to any window [`SurfaceTarget`](super::core::SurfaceTarget)
+    /// names — a Wayland surface, or on macOS a `CAMetalLayer` — on the same
+    /// terms as [`try_new`](Self::try_new).
+    ///
+    /// # Safety
+    /// The target's pointers must be live and outlive the renderer.
+    pub unsafe fn try_new_for(
+        target: super::core::SurfaceTarget,
+        width: u32,
+        height: u32,
+        corner_radius_px: f32,
+    ) -> Result<Self, SurfaceLost> {
         let t_new = std::time::Instant::now();
-        let (mut core, surface) =
-            super::core::VkCore::new_for_wayland_surface(display_ptr, surface_ptr)?;
-        log::debug!("[timing] VkCore::new_for_wayland_surface: {:?}", t_new.elapsed());
+        let (mut core, surface) = super::core::VkCore::new_for_surface(target)?;
+        log::debug!("[timing] VkCore::new_for_surface: {:?}", t_new.elapsed());
         let t_rest = std::time::Instant::now();
         // Locals over the core for the setup below (methods use self.core.*).
         let device = core.device.clone();
@@ -1633,10 +1652,28 @@ impl VkRenderer {
         width: u32,
         height: u32,
     ) -> Result<(), SurfaceLost> {
+        self.attach_surface_to(
+            super::core::SurfaceTarget::Wayland { display: display_ptr, surface: surface_ptr },
+            width,
+            height,
+        )
+    }
+
+    /// [`attach_surface`](Self::attach_surface) for any window
+    /// [`SurfaceTarget`](super::core::SurfaceTarget).
+    ///
+    /// # Safety
+    /// The target's pointers must be live and outlive the attachment.
+    pub unsafe fn attach_surface_to(
+        &mut self,
+        target: super::core::SurfaceTarget,
+        width: u32,
+        height: u32,
+    ) -> Result<(), SurfaceLost> {
         if self.surface != vk::SurfaceKHR::null() {
             self.detach_surface();
         }
-        self.surface = self.core.create_wayland_surface(display_ptr, surface_ptr)?;
+        self.surface = self.core.create_surface(target)?;
         self.surface_lost = false;
         self.resize(width, height);
         self.swapchain_dirty = true;

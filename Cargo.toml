@@ -58,6 +58,12 @@ raw-window-handle = "0.6"
 ash = "0.38"
 gpu-allocator = { version = "0.27", default-features = false, features = ["vulkan"] }
 naga = { version = "24", features = ["wgsl-in", "spv-out"] }
+libc = "0.2"
+rfd = "0.15"
+
+# The Wayland shell: every native target but macOS, which has its own shell
+# (`src/mac`, AppKit) over the same Vulkan renderer through MoltenVK.
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "macos")))'.dependencies]
 smithay-client-toolkit = { version = "0.19.2", features = ["calloop"] }
 calloop = "0.13.0"
 calloop-wayland-source = "0.3.0"
@@ -66,8 +72,14 @@ wayland-protocols = { version = "0.31", features = ["client", "unstable"] }
 wayland-backend = "0.3"
 wayland-scanner = "0.31"
 xkeysym = "0.2"
-libc = "0.2"
-rfd = "0.15"
+
+# The AppKit shell (`src/mac`): the window, its CAMetalLayer, the run loop.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "NSNotification", "NSObject", "NSDate", "NSDictionary"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSView", "NSResponder", "NSEvent", "NSScreen", "NSCursor", "NSMenu", "NSMenuItem", "NSColor", "NSTrackingArea", "NSGraphics", "NSGraphicsContext", "NSRunningApplication", "objc2-quartz-core", "objc2-core-foundation"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "CAMetalLayer", "objc2-core-foundation"] }
+dispatch2 = "0.3"
 
 # The browser shell and renderer (W2/W3 of the web port): WebGPU through
 # web-sys, the page through wasm-bindgen.

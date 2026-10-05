@@ -14,12 +14,11 @@
 //! compiles the warning out and prints nothing. Exits by itself after a few
 //! frames.
 
-use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
+use cce_ui::engine::{AppSender, Application, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
 use cce_ui::scene::Material;
 use cce_ui::widget::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
-use wayland_client::QueueHandle;
 
 struct TriggerApp {
     ticks: u32,
@@ -28,10 +27,7 @@ struct TriggerApp {
 impl Application for TriggerApp {
     type Message = ();
 
-    fn new(
-        _qh: &QueueHandle<EngineState<Self>>,
-        _sender: calloop::channel::Sender<Self::Message>,
-    ) -> Self {
+    fn create(_sender: AppSender<Self::Message>) -> Self {
         Self { ticks: 0 }
     }
 

@@ -92,6 +92,11 @@ pub struct PressSite {
     /// a grab is the app's instead — which is what the Wayland runner did on
     /// a layer surface, and what a shell with no grabs at all always does.
     pub can_grab: bool,
+    /// The window system resizes the window from edges of its own (AppKit's
+    /// window frame), and offers no way to start a resize from a press: the
+    /// CSD resize band is then no grab, and a press there goes on to the
+    /// move checks and the app.
+    pub own_edges: bool,
 }
 
 /// Where a scroll came from, as far as the phase cares.
@@ -316,7 +321,7 @@ impl Driver {
             // Resize borders off: the compositor's own band outside the
             // window handles it; the move checks still run, so drag-to-move
             // still works.
-            if t.app.csd_resize_borders() {
+            if t.app.csd_resize_borders() && !site.own_edges {
                 if let Some(edge) = csd_edge(lx, ly, site.size) {
                     return Press::Resize(edge);
                 }
@@ -822,7 +827,7 @@ mod tests {
     const SIZE: LogicalSize = LogicalSize { width: 400.0, height: 300.0 };
 
     fn site(can_grab: bool) -> PressSite {
-        PressSite { size: SIZE, on_popup: false, can_grab }
+        PressSite { size: SIZE, on_popup: false, can_grab, own_edges: false }
     }
 
     #[test]
@@ -864,6 +869,15 @@ mod tests {
         let r = d.pointer_press(turn(&mut app, &mut f), MouseButton::Left, corner, site(false));
         assert_eq!(r, Press::Dispatched);
         assert_eq!(app.seen, vec![Seen::Button(MouseButton::Left, ElementState::Pressed, 2.0, 2.0)]);
+
+        // A window system that resizes from its own edges: the band is no
+        // grab, and the press is the app's.
+        app.seen.clear();
+        let own = PressSite { own_edges: true, ..site(true) };
+        assert_eq!(d.pointer_press(turn(&mut app, &mut f), MouseButton::Left, corner, own), Press::Dispatched);
+        assert_eq!(app.seen, vec![Seen::Button(MouseButton::Left, ElementState::Pressed, 2.0, 2.0)]);
+        // But the titlebar band still moves the window.
+        assert_eq!(d.pointer_press(turn(&mut app, &mut f), MouseButton::Left, band, own), Press::Move);
 
         // Nor is a press through the menu popup ever a grab.
         app.seen.clear();

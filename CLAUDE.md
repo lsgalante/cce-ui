@@ -65,6 +65,13 @@ wayland-*, libc, rfd) are `cfg(not(target_arch = "wasm32"))`; so are the Wayland
 of the client contract: `Application::new(qh, …)`, `layer()` and `LayerSettings`,
 `register_sources`, and `renderer_init` / `stage_renderer`, which take a `VkRenderer`.
 `WindowAction::Resize` takes `app::WindowEdge` — xdg's `ResizeEdge` on Linux, as before.
+Since macOS joined (2026-10-05) "native" is two things: the Vulkan renderer and the native
+services (`vk`, `ipc`, `file_dialog`; ash, libc, rfd) are `cfg(not(target_arch = "wasm32"))`,
+and the WAYLAND shell — `backend::{window_runner, menu_popup, dnd}`, `wayland`, `protocol`,
+`mcp`, the crates smithay / calloop / wayland-* / xkeysym, and the contract's `new(qh, …)`,
+`layer()`, `LayerSettings` and `register_sources` — is
+`cfg(not(any(target_arch = "wasm32", target_os = "macos")))`. `renderer_init` /
+`stage_renderer` are on macOS too, since it has the Vulkan renderer.
 Portable code keeps time with `web_time::Instant` (std's own type natively; std's panics in
 the browser), and reaches what a renderer draws through `crate::draw`, not `crate::vk`. A
 change that makes portable code call into a native module fails `check-wasm` first — put
@@ -215,6 +222,54 @@ Chromium needs `--use-angle=swiftshader --enable-unsafe-swiftshader
 --disable-gpu-compositing` beside the WebGPU flags (`browser.mjs`): headless, with GPU
 compositing it has no shared-image backing for a WebGPU canvas and loses the device on the
 first present ("A valid external Instance reference no longer exists").
+
+**And on a Mac, type-checked only** (`src/mac`, since 2026-10-05). The fourth shell is an
+AppKit window over the same `Driver`, `Pacer`, `build_frame` and **Vulkan renderer, on
+Metal through MoltenVK**: `vk::SurfaceTarget` names what a window's `VkSurfaceKHR` is made
+from — `Wayland { display, surface }` or `Metal { layer }` (a `CAMetalLayer`) —
+`VkRenderer::try_new_for` / `attach_surface_to` and `VkCore::new_for_surface` /
+`create_surface` take one, and the Wayland-pointer forms forward to them unchanged. The
+instance enables VK_EXT_metal_surface when the loader offers it, and on macOS only
+VK_KHR_portability_enumeration (the loader lists MoltenVK to no instance that does not ask);
+a device that offers VK_KHR_portability_subset gets it enabled, as the spec requires, and
+no Linux driver offers it — so a Linux instance and device are the ones they always were.
+`engine::run::<App>()` is the AppKit shell's `run` on macOS, so a client's `main` does not
+change. What the shell does, in AppKit's terms (module doc in `src/mac/mod.rs`):
+
+- **The window**: transparent, its titlebar transparent over full-size content, so the root
+  plate fills it with the traffic lights on its corner. AppKit resizes from its own window
+  edges, so the driver's CSD resize band is the app's (`PressSite::own_edges`, new; false
+  on the other shells); a press the driver reads as a move drags the window
+  (`performWindowDragWithEvent:`).
+- **Events**: a flipped, layer-hosting `NSView` maps mouse, scroll, magnify and keys through
+  `backend::appkit` (portable, tested on Linux like `dom`): named keys from the hardware key
+  code (AppKit spells them in private-use characters, and Backspace as DEL), the rest from
+  `characters`, or with ⌘/Ctrl from `charactersIgnoringModifiers` so ⌘Z is z typing ^Z;
+  Command reads as `ctrl`, as in a page on a Mac; a Control-click is a right click. AppKit
+  sends NO keyUp for a ⌘-combination, so the shell releases one as it presses it (else the
+  driver repeats ⌘Z until focus is lost). Its key repeats are dropped (the driver repeats)
+  and so is the system's scroll MOMENTUM (the toolkit coasts a flick itself; both would
+  coast twice). The system has applied natural scrolling to the wheel too, where a Linux
+  compositor applies it to the trackpad alone, so a wheel notch is turned back to the
+  wheel's own direction, and each trackpad event's `isDirectionInvertedFromDevice` sets
+  `input::force_natural_scroll` on the main thread: the system setting rules, not input.kdl's.
+- **Pacing**: main-queue dispatches (`dispatch2`); an event or any `AppSender::send`, from
+  any thread (`app::set_wake`, process-wide on macOS, per thread in a page), asks for a turn
+  at most one ACTIVE frame after the last; between, the pacer's sleep. A superseded turn is
+  dropped by its generation. Quit (⌘Q) and the close button ask the app to exit as a
+  compositor's close does; the run loop is stopped once it has.
+- **Fonts**: the system set is always loaded on macOS (`build_font_system`) — it is what
+  cosmic-text's macOS fallback list names.
+
+Not there yet: the clipboard, IME (`NSTextInputClient`), drag and drop, the context menu
+in a popup window (it is drawn in the window, as on a layer surface), blur behind the window,
+a menu bar beyond Quit. **None of it has run**: this is Linux, where an Apple target can be
+type-checked but not linked. `scripts/check-mac` type-checks the library, the demo, every
+example and the tests for `aarch64-apple-darwin` (`rustup target add aarch64-apple-darwin`);
+the four examples that still used the legacy `new(qh, …)` moved to `create`, and
+`plate_probe` / two integration tests reach the tessellator at `backend::tessellate` rather
+than through `window_runner`. On a Mac, MoltenVK and the Vulkan loader must be installed
+(the LunarG SDK, or Homebrew's `molten-vk` and `vulkan-loader`); `cargo run` is the test.
 
 Wayland protocol bindings are generated **inline at compile time** by `wayland-scanner` macros in
 `src/protocol.rs` from `protocol/*.xml` (`cce-inspector-v1`, `cce-window-management-v1`) — there is
@@ -1259,7 +1314,8 @@ cce-system-interface) to confirm behavior, not just the test suite.
   outside-press popover close, held-button release on a lost pointer, the scroll phase,
   the pinch fallback — fed in cce-ui's own terms and unit-tested with no compositor),
   `dom.rs` (the DOM's key and wheel vocabulary as the driver's: `map_key`, `wheel_frame` —
-  portable, so tested natively), `frame.rs` (`build_frame`: the app's display list, damage, custom vertices and overlays,
+  portable, so tested natively), `appkit.rs` (AppKit's, likewise: key codes and
+  characters, scroll deltas and phases, modifier flags and buttons), `frame.rs` (`build_frame`: the app's display list, damage, custom vertices and overlays,
   widget shaping, text and the popover-occlusion rects, tessellated into a `BuiltFrame` the
   renderer draws — no window system in it, tested with no GPU), `shell.rs` (the `Shell`
   trait — a window system's side of the run loop: exit, size requests, per-turn sync,
@@ -1306,6 +1362,7 @@ cce-system-interface) to confirm behavior, not just the test suite.
   `compute.rs`, the async
   `ComputeDevice`; and `request_device`, the adapter and device every one of them asks
   for (with the limits a caller names raised to the adapter's).
+- `mac/` — macOS only: the AppKit shell, `run` (see "And on a Mac, type-checked only").
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
   the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance

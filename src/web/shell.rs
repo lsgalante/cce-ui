@@ -522,7 +522,7 @@ impl<A: Application> Loop<A> {
                 let mods = s.mods_from(e.ctrl_key(), e.shift_key(), e.alt_key(), e.meta_key());
                 s.sync_mods(mods);
                 let pos = s.pointer_pos(&e);
-                let site = PressSite { size: s.size(), on_popup: false, can_grab: false };
+                let site = PressSite { size: s.size(), on_popup: false, can_grab: false, own_edges: false };
                 let (driver, t) = s.turn();
                 driver.pointer_press(t, btn, pos, site);
             })

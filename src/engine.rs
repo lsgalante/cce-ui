@@ -21,7 +21,9 @@ pub use crate::backend::tessellate::{
 pub use crate::backend::text::{get_text_buffer_laid_out, shaped_cluster_offsets, shaping_for};
 pub use cursor_icon::CursorIcon;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub use crate::backend::app::{LayerAnchor, LayerKeyboardInteractivity, LayerKind, LayerSettings};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub use crate::backend::window_runner::{run, xdg_toplevel, EngineState};
+#[cfg(target_os = "macos")]
+pub use crate::mac::run;

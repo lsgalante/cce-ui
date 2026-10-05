@@ -5,11 +5,11 @@
 
 use cosmic_text::FontSystem;
 use crate::widget::{MouseButton, ElementState, MouseScrollDelta, KeyEvent};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 use wayland_client::QueueHandle;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::vk::VkRenderer;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 use super::window_runner::EngineState;
 use cursor_icon::CursorIcon;
 use super::tessellate::Vertex;
@@ -27,9 +27,9 @@ pub struct WindowSettings {
 
 /// The edge a [`WindowAction::Resize`] grabs. On Wayland it is
 /// `xdg_toplevel`'s own enum, as it always was; elsewhere the driver's.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge as WindowEdge;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", target_os = "macos"))]
 pub use super::driver::ResizeEdge as WindowEdge;
 
 /// A compositor-side window operation requested by the app: an interactive
@@ -43,7 +43,7 @@ pub enum WindowAction {
 
 // Re-export the wlr-layer-shell types apps need to describe a layer surface.
 // Layer surfaces are a Wayland (wlr) notion: native only, like `layer()`.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub use smithay_client_toolkit::shell::wlr_layer::{
     Anchor as LayerAnchor, KeyboardInteractivity as LayerKeyboardInteractivity, Layer as LayerKind,
 };
@@ -51,7 +51,7 @@ pub use smithay_client_toolkit::shell::wlr_layer::{
 /// Opt-in configuration for running an [`Application`] on a wlr-layer-shell
 /// surface (panels, overlays, notifications) instead of an xdg toplevel.
 /// Return one from [`Application::layer`] to select layer-shell.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 #[derive(Debug, Clone)]
 pub struct LayerSettings {
     pub layer: LayerKind,
@@ -100,15 +100,15 @@ pub struct RenderContext<'a> {
 /// It names no window system. Handed to [`Application::create`], it is what
 /// a client written against it can be run by any shell with; the Wayland
 /// runner backs it with its calloop channel, and `From` converts both ways
-/// for a client that still keeps a `calloop::channel::Sender` somewhere. In
-/// the browser it is a `std::sync::mpsc` sender whose receiver the shell
-/// drains every turn — still `Send`, so app code that hands it to a worker
-/// compiles unchanged — and a send wakes the browser shell's loop through
-/// [`set_wake`], as a calloop channel wakes the Wayland one.
+/// for a client that still keeps a `calloop::channel::Sender` somewhere.
+/// Elsewhere (the browser, macOS) it is a `std::sync::mpsc` sender whose
+/// receiver the shell drains every turn — still `Send`, so app code that
+/// hands it to a worker compiles unchanged — and a send wakes the shell's
+/// loop through `set_wake`, as a calloop channel wakes the Wayland one.
 pub struct AppSender<M> {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
     inner: calloop::channel::Sender<M>,
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(any(target_arch = "wasm32", target_os = "macos"))]
     inner: std::sync::mpsc::Sender<M>,
 }
 
@@ -117,7 +117,7 @@ impl<M> AppSender<M> {
     /// gone: the app has exited.
     pub fn send(&self, msg: M) -> Result<(), std::sync::mpsc::SendError<M>> {
         self.inner.send(msg)?;
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", target_os = "macos"))]
         wake();
         Ok(())
     }
@@ -147,6 +147,29 @@ pub fn set_wake(wake: Option<Box<dyn Fn()>>) {
     WAKE.with(|w| *w.borrow_mut() = wake);
 }
 
+/// Call the hook [`set_wake`] installed, if any, from whatever thread sent.
+#[cfg(target_os = "macos")]
+pub(crate) fn wake() {
+    let hook = WAKE.read().ok().and_then(|w| w.clone());
+    if let Some(wake) = hook {
+        wake();
+    }
+}
+
+#[cfg(target_os = "macos")]
+static WAKE: std::sync::RwLock<Option<std::sync::Arc<dyn Fn() + Send + Sync>>> = std::sync::RwLock::new(None);
+
+/// What an [`AppSender::send`] calls after posting: the AppKit shell's "turn
+/// the loop soon". Process-wide, unlike the browser's: an AppKit app's
+/// workers send from their own threads, and the hook hops to the main thread
+/// itself, as a calloop channel's ping wakes the Wayland loop from anywhere.
+#[cfg(target_os = "macos")]
+pub fn set_wake(wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
+    if let Ok(mut w) = WAKE.write() {
+        *w = wake;
+    }
+}
+
 impl<M> Clone for AppSender<M> {
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone() }
@@ -159,21 +182,21 @@ impl<M> std::fmt::Debug for AppSender<M> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 impl<M> From<calloop::channel::Sender<M>> for AppSender<M> {
     fn from(inner: calloop::channel::Sender<M>) -> Self {
         Self { inner }
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", target_os = "macos"))]
 impl<M> From<std::sync::mpsc::Sender<M>> for AppSender<M> {
     fn from(inner: std::sync::mpsc::Sender<M>) -> Self {
         Self { inner }
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 impl<M> From<AppSender<M>> for calloop::channel::Sender<M> {
     fn from(sender: AppSender<M>) -> Self {
         sender.inner
@@ -202,7 +225,7 @@ pub trait Application: Sized + 'static {
     /// view: the session's Wayland queue handle (no client ever used it) and
     /// its calloop sender. Prefer [`create`](Self::create); the default here
     /// forwards to it. Native only: it names the Wayland queue.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
     fn new(qh: &QueueHandle<EngineState<Self>>, sender: calloop::channel::Sender<Self::Message>) -> Self {
         let _ = qh;
         Self::create(AppSender::from(sender))
@@ -210,7 +233,7 @@ pub trait Application: Sized + 'static {
     fn settings(&self) -> WindowSettings;
     /// Return `Some(..)` to run on a wlr-layer-shell surface (overlay/panel)
     /// instead of an xdg toplevel. Defaults to `None` (a normal window).
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
     fn layer(&self) -> Option<LayerSettings> {
         None
     }
@@ -340,7 +363,7 @@ pub trait Application: Sized + 'static {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
     fn register_sources(&mut self, _handle: &calloop::LoopHandle<'_, EngineState<Self>>) {}
 
     fn adjust_size(&self, width: f32, height: f32) -> (f32, f32) {
@@ -577,7 +600,7 @@ pub trait Application: Sized + 'static {
 }
 
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(test, not(any(target_arch = "wasm32", target_os = "macos"))))]
 mod app_sender_tests {
     use super::AppSender;
     use calloop::channel::{channel, Event};
