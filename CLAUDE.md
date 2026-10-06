@@ -1830,6 +1830,14 @@ falls back to, and never built from primitives. Apps hold to the same rule.
   to `arc`, a disc to `circle` — each a no-op by default, so a host draws what
   it implements (`a_widget_glyph_reaches_a_flat_host`,
   `a_graphs_wires_reach_a_flat_host`).
+- **`ParametersBg` paints its controls' glyphs itself** (2026-10-06). The
+  pane draws its rows' chrome and collects their TEXT (`own_text_labels`)
+  without ever running a control's `Paint::paint` into the frame, so when
+  the symbols became glyphs every dropdown, picker and spinbox in it lost
+  its arrow or −/+. `Adapted::own_glyphs` is the image half of that bridge,
+  and `paint_ui` / `paint` emit `child_glyphs` over the chrome. A container
+  that collects its children's labels must collect their glyphs too
+  (`the_pane_draws_its_controls_glyphs`).
 - **Kept as shapes**, being indicators and not symbols: `StatusDot`'s LED
   disc and the plate dock's corner dot.
 

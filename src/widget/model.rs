@@ -993,6 +993,26 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         out
     }
 
+    /// This widget's GLYPHS — the image prims its [`Paint::paint`] emits, a
+    /// dropdown's arrow or a spinbox's −/+ — as `(image, rect, alpha)`, for a
+    /// container that paints its children's chrome itself and collects their
+    /// text through [`own_text_labels`](Self::own_text_labels) (the
+    /// parameters pane). Until 2026-10-05 those symbols were text and rode
+    /// the labels; as glyphs nothing carried them, and the pane drew its
+    /// controls without their arrows.
+    pub(crate) fn own_glyphs(&self) -> Vec<(u32, Rect, f32)> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        self.painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                Prim::Image { image, rect, alpha } => Some((image, rect, alpha)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The paint walk's own-labels bridge: prim-derived text in the widget's content font
     /// ([`Paint::text_font`]), plus the detached base label in the configured detached-label
     /// font. Fed the Text prims `paint_self` already holds from its own pass — running

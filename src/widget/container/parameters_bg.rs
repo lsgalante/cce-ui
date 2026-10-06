@@ -1350,6 +1350,67 @@ impl ParametersBg {
         labels
     }
 
+    /// The hosted controls' GLYPHS — a dropdown's or a picker's arrow, a
+    /// spinbox's −/+ — as `(image, rect, alpha)`, row by row as
+    /// [`own_text_labels`](Self::own_text_labels) collects their text. The
+    /// pane paints its controls' chrome itself and never runs their
+    /// `Paint::paint` into the frame, so a symbol a control draws reaches
+    /// the pane only through here. Ramps are not asked: they paint whole
+    /// through `paint_scene_rows`.
+    fn child_glyphs(&self) -> Vec<(u32, Rect, f32)> {
+        let hidden = self.hidden_rows();
+        let mut glyphs = Vec::new();
+        for (i, (_, _, ptype)) in self.display_params.iter().enumerate() {
+            if hidden[i] {
+                continue;
+            }
+            if ptype.starts_with("slider") {
+                if let Some(s) = &self.sliders[i] {
+                    glyphs.extend(s.own_glyphs());
+                }
+            } else if is_vec_row(ptype) {
+                if let Some(f) = &self.float3s[i] {
+                    glyphs.extend(f.own_glyphs());
+                }
+            } else if ptype.starts_with("spinbox") {
+                if let Some(sb) = &self.spinboxes[i] {
+                    glyphs.extend(sb.own_glyphs());
+                }
+            } else if is_text_row(ptype) {
+                if let Some(tb) = &self.texts[i] {
+                    glyphs.extend(tb.own_glyphs());
+                }
+                if let Some(d) = &self.choices[i] {
+                    glyphs.extend(d.own_glyphs());
+                }
+            } else if ptype.starts_with("choice") {
+                if let Some(d) = &self.choices[i] {
+                    glyphs.extend(d.own_glyphs());
+                }
+            } else if ptype == "button" {
+                if let Some(b) = &self.buttons[i] {
+                    glyphs.extend(b.own_glyphs());
+                }
+            } else if ptype == "toggle" || ptype == "checkbox" {
+                if let Some(cb) = &self.toggles[i] {
+                    glyphs.extend(cb.own_glyphs());
+                }
+            } else if ptype.starts_with("color") || ptype == "rgb" || ptype == "rgba" {
+                if let Some(c) = &self.colors[i] {
+                    glyphs.extend(c.own_glyphs());
+                }
+            }
+        }
+        glyphs
+    }
+
+    /// Paint [`child_glyphs`](Self::child_glyphs), over the chrome.
+    fn paint_child_glyphs(&self, ctx: &mut PaintCtx) {
+        for (image, rect, alpha) in self.child_glyphs() {
+            ctx.image(image, rect, alpha);
+        }
+    }
+
     /// The dropdown rows' popover, if one is open — the widget's OWN popover surface
     /// ([`Paint::popover`]); the raw `children`'s popovers are the adapter's recursion.
     /// The ramp rows' field dropdowns count too.
@@ -2112,8 +2173,8 @@ impl Paint for ParametersBg {
     /// The COMPLETE row chrome — everything the legacy hatches carry, in the hosts' canonical
     /// draw order: the controls' rounded wells, the flat-style section outline fillets, the
     /// relief steps (after the fills so the walls shade what they cross), the section carves'
-    /// concave throat fillets, the slider-thumb spheres, the scene-path rows, then the flat
-    /// plain-quad chrome. What stays OUT, deliberately: the background plate (see
+    /// concave throat fillets, the slider-thumb spheres, the scene-path rows, the flat
+    /// plain-quad chrome, then the hosted controls' glyphs (arrows, −/+) over it. What stays OUT, deliberately: the background plate (see
     /// [`color`](Paint::color)), the scrollbar (hosts place its depth — the designer straddles
     /// it around the pane plate), and text (`paint_self`'s own-labels bridge carries the
     /// per-row fonts and code-box bounds). Hosts clip this to their pane viewport — a rect
@@ -2169,6 +2230,7 @@ impl Paint for ParametersBg {
         for (qx, qy, qw, qh, qc) in self.plain_quads() {
             ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
         }
+        self.paint_child_glyphs(ctx);
     }
 
     /// Ui-less emission (the [`paint_ui`](Paint::paint_ui) override above is what `paint_self`
@@ -2180,6 +2242,7 @@ impl Paint for ParametersBg {
             ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
         }
         self.paint_scene_rows(ctx);
+        self.paint_child_glyphs(ctx);
         // Scene-path hosts get the scrollbar on top (the designer instead straddles it around
         // the pane plate through `scrollbar_quads`).
         for (qx, qy, qw, qh, qc) in self.scrollbar_quads() {
@@ -3927,6 +3990,41 @@ mod tests {
             d.inner().arrow_rect(crate::scene::layout::Rect { x, y, width: w, height: h }).x
         };
         assert!((arrow(0) - arrow(1)).abs() < 1e-3, "picker {} vs dropdown {}", arrow(0), arrow(1));
+    }
+
+    /// The pane draws its controls' glyphs: a dropdown's and a picker's
+    /// arrow, a spinbox's minus and plus. The pane paints its rows' chrome
+    /// itself and took only their TEXT, so when the symbols became glyphs
+    /// (2026-10-05) every control in the pane lost them. Skipped where the
+    /// icon set is not checked out (no glyph uploads, nothing to name).
+    #[test]
+    fn the_pane_draws_its_controls_glyphs() {
+        if !std::path::Path::new(&crate::icons_dir()).join("chevron-down.svg").is_file() {
+            eprintln!("skipped: no icon set");
+            return;
+        }
+        let p = panel_with(&[
+            ("Name", "mass", "textpick:Norm,UV,Pos,Col"),
+            ("Type", "Float", "choice:Float,Float3,Int"),
+            ("Count", "3", "spinbox:0:10:1"),
+        ]);
+        let ui = UiContext::new();
+        let mut pc = PaintCtx::new();
+        let r = Rect { x: 0.0, y: 0.0, width: 300.0, height: 400.0 };
+        Paint::paint_ui(&*p, &ui, r, &mut pc);
+        let names: Vec<String> = pc
+            .finish()
+            .items
+            .into_iter()
+            .filter_map(|item| match item.prim {
+                crate::scene::paint::Prim::Image { image, .. } => crate::icon_source(image).map(|(n, _, _)| n),
+                _ => None,
+            })
+            .collect();
+        let count = |n: &str| names.iter().filter(|m| *m == n).count();
+        assert_eq!(count("chevron-down"), 2, "the picker's and the dropdown's arrows: {names:?}");
+        assert_eq!(count("minus"), 1, "the spinbox's minus: {names:?}");
+        assert_eq!(count("plus"), 1, "the spinbox's plus: {names:?}");
     }
 
     #[test]
