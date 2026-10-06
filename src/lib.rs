@@ -32,6 +32,7 @@ pub mod ipc;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod mcp;
 pub mod motion;
+pub mod text_input;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vk;
 #[cfg(target_arch = "wasm32")]

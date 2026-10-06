@@ -20,8 +20,12 @@
 //!   surrounding text, so a deletion has nothing to count its bytes in and
 //!   is not applied. A `done` whose serial is behind our commits still
 //!   applies its text — the protocol asks only that it not change our state.
-//! - `leave` drops any composition, as the protocol asks; the compositor
-//!   ignores our requests until the next `enter`.
+//! - `enter` applies the last frame's caret at once (an idle window builds
+//!   no frame to do it); `leave` drops any composition, as the protocol
+//!   asks, and an enabled text input is disabled there and then: wlroots
+//!   keeps a text input's enabled state across a leave, and a stale
+//!   "enabled" turns the next enable into a plain commit the compositor
+//!   ignores.
 //!
 //! The pure part — what a batch does, and what state to send — is
 //! [`Batch::apply_order`] and [`TextInput::plan`], tested with no
@@ -141,13 +145,20 @@ impl TextInput {
         self.sent_rect = None;
     }
 
-    /// `leave`: the focus went; the compositor disabled us, and ignores us
-    /// until the next `enter`.
-    pub fn leave(&mut self) {
+    /// `leave`: the focus went. True when we were enabled, and so owe a
+    /// `disable` and `commit` (counted here): wlroots keeps the enabled
+    /// state across a leave, and the next `enter`'s enable would otherwise
+    /// be a plain commit it ignores.
+    pub fn leave(&mut self) -> bool {
+        let owed = self.enabled;
+        if owed {
+            self.commits += 1;
+        }
         self.entered = false;
         self.enabled = false;
         self.sent_rect = None;
         self.pending = Batch::default();
+        owed
     }
 
     /// `done`: the batch to apply, the pending state back to initial.
@@ -199,10 +210,22 @@ mod tests {
         assert_eq!(ti.plan(None, 1.0, false), Send::Nothing);
         assert_eq!(ti.commits, 5, "enable, move, disable + enable, disable");
         // The focus leaves; editing again enables nothing until it is back.
-        ti.leave();
+        assert!(!ti.leave(), "nothing enabled, nothing owed");
         assert_eq!(ti.plan(caret, 1.0, false), Send::Nothing);
         ti.enter();
         assert!(matches!(ti.plan(caret, 1.0, false), Send::Enable { reset: false, .. }));
+    }
+
+    #[test]
+    fn a_leave_while_enabled_owes_a_disable_and_enter_enables_again() {
+        let mut ti = TextInput::default();
+        let caret = Some([10.0, 20.0, 1.5, 16.0]);
+        ti.enter();
+        ti.plan(caret, 1.0, false);
+        assert!(ti.leave(), "wlroots keeps the enabled state across a leave");
+        assert_eq!(ti.commits, 2, "the enable, then the disable");
+        ti.enter();
+        assert_eq!(ti.plan(caret, 1.0, false), Send::Enable { rect: [10, 20, 2, 16], reset: false });
     }
 
     #[test]

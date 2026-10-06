@@ -1892,6 +1892,29 @@ button and selected rather than scrolled. `CCE_SCROLL_DEBUG=1` logs each
 touch scroll (`[scroll] touch: …`); in a shadow, `ccectl touch down|motion|up`
 drives it.
 
+### A field being edited says so (text-input-v3, since 2026-10-05)
+
+A widget open for typing calls `cce_ui::text_input::claim(x, y, w, h)` from
+its paint, every frame (window px, the `PaintCtx` offset added). A claim per
+frame, not an enable/disable pair, because a field leaves editing on many
+paths (Enter, Escape, a click elsewhere, focus loss, its page dropped) and a
+widget that stops painting has stopped claiming. `claim` is
+`ime::report_caret` by its first name — the two were written the same day on
+two branches and merged into one: the frame's last claim is `ime::caret()`,
+which every shell reads (see "On Wayland it is `text-input-v3`" above for the
+Wayland half, `backend/text_input.rs`). The compositor raises the on-screen
+keyboard on an enable that follows a touch (`cce-compositor`'s `osk.rs`).
+`Spinbox`, `Slider`'s readout, `ColorSelector`, the params pane's code rows
+claim their field; `TextBox` and a focused `DocEditor` claim their field (the
+viewport) and then report the caret once it is drawn, which wins; an app that
+draws its own text (a `LineEdit`, a terminal, an editor) must claim from
+`display_list` while it has a caret, or the board will not follow it. Keys
+still come over `wl_keyboard`; an input method's commit is typed through
+`Driver::commit_text`. On `enter` the last frame's claim is applied at once,
+and `leave` disables an enabled text input: wlroots keeps the enabled state
+across a leave, and a stale "enabled" turns the next enable into a plain
+commit the compositor ignores.
+
 ### A host may name the phase; a test may pin the settings (2026-09-30)
 
 The phase a wheel event belongs to (`Finger`, `FingerEnd`, `Wheel`) is a

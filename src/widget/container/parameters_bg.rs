@@ -2137,6 +2137,11 @@ impl Paint for ParametersBg {
     /// runs): the flat subset plus the scrollbar, kept for direct callers only. The background
     /// plate stays out — see [`color`](Paint::color).
     fn paint(&self, _rect: Rect, ctx: &mut PaintCtx) {
+        // A code row open for typing (its fields claim for themselves).
+        if self.code_editing() {
+            let (ox, oy) = ctx.offset();
+            crate::text_input::claim(self.rect.x + ox, self.rect.y + oy, self.rect.width, self.rect.height);
+        }
         for (qx, qy, qw, qh, qc) in self.plain_quads() {
             ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
         }

@@ -173,13 +173,22 @@ const PLATE_CREST: f32 = 0.25;
 // 1 is the exact mirror; 0.5 keeps dark faces from bottoming out at black.
 const PLATE_SHADE_LINE: f32 = 0.5;
 // The focus treatment (p_spec_tint.w = 1) keeps the relief and recolours it:
-// the light composites in the accent instead of white, the shadow in the
-// accent darkened to this fraction instead of black — so the lit and shaded
-// sides still differ exactly as an unfocused plate's do, in the accent's hue.
-const FOCUS_SHADOW: f32 = 0.25;
-// ...and at this gain over the neutral relief: the accent at white's alpha
-// reads dimmer than white, and a focused plate should read at least as lit.
+// the light composites in the accent instead of white, the shadow in a DARK
+// accent instead of black — so the lit and shaded sides still differ as an
+// unfocused plate's do, in the accent's hue. A shadow is never lighter than
+// the unfocused one: a faced plate's takes the accent's hue at the shaded
+// luminance, and a carve (an overlay, which cannot see what it darkens)
+// composites the accent at this luminance, near black. Until 2026-10-05 the
+// shadow was the accent at a quarter of its own brightness, which for a
+// bright accent on a dark plate is far LIGHTER than the plate: the shaded
+// side became the brightest part of the ring and the relief read inverted.
+const FOCUS_SHADOW_LUM: f32 = 0.004;
+// ...and the light at this gain over the neutral relief: the accent at
+// white's alpha reads dimmer than white, and a focused plate should read at
+// least as lit.
 const FOCUS_GAIN: f32 = 1.5;
+// Rec. 709 luminance weights, for the colours above (all linear).
+const LUMA: vec3f = vec3f(0.2126, 0.7152, 0.0722);
 // Recess depth as a fraction of the roll width (a recess is visually shallower
 // than a raised plate's full quarter-round).
 const RECESS_DEPTH: f32 = 0.6;
@@ -733,8 +742,8 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
             }
             // A faced one keeps its relief and recolours it, exactly as a
             // tinted carve does: the roll's light composites toward the
-            // accent instead of white, its shadow toward the dark accent
-            // instead of black, at FOCUS_GAIN — so the lit and shaded sides
+            // accent instead of white (at FOCUS_GAIN), its shadow toward a
+            // dark accent instead of black — so the lit and shaded sides
             // still differ as they do unfocused. The roll alone (sv_rim, and
             // the crest, which lives on it): with the full slope every well
             // carved into a focused plate — each parameter control on the
@@ -743,16 +752,22 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
             // neutral shading is composited over it unchanged.
             let tint = rrect_clip.p_spec_tint.rgb;
             let rim = base.rgb * shade_r + vec3f((spec_r - dark_r) * strength);
-            // The alpha a carve would composite white (or black) at for the
-            // same change in luminance, then that alpha in the accent.
-            let W = vec3f(0.2126, 0.7152, 0.0722);
-            let bl = dot(base.rgb, W);
-            let dl = dot(rim, W) - bl;
+            // The light: the alpha a carve would composite white at for the
+            // same rise in luminance, then that alpha in the accent.
+            let bl = dot(base.rgb, LUMA);
+            let dl = dot(rim, LUMA) - bl;
             var lit = base.rgb;
             if (dl >= 0.0) {
                 lit = mix(base.rgb, tint, min(dl / max(1.0 - bl, 0.05) * FOCUS_GAIN, 1.0));
             } else {
-                lit = mix(base.rgb, tint * FOCUS_SHADOW, min(-dl / max(bl, 0.004) * FOCUS_GAIN, 1.0));
+                // The shadow: the face's colour turned toward the accent's
+                // hue at the face's own luminance, then darkened to exactly
+                // the luminance the unfocused roll has here. So it is as dark
+                // as an unfocused shadow, never lighter, whatever the accent.
+                let bs = max(bl, 0.004);
+                let toward = tint * (bs / max(dot(tint, LUMA), 0.004));
+                let hued = mix(base.rgb, toward, min(-dl / bs * FOCUS_GAIN, 1.0));
+                lit = min(hued * (max(bl + dl, 0.0) / bs), vec3f(1.0));
             }
             return vec4f(carve_over(lit, v_c), abs(base.a) * aa);
         }
@@ -1072,18 +1087,20 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let v = (diff / flat_shade - 1.0 + curv + curv_seam + spec) * strength * att;
     // p_spec_tint.w = 1 marks a tinted carve — the FOCUS treatment. The
     // relief is the unfocused carve's, term for term; only its colours
-    // change: the light composites in the accent instead of white and the
-    // shadow in a dark accent instead of black (FOCUS_SHADOW), both at
-    // FOCUS_GAIN. So the ring is the carve's own light and shadow, still
-    // reading which walls face the lamp. Plates leave w at 0.
+    // change: the light composites in the accent instead of white, at
+    // FOCUS_GAIN, and the shadow in the accent at FOCUS_SHADOW_LUM instead
+    // of black, at the unfocused alpha — an overlay cannot see the surface
+    // it darkens, so only a near-black accent is sure to darken it. So the
+    // ring is the carve's own light and shadow, still reading which walls
+    // face the lamp. Plates leave w at 0.
     let tw = rrect_clip.p_spec_tint.w;
-    let gain = mix(1.0, FOCUS_GAIN, tw);
     if (v >= 0.0) {
         let hl = mix(vec3f(1.0), rrect_clip.p_spec_tint.rgb, tw);
-        return vec4f(hl, min(v * gain, 1.0));
+        return vec4f(hl, min(v * mix(1.0, FOCUS_GAIN, tw), 1.0));
     }
-    let sh = rrect_clip.p_spec_tint.rgb * (FOCUS_SHADOW * tw);
-    return vec4f(sh, min(-v * gain, 1.0));
+    let tint = rrect_clip.p_spec_tint.rgb;
+    let sh = tint * (FOCUS_SHADOW_LUM * tw / max(dot(tint, LUMA), 0.004));
+    return vec4f(min(sh, vec3f(1.0)), min(-v, 1.0));
 }
 
 struct VertexOutput {

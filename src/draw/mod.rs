@@ -101,8 +101,10 @@ pub struct PlatePush {
     /// (center + half-extents) a free recess fades out against; far-away sides
     /// (±1e5) disable the fade.
     pub host: [f32; 4],
-    /// RGB multiplies the roll's specular color (w unused). Neutral white
-    /// normally; the focused-pane bevel carries the highlight color here.
+    /// RGB multiplies the roll's specular color. Neutral white normally; the
+    /// focused-pane bevel carries the highlight color here, with w = 1 marking
+    /// the plate (or carve) as accent-tinted — the shader's focus branch,
+    /// which recolours the light AND the shadow (see shader2d's FOCUS_*).
     pub specular_tint: [f32; 4],
     /// 1.0 = raised lit plate, 2.0 = recess overlay, 3.0 = boss, 4.0 = ridge,
     /// 5.0 = sphere, 6.0/7.0 = concave fillet (recessed/raised), 8.0 = groove

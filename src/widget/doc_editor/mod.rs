@@ -1003,6 +1003,13 @@ impl DocEditor {
         let caret_col = self.laid_col(caret.line, caret.col, true);
         let composition = self.composition_on(caret.line);
         let th = self.theme.clone();
+        // Focused is typing: the on-screen keyboard follows
+        // (`crate::text_input`). The viewport stands in until the caret's
+        // line is drawn below, and stays when it is scrolled out of view.
+        if focused {
+            let (dx, dy) = pc.offset();
+            crate::text_input::claim(rect.x + dx, rect.y + dy, rect.width, rect.height);
+        }
         let first = self.line_at_y(self.scroll - self.pad);
         pc.clip(rect, |pc| {
             let mut i = first;

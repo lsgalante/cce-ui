@@ -964,6 +964,7 @@ impl<A: Application> SeatHandler for EngineState<A> {
         }
         if capability == Capability::Keyboard {
             self.keyboard = None;
+            self.text_input = None;
         }
         if capability == Capability::Touch {
             self.touch_lost();
@@ -1452,11 +1453,17 @@ impl<A: Application> wayland_client::Dispatch<ZwpTextInputV3, ()> for EngineStat
         match event {
             zwp_text_input_v3::Event::Enter { .. } => {
                 state.text_input_state.enter();
-                // A frame, so the sync after it enables for an editing widget.
-                state.redraw = true;
+                // At once, at the last frame's caret: an idle window builds
+                // no frame to do it.
+                state.sync_text_input();
             }
             zwp_text_input_v3::Event::Leave { .. } => {
-                state.text_input_state.leave();
+                if state.text_input_state.leave() {
+                    if let Some(ti) = &state.text_input {
+                        ti.disable();
+                        ti.commit();
+                    }
+                }
                 let (driver, t) = state.turn();
                 driver.preedit(t, None);
             }

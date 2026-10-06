@@ -357,6 +357,11 @@ impl Paint for Spinbox {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let g = self.geom(rect);
+        // Typing a value: the on-screen keyboard follows (`crate::text_input`).
+        if self.editing {
+            let (ox, oy) = ctx.offset();
+            crate::text_input::claim(g.x + ox, g.y + oy, g.w, g.h);
+        }
         let radius = crate::layout::spinbox_corner_radius();
         let rounded = radius > 0.0;
         let display_bg = if self.editing { [0.06, 0.10, 0.18, 1.0] } else { colors::spinbox_display() };

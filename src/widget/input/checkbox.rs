@@ -16,27 +16,31 @@ use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Justification, Layout, MouseButton, Paint,
 };
 
-/// How much of a checked box's width its run takes, standing in the middle
-/// of the well — enough to read as a plate, little enough to leave the well
-/// showing either side of it, which is what tells it from an empty box. (All
+/// How much of a checked box's side its plate takes, standing square in the
+/// middle of the well — enough to read as a plate, little enough to leave the
+/// well showing all round it, which is what tells it from an empty box. (All
 /// run, a box filled flush, was tried first: at a control's size its outline
-/// is the empty well's, and the two states were hard to tell apart.)
-const RUN_SHARE: f32 = 0.5;
+/// is the empty well's, and the two states were hard to tell apart. Then the
+/// toggle's run, half the width and the field's whole height: in a square box
+/// that is a tall bar, and a ticked box read as having narrowed.)
+const PLATE_SHARE: f32 = 0.6;
 
-/// Paint a check box's field ([`Checkbox::box_field`]): the field itself
-/// with relief on; off, as the toggle's — a well is its frame, the hairline
-/// every well falls back to (lit by `hovered` / `focused`), and a checked
-/// box's run a lit face in it.
-fn paint_box(ctx: &mut PaintCtx, field: &Field, hovered: bool, focused: bool) {
+/// Paint a check box — its well ([`Checkbox::box_field`]) and, checked, the
+/// plate in it ([`Checkbox::box_plate`]): both fields with relief on; off,
+/// as the toggle's — a well is its frame, the hairline every well falls back
+/// to (lit by `hovered` / `focused`), and the plate a lit face in it.
+fn paint_box(ctx: &mut PaintCtx, well: &Field, plate: Option<&Field>, hovered: bool, focused: bool) {
     if crate::layout::control_relief() {
-        ctx.field(field);
+        ctx.field(well);
+        if let Some(plate) = plate {
+            ctx.field(plate);
+        }
         return;
     }
     let bw = crate::layout::toggle_border_width().max(1.0);
-    ctx.border(field.rect, field.radii, [0.0; 4], colors::well_frame_color(hovered, focused), bw);
-    if let Some((a, b)) = field.run_span() {
-        let run = Rect { x: a, y: field.rect.y, width: b - a, height: field.rect.height };
-        let (face, face_r) = inset(run, field.radii.0, field.depth * 0.5);
+    ctx.border(well.rect, well.radii, [0.0; 4], colors::well_frame_color(hovered, focused), bw);
+    if let Some(plate) = plate {
+        let (face, face_r) = inset(plate.rect, plate.radii.0, plate.depth * 0.5);
         let lit = (0.16 * (crate::layout::bevel_depth() / 0.15)).clamp(0.0, 0.5);
         ctx.rounded_rect(face, face_r, (true, true, true, true), [1.0, 1.0, 1.0, lit]);
     }
@@ -64,13 +68,12 @@ fn parse_bool(val: &str) -> Option<bool> {
     }
 }
 
-/// A check box: a square [`Field`] with an optional label to its right —
-/// an empty well unchecked ([`Field::well`]); checked, a flush run half its
-/// width standing in the middle of it, the well either side
-/// ([`Field::sliding_run`] at its midpoint). It is the toggle's object with
-/// no travel: where a toggle's run glides between the ends of its field, a
-/// check box's is there or not. Standalone, the box is the largest square in
-/// the rect, centred.
+/// A check box: a square well ([`Field::well`]) with an optional label to
+/// its right — empty unchecked; checked, a flush square plate standing in the
+/// middle of it ([`Field::run`] on [`PLATE_SHARE`] of its side), the well
+/// showing all round. Not the toggle's run with no travel, though it was: a
+/// run spans its field's whole height, so in a square it is a tall bar.
+/// Standalone, the box is the largest square in the rect, centred.
 ///
 /// A check drawn inline in text — a list row (cce-list), a markdown task
 /// item, the doc editor — is the same box, through [`Checkbox::paint_inline`].
@@ -90,10 +93,9 @@ impl Checkbox {
     /// replaced.
     pub const INLINE_HALF: f32 = 7.0;
 
-    /// The box as the [`Field`] it is: a square as tall as the control (at
-    /// most a toggle's height) at the rect's left when labelled, the largest
-    /// square in the rect, centred, when not ([`Checkbox::box_field`]). Lit
-    /// while focused.
+    /// The box's well: a square as tall as the control (at most a toggle's
+    /// height) at the rect's left when labelled, the largest square in the
+    /// rect, centred, when not ([`Checkbox::box_field`]). Lit while focused.
     pub fn field(&self, rect: Rect) -> Field {
         let side = if self.label.is_some() {
             rect.height.min(crate::layout::toggle_height())
@@ -103,37 +105,46 @@ impl Checkbox {
         .max(1.0);
         let x = if self.label.is_some() { rect.x } else { rect.x + (rect.width - side) * 0.5 };
         let square = Rect { x, y: rect.y + (rect.height - side) * 0.5, width: side, height: side };
-        Self::box_field(square, self.checked).with_tint(self.focused.then(crate::scene::paint::ControlPlate::focus_tint))
+        Self::box_field(square).with_tint(self.focused.then(crate::scene::paint::ControlPlate::focus_tint))
     }
 
-    /// A check box on `square` — its footprint — as a [`Field`], carved
-    /// inside it through [`crate::layout::carve_inside`] as every field is:
-    /// all well unchecked; checked, a run [`RUN_SHARE`] of its width in the
-    /// middle. The ONE description the widget and every inline box share.
+    /// A check box's well on `square` — its footprint — carved inside it
+    /// through [`crate::layout::carve_inside`] as every field is. With
+    /// [`Checkbox::box_plate`], the ONE description the widget and every
+    /// inline box share.
     ///
     /// The corner is the toggle's in PROPORTION — its radius over its height
     /// — so a box as tall as a toggle has the toggle's corner exactly, and a
     /// 14px box in a line of text is a rounded square rather than a disc,
     /// which the toggle's radius taken whole would make it.
-    pub fn box_field(square: Rect, checked: bool) -> Field {
+    pub fn box_field(square: Rect) -> Field {
         let side = square.width.min(square.height).max(1.0);
         let r = (crate::layout::toggle_corner_radius() * side / crate::layout::toggle_height().max(1.0)).min(side * 0.5);
         let depth = crate::layout::bevel_width().min(side * 0.2);
         let (outline, radii) = crate::layout::carve_inside(square, (r, r, r, r), depth);
-        if checked {
-            Field::sliding_run(outline, radii, depth, outline.width * RUN_SHARE, 0.5)
-        } else {
-            Field::well(outline, radii, depth)
-        }
+        Field::well(outline, radii, depth)
+    }
+
+    /// A checked box's plate in `well` ([`Checkbox::box_field`]): a square
+    /// [`PLATE_SHARE`] of its side, centred, all run — its corner the well's
+    /// in proportion, so it is the box again, smaller.
+    pub fn box_plate(well: &Field) -> Field {
+        let o = well.rect;
+        let side = (o.width.min(o.height) * PLATE_SHARE).max(1.0);
+        let rect = Rect { x: o.x + (o.width - side) * 0.5, y: o.y + (o.height - side) * 0.5, width: side, height: side };
+        let r = well.radii.0 * side / o.width.max(1.0);
+        Field::run(rect, (r, r, r, r), well.depth.min(side * 0.2))
     }
 
     /// Paint a check box centred on (`cx`, `cy`), `half` its half-side, for
     /// a host that draws one inline — cce-list's rows, a markdown task item,
     /// the doc editor — where the widget would be a whole control. The same
-    /// box the widget draws ([`Checkbox::box_field`]), relief on or off.
+    /// box the widget draws ([`Checkbox::box_field`], [`Checkbox::box_plate`]),
+    /// relief on or off.
     pub fn paint_inline(ctx: &mut PaintCtx, cx: f32, cy: f32, half: f32, checked: bool) {
         let square = Rect { x: cx - half, y: cy - half, width: 2.0 * half, height: 2.0 * half };
-        paint_box(ctx, &Self::box_field(square, checked), false, false);
+        let well = Self::box_field(square);
+        paint_box(ctx, &well, checked.then(|| Self::box_plate(&well)).as_ref(), false, false);
     }
 
     pub fn new() -> Adapted<Checkbox> {
@@ -190,7 +201,8 @@ impl Paint for Checkbox {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
         // The box leads and the label follows, a list row's reading order.
         let field = self.field(rect);
-        paint_box(ctx, &field, self.hovered, self.focused);
+        let plate = self.checked.then(|| Self::box_plate(&field));
+        paint_box(ctx, &field, plate.as_ref(), self.hovered, self.focused);
         if let Some(ref label) = self.label {
             let (_, font_size) = crate::layout::control_label_font_parsed();
             let ty = crate::layout::align_text_y(y, h, font_size, 0.0);
@@ -665,7 +677,7 @@ mod tests {
     /// A labelled checkbox is a square field at the left of its label: an
     /// empty well, or checked a run standing in its middle.
     #[test]
-    fn a_checkbox_is_a_field_with_a_run_in_it_or_not() {
+    fn a_checkbox_is_a_well_with_a_square_plate_in_it_or_not() {
         use crate::scene::paint::Prim;
         let ctx = UiContext::new();
         let mut cb = Checkbox::new().with_label("Enable");
@@ -682,23 +694,28 @@ mod tests {
         let side = 24.0f32.min(crate::layout::toggle_height());
         assert!((f.rect.width - f.rect.height).abs() < 1e-4, "square");
         assert!(f.rect.x >= 0.0 && f.rect.x + f.rect.width <= side, "at the left, inside its square");
-        assert!(f.has_well() && f.run_span().is_none(), "unchecked: all well");
+        assert!(f.has_well() && f.run_span().is_none(), "all well");
 
+        // Checked, a square plate in the middle, the well all round it: the
+        // box keeps its shape — a ticked box must not read as narrower.
         cb.inner_mut().set_checked(true);
-        let f = cb.inner().field(rect);
-        let (a, b) = f.run_span().expect("checked: a run");
-        assert!(a > f.rect.x + 1.0 && b < f.rect.x + f.rect.width - 1.0, "in the middle, the well either side");
-        assert!((a - f.rect.x - (f.rect.x + f.rect.width - b)).abs() < 1e-3, "centred");
-        assert!(((b - a) - f.rect.width * RUN_SHARE).abs() < 1e-3);
+        assert_eq!(cb.inner().field(rect), f, "the well is the same either way");
+        let p = Checkbox::box_plate(&f);
+        assert!((p.rect.width - p.rect.height).abs() < 1e-4, "the plate is square");
+        assert!((p.rect.width - f.rect.width * PLATE_SHARE).abs() < 1e-3);
+        let (pcx, pcy) = (p.rect.x + p.rect.width * 0.5, p.rect.y + p.rect.height * 0.5);
+        let (fcx, fcy) = (f.rect.x + f.rect.width * 0.5, f.rect.y + f.rect.height * 0.5);
+        assert!((pcx - fcx).abs() < 1e-3 && (pcy - fcy).abs() < 1e-3, "centred");
+        assert!(!p.has_well(), "the plate is all run");
         assert!(WidgetHost::extra_circles(&cb).is_empty(), "no mark");
 
         if crate::layout::control_relief() {
             cb.inner_mut().set_checked(false);
             assert!(matches!(prims(&cb)[..], [Prim::Recess { .. }]), "a well paints as the recess it groups as");
             cb.inner_mut().set_checked(true);
-            assert!(matches!(prims(&cb)[..], [Prim::Field { .. }]), "a run paints as a field");
+            assert!(matches!(prims(&cb)[..], [Prim::Recess { .. }, Prim::Field { .. }]), "the plate paints as a field in it");
             cb.focused = true;
-            assert!(matches!(prims(&cb)[..], [Prim::Field { tint: Some(_), .. }]), "focus lights the rim");
+            assert!(matches!(prims(&cb)[..], [Prim::Recess { tint: Some(_), .. }, _]), "focus lights the rim");
         }
 
         // The label follows the box.
@@ -725,19 +742,21 @@ mod tests {
             let mut pc = crate::scene::paint::PaintCtx::new();
             Checkbox::paint_inline(&mut pc, 50.0, 20.0, h, checked);
             let prims: Vec<Prim> = pc.finish().items.into_iter().map(|i| i.prim).collect();
-            let want = Checkbox::box_field(square, checked);
+            let want = Checkbox::box_field(square);
             if crate::layout::control_relief() {
                 let mut expect = crate::scene::paint::PaintCtx::new();
                 expect.field(&want);
+                if checked {
+                    expect.field(&Checkbox::box_plate(&want));
+                }
                 let expect: Vec<Prim> = expect.finish().items.into_iter().map(|i| i.prim).collect();
-                assert_eq!(format!("{prims:?}"), format!("{expect:?}"), "the box_field, painted");
+                assert_eq!(format!("{prims:?}"), format!("{expect:?}"), "the box_field and box_plate, painted");
             }
-            assert!(want.run_span().is_some() == checked, "a run when checked, none when not");
             assert!(want.radii.0 < want.rect.width * 0.5 - 0.5, "a rounded square, not a disc: {:?}", want.radii);
         }
         // A box a toggle tall has the toggle's corner, as the widget's always had.
         let th = crate::layout::toggle_height();
-        let big = Checkbox::box_field(Rect { x: 0.0, y: 0.0, width: th, height: th }, false);
+        let big = Checkbox::box_field(Rect { x: 0.0, y: 0.0, width: th, height: th });
         let r = crate::layout::toggle_corner_radius().min(th * 0.5);
         let (_, radii) = crate::layout::carve_inside(Rect { x: 0.0, y: 0.0, width: th, height: th }, (r, r, r, r), big.depth);
         assert_eq!(big.radii, radii);
