@@ -1304,9 +1304,23 @@ impl Input for Graph {
             let nx = px - self.drag_ox;
             let ny = py - self.drag_oy;
 
-            // Snapping centres the body on the nearest intersection.
+            // Snapping centres the body on the nearest intersection a drop
+            // could LAND on: an empty one, or another node's when a drop
+            // there swaps the two (`set_swap_on_drop`); otherwise the
+            // nearest free one, which is where `commit_drag` would walk it
+            // — so the body never sits where it cannot stay. It snapped to
+            // the nearest crossing whatever stood there until 2026-10-06,
+            // and showed a node over another until the release moved it.
             let (nx, ny) = match self.nearest_cell(nx, ny) {
-                Some((c, r)) if self.grid_snap_enabled => self.cell_origin(c, r),
+                Some((c, r)) if self.grid_snap_enabled => {
+                    let dragged = self.dragging_idx.unwrap_or(usize::MAX);
+                    let (c, r) = if self.swap_candidate(dragged, nx, ny).is_some() {
+                        (c, r)
+                    } else {
+                        self.find_empty_cell(c, r, self.dragging_idx)
+                    };
+                    self.cell_origin(c, r)
+                }
                 _ => (nx, ny),
             };
 
@@ -1913,6 +1927,7 @@ mod tests {
 
         let (mut g, mut ctx) = build(true);
         assert_eq!(g.swap_target_idx(), Some(1), "beta is the swap target while the ghost is on it");
+        assert_eq!(g.node_rect(0), g.node_rect(1), "the ghost sits on beta's cell, where a swap lands");
         assert_eq!(g.drop_target_cell_rect(), g.node_rect(1), "and its cell is where the drop lands");
         assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 140.0, 240.0, &mut ctx));
         assert_eq!(GraphController::take_pending_swap(&mut *g), Some(("a".to_string(), "b".to_string())));
@@ -1923,6 +1938,11 @@ mod tests {
 
         let (mut g, mut ctx) = build(false);
         assert_eq!(g.swap_target_idx(), None);
+        // No swap to make: the ghost snaps to the free cell a drop walks to,
+        // not over beta, where it could not stay.
+        let ghost = g.node_rect(0).unwrap();
+        assert_ne!(Some(ghost), g.node_rect(1), "the ghost does not sit on a taken cell");
+        assert_eq!(Some(ghost), g.drop_target_cell_rect(), "it sits where the drop lands");
         assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 140.0, 240.0, &mut ctx));
         assert_eq!(GraphController::take_pending_swap(&mut *g), None);
         let nodes = GraphController::get_nodes(&*g);

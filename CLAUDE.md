@@ -1681,6 +1681,13 @@ one as it always did, so cce-files and cce-graph see no change.
   are never both reported.
 - **A host turns it off for a multi-node drag**: the widget drags one node,
   and one of a group trading places would scatter the rest.
+- **A snapped drag sits only where it could land** (`drag_update`, since
+  the same day): the nearest crossing when it is free or a swap target,
+  else the nearest free one — `find_empty_cell`, the walk `commit_drag`
+  makes — so the ghost never stands over a node it cannot stay on, and
+  `drop_target_cell_rect` is where it is. It snapped to the nearest
+  crossing whatever stood there until then. Unsnapped drags (a host with
+  `grid_snap` off) are unchanged.
 
 `a_node_dropped_on_a_node_swaps_with_it` is the test.
 
