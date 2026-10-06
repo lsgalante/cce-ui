@@ -42,6 +42,58 @@ pub fn get_font_db() -> &'static resvg::usvg::fontdb::Database {
     })
 }
 
+/// Everything [`TextBox`]'s `prepare_text` output depends on.
+#[derive(Debug, Clone, PartialEq)]
+struct PrepKey {
+    text: String,
+    placeholder: bool,
+    password: bool,
+    font_size_bits: u32,
+    font: Option<String>,
+    scale_bits: u32,
+    vertical: bool,
+    /// `Some(max chars per line)` for a multiline box.
+    wrap: Option<usize>,
+}
+
+/// Per-column x offsets of `text` as `buffer` shaped it: one entry per char plus
+/// its total advance. Byte offsets map to columns through one table, rather than
+/// recounting the prefix per glyph — which made long text quadratic.
+fn column_offsets(buffer: &cosmic_text::Buffer, text: &str, scale: f32) -> (Vec<f32>, f32) {
+    let mut col_of_byte = vec![0usize; text.len() + 1];
+    let mut n = 0;
+    for (col, (b, ch)) in text.char_indices().enumerate() {
+        col_of_byte[b..b + ch.len_utf8()].fill(col);
+        n = col + 1;
+    }
+    col_of_byte[text.len()] = n;
+
+    let mut offs = vec![0.0f32; n + 1];
+    let mut total: f32 = 0.0;
+    for (start, gx, gw) in crate::backend::text::normalized_glyph_starts(buffer, text) {
+        let c_idx = col_of_byte[start.min(text.len())];
+        if c_idx < offs.len() {
+            offs[c_idx] = gx / scale;
+        }
+        total = total.max((gx + gw) / scale);
+    }
+    (offs, total)
+}
+
+/// Carry the last recorded offset forward over columns no glyph started at
+/// (the trailing chars of a ligature or cluster). The single-line pass has
+/// always kept column 0's own value; the per-line pass fills it too.
+fn fill_gaps(offs: &mut [f32], include_first: bool) {
+    let mut current = 0.0;
+    for (i, o) in offs.iter_mut().enumerate() {
+        if *o == 0.0 && (include_first || i > 0) {
+            *o = current;
+        } else {
+            current = *o;
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TextBox {
     pub text: String,
@@ -105,6 +157,10 @@ pub struct TextBox {
     /// before is exact only for monospace. Empty for single-line boxes or until the
     /// first shape (readers fall back to the grid).
     line_glyph_positions: Vec<Vec<f32>>,
+    /// What the last `prepare_text` shaped. The runner calls `prepare_text` on
+    /// every registered box before every frame; when none of these inputs moved,
+    /// the offsets above are still right and only the caret is re-read.
+    prep_key: Option<PrepKey>,
     pub update_on_type: bool,
     /// Synced control label ([`Paint::sync_label`]) — drives the detached strip offset.
     label: Option<String>,
@@ -174,6 +230,7 @@ impl TextBox {
             total_text_width: 0.0,
             shaped_char_advance: 0.0,
             line_glyph_positions: Vec::new(),
+            prep_key: None,
             update_on_type: false,
             label: None,
             hovered: false,
@@ -258,6 +315,49 @@ impl TextBox {
     /// two dots short after twelve in the login greeter's password box.
     pub fn value_font(&self) -> Option<String> {
         <Self as Paint>::text_font(self)
+    }
+
+    /// The shaping half of `prepare_text`: `glyph_positions` and
+    /// `total_text_width` for the whole display text, and, multiline,
+    /// `line_glyph_positions` per wrapped line as the paint draws them.
+    fn shape_columns(&mut self, fs: &mut cosmic_text::FontSystem, key: &PrepKey) {
+        let scale = f32::from_bits(key.scale_bits);
+        let font_fam = key.font.as_deref();
+        let attrs = crate::scene::paint::TextAttrs::default();
+        let shared = crate::backend::text::shared_text_buffer;
+
+        let render_text = if key.password {
+            "•".repeat(key.text.chars().count())
+        } else {
+            key.text.clone()
+        };
+
+        // A multiline box reads only the per-line offsets; shaping the whole
+        // document as one buffer would be its most expensive and least used step.
+        self.line_glyph_positions.clear();
+        if let Some(max_chars) = key.wrap {
+            let (lines, _) = self.wrap_text(max_chars);
+            for line in &lines {
+                let line_buffer = shared(fs, line, self.font_size, font_fam, attrs);
+                let (mut offs, line_total) = column_offsets(&line_buffer, line, scale);
+                fill_gaps(&mut offs, true);
+                let n = offs.len() - 1;
+                offs[n] = line_total;
+                self.line_glyph_positions.push(offs);
+            }
+            self.glyph_positions = vec![0.0; render_text.chars().count() + 1];
+            self.total_text_width = 0.0;
+            return;
+        }
+
+        let buffer = shared(fs, &render_text, self.font_size, font_fam, attrs);
+        let (mut x_offsets, total_w) = column_offsets(&buffer, &render_text, scale);
+        fill_gaps(&mut x_offsets, false);
+        let last_idx = x_offsets.len() - 1;
+        x_offsets[last_idx] = total_w;
+
+        self.glyph_positions = x_offsets;
+        self.total_text_width = total_w;
     }
 
     pub fn char_width(&self) -> f32 {
@@ -1542,7 +1642,8 @@ impl Paint for TextBox {
         self.default_font_family = style_family;
 
         let text_src = if self.editing { &self.edit_buffer } else { &self.text };
-        let display_text = if text_src.is_empty() && self.placeholder.is_some() {
+        let showing_placeholder = text_src.is_empty() && self.placeholder.is_some();
+        let display_text = if showing_placeholder {
             self.placeholder.as_ref().unwrap().as_str()
         } else {
             text_src.as_str()
@@ -1550,95 +1651,51 @@ impl Paint for TextBox {
 
         // Measured in the family the value text is DRAWN in — see `value_font`.
         let font_fam = self.value_font();
-        let font_fam = font_fam.as_deref();
-
-        let render_text = if self.is_password {
-            "•".repeat(display_text.chars().count())
-        } else {
-            display_text.to_string()
-        };
-
-        let buffer = crate::backend::text::get_text_buffer(fs, &render_text, self.font_size, font_fam);
-
-        let char_count = render_text.chars().count();
-        let mut x_offsets = vec![0.0; char_count + 1];
-        let mut total_w: f32 = 0.0;
         let scale = crate::scale::scale_factor().max(1.0);
 
         // One column's advance, from the same shaping path as the labels (buffer-cached,
         // so this is a lookup after the first frame per family/size).
-        let probe = crate::backend::text::get_text_buffer(fs, "MMMMMMMM", self.font_size, font_fam);
+        let probe = crate::backend::text::shared_text_buffer(
+            fs,
+            "MMMMMMMM",
+            self.font_size,
+            font_fam.as_deref(),
+            crate::scene::paint::TextAttrs::default(),
+        );
         self.shaped_char_advance = probe
             .layout_runs()
             .next()
             .and_then(|run| run.glyphs.last().map(|g| (g.x + g.w) / scale / 8.0))
             .unwrap_or(0.0);
 
-        for (start, gx, gw) in crate::backend::text::normalized_glyph_starts(&buffer, &render_text) {
-            let c_idx = render_text[..start.min(render_text.len())].chars().count();
-            if c_idx < x_offsets.len() {
-                x_offsets[c_idx] = gx / scale;
-            }
-            total_w = total_w.max((gx + gw) / scale);
-        }
-
-        let mut current_x = 0.0;
-        for i in 0..x_offsets.len() {
-            if x_offsets[i] == 0.0 && i > 0 {
-                x_offsets[i] = current_x;
-            } else {
-                current_x = x_offsets[i];
-            }
-        }
-
-        if !x_offsets.is_empty() {
-            let last_idx = x_offsets.len() - 1;
-            x_offsets[last_idx] = total_w;
-        }
-
-        self.glyph_positions = x_offsets;
-        self.total_text_width = total_w;
-
-        let cursor_pos = self.cursor_idx.min(self.glyph_positions.len() - 1);
-        self.cursor_x_offset = self.glyph_positions.get(cursor_pos).copied().unwrap_or(0.0);
-
-        // Multiline: shape each WRAPPED line the way the paint draws it (same wrap,
-        // same buffer path) and record per-column x offsets. `char_width()` already
-        // returns this frame's shaped advance here, so the wrap below matches the
-        // one `selection_quads`/`value_labels` compute at paint time.
-        self.line_glyph_positions.clear();
-        if self.multiline {
-            let wrap_w = self.rect.width;
-            let max_chars = if self.line_wrap_enabled() {
-                (((wrap_w - 16.0) / self.char_width()).floor() as usize).max(1)
+        // `char_width()` returns this frame's shaped advance from here on, so the
+        // wrap below matches the one `selection_quads`/`value_labels` compute at
+        // paint time.
+        let wrap = self.multiline.then(|| {
+            if self.line_wrap_enabled() {
+                (((self.rect.width - 16.0) / self.char_width()).floor() as usize).max(1)
             } else {
                 999999
-            };
-            let (lines, _) = self.wrap_text(max_chars);
-            for line in &lines {
-                let line_buffer = crate::backend::text::get_text_buffer(fs, line, self.font_size, font_fam);
-                let n = line.chars().count();
-                let mut offs = vec![0.0f32; n + 1];
-                let mut line_total: f32 = 0.0;
-                for (start, gx, gw) in crate::backend::text::normalized_glyph_starts(&line_buffer, line) {
-                    let c_idx = line[..start.min(line.len())].chars().count();
-                    if c_idx < offs.len() {
-                        offs[c_idx] = gx / scale;
-                    }
-                    line_total = line_total.max((gx + gw) / scale);
-                }
-                let mut current = 0.0;
-                for o in offs.iter_mut() {
-                    if *o == 0.0 {
-                        *o = current;
-                    } else {
-                        current = *o;
-                    }
-                }
-                offs[n] = line_total;
-                self.line_glyph_positions.push(offs);
             }
+        });
+
+        let key = PrepKey {
+            text: display_text.to_string(),
+            placeholder: showing_placeholder,
+            password: self.is_password,
+            font_size_bits: self.font_size.to_bits(),
+            font: font_fam.clone(),
+            scale_bits: scale.to_bits(),
+            vertical: crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed),
+            wrap,
+        };
+        if self.prep_key.as_ref() != Some(&key) {
+            self.shape_columns(fs, &key);
+            self.prep_key = Some(key);
         }
+
+        let cursor_pos = self.cursor_idx.min(self.glyph_positions.len().saturating_sub(1));
+        self.cursor_x_offset = self.glyph_positions.get(cursor_pos).copied().unwrap_or(0.0);
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
@@ -2038,6 +2095,29 @@ mod tests {
                 assert!(x > 0.0 && x < total, "col {i} offset {x} must sit inside the text run");
             }
         }
+    }
+
+    /// Multi-byte text gets one offset per CHAR (not per byte), and the
+    /// per-frame memo notices a change of text: the second shape must not
+    /// serve the first one's offsets.
+    #[test]
+    fn offsets_count_chars_and_reshape_on_change() {
+        let mut fs = cosmic_text::FontSystem::new();
+        let mut tb = TextBox::new("héllo wörld".to_string());
+        tb.set_rect(10.0, 10.0, 300.0, 30.0);
+        tb.prepare_text(&mut fs);
+        assert_eq!(tb.glyph_positions.len(), "héllo wörld".chars().count() + 1);
+        for w in tb.glyph_positions.windows(2) {
+            assert!(w[1] >= w[0], "offsets must be non-decreasing: {:?}", tb.glyph_positions);
+        }
+
+        let first = tb.glyph_positions.clone();
+        tb.prepare_text(&mut fs);
+        assert_eq!(tb.glyph_positions, first, "an unchanged box keeps its offsets");
+
+        tb.text = "hé".to_string();
+        tb.prepare_text(&mut fs);
+        assert_eq!(tb.glyph_positions.len(), 3, "a changed text is reshaped");
     }
 
     #[test]
