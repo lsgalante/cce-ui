@@ -95,6 +95,65 @@ fn rect_intersect(a: vk::Rect2D, b: vk::Rect2D) -> vk::Rect2D {
     }
 }
 
+/// How far beyond its own rect a frosted plate's blur can sample, physical
+/// px: shader2d's 7x7 kernel reaches three taps of the plate's stride either
+/// way, plus the rim's refraction offset. Generous on purpose — the panel's
+/// stride is 5.5 px at scale 2, so the real reach is ~17 px — because an
+/// under-estimate shows as a seam and an over-estimate only repaints more.
+const BLUR_REACH_PX: i32 = 96;
+
+fn rect_expand(r: vk::Rect2D, by: i32) -> vk::Rect2D {
+    vk::Rect2D {
+        offset: vk::Offset2D { x: r.offset.x - by, y: r.offset.y - by },
+        extent: vk::Extent2D { width: r.extent.width + 2 * by as u32, height: r.extent.height + 2 * by as u32 },
+    }
+}
+
+fn rect_overlaps(a: vk::Rect2D, b: vk::Rect2D) -> bool {
+    let i = rect_intersect(a, b);
+    i.extent.width > 0 && i.extent.height > 0
+}
+
+/// The physical-px box a run of vertices covers (positions are NDC, y up).
+pub(crate) fn verts_bounds(verts: &[crate::engine::Vertex], extent: vk::Extent2D) -> Option<vk::Rect2D> {
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for v in verts {
+        let px = (v.position[0] + 1.0) * 0.5 * extent.width as f32;
+        let py = (1.0 - v.position[1]) * 0.5 * extent.height as f32;
+        x0 = x0.min(px);
+        y0 = y0.min(py);
+        x1 = x1.max(px);
+        y1 = y1.max(py);
+    }
+    if x0 > x1 {
+        return None;
+    }
+    let (x0, y0) = ((x0.floor() - 1.0) as i32, (y0.floor() - 1.0) as i32);
+    let (x1, y1) = ((x1.ceil() + 1.0) as i32, (y1.ceil() + 1.0) as i32);
+    Some(vk::Rect2D {
+        offset: vk::Offset2D { x: x0, y: y0 },
+        extent: vk::Extent2D { width: (x1 - x0).max(0) as u32, height: (y1 - y0).max(0) as u32 },
+    })
+}
+
+/// Index of the frosted batch that is the first thing the frame draws, if
+/// it may sample the zeroed scene backdrop instead of a snapshot of the
+/// frame so far: with nothing drawn yet, a transparent clear and no scene in
+/// the backdrop, the two hold the same pixels — and the backdrop needs no
+/// copy and, in a partial frame, does not depend on pixels outside the
+/// repainted region. That is what lets the root plate, frosted in every
+/// themed app and the size of the window, stay out of the region growth
+/// below.
+pub(crate) fn first_frost_exempt(batches: &[Batch2D], images: &[crate::draw::ImageQuad], clear: [f32; 4], use_backdrop: bool) -> Option<usize> {
+    if use_backdrop || clear != [0.0, 0.0, 0.0, 0.0] {
+        return None;
+    }
+    let first = batches.iter().position(|b| b.start < b.end)?;
+    let batch = &batches[first];
+    let image_before = images.iter().any(|q| q.z_before <= batch.start);
+    (batch.blur_behind && !image_before).then_some(first)
+}
+
 pub(crate) const FRAMES_IN_FLIGHT: usize = 2;
 pub(crate) use crate::draw::PLATE_FEATURE_BYTES;
 /// shader2d's WindowInfo uniform, in bytes (layout in `draw::window_info_data`).
@@ -1009,6 +1068,10 @@ impl VkRenderer {
         let relief = self.relief_px();
         let data = window_info_data(self.extent, self.clip_corner_radius(), relief);
         self.relief_uploaded = relief;
+        // Every pixel shades differently now: no image may be patched.
+        for age in &mut self.image_ages {
+            *age = ImageAge::Unknown;
+        }
         self.profile_gen = crate::layout::bevel_profile_generation();
         self.roll_profile_gen = crate::layout::roll_profile_generation();
         if let Some(allocation) = self.window_info.allocation.as_mut() {
@@ -2045,8 +2108,9 @@ impl VkRenderer {
                 extent: self.extent,
             };
             // This frame's damage, and whether the acquired image can be
-            // brought up to date by repainting part of it. Blur-behind and
-            // backdrop frames copy whole images around and stay full.
+            // brought up to date by repainting part of it. Backdrop (3D
+            // scene) frames copy whole images around and stay full; a
+            // frosted plate grows the region instead (below).
             let damage = frame2d.damage.map(|(x, y, w, h)| {
                 rect_intersect(
                     vk::Rect2D {
@@ -2056,12 +2120,45 @@ impl VkRenderer {
                     full_scissor,
                 )
             });
-            let partial: Option<vk::Rect2D> = match (damage, self.image_ages[image_index as usize]) {
-                _ if use_backdrop || frame2d.batches.iter().any(|b| b.blur_behind) => None,
+            let frost_exempt = first_frost_exempt(frame2d.batches, frame2d.images, frame2d.clear_color, use_backdrop);
+            let mut partial: Option<vk::Rect2D> = match (damage, self.image_ages[image_index as usize]) {
+                _ if use_backdrop => None,
                 (Some(d), ImageAge::Current) => Some(d),
                 (Some(d), ImageAge::Behind(missing)) => Some(rect_union(d, missing)),
                 _ => None,
             };
+            // A frosted plate's blur reads the snapshot of the frame so far,
+            // and in a partial frame that snapshot is only right inside the
+            // region — outside it the image holds the previous FINAL frame,
+            // the plate and whatever covers it included. So a plate the
+            // region touches is repainted whole, with everything its blur
+            // can reach, and the grown region may touch the next plate.
+            if let Some(mut region) = partial {
+                let frosts: Vec<vk::Rect2D> = frame2d
+                    .batches
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, b)| b.blur_behind && Some(i) != frost_exempt && b.start < b.end)
+                    .filter_map(|(_, b)| {
+                        let verts = frame2d.verts.get(b.start as usize..b.end as usize)?;
+                        verts_bounds(verts, self.extent)
+                    })
+                    .collect();
+                loop {
+                    let mut grew = false;
+                    for &plate in &frosts {
+                        let need = rect_intersect(rect_expand(plate, BLUR_REACH_PX), full_scissor);
+                        if rect_overlaps(region, plate) && rect_intersect(region, need) != need {
+                            region = rect_union(region, need);
+                            grew = true;
+                        }
+                    }
+                    if !grew {
+                        break;
+                    }
+                }
+                partial = Some(region);
+            }
             // Every scissor of the frame passes through this.
             let clip = |r: vk::Rect2D| match partial {
                 Some(region) => rect_intersect(r, region),
@@ -2140,7 +2237,7 @@ impl VkRenderer {
                 // see each other, which only matters where they overlap.
                 let mut snapshot_fresh = false;
 
-                for batch in batches {
+                for (batch_i, batch) in batches.iter().enumerate() {
                     // Images due at this batch's boundary draw first: they sit
                     // beneath the batch's geometry, and a blur snapshot taken
                     // for this batch must capture them (an image whose
@@ -2166,7 +2263,10 @@ impl VkRenderer {
                         self.image.record_quad(&self.core.device, cmd, frame_index, k, q.image);
                         snapshot_fresh = false;
                     }
-                    if batch.blur_behind {
+                    if batch.blur_behind && Some(batch_i) == frost_exempt {
+                        // Nothing drawn yet: the zeroed backdrop the default
+                        // set binds IS the frame so far (`first_frost_exempt`).
+                    } else if batch.blur_behind {
                         if !snapshot_fresh {
                             self.snapshot_frame_so_far(cmd, image_index as usize);
                             active_set = self.descriptor_set_snapshot;
@@ -2603,5 +2703,31 @@ mod tests {
             floats * 4,
             super::WINDOW_INFO_BYTES,
         );
+    }
+}
+
+#[cfg(test)]
+mod frost_exempt_tests {
+    use super::*;
+
+    fn batch(start: u32, end: u32, blur: bool) -> Batch2D {
+        Batch2D { scissor: None, clip_rrect: None, start, end, plate: None, blur_behind: blur }
+    }
+
+    /// Only a frosted batch that is the first thing drawn, over a
+    /// transparent clear with no scene, may skip its snapshot.
+    #[test]
+    fn only_the_first_frost_over_nothing_is_exempt() {
+        let clear = [0.0; 4];
+        let root_first = [batch(0, 6, true), batch(6, 12, true)];
+        assert_eq!(first_frost_exempt(&root_first, &[], clear, false), Some(0));
+        // An empty leading batch does not count as drawing.
+        assert_eq!(first_frost_exempt(&[batch(0, 0, false), batch(0, 6, true)], &[], clear, false), Some(1));
+        // Something drawn first, a scene backdrop, or an opaque clear: no.
+        assert_eq!(first_frost_exempt(&[batch(0, 6, false), batch(6, 12, true)], &[], clear, false), None);
+        assert_eq!(first_frost_exempt(&root_first, &[], clear, true), None);
+        assert_eq!(first_frost_exempt(&root_first, &[], [0.0, 0.0, 0.0, 1.0], false), None);
+        let image = crate::draw::ImageQuad { image: 1, rect: (0.0, 0.0, 1.0, 1.0), alpha: 1.0, z_before: 0, clip: None };
+        assert_eq!(first_frost_exempt(&root_first, &[image], clear, false), None);
     }
 }
