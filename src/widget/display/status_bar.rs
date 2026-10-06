@@ -182,7 +182,7 @@ impl Paint for StatusBar {
     }
 
     /// The paint walk re-fonts prim-derived labels through this (the prim's own font field
-    /// is stripped by `own_labels_for_walk`) — without it the bar's text falls back to sans.
+    /// is stripped by the adapter's own-labels bridge) — without it the bar's text falls back to sans.
     fn text_font(&self) -> Option<String> {
         Some(crate::layout::statusbar_font())
     }

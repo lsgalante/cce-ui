@@ -993,14 +993,16 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         out
     }
 
-    /// The paint-walk view of `own_labels_with_font_and_bounds`: prim-derived text carries the
-    /// widget's content font ([`Paint::text_font`]); the detached base label is drawn in the
-    /// configured detached-label font either way (via `own_labels_with_prim_font`).
-    fn own_labels_for_walk(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        self.own_labels_with_prim_font(ctx, Paint::text_font(&self.inner))
-    }
-
-    fn own_labels_with_prim_font(&self, _ctx: &UiContext, prim_font: Option<String>) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+    /// The paint walk's own-labels bridge: prim-derived text in the widget's content font
+    /// ([`Paint::text_font`]), plus the detached base label in the configured detached-label
+    /// font. Fed the Text prims `paint_self` already holds from its own pass — running
+    /// `Paint::paint` a second time just to get them back doubled every leaf's paint cost.
+    fn own_labels_from_painted(
+        &self,
+        _ctx: &UiContext,
+        painted: Vec<TextLabel>,
+        prim_font: Option<String>,
+    ) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         // The detached label is the adapter's, not the widget's: one font for every
         // control's label — `style.control.label.font_detached`, whose size
         // `base_label_fallback` already takes — whatever font the widget's own content
@@ -1010,16 +1012,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         let base_font = Some(crate::layout::control_label_font_detached());
         let mut fonted: Vec<(TextLabel, Option<String>)> = Vec::new();
         if self.visible() {
-            fonted.extend(
-                self.painted_prims()
-                    .into_iter()
-                    .filter_map(|prim| match prim {
-                        Prim::Text { text, x, y, font_size, color, .. } => {
-                            Some((TextLabel { text, x, y, font_size, color }, prim_font.clone()))
-                        }
-                        _ => None,
-                    }),
-            );
+            fonted.extend(painted.into_iter().map(|l| (l, prim_font.clone())));
             if !Layout::inline_label(&self.inner) {
                 fonted.extend(self.base_label_fallback().into_iter().map(|l| (l, base_font.clone())));
             }
@@ -1304,6 +1297,10 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         // verbatim and the single-font own-labels re-derivation below is skipped
         // (re-deriving would flatten a composite's mixed child fonts to widget_font).
         let subtree = Paint::paints_own_subtree(&self.inner);
+        // The Text prims the own-labels bridge below re-derives labels from. Only
+        // ParametersBg and Group override `paint_ui`, and neither reaches that
+        // bridge, so this pass's text is exactly what `Paint::paint` would emit.
+        let mut painted_text: Vec<TextLabel> = Vec::new();
         for item in tmp.finish().items {
             // Re-emitting through ctx re-records clip state, so restore the
             // circular clip the widget authored the prim under (Ramp's
@@ -1321,6 +1318,8 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
             {
                 if subtree {
                     ctx.text_with(text, x, y, font_size, color, font, bounds);
+                } else {
+                    painted_text.push(TextLabel { text, x, y, font_size, color });
                 }
             }
             if clip_circle.is_some() {
@@ -1358,7 +1357,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         let labels = if Paint::serves_legacy_labels(&self.inner) {
             Paint::legacy_labels_with_font_and_bounds(&self.inner, self.content_rect(), ui)
         } else {
-            self.own_labels_for_walk(ui)
+            self.own_labels_from_painted(ui, painted_text, Paint::text_font(&self.inner))
         };
         for (tl, font, bounds) in labels {
             ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
