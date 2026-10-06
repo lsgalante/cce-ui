@@ -131,10 +131,12 @@ fn wire_stroke(size: f32, px: f32) -> (f32, f32) {
 /// The path of a wire from `start` to `end` drawn `t` px thick. `bend` is
 /// the largest radius a Rounded bend takes and the least a Bezier lead
 /// runs straight down before curving — both scale with the node, so the
-/// shape keeps its proportions under zoom.
-fn wire_path(style: WireStyle, start: (f32, f32), end: (f32, f32), t: f32, bend: f32) -> Vec<WireSeg> {
+/// shape keeps its proportions under zoom. `turn` is the height of an
+/// Orthogonal or Rounded wire's run across ([`Graph::wire_turn_y`]); `None`
+/// is halfway between the two ends.
+fn wire_path(style: WireStyle, start: (f32, f32), end: (f32, f32), t: f32, bend: f32, turn: Option<f32>) -> Vec<WireSeg> {
     let ((sx, sy), (ex, ey)) = (start, end);
-    let my = sy + (ey - sy) / 2.0;
+    let my = turn.unwrap_or(sy + (ey - sy) / 2.0);
     let orthogonal = || {
         // Square joins with no overlap, so a translucent wire is one alpha
         // throughout: the across run is widened by half a thickness at each
@@ -160,7 +162,9 @@ fn wire_path(style: WireStyle, start: (f32, f32), end: (f32, f32), t: f32, bend:
             if dx.abs() < 0.5 {
                 return vec![WireSeg::Line(start, end)];
             }
-            let r = bend.min(dx.abs() / 2.0).min(dy.abs() / 2.0);
+            // The bends fit the legs they turn between: the run across
+            // need not be halfway down.
+            let r = bend.min(dx.abs() / 2.0).min((my - sy).abs()).min((ey - my).abs());
             // A bend tighter than half the stroke has no inside edge.
             if r < t / 2.0 {
                 return orthogonal();
@@ -736,7 +740,28 @@ impl Graph {
     /// The wire from `src_idx`'s output to `dest_idx`'s input, as drawn.
     fn wire_segments(&self, src_idx: usize, dest_idx: usize, port: usize) -> Option<Vec<WireSeg>> {
         let (start, end) = self.wire_endpoints(src_idx, dest_idx, port)?;
-        Some(wire_path(self.wire_style(), start, end, self.wire_thickness(), self.wire_bend()))
+        let turn = self.wire_turn_y(start, end);
+        Some(wire_path(self.wire_style(), start, end, self.wire_thickness(), self.wire_bend(), turn))
+    }
+
+    /// Where a wire running DOWN turns across: on the first lattice line
+    /// below its source — the line the row under the source stands on — so
+    /// it leaves the source's column at once. Halfway down, which is where
+    /// every wire used to turn, a wire spanning several rows ran straight
+    /// down through whatever node stood under its source on the way: a wire
+    /// from row -1 to row 3 turned on row 1's line, through the node there.
+    /// `None` (halfway) where that line is not between the two ends with
+    /// room for the bends — the nodes are in adjacent rows, and the turn
+    /// belongs between the bodies — and for a wire running up, whose first
+    /// line past its source is the source's own.
+    fn wire_turn_y(&self, start: (f32, f32), end: (f32, f32)) -> Option<f32> {
+        let (sy, ey) = (start.1, end.1);
+        if self.pitch_y <= 0.0 || ey <= sy {
+            return None;
+        }
+        let line = self.grid_origin_y + (((sy - self.grid_origin_y) / self.pitch_y).floor() + 1.0) * self.pitch_y;
+        let room = self.wire_thickness().max(1.0);
+        (line - sy >= room && ey - line >= room).then_some(line)
     }
 
     /// The wires, and the one being dragged out of a port, in the style in
@@ -774,7 +799,7 @@ impl Graph {
             // The connection being dragged out of a port.
             if let Some((node_idx, port_type, port_idx)) = self.connecting_from {
                 if let Some(start) = self.port_center(node_idx, port_type, port_idx) {
-                    let segs = wire_path(self.wire_style(), start, self.current_mouse_pos, t, self.wire_bend());
+                    let segs = wire_path(self.wire_style(), start, self.current_mouse_pos, t, self.wire_bend(), None);
                     stroke(&segs, [1.0, 0.6, 0.0, 0.8], pc); // Golden orange preview
                 }
             }
@@ -1896,20 +1921,20 @@ mod tests {
         let cases = [((100.0, 100.0), (300.0, 260.0)), ((300.0, 260.0), (100.0, 100.0)), ((100.0, 100.0), (100.0, 300.0))];
         for (start, end) in cases {
             for style in [WireStyle::Rounded, WireStyle::Bezier, WireStyle::Straight] {
-                let segs = wire_path(style, start, end, t, 20.0);
+                let segs = wire_path(style, start, end, t, 20.0, None);
                 assert!(near(seg_ends(&segs[0]).0, start), "{style:?} {start:?}->{end:?} starts at the output");
                 assert!(near(seg_ends(segs.last().unwrap()).1, end), "{style:?} {start:?}->{end:?} ends at the input");
                 for w in segs.windows(2) {
                     assert!(near(seg_ends(&w[0]).1, seg_ends(&w[1]).0), "{style:?} {start:?}->{end:?} is unbroken");
                 }
             }
-            let segs = wire_path(WireStyle::Rounded, start, end, t, 20.0);
+            let segs = wire_path(WireStyle::Rounded, start, end, t, 20.0, None);
             if start.0 != end.0 {
                 assert_eq!(segs.iter().filter(|s| matches!(s, WireSeg::Arc { .. })).count(), 2, "two rounded bends");
             }
         }
 
-        let segs = wire_path(WireStyle::Orthogonal, (100.0, 100.0), (300.0, 260.0), t, 20.0);
+        let segs = wire_path(WireStyle::Orthogonal, (100.0, 100.0), (300.0, 260.0), t, 20.0, None);
         assert_eq!(
             segs,
             vec![
@@ -1918,6 +1943,69 @@ mod tests {
                 WireSeg::Line((300.0, 183.0), (300.0, 260.0)),
             ]
         );
+    }
+
+    /// A wire running down several rows turns on the first lattice line
+    /// below its source, not halfway: from row -1 to row 3 it turned on
+    /// row 1's line, after running down through the node standing there.
+    /// Between adjacent rows there is no line between the bodies, and the
+    /// wire turns halfway as it always did.
+    #[test]
+    fn a_wire_turns_on_the_first_line_below_its_source() {
+        let mut g = Graph::new();
+        WidgetHost::set_rect(&mut g, 0.0, 0.0, 1200.0, 900.0);
+        g.set_grid_pitch(140.0, 70.0);
+        g.set_node_size(80.0, 40.0);
+        g.set_grid_origin(100.0, 200.0);
+        let node = |name: &str, col: f32, row: f32, wires: &[&str]| GraphNode {
+            id: name.into(),
+            name: name.into(),
+            position: (col, row),
+            parameters: wires.iter().enumerate().map(|(k, w)| (format!("in{k}"), w.to_string(), "node".to_string())).collect(),
+            geom_visible: true,
+            node_type: String::new(),
+            inputs: wires.len().max(1),
+            outputs: 1,
+        };
+        // The simnet the user found it in: input1 above pull1, relax1
+        // reading both, a column to the right and four rows down.
+        g.set_nodes(&[
+            node("input1", 3.0, -1.0, &[]),
+            node("pull1", 3.0, 1.0, &["input1"]),
+            node("relax1", 4.0, 3.0, &["pull1", "input1"]),
+        ]);
+        let line = |row: f32| 200.0 + row * 70.0;
+        let across = |segs: &[WireSeg]| {
+            segs.iter()
+                .find_map(|s| match *s {
+                    WireSeg::Line(a, b) if (a.1 - b.1).abs() < 0.01 && (a.0 - b.0).abs() > 1.0 => Some(a.1),
+                    _ => None,
+                })
+                .expect("a run across")
+        };
+        for style in [WireStyle::Orthogonal, WireStyle::Rounded] {
+            g.set_wire_style(Some(style));
+            // input1 (row -1) into relax1's second port (row 3): row 0's line.
+            let segs = g.wire_segments(0, 2, 1).unwrap();
+            assert_eq!(across(&segs), line(0.0), "{style:?}: the first line below the source");
+            // Nothing of it stands in pull1's body, under the source.
+            let (px, py, pw, ph) = g.node_rect(1).unwrap();
+            assert!(
+                !segs.iter().any(|s| matches!(*s, WireSeg::Line(a, b) if segment_meets_rect(a, b, px, py, px + pw, py + ph))),
+                "{style:?}: the wire runs through pull1"
+            );
+            // pull1 (row 1) into relax1 (row 3): row 2's line, as before.
+            assert_eq!(across(&g.wire_segments(1, 2, 0).unwrap()), line(2.0));
+        }
+        // Adjacent rows: no line between the bodies, so halfway.
+        g.set_nodes(&[node("a", 0.0, 0.0, &[]), node("b", 1.0, 1.0, &["a"])]);
+        g.set_wire_style(Some(WireStyle::Orthogonal));
+        let (start, end) = g.wire_endpoints(0, 1, 0).unwrap();
+        assert_eq!(across(&g.wire_segments(0, 1, 0).unwrap()), start.1 + (end.1 - start.1) / 2.0);
+        // A wire running up turns halfway too.
+        g.set_nodes(&[node("a", 0.0, 3.0, &[]), node("b", 1.0, 0.0, &["a"])]);
+        let (start, end) = g.wire_endpoints(0, 1, 0).unwrap();
+        assert_eq!(across(&g.wire_segments(0, 1, 0).unwrap()), start.1 + (end.1 - start.1) / 2.0);
     }
 
     #[test]
