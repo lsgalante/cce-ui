@@ -7,6 +7,17 @@
 //! (content/viewport heights, thumb position) is derived in one place ([`ScrollGeom`]) — legacy
 //! re-derived it in seven. [`SpreadsheetController`] rides the `Input` capability hooks.
 //!
+//! **The two scrollbars cross at the body's centre** (since 2026-10-06): the vertical bar
+//! rides the pane's vertical centre line and the horizontal one the body's horizontal centre
+//! line, as the params pane's and the designer dialog's bars ride theirs — over the cells,
+//! reserving no lane. They idle BEHIND the pane's plate ([`ScrollbarActivity`]): a scroll,
+//! a key or a thumb drag raises them in front, a pointer over a raised bar keeps it there,
+//! and once nothing holds them for the hold window they sink again. Sunk they take no input,
+//! so a press on their lane reaches the row beneath. The fore copy is painted by
+//! [`Paint::paint`] at the activity's fade; the copy behind the plate is the HOST's to
+//! draw, before the plate, through [`Spreadsheet::paint_scrollbars`] — the plate is the
+//! host's too.
+//!
 //! The `PARAM_BG` background is NOT emitted here: the designer's render path draws every
 //! widget's background itself from `color()` + `corner_style()` (`push_widget_vertices`), and
 //! `PARAM_BG` is translucent — emitting it again would double-blend. This widget's own
@@ -18,13 +29,15 @@ use crate::scene::paint::PaintCtx;
 use crate::widget::scroll_motion::{scroll_settings, Bounds, ScrollMotion};
 use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton, MouseScrollDelta,
-    NamedKey, Paint, SpreadsheetController,
+    NamedKey, Paint, ScrollbarActivity, SpreadsheetController,
 };
 
 const HEADER_H: f32 = 24.0;
 const ROW_H: f32 = 24.0;
-const SCROLLBAR_W: f32 = 6.0;
-const SCROLLBAR_PAD: f32 = 2.0;
+/// How far a track stops short of each end of what it spans, as every toolkit bar's does.
+const TRACK_INSET: f32 = 4.0;
+/// How far either side of a bar a press or the pointer still counts as on it.
+const BAR_SLOP: f32 = 4.0;
 /// Columns never squeeze below this: when they don't fit, the pane scrolls
 /// horizontally instead. Sized for a 4-decimal value / a short header plus its
 /// sort mark in the 12px mono label font, with the cell padding on both sides.
@@ -47,8 +60,6 @@ pub struct Spreadsheet {
     scroll_y: f32,
     dragging_scrollbar: bool,
     drag_offset_y: f32,
-    scrollbar_hovered: bool,
-    scrollbar_thumb_hovered: bool,
     scroll_x: f32,
     /// Smooth-scroll driver behind `scroll_y`/`scroll_x`: wheel notches
     /// glide, trackpad flicks coast (the widget's former velocity model,
@@ -56,8 +67,9 @@ pub struct Spreadsheet {
     motion: ScrollMotion,
     dragging_hscrollbar: bool,
     drag_offset_x: f32,
-    hscrollbar_hovered: bool,
-    hscrollbar_thumb_hovered: bool,
+    /// Whether the two bars are raised in front of the plate or sunk behind
+    /// it — one latch for both, since they are one cross.
+    activity: ScrollbarActivity,
     /// The selected rows, as indices into `rows` — the SOURCE order, so a
     /// sort moves a selected row's place in the pane and not what it names.
     selected: std::collections::BTreeSet<usize>,
@@ -77,8 +89,11 @@ struct ScrollGeom {
     max_scroll: f32,
     /// `scroll_y` clamped to the current bounds (data changes can leave the raw value stale).
     scroll: f32,
-    scrollbar_x: f32,
+    /// The bar's left edge: it is centred on the pane's width.
+    bar_x: f32,
+    bar_w: f32,
     track_y: f32,
+    track_h: f32,
     thumb_h: f32,
     thumb_y: f32,
     track_range: f32,
@@ -87,12 +102,14 @@ struct ScrollGeom {
 /// [`ScrollGeom`]'s horizontal twin, for the bottom scrollbar. Present only
 /// when the column run overflows the pane width.
 struct HScrollGeom {
-    visible_w: f32,
     max_scroll: f32,
     /// `scroll_x` clamped to the current bounds.
     scroll: f32,
     track_x: f32,
-    track_y: f32,
+    track_w: f32,
+    /// The bar's top edge: it is centred on the body's height.
+    bar_y: f32,
+    bar_h: f32,
     thumb_w: f32,
     thumb_x: f32,
     track_range: f32,
@@ -110,14 +127,11 @@ impl Spreadsheet {
             scroll_y: 0.0,
             dragging_scrollbar: false,
             drag_offset_y: 0.0,
-            scrollbar_hovered: false,
-            scrollbar_thumb_hovered: false,
             scroll_x: 0.0,
             motion: ScrollMotion::new(),
             dragging_hscrollbar: false,
             drag_offset_x: 0.0,
-            hscrollbar_hovered: false,
-            hscrollbar_thumb_hovered: false,
+            activity: ScrollbarActivity::new(),
             selected: std::collections::BTreeSet::new(),
             anchor: None,
             selection_changed: false,
@@ -137,15 +151,19 @@ impl Spreadsheet {
         }
         let max_scroll = content_h - visible_h;
         let scroll = self.scroll_y.clamp(0.0, max_scroll);
-        let thumb_h = ((visible_h / content_h) * visible_h).clamp(15.0_f32.min(visible_h), visible_h);
-        let track_y = rect.y + HEADER_H;
-        let track_range = visible_h - thumb_h;
+        let bar_w = Self::bar_w();
+        let track_y = rect.y + HEADER_H + TRACK_INSET;
+        let track_h = (visible_h - 2.0 * TRACK_INSET).max(0.0);
+        let thumb_h = Self::thumb_len(track_h, visible_h / content_h);
+        let track_range = track_h - thumb_h;
         Some(ScrollGeom {
             visible_h,
             max_scroll,
             scroll,
-            scrollbar_x: rect.x + rect.width - SCROLLBAR_W - SCROLLBAR_PAD,
+            bar_x: rect.x + (rect.width - bar_w) * 0.5,
+            bar_w,
             track_y,
+            track_h,
             thumb_h,
             thumb_y: track_y + (scroll / max_scroll) * track_range,
             track_range,
@@ -169,19 +187,118 @@ impl Spreadsheet {
         }
         let max_scroll = content_w - visible_w;
         let scroll = self.scroll_x.clamp(0.0, max_scroll);
-        let thumb_w = ((visible_w / content_w) * visible_w).clamp(15.0_f32.min(visible_w), visible_w);
-        let track_x = rect.x;
-        let track_range = visible_w - thumb_w;
+        let bar_h = Self::bar_w();
+        let track_x = rect.x + TRACK_INSET;
+        let track_w = (visible_w - 2.0 * TRACK_INSET).max(0.0);
+        let thumb_w = Self::thumb_len(track_w, visible_w / content_w);
+        let track_range = track_w - thumb_w;
+        let body_h = (rect.height - HEADER_H).max(0.0);
         Some(HScrollGeom {
-            visible_w,
             max_scroll,
             scroll,
             track_x,
-            track_y: rect.y + rect.height - SCROLLBAR_W - SCROLLBAR_PAD,
+            track_w,
+            bar_y: rect.y + HEADER_H + (body_h - bar_h) * 0.5,
+            bar_h,
             thumb_w,
             thumb_x: track_x + (scroll / max_scroll) * track_range,
             track_range,
         })
+    }
+
+    /// A bar's thickness — the DE `scrollbar_width` widened, as the params
+    /// pane's bar is, since it sits over cells rather than in a lane.
+    fn bar_w() -> f32 {
+        crate::layout::scrollbar_width() * 1.6
+    }
+
+    /// A thumb's length on a track `track` long showing `ratio` of the content.
+    fn thumb_len(track: f32, ratio: f32) -> f32 {
+        if track <= 20.0 {
+            track
+        } else {
+            (track * ratio).clamp(20.0, track)
+        }
+    }
+
+    /// Whether `(px, py)` is on the vertical bar's strip (with slop).
+    fn over_vbar(&self, px: f32, py: f32, rect: Rect) -> bool {
+        self.geom(rect).is_some_and(|g| {
+            px >= g.bar_x - BAR_SLOP
+                && px <= g.bar_x + g.bar_w + BAR_SLOP
+                && py >= g.track_y
+                && py <= g.track_y + g.track_h
+        })
+    }
+
+    /// Whether `(px, py)` is on the horizontal bar's strip (with slop).
+    fn over_hbar(&self, px: f32, py: f32, rect: Rect) -> bool {
+        self.hgeom(rect).is_some_and(|g| {
+            py >= g.bar_y - BAR_SLOP
+                && py <= g.bar_y + g.bar_h + BAR_SLOP
+                && px >= g.track_x
+                && px <= g.track_x + g.track_w
+        })
+    }
+
+    /// Whether the pane has either bar at all.
+    pub fn scrollbars_shown(&self, rect: Rect) -> bool {
+        self.geom(rect).is_some() || self.hgeom(rect).is_some()
+    }
+
+    /// Whether the bars are raised in front of the plate — the latch, which
+    /// gates input. Paint the fore copy with [`Self::scrollbar_fade`].
+    pub fn scrollbars_raised(&self) -> bool {
+        self.activity.raised()
+    }
+
+    /// How far the fore copy has faded in, 0..=1.
+    pub fn scrollbar_fade(&self) -> f32 {
+        self.activity.fade()
+    }
+
+    /// The cross of pill scrollbars on `rect`, scaled to `alpha`: both
+    /// tracks, then both thumbs, so neither track covers the other's thumb
+    /// where they cross. [`Paint::paint`] draws the fore copy; the host draws
+    /// the copy that idles behind its plate, at full alpha, BEFORE the plate.
+    pub fn paint_scrollbars(&self, rect: Rect, ctx: &mut PaintCtx, alpha: f32) {
+        let a = alpha.clamp(0.0, 1.0);
+        if a <= 0.001 {
+            return;
+        }
+        let dim = |mut c: [f32; 4]| {
+            c[3] *= a;
+            c
+        };
+        let all = (true, true, true, true);
+        let track = dim(crate::color::scrollbar_track_color());
+        let thumb = dim(crate::color::scrollbar_thumb_color());
+        let pill = |ctx: &mut PaintCtx, r: Rect, c: [f32; 4]| {
+            if r.width > 0.0 && r.height > 0.0 {
+                ctx.rounded_rect(r, r.width.min(r.height) * 0.5, all, c);
+            }
+        };
+        let v = self.geom(rect);
+        let h = self.hgeom(rect);
+        if let Some(g) = &v {
+            pill(ctx, Rect { x: g.bar_x, y: g.track_y, width: g.bar_w, height: g.track_h }, track);
+        }
+        if let Some(g) = &h {
+            pill(ctx, Rect { x: g.track_x, y: g.bar_y, width: g.track_w, height: g.bar_h }, track);
+        }
+        if let Some(g) = &v {
+            pill(ctx, Rect { x: g.bar_x, y: g.thumb_y, width: g.bar_w, height: g.thumb_h }, thumb);
+        }
+        if let Some(g) = &h {
+            pill(ctx, Rect { x: g.thumb_x, y: g.bar_y, width: g.thumb_w, height: g.bar_h }, thumb);
+        }
+    }
+
+    /// Re-latch the raise/sink, returning whether it flipped.
+    fn recompute_bars(&mut self, rect: Rect) -> bool {
+        let shown = self.scrollbars_shown(rect);
+        let dragging = self.dragging_scrollbar || self.dragging_hscrollbar;
+        self.activity.recompute(shown, dragging)
     }
 
     /// The clamped horizontal scroll — 0 while everything fits.
@@ -246,21 +363,15 @@ impl Spreadsheet {
     /// What a body press at `(px, py)` lands on: `Some(Some(place))` for the
     /// row at that place in the DISPLAY order, `Some(None)` for the empty
     /// body under the last row, `None` for a press that is not the body's —
-    /// outside it, or on a scrollbar, which the drag surface owns.
+    /// outside it, or on a RAISED scrollbar, which the drag surface owns. A
+    /// sunk bar is behind the plate and the press is the row's.
     fn body_row_at(&self, px: f32, py: f32, rect: Rect) -> Option<Option<usize>> {
         let body_top = rect.y + HEADER_H;
         if px < rect.x || px > rect.x + rect.width || py < body_top || py > rect.y + rect.height {
             return None;
         }
-        if let Some(g) = self.geom(rect) {
-            if px >= g.scrollbar_x - 4.0 {
-                return None;
-            }
-        }
-        if let Some(g) = self.hgeom(rect) {
-            if py >= g.track_y - 4.0 {
-                return None;
-            }
+        if self.activity.raised() && (self.over_vbar(px, py, rect) || self.over_hbar(px, py, rect)) {
+            return None;
         }
         let scroll = self.geom(rect).map_or(0.0, |g| g.scroll);
         let place = ((py - body_top + scroll) / ROW_H) as usize;
@@ -417,47 +528,10 @@ impl Paint for Spreadsheet {
             }
         }
 
-        // Scrollbar track & thumb
-        if let Some(g) = self.geom(rect) {
-            ctx.quad(
-                Rect { x: g.scrollbar_x, y: g.track_y, width: SCROLLBAR_W, height: g.visible_h },
-                [0.05, 0.05, 0.08, 0.15],
-            );
-            let thumb_color = if self.dragging_scrollbar {
-                [0.40, 0.40, 0.48, 1.0]
-            } else if self.scrollbar_thumb_hovered {
-                [0.32, 0.32, 0.38, 1.0]
-            } else if self.scrollbar_hovered {
-                [0.24, 0.24, 0.30, 0.9]
-            } else {
-                [0.18, 0.18, 0.24, 0.7]
-            };
-            ctx.quad(
-                Rect { x: g.scrollbar_x, y: g.thumb_y, width: SCROLLBAR_W, height: g.thumb_h },
-                thumb_color,
-            );
-        }
-
-        // Horizontal scrollbar along the bottom, the vertical bar's twin.
-        if let Some(g) = self.hgeom(rect) {
-            ctx.quad(
-                Rect { x: g.track_x, y: g.track_y, width: g.visible_w, height: SCROLLBAR_W },
-                [0.05, 0.05, 0.08, 0.15],
-            );
-            let thumb_color = if self.dragging_hscrollbar {
-                [0.40, 0.40, 0.48, 1.0]
-            } else if self.hscrollbar_thumb_hovered {
-                [0.32, 0.32, 0.38, 1.0]
-            } else if self.hscrollbar_hovered {
-                [0.24, 0.24, 0.30, 0.9]
-            } else {
-                [0.18, 0.18, 0.24, 0.7]
-            };
-            ctx.quad(
-                Rect { x: g.thumb_x, y: g.track_y, width: g.thumb_w, height: SCROLLBAR_W },
-                thumb_color,
-            );
-        }
+        // The scrollbars' fore copy, over the cells, at the activity's fade —
+        // the fade rather than the latch, so it draws all the way out. The
+        // copy behind the plate is the host's (`paint_scrollbars`).
+        self.paint_scrollbars(rect, ctx, self.activity.fade());
 
         // Header + cell text, each cell clamped to its column and the body band.
         if self.headers.is_empty() {
@@ -570,44 +644,14 @@ impl Input for Spreadsheet {
                 self.hovered =
                     *px >= r.x && *px <= r.x + r.width && *py >= r.y && *py <= r.y + r.height;
 
-                let was_sb = self.scrollbar_hovered;
-                let was_thumb = self.scrollbar_thumb_hovered;
-                if let Some(g) = self.geom(r) {
-                    self.scrollbar_hovered = *px >= g.scrollbar_x - 2.0
-                        && *px <= r.x + r.width
-                        && *py >= g.track_y
-                        && *py <= r.y + r.height;
-                    self.scrollbar_thumb_hovered = *px >= g.scrollbar_x - 2.0
-                        && *px <= r.x + r.width
-                        && *py >= g.thumb_y
-                        && *py <= g.thumb_y + g.thumb_h;
-                } else {
-                    self.scrollbar_hovered = false;
-                    self.scrollbar_thumb_hovered = false;
-                }
-                let was_hsb = self.hscrollbar_hovered;
-                let was_hthumb = self.hscrollbar_thumb_hovered;
-                if let Some(g) = self.hgeom(r) {
-                    self.hscrollbar_hovered = *py >= g.track_y - 2.0
-                        && *py <= r.y + r.height
-                        && *px >= g.track_x
-                        && *px <= g.track_x + g.visible_w;
-                    self.hscrollbar_thumb_hovered = *py >= g.track_y - 2.0
-                        && *py <= r.y + r.height
-                        && *px >= g.thumb_x
-                        && *px <= g.thumb_x + g.thumb_w;
-                } else {
-                    self.hscrollbar_hovered = false;
-                    self.hscrollbar_thumb_hovered = false;
-                }
+                // Over a bar: hover only SUSTAINS a raised bar — a sunk one
+                // is behind the plate, and the pointer is on the plate.
+                let over = self.over_vbar(*px, *py, r) || self.over_hbar(*px, *py, r);
+                self.activity.set_hover(over);
+                let flipped = self.recompute_bars(r);
                 let was_header = self.header_hover_col;
                 self.header_hover_col = self.header_col_at(*px, *py, r);
-                was_hovered != self.hovered
-                    || was_sb != self.scrollbar_hovered
-                    || was_thumb != self.scrollbar_thumb_hovered
-                    || was_hsb != self.hscrollbar_hovered
-                    || was_hthumb != self.hscrollbar_thumb_hovered
-                    || was_header != self.header_hover_col
+                was_hovered != self.hovered || flipped || was_header != self.header_hover_col
             }
             // A left press on a column header cycles that column's sort:
             // ascending → descending → back to natural order.
@@ -653,6 +697,11 @@ impl Input for Spreadsheet {
                 self.motion.apply_px(dx, dy, discrete, bx, by);
                 self.scroll_x = self.motion.x.pos();
                 self.scroll_y = self.motion.y.pos();
+                if used {
+                    // A scroll is what brings the bars to the fore.
+                    self.activity.bump();
+                    self.recompute_bars(ectx.rect);
+                }
                 used
             }
             Event::KeyInput(key_event) => {
@@ -678,6 +727,10 @@ impl Input for Spreadsheet {
                 };
                 let moved = self.motion.y.scroll_to(new, by, &scroll_settings());
                 self.scroll_y = self.motion.y.pos();
+                if moved {
+                    self.activity.bump();
+                    self.recompute_bars(ectx.rect);
+                }
                 moved
             }
             _ => false,
@@ -695,7 +748,8 @@ impl Input for Spreadsheet {
 
     // --- Scrollbar drag, host-driven (the designer checks `draggable()` on the pressed widget
     // and then streams `drag_update` at it). `drag_begin` decides whether the press actually
-    // landed on the scrollbar; a body press starts no drag, exactly like legacy.
+    // landed on a RAISED scrollbar; a body press, or one on a bar sunk behind the plate,
+    // starts no drag.
 
     fn draggable(&self, rect: Rect) -> bool {
         self.geom(rect).is_some() || self.hgeom(rect).is_some()
@@ -706,16 +760,14 @@ impl Input for Spreadsheet {
     }
 
     fn drag_begin(&mut self, px: f32, py: f32, rect: Rect) {
+        if !self.activity.raised() {
+            return;
+        }
         // A grab or release cancels any glide/coast in flight.
         self.motion = ScrollMotion::at(self.scroll_x, self.scroll_y);
-        // The vertical bar owns the shared bottom-right corner (it was here
-        // first); the horizontal bar takes what's left of the bottom band.
+        // The vertical bar owns the middle of the cross, where the two meet.
         if let Some(g) = self.geom(rect) {
-            if px >= g.scrollbar_x - 4.0
-                && px <= rect.x + rect.width
-                && py >= g.track_y
-                && py <= rect.y + rect.height
-            {
+            if self.over_vbar(px, py, rect) {
                 self.dragging_scrollbar = true;
                 if py >= g.thumb_y && py <= g.thumb_y + g.thumb_h {
                     self.drag_offset_y = py - g.thumb_y;
@@ -728,11 +780,7 @@ impl Input for Spreadsheet {
             }
         }
         if let Some(g) = self.hgeom(rect) {
-            if py >= g.track_y - 4.0
-                && py <= rect.y + rect.height
-                && px >= g.track_x
-                && px <= g.track_x + g.visible_w
-            {
+            if self.over_hbar(px, py, rect) {
                 self.dragging_hscrollbar = true;
                 if px >= g.thumb_x && px <= g.thumb_x + g.thumb_w {
                     self.drag_offset_x = px - g.thumb_x;
@@ -766,6 +814,10 @@ impl Input for Spreadsheet {
     }
 
     fn drag_end(&mut self) {
+        if self.dragging_scrollbar || self.dragging_hscrollbar {
+            // A release holds the bars up for the hold window, as a scroll does.
+            self.activity.bump();
+        }
         self.dragging_scrollbar = false;
         self.dragging_hscrollbar = false;
         // A grab or release cancels any glide/coast in flight.
@@ -776,15 +828,29 @@ impl Input for Spreadsheet {
 
     fn tick(&mut self, dt: f32, rect: Rect) -> bool {
         self.motion.reconcile(self.scroll_x, self.scroll_y);
-        if !self.motion.is_animating() {
-            return false;
+        let mut moved = false;
+        if self.motion.is_animating() {
+            let by = self.geom(rect).map_or(Bounds::max(0.0), |g| Bounds::max(g.max_scroll));
+            let bx = self.hgeom(rect).map_or(Bounds::max(0.0), |g| Bounds::max(g.max_scroll));
+            moved = self.motion.tick(dt, bx, by);
+            self.scroll_x = self.motion.x.pos();
+            self.scroll_y = self.motion.y.pos();
+            if moved {
+                // A glide or a coast is scrolling too: the bars stay up for
+                // the whole of it, not only the hold after its first event.
+                self.activity.bump();
+            }
         }
-        let by = self.geom(rect).map_or(Bounds::max(0.0), |g| Bounds::max(g.max_scroll));
-        let bx = self.hgeom(rect).map_or(Bounds::max(0.0), |g| Bounds::max(g.max_scroll));
-        let moved = self.motion.tick(dt, bx, by);
-        self.scroll_x = self.motion.x.pos();
-        self.scroll_y = self.motion.y.pos();
-        moved || self.motion.is_animating()
+        // The raise/sink latch and its fade. Frames keep coming while the
+        // hold runs and while the fade chases the latch, so the sink is
+        // actually drawn rather than frozen at the last input event.
+        let holding = self.activity.holding();
+        let shown = self.scrollbars_shown(rect);
+        let dragging = self.dragging_scrollbar || self.dragging_hscrollbar;
+        let flipped = self.activity.tick(dt, shown, dragging);
+        let fade = self.activity.fade();
+        let fading = if self.activity.raised() { fade < 1.0 } else { fade > 0.0 };
+        moved || self.motion.is_animating() || holding || flipped || fading
     }
 
     fn wants_tick(&self) -> bool {
@@ -995,10 +1061,17 @@ mod tests {
         // content 1200, viewport 100 -> overflowing, so the host may drag it.
         assert!(s.draggable());
 
-        // Press on the scrollbar track (x >= 200-6-2-4): thumb jumps, drag engages.
-        s.drag_begin(195.0, 80.0);
+        // Sunk behind the plate, the bar takes no press.
+        s.drag_begin(100.0, 80.0);
+        assert!(!s.is_dragging(), "a sunk bar is not grabbed");
+
+        // Raised, a press on its track (the pane's centre line) jumps the
+        // thumb and engages the drag.
+        s.inner_mut().activity.bump();
+        s.inner_mut().recompute_bars(rect);
+        s.drag_begin(100.0, 80.0);
         assert!(s.is_dragging());
-        assert!(s.drag_update(195.0, 110.0), "thumb drag scrolls");
+        assert!(s.drag_update(100.0, 90.0), "thumb drag scrolls");
         let dragged_to = s.inner().geom(rect).unwrap().scroll;
         assert!(dragged_to > 0.0);
         s.drag_end();
@@ -1143,13 +1216,16 @@ mod tests {
         s.handle_event(&body_click(row_y(3)), &mut ctx);
         assert!(s.inner().selected_rows().is_empty());
 
-        // The scrollbar's column is the drag surface's.
+        // A RAISED scrollbar's lane is the drag surface's.
+        let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
+        s.inner_mut().activity.bump();
+        s.inner_mut().recompute_bars(rect);
         s.handle_event(&Event::MouseButton {
             button: MouseButton::Left,
             state: ElementState::Pressed,
-            x: 196.0,
+            x: 100.0,
             y: row_y(1),
-            local_x: 196.0,
+            local_x: 100.0,
             local_y: row_y(1),
         }, &mut ctx);
         assert!(s.inner().selected_rows().is_empty(), "a scrollbar press selects nothing");
@@ -1180,6 +1256,93 @@ mod tests {
         t.inner_mut().set_selected_rows(&[]);
         assert!(t.inner().selected_rows().is_empty());
         assert!(t.inner_mut().take_selection_change());
+    }
+
+    /// The two bars cross at the middle of the body; they idle behind the
+    /// plate, where a press on them is the row's; a scroll brings them to the
+    /// fore, a pointer over a raised bar holds it there past the hold, and
+    /// with nothing holding them they sink again. Hover alone never raises.
+    #[test]
+    fn the_scrollbars_cross_at_the_body_and_sink_until_scrolled() {
+        let mut ctx = UiContext::new();
+        let mut s = Spreadsheet::new();
+        s.set_visible(true);
+        let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
+        WidgetHost::set_rect(&mut s, rect.x, rect.y, rect.width, rect.height);
+        let (id, ptr) = (s.id(), s.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        let headers: Vec<String> = (0..6).map(|i| format!("c{i}")).collect();
+        let rows: Vec<Vec<String>> = (0..50).map(|r| (0..6).map(|c| format!("{r}.{c}")).collect()).collect();
+        SpreadsheetController::set_spreadsheet_data(&mut *s, headers, rows);
+
+        // A cross: the vertical bar centred on the width, the horizontal on
+        // the body's height, each spanning its axis less the inset.
+        let v = s.inner().geom(rect).expect("50 rows overflow");
+        let h = s.inner().hgeom(rect).expect("6 floored columns overflow");
+        let body_mid = HEADER_H + (rect.height - HEADER_H) * 0.5;
+        assert!((v.bar_x + v.bar_w * 0.5 - rect.width * 0.5).abs() < 0.01, "vertical bar on the centre line");
+        assert!((h.bar_y + h.bar_h * 0.5 - body_mid).abs() < 0.01, "horizontal bar on the body's centre line");
+        assert_eq!((v.track_y, v.track_h), (HEADER_H + TRACK_INSET, rect.height - HEADER_H - 2.0 * TRACK_INSET));
+        assert_eq!((h.track_x, h.track_w), (TRACK_INSET, rect.width - 2.0 * TRACK_INSET));
+
+        let at = |x: f32, y: f32| Event::PointerMove { x, y, local_x: x, local_y: y };
+        let mid = (rect.width * 0.5, body_mid);
+
+        // Sunk: hovering raises nothing, and a press on the middle of the
+        // cross is a press on the row there.
+        assert!(!s.inner().scrollbars_raised());
+        s.handle_event(&at(mid.0, mid.1), &mut ctx);
+        assert!(!s.inner().scrollbars_raised(), "hover never raises a sunk bar");
+        assert!(s.inner().body_row_at(mid.0, mid.1, rect).is_some(), "a sunk bar's lane is the row's");
+
+        // A scroll raises both; the lane is the bars' now, and the fore copy
+        // fades in over the next frames.
+        let wheel = Event::MouseWheel {
+            delta: MouseScrollDelta::LineDelta(0.0, -1.0),
+            x: 30.0,
+            y: 40.0,
+            local_x: 30.0,
+            local_y: 40.0,
+        };
+        assert!(s.handle_event(&wheel, &mut ctx));
+        assert!(s.inner().scrollbars_raised(), "a scroll raises the bars");
+        assert!(s.inner().body_row_at(mid.0, mid.1, rect).is_none(), "a raised bar's lane is the drag's");
+        assert!(s.inner().body_row_at(mid.0, mid.1 + 30.0, rect).is_none(), "the vertical bar off the middle too");
+        for _ in 0..20 {
+            Input::tick(&mut *s.inner_mut(), 0.016, rect);
+        }
+        assert_eq!(s.inner().scrollbar_fade(), 1.0, "faded all the way in");
+
+        // The pointer on a bar holds it up long past the hold…
+        s.handle_event(&at(mid.0, mid.1 + 30.0), &mut ctx);
+        for _ in 0..200 {
+            Input::tick(&mut *s.inner_mut(), 0.016, rect);
+        }
+        assert!(s.inner().scrollbars_raised(), "hovered, a raised bar stays in front");
+
+        // …and off it, the bars sink once the hold runs out, and fade away.
+        s.handle_event(&at(30.0, 40.0), &mut ctx);
+        let mut guard = 0;
+        while Input::tick(&mut *s.inner_mut(), 0.016, rect) {
+            guard += 1;
+            assert!(guard < 1000, "the sink settles");
+        }
+        assert!(!s.inner().scrollbars_raised(), "unheld, the bars sink");
+        assert_eq!(s.inner().scrollbar_fade(), 0.0);
+
+        // Painted: nothing of the bars while sunk (the host draws that copy
+        // behind its plate), four pills while raised.
+        let pills = |s: &Adapted<Spreadsheet>| {
+            let mut pc = crate::scene::paint::PaintCtx::new();
+            Paint::paint(&**s, rect, &mut pc);
+            pc.finish().items.iter().filter(|i| matches!(i.prim, crate::scene::paint::Prim::RoundedRect { .. })).count()
+        };
+        assert_eq!(pills(&s), 0, "a sunk bar is not painted over the cells");
+        s.handle_event(&wheel, &mut ctx);
+        for _ in 0..20 {
+            Input::tick(&mut *s.inner_mut(), 0.016, rect);
+        }
+        assert_eq!(pills(&s), 4, "two tracks and two thumbs");
     }
 
     #[test]

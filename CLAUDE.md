@@ -2168,7 +2168,27 @@ something else clears it itself.
 
 `SpreadsheetController` carries it: `selected_rows` (ascending),
 `set_selected_rows`, and `take_selection_change`, which is true once after
-anything changed the selection. A press on a scrollbar is the drag
-surface's and selects nothing (`body_row_at`). Selected rows wear
+anything changed the selection. A press on a RAISED scrollbar is the drag
+surface's and selects nothing (`body_row_at`); a sunk one is behind the
+plate and the press is the row's. Selected rows wear
 `highlight_primary_color` at 28% over the zebra.
 `rows_select_alone_toggled_and_in_runs` is the test.
+
+### A spreadsheet's scrollbars are a cross behind its plate
+
+`Spreadsheet`'s two bars (since 2026-10-06) ride the CENTRE lines of what
+they scroll — the vertical one the pane's width, the horizontal one the
+body's height — so with both they cross at the middle of the body, over
+the cells, reserving no lane; the params pane's bar and the designer
+dialog's ride theirs the same way. Until then they were 6 px strips at the
+right and bottom edges, always in front. They are `scrollbar_width` × 1.6
+pills in the shared track and thumb colours, and they share one
+`ScrollbarActivity`: a wheel, a key, a glide or coast in motion, or a
+thumb drag raises them; a pointer over a raised bar holds them up; with
+nothing holding them for the hold window they sink. Sunk they take no
+press (`drag_begin` and `body_row_at` ask the latch). The widget paints
+the FORE copy at the activity's fade; the copy that idles behind the
+plate is the host's, before the plate, through `paint_scrollbars(rect,
+ctx, 1.0)` (`scrollbars_shown` says whether there is one) — the plate is
+the host's too. The vertical bar owns the middle of the cross for a drag.
+`the_scrollbars_cross_at_the_body_and_sink_until_scrolled` is the test.
