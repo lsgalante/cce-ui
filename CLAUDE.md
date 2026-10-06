@@ -1484,6 +1484,24 @@ button and selected rather than scrolled. `CCE_SCROLL_DEBUG=1` logs each
 touch scroll (`[scroll] touch: …`); in a shadow, `ccectl touch down|motion|up`
 drives it.
 
+### A field being edited says so (text-input-v3, since 2026-10-05)
+
+A widget open for typing calls `cce_ui::text_input::claim(x, y, w, h)` from
+its paint, every frame; once the display list is built the runner takes the
+frame's claim and `backend/text_input.rs` enables the seat's
+`zwp_text_input_v3` with that rectangle, or disables it when nobody claimed.
+The compositor raises the on-screen keyboard on an enable that follows a touch
+(`cce-compositor`'s `osk.rs`). A claim per frame, not an enable/disable pair,
+because a field leaves editing on many paths (Enter, Escape, a click
+elsewhere, focus loss, its page dropped) and a widget that stops painting has
+stopped claiming. `TextBox`, `Spinbox`, `Slider`'s readout, `ColorSelector`,
+the params pane's code rows and a focused `DocEditor` claim; an app that draws
+its own text (a `LineEdit`, a terminal, an editor) must call `claim` itself
+from `display_list` while it has a caret, or the board will not follow it.
+Keys still come over `wl_keyboard`; an input method's `commit_string` is
+delivered as one typed `Key::Character` (`EngineState::type_text`). Preedit
+and surrounding text are not implemented.
+
 ### A host may name the phase; a test may pin the settings (2026-09-30)
 
 The phase a wheel event belongs to (`Finger`, `FingerEnd`, `Wheel`) is a

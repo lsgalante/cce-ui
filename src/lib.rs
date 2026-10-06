@@ -18,6 +18,7 @@ pub mod icon;
 pub mod ipc;
 pub mod mcp;
 pub mod motion;
+pub mod text_input;
 pub mod vk;
 
 pub mod colors {

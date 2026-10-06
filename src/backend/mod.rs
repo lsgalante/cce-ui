@@ -1,5 +1,6 @@
 pub mod dnd;
 pub mod menu_popup;
+pub mod text_input;
 pub mod touch;
 pub mod window_runner;
 

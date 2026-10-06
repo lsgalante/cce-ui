@@ -1513,6 +1513,12 @@ impl Paint for TextBox {
         let radius = crate::layout::textbox_corner_radius();
         let border_w = self.border_width();
 
+        // Open for typing: say so to the compositor this frame (the
+        // on-screen keyboard follows it). The field stands in for the caret.
+        if self.editing && !self.disabled {
+            crate::text_input::claim(self.rect.x, self.rect.y + top, self.rect.width, visual_h);
+        }
+
         // Keep the model's cached rect and the paint rect consistent: paint receives the
         // content rect derived from the same base the cache holds, so the bodies below read
         // `self.rect` (the legacy `self.base`) exactly as legacy did. `rect` is used only to

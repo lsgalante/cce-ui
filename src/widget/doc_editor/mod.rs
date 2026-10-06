@@ -887,6 +887,12 @@ impl DocEditor {
         let sel = self.buf.selection();
         let caret = self.buf.caret;
         let th = self.theme.clone();
+        // Focused is typing: the on-screen keyboard follows
+        // (`crate::text_input`). The viewport stands in until the caret's
+        // line is drawn below, and stays when it is scrolled out of view.
+        if focused {
+            crate::text_input::claim(rect.x, rect.y, rect.width, rect.height);
+        }
         let first = self.line_at_y(self.scroll - self.pad);
         pc.clip(rect, |pc| {
             let mut i = first;
@@ -949,6 +955,7 @@ impl DocEditor {
                     let h = l.row_h * 0.8;
                     let y = top + row as f32 * l.row_h + (l.row_h - h) / 2.0;
                     pc.quad(Rect { x: ox + x - 0.5, y, width: 2.0, height: h }, th.caret);
+                    crate::text_input::claim(ox + x - 0.5, y, 2.0, h);
                 }
                 i += 1;
             }

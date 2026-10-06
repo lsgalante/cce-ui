@@ -356,6 +356,11 @@ impl Paint for Slider {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let g = self.geom(rect);
+        // Typing into the readout: the on-screen keyboard follows
+        // (`crate::text_input`).
+        if self.editing {
+            crate::text_input::claim(g.x, g.y, g.w, g.h);
+        }
         let radius = crate::layout::slider_corner_radius();
         let rounded = radius > 0.0;
         let rc = (rounded, rounded, rounded, rounded);

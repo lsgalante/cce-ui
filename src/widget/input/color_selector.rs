@@ -245,6 +245,11 @@ impl Paint for ColorSelector {
         let visual_h = rect.height;
         let pick_x = rect.x + rect.width * 0.65;
         let pick_w = rect.width * 0.35;
+        // Typing a hex value: the on-screen keyboard follows
+        // (`crate::text_input`).
+        if self.editing {
+            crate::text_input::claim(rect.x, rect.y, pick_x - rect.x, visual_h);
+        }
 
         // The text field has NO face of its own — a frame over the host plate,
         // like a relief TextBox well (transparent fill, the outline defines

@@ -4215,6 +4215,9 @@ pub struct EngineState<A: Application> {
     pub just_configured: bool,
     pub pointer_gestures: Option<ZwpPointerGesturesV1>,
     pub pinch_gesture: Option<ZwpPointerGesturePinchV1>,
+    /// text-input-v3: enabled while a widget is editing (`backend::text_input`).
+    pub text_input_manager: Option<wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3>,
+    pub text_input: Option<super::text_input::TextInput>,
     /// The cce window-management toplevel handle, held for the window's
     /// lifetime once [`Application::utility`] declared the mode.
     pub cce_toplevel: Option<crate::protocol::cce_window_management_v1::zcce_toplevel_v1::ZcceToplevelV1>,
@@ -4576,6 +4579,12 @@ impl<A: Application> EngineState<A> {
         let dl = self.inner.as_mut().unwrap()
             .display_list(LogicalSize::new(logical_w, logical_h), scale_factor)
             .unwrap_or_else(|| crate::scene::paint::PaintCtx::new().finish());
+        // The paint just built says whether a field is editing
+        // (`crate::text_input`); the compositor hears it with this frame.
+        let text_claim = crate::text_input::take();
+        if let Some(ti) = self.text_input.as_mut() {
+            ti.frame(text_claim);
+        }
         // Taken with the display list it describes. A frame that took the
         // app's damage and then was not presented owes those pixels, so the
         // next one that is presented repaints everything.
@@ -5056,6 +5065,10 @@ impl<A: Application> SeatHandler for EngineState<A> {
         if capability == Capability::Keyboard && self.keyboard.is_none() {
             let keyboard = self.seat_state.get_keyboard(qh, &seat, None).unwrap();
             self.keyboard = Some(keyboard);
+            // Text-input focus follows keyboard focus, so it lives with it.
+            if let Some(ref manager) = self.text_input_manager {
+                self.text_input = Some(super::text_input::TextInput::new(manager, &seat, qh));
+            }
         }
         if capability == Capability::Touch && self.touch.is_none() {
             self.touch = self.seat_state.get_touch(qh, &seat).ok();
@@ -5075,6 +5088,7 @@ impl<A: Application> SeatHandler for EngineState<A> {
         }
         if capability == Capability::Keyboard {
             self.keyboard = None;
+            self.text_input = None;
         }
         if capability == Capability::Touch {
             self.touch_lost();
@@ -5591,6 +5605,30 @@ impl<A: Application> EngineState<A> {
             *rebuild = true;
         }
         taken
+    }
+
+    /// Text an input method committed (`backend::text_input`), delivered as
+    /// one typed key: a press and a release of `Key::Character(text)`, the
+    /// shape a text box already inserts from.
+    pub(crate) fn type_text(&mut self, text: String) {
+        for state in [ElementState::Pressed, ElementState::Released] {
+            let event = KeyEvent {
+                state,
+                logical_key: Key::Character(text.clone()),
+                text: Some(text.clone()),
+                repeat: false,
+                ctrl: false,
+                shift: false,
+                alt: false,
+            };
+            let mut rebuild = false;
+            if let Some(msg) = self.inner.as_mut().unwrap().handle_key_input(&event, &mut rebuild) {
+                self.inner.as_mut().unwrap().update(msg, &mut rebuild, &mut self.exit);
+            }
+            if rebuild {
+                self.redraw = true;
+            }
+        }
     }
 
     fn handle_key(&mut self, event: smithay_client_toolkit::seat::keyboard::KeyEvent, state: ElementState) {
@@ -6248,6 +6286,7 @@ fn run_session<'l, A: Application>(
     let output_state = OutputState::new(&globals, &qh);
 
     let pointer_gestures: Option<ZwpPointerGesturesV1> = globals.bind(&qh, 1..=3, ()).ok();
+    let text_input_manager = globals.bind(&qh, 1..=1, ()).ok();
 
     let mut engine_state = EngineState {
         data_device_manager: DataDeviceManagerState::bind(&globals, &qh).ok(),
@@ -6308,6 +6347,8 @@ fn run_session<'l, A: Application>(
         qh: qh.clone(),
         just_configured: false,
         pointer_gestures,
+        text_input_manager,
+        text_input: None,
         pinch_gesture: None,
         cce_toplevel: None,
         pending_grid_patch: None,
