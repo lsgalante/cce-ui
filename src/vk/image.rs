@@ -896,6 +896,13 @@ impl ImageStage {
                 let mut b = std::mem::replace(buf, AllocatedBuffer::null());
                 destroy_cpu_buffer(device, allocator, &mut b);
             }
+            // The upload staging buffer, kept between uploads. Missed here
+            // until 2026-10-05: gpu-allocator reported it leaked whenever a
+            // renderer that had uploaded an image was dropped (a reconnect,
+            // or a layer app hiding its surface).
+            if let Some(mut staging) = self.staging.take() {
+                destroy_cpu_buffer(device, allocator, &mut staging);
+            }
             device.destroy_sampler(self.sampler, None);
             device.destroy_descriptor_pool(self.descriptor_pool, None);
             device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
