@@ -69,11 +69,31 @@ pub fn truncate_head(s: &str, max_chars: usize) -> String {
     format!("...{tail}")
 }
 
-fn perform_svg_measurement(text: &str, font_family: &str, font_size: f32, scale: f32) -> f32 {
-    if text.is_empty() {
-        return 0.0;
+/// `s` with the five XML specials escaped, for text and attribute values
+/// alike.
+fn xml_escape(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.contains(['&', '<', '>', '"', '\'']) {
+        return std::borrow::Cow::Borrowed(s);
     }
-    
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// The one-line SVG the measurement renders: `text` centered on a canvas
+/// 1000 logical px wide. Both the text and the family are escaped — until
+/// 2026-10-06 they went in raw, so a label with `&` or `<` (a family with a
+/// quote) was not XML, failed to parse, and fell back to the estimate.
+fn measurement_svg(text: &str, font_family: &str, font_size: f32, scale: f32) -> (String, u32, u32) {
     let canvas_w = 1000.0;
     let canvas_h = font_size * 2.5;
 
@@ -87,10 +107,18 @@ fn perform_svg_measurement(text: &str, font_family: &str, font_size: f32, scale:
         w_px, h_px,
         canvas_w, canvas_h,
         canvas_w / 2.0, canvas_h / 2.0,
-        font_family,
+        xml_escape(font_family),
         font_size,
-        text
+        xml_escape(text)
     );
+    (svg_data, w_px, h_px)
+}
+
+fn perform_svg_measurement(text: &str, font_family: &str, font_size: f32, scale: f32) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    let (svg_data, w_px, h_px) = measurement_svg(text, font_family, font_size, scale);
 
     let opt = resvg::usvg::Options::default();
     let fontdb = crate::widget::input::get_font_db();
@@ -128,7 +156,28 @@ fn perform_svg_measurement(text: &str, font_family: &str, font_size: f32, scale:
 
 #[cfg(test)]
 mod tests {
-    use super::{truncate_head, truncate_tail};
+    use super::{measurement_svg, truncate_head, truncate_tail, xml_escape};
+
+    #[test]
+    fn xml_specials_are_escaped() {
+        assert_eq!(xml_escape("plain"), "plain");
+        assert_eq!(xml_escape(r#"R&D <x> "q" 'a'"#), "R&amp;D &lt;x&gt; &quot;q&quot; &apos;a&apos;");
+    }
+
+    #[test]
+    fn a_label_with_xml_specials_still_parses() {
+        // The raw interpolation made each of these an XML error, and the
+        // width fell back to the character-count estimate.
+        let opt = resvg::usvg::Options::default();
+        let fontdb = resvg::usvg::fontdb::Database::new();
+        for (text, family) in [("Tom & Jerry", "Sans"), ("a < b", "Sans"), ("x > y", "Sans"), ("plain", r#"My "Font""#)] {
+            let (svg, _, _) = measurement_svg(text, family, 14.0, 1.0);
+            assert!(
+                resvg::usvg::Tree::from_data(svg.as_bytes(), &opt, &fontdb).is_ok(),
+                "{text:?} in {family:?} did not parse: {svg}"
+            );
+        }
+    }
 
     #[test]
     fn short_strings_pass_through() {
