@@ -14,6 +14,21 @@ use std::ffi::{c_void, CStr, CString};
 use ash::vk;
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 
+/// Memory blocks start small and double as a client needs more, up to the
+/// allocator's old fixed sizes. Those defaults (a 256 MiB device block and a
+/// 64 MiB host one, reserved on the first allocation of each) held ~320 MiB
+/// for every client, against ~60 MiB of allocations in a typical window — a
+/// status-bar module included. On the iGPU that is system RAM. Until
+/// gpu-allocator 0.28 the sizes passed here were ignored (0.27.0's
+/// `Allocator::new` stored the defaults whatever the descriptor said).
+/// An allocation larger than the current block size gets one of its own.
+fn allocation_sizes() -> gpu_allocator::AllocationSizes {
+    const MIB: u64 = 1024 * 1024;
+    gpu_allocator::AllocationSizes::new(8 * MIB, 4 * MIB)
+        .with_max_device_memblock_size(256 * MIB)
+        .with_max_host_memblock_size(64 * MIB)
+}
+
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 
 unsafe extern "system" fn debug_callback(
@@ -653,7 +668,7 @@ impl VkCore {
             physical_device,
             debug_settings: Default::default(),
             buffer_device_address: ray_query,
-            allocation_sizes: Default::default(),
+            allocation_sizes: allocation_sizes(),
         })
         .expect("Failed to create GPU allocator");
 

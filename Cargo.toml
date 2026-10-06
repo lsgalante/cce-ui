@@ -56,7 +56,7 @@ web-time = "1"
 raw-window-handle = "0.6"
 # Raw-Vulkan backend (versions match what wgpu 24 already pulled in).
 ash = "0.38"
-gpu-allocator = { version = "0.27", default-features = false, features = ["vulkan"] }
+gpu-allocator = { version = "0.28", default-features = false, features = ["vulkan", "std"] }
 naga = { version = "24", features = ["wgsl-in", "spv-out"] }
 libc = "0.2"
 rfd = "0.15"

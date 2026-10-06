@@ -81,6 +81,10 @@ pub(crate) struct SceneStage {
     staged: Option<StagedScene>,
     /// True once the backdrop holds rendered content worth copying to screen.
     pub(crate) backdrop_valid: bool,
+    /// Whether the app has ever staged a scene (or a traced one). Until it
+    /// has, the backdrop and depth targets are 1×1 — see
+    /// [`Scene::target_extent`].
+    pub(crate) wanted: bool,
     /// Toward the flat shading's light, unit length — see
     /// `VkRenderer::set_scene_light`.
     pub(crate) light: [f32; 3],
@@ -549,8 +553,10 @@ impl SceneStage {
                 frames,
                 staged: None,
                 backdrop_valid: false,
+                wanted: false,
                 light: glam::Vec3::from_array(DEFAULT_SCENE_LIGHT).normalize().to_array(),
             };
+            let extent = stage.target_extent(extent);
             stage.resize(device, allocator, extent);
             stage
         }
@@ -570,6 +576,23 @@ impl SceneStage {
                     .buffer_info(&buffer_infos)],
                 &[],
             );
+        }
+    }
+
+    /// The size the backdrop and depth targets are made at for a surface of
+    /// `surface`: the surface's, once a scene has been staged; 1×1 before.
+    ///
+    /// Most windows never draw a 3D scene, and full-surface targets cost
+    /// ~33 MiB a window at 2560×1600 (D32 depth plus the RGBA backdrop). A
+    /// 2D frame still samples the backdrop — the frosted root plate reads it,
+    /// zeroed — and a zeroed 1×1 image reads the same under the UI's
+    /// clamp-to-edge sampler at normalized coordinates. The first
+    /// `stage_scene` / `stage_rt` grows them (`VkRenderer::want_scene_targets`).
+    pub(crate) fn target_extent(&self, surface: vk::Extent2D) -> vk::Extent2D {
+        if self.wanted {
+            surface
+        } else {
+            vk::Extent2D { width: 1, height: 1 }
         }
     }
 

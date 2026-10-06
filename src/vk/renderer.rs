@@ -1415,10 +1415,11 @@ impl VkRenderer {
     /// a compositor on the integrated one — its swapchain is rebuilt at the
     /// same size a few frames in (`CCE_PRESENT_DEBUG` logs every rebuild).
     fn sync_backdrop_targets(&mut self) {
+        let extent = self.scene.target_extent(self.extent);
         let recreated = self.scene.resize(
             &self.core.device,
             self.core.allocator.as_mut().unwrap(),
-            self.extent,
+            extent,
         );
         if recreated {
             clear_image_to_shader_read(
@@ -1553,7 +1554,25 @@ impl VkRenderer {
     /// with no staged scene reuse the previous backdrop — the ash equivalent of
     /// the app's viewport-changed cache.
     pub fn stage_scene(&mut self, scissor: (u32, u32, u32, u32), draws: Vec<SceneDraw>) {
+        self.want_scene_targets();
         self.scene.stage(scissor, draws);
+    }
+
+    /// Grow the backdrop and depth targets to the surface the first time a
+    /// scene is staged; until then they are 1×1 (`Scene::target_extent`).
+    /// Runs between frames, the device idle, as a resize does.
+    fn want_scene_targets(&mut self) {
+        if self.scene.wanted {
+            return;
+        }
+        self.scene.wanted = true;
+        if self.surface == vk::SurfaceKHR::null() {
+            return; // sized with the swapchain when one exists
+        }
+        unsafe {
+            let _ = self.core.device.device_wait_idle();
+        }
+        self.sync_backdrop_targets();
     }
 
     /// Add textured quads to the scene staged by the last [`stage_scene`] —
@@ -1650,6 +1669,8 @@ impl VkRenderer {
     /// RT mode is on: each frame adds a sample; a camera/pane/scene change
     /// restarts the accumulation. No-op until `set_rt_scene` has run.
     pub fn stage_rt(&mut self, pane: (u32, u32, u32, u32), camera: RtCamera) {
+        // The tracer blits into the backdrop at the surface's size.
+        self.want_scene_targets();
         if let Some(rt) = self.rt.as_mut() {
             rt.set_background(self.rt_background);
             rt.set_environment(self.rt_environment);
