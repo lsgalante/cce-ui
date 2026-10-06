@@ -355,6 +355,17 @@ pub struct Graph {
     /// node id). The host rewires: dragged.Input = upstream name,
     /// downstream.Input = dragged's name.
     pending_splice: Option<(String, String, String)>,
+    /// Whether a node dropped onto another node SWAPS with it
+    /// ([`Graph::set_swap_on_drop`]); off, it is walked to the nearest free
+    /// cell, as it always was.
+    swap_on_drop: bool,
+    /// The node the in-flight drag would swap with — the one standing on
+    /// the cell the ghost is over — by id, as `splice_target` is held.
+    swap_target: Option<String>,
+    /// A completed swap drop for the host: (dragged node id, the other
+    /// node's id). The two have traded cells already; the host trades
+    /// whatever else it keeps — wires, for the designer.
+    pending_swap: Option<(String, String)>,
     /// The host's choice of wire style; `None` follows the config.
     wire_style: Option<WireStyle>,
 }
@@ -403,6 +414,9 @@ impl Graph {
             hovered_port: None,
             splice_target: None,
             pending_splice: None,
+            swap_on_drop: false,
+            swap_target: None,
+            pending_swap: None,
             wire_style: None,
         })
     }
@@ -492,7 +506,9 @@ impl Graph {
         let idx = self.dragging_idx?;
         let (nx, ny) = self.drag_node_pos?;
         let (c, r) = self.nearest_cell(nx, ny)?;
-        let (c, r) = self.find_empty_cell(c, r, Some(idx));
+        // A swap lands ON the other node's cell; anything else walks off
+        // an occupied one.
+        let (c, r) = if self.swap_target_idx().is_some() { (c, r) } else { self.find_empty_cell(c, r, Some(idx)) };
         let (x, y) = self.cell_origin(c, r);
         Some((x, y, self.node_w, self.node_h))
     }
@@ -714,6 +730,42 @@ impl Graph {
         self.wire_style = style;
     }
 
+    /// Whether a node dropped onto another node swaps places with it: the
+    /// dragged node takes the other's cell and the other takes the dragged
+    /// node's, and the host is told ([`GraphController::take_pending_swap`])
+    /// so it can trade whatever else the two own. Off by default — a drop
+    /// on an occupied cell walks to the nearest free one — so a host opts
+    /// in. While the ghost is over a node that node is the swap target:
+    /// coloured as the dragged node is, the drop target's cell, and it wins
+    /// over a wire the ghost also touches (a node's own wires run into its
+    /// body, so the two meet whenever a ghost is over a node).
+    pub fn set_swap_on_drop(&mut self, on: bool) {
+        self.swap_on_drop = on;
+        if !on {
+            self.swap_target = None;
+        }
+    }
+
+    /// The node the in-flight drag would swap with, by index.
+    pub fn swap_target_idx(&self) -> Option<usize> {
+        let id = self.swap_target.as_ref()?;
+        self.nodes.iter().position(|n| &n.id == id)
+    }
+
+    /// The node standing on the cell the dragged node's ghost at (nx, ny)
+    /// is nearest — the one a drop there would swap with.
+    fn swap_candidate(&self, dragged: usize, nx: f32, ny: f32) -> Option<usize> {
+        if !self.swap_on_drop {
+            return None;
+        }
+        let (c, r) = self.nearest_cell(nx, ny)?;
+        self.nodes
+            .iter()
+            .enumerate()
+            .find(|(i, n)| *i != dragged && n.position.0.round() == c && n.position.1.round() == r)
+            .map(|(i, _)| i)
+    }
+
     /// A wire's width as asked for: `graph_wire_size` px at 100%, scaled
     /// with the node body as the zoom scales it, and at most half a body.
     fn wire_size_at_zoom(&self) -> f32 {
@@ -825,7 +877,7 @@ impl Graph {
         for i in 0..self.nodes.len() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
-                let mut bg_color = if self.dragging_idx == Some(i) {
+                let mut bg_color = if self.dragging_idx == Some(i) || self.swap_target_idx() == Some(i) {
                     colors::node_drag_color()
                 } else if self.selected_idx == Some(i) {
                     colors::node_selected_color()
@@ -1259,13 +1311,21 @@ impl Input for Graph {
             };
 
             self.drag_node_pos = Some((nx, ny));
+            // A node under the ghost is a swap, which wins over a wire.
+            self.swap_target = self
+                .dragging_idx
+                .and_then(|i| self.swap_candidate(i, nx, ny))
+                .map(|o| self.nodes[o].id.clone());
             // The wire the ghost sits on right now, held by id (hosts
             // re-sync between events) and drawn highlighted — the drop
             // affordance the user aims by.
-            self.splice_target = self
-                .dragging_idx
-                .and_then(|i| self.splice_wire_at(i, nx, ny))
-                .map(|(s, d)| (self.nodes[s].id.clone(), self.nodes[d].id.clone()));
+            self.splice_target = if self.swap_target.is_some() {
+                None
+            } else {
+                self.dragging_idx
+                    .and_then(|i| self.splice_wire_at(i, nx, ny))
+                    .map(|(s, d)| (self.nodes[s].id.clone(), self.nodes[d].id.clone()))
+            };
             return true;
         }
         false
@@ -1506,8 +1566,20 @@ impl Graph {
     /// resolving a held splice target into `pending_splice` for the host.
     fn commit_drag(&mut self) {
         let target = self.splice_target.take();
+        let swap = self.swap_target_idx();
+        self.swap_target = None;
         if let Some((nx, ny)) = self.drag_node_pos.take() {
             if let Some(idx) = self.dragging_idx.take() {
+                // A swap: the two trade cells — the dragged node's own
+                // position is still the cell it was picked up from.
+                if let Some(other) = swap.filter(|&o| o != idx) {
+                    let from = self.nodes[idx].position;
+                    self.nodes[idx].position = self.nodes[other].position;
+                    self.nodes[other].position = from;
+                    self.pending_swap = Some((self.nodes[idx].id.clone(), self.nodes[other].id.clone()));
+                    self.dragging_id = None;
+                    return;
+                }
                 if let Some((c, r)) = self.nearest_cell(nx, ny) {
                     let (c, r) = self.find_empty_cell(c, r, Some(idx));
                     self.nodes[idx].position = (c, r);
@@ -1568,11 +1640,13 @@ impl GraphController for Graph {
                 self.dragging_id = None;
                 self.drag_node_pos = None;
                 self.splice_target = None;
+                self.swap_target = None;
             }
         } else {
             self.dragging_idx = None;
             self.drag_node_pos = None;
             self.splice_target = None;
+            self.swap_target = None;
         }
 
         // double_clicked_id / double_click_timer survive deliberately: they
@@ -1624,6 +1698,9 @@ impl GraphController for Graph {
     }
     fn take_pending_connection_to_port(&mut self) -> Option<(String, String, usize)> {
         self.pending_connection.take()
+    }
+    fn take_pending_swap(&mut self) -> Option<(String, String)> {
+        self.pending_swap.take()
     }
     fn take_pending_splice(&mut self) -> Option<(String, String, String)> {
         self.pending_splice.take()
@@ -1796,6 +1873,61 @@ mod tests {
         for style in WireStyle::ALL {
             node_dropped_on_a_wire_reports_a_splice_in(style);
         }
+    }
+
+    /// With swap-on-drop, a node dropped on another node trades cells with
+    /// it and reports the swap — over the wire between them, which the
+    /// ghost also touches. Without it, the drop walks to a free cell as it
+    /// always did.
+    #[test]
+    fn a_node_dropped_on_a_node_swaps_with_it() {
+        let build = |swap: bool| {
+            let mut ctx = UiContext::new();
+            let mut g = Graph::new();
+            WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
+            g.set_grid_pitch(100.0, 60.0);
+            g.set_node_size(80.0, 40.0);
+            g.set_grid_origin(140.0, 120.0);
+            g.set_grid_snap_enabled(true);
+            g.set_swap_on_drop(swap);
+            let node = |id: &str, name: &str, col: f32, row: f32, input: &str| GraphNode {
+                id: id.into(),
+                name: name.into(),
+                position: (col, row),
+                parameters: vec![("Input".to_string(), input.to_string(), "node".to_string())],
+                geom_visible: true,
+                node_type: String::new(),
+                inputs: 1,
+                outputs: 1,
+            };
+            // alpha above beta, beta reading alpha.
+            g.set_nodes(&[node("a", "alpha", 0.0, 0.0, ""), node("b", "beta", 0.0, 2.0, "alpha")]);
+            let (id, ptr) = (g.id(), g.as_ptr_mut());
+            ctx.register_widget(id, ptr);
+            // Drag alpha by its middle onto beta's middle.
+            assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 140.0, 120.0, &mut ctx));
+            g.drag_begin(140.0, 120.0);
+            assert!(g.drag_update(140.0, 240.0));
+            (g, ctx)
+        };
+
+        let (mut g, mut ctx) = build(true);
+        assert_eq!(g.swap_target_idx(), Some(1), "beta is the swap target while the ghost is on it");
+        assert_eq!(g.drop_target_cell_rect(), g.node_rect(1), "and its cell is where the drop lands");
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 140.0, 240.0, &mut ctx));
+        assert_eq!(GraphController::take_pending_swap(&mut *g), Some(("a".to_string(), "b".to_string())));
+        assert_eq!(GraphController::take_pending_swap(&mut *g), None, "take-once");
+        assert_eq!(GraphController::take_pending_splice(&mut *g), None, "a swap is not a splice");
+        let nodes = GraphController::get_nodes(&*g);
+        assert_eq!((nodes[0].position, nodes[1].position), ((0.0, 2.0), (0.0, 0.0)), "the two traded cells");
+
+        let (mut g, mut ctx) = build(false);
+        assert_eq!(g.swap_target_idx(), None);
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 140.0, 240.0, &mut ctx));
+        assert_eq!(GraphController::take_pending_swap(&mut *g), None);
+        let nodes = GraphController::get_nodes(&*g);
+        assert_eq!(nodes[1].position, (0.0, 2.0), "beta stays");
+        assert_ne!(nodes[0].position, (0.0, 2.0), "alpha walks off the taken cell");
     }
 
     fn node_dropped_on_a_wire_reports_a_splice_in(style: WireStyle) {

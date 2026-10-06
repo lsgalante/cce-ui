@@ -1663,6 +1663,27 @@ Splicing a dragged node onto a wire takes only a wire into port 0, since
 the splice rewires Inputs. `every_node_parameter_is_a_wire_into_its_own_port`
 is the test.
 
+## A node dropped on a node can swap with it (since 2026-10-06)
+
+`Graph::set_swap_on_drop(true)` makes a node dropped on another node SWAP
+places with it: the dragged node takes the other's cell and the other the
+cell the dragged node was picked up from, and
+`GraphController::take_pending_swap` hands the host (dragged id, other id)
+to trade whatever else the two own — the designer trades their wires. Off
+by default, where a drop on an occupied cell walks to the nearest free
+one as it always did, so cce-files and cce-graph see no change.
+
+- **The swap target** (`swap_target`, by id like `splice_target`) is the
+  node on the cell nearest the ghost, set in `drag_update`. While it holds
+  it is coloured as the dragged node is, `drop_target_cell_rect` is ITS
+  cell (no walk), and it wins over a wire: a node's own wires run into its
+  body, so a ghost over a node always touches one, and a swap and a splice
+  are never both reported.
+- **A host turns it off for a multi-node drag**: the widget drags one node,
+  and one of a group trading places would scatter the rest.
+
+`a_node_dropped_on_a_node_swaps_with_it` is the test.
+
 ## Units — logical px inside, real lengths at the edges
 
 The toolkit's working unit is and stays the **logical pixel**: every layout

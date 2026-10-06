@@ -730,6 +730,13 @@ pub trait GraphController {
     fn take_pending_splice(&mut self) -> Option<(String, String, String)> {
         None
     }
+    /// A node dropped onto another node, which it swapped places with:
+    /// (dragged node id, the other node's id). The widget has traded their
+    /// cells; the host trades the rest. Only while the host opted in
+    /// (`Graph::set_swap_on_drop`); default None.
+    fn take_pending_swap(&mut self) -> Option<(String, String)> {
+        None
+    }
     /// The wire into an Input that runs through the body a node would have
     /// at lattice cell (col, row), as (upstream id, downstream id): where a
     /// node ADDED there splices in, by the hit test a drop uses. Default
