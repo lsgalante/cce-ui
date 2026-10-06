@@ -2018,6 +2018,15 @@ impl crate::layout::RenderTarget for PaintCtx {
     fn icon(&mut self, name: &str, rect: Rect, color: [f32; 4]) {
         PaintCtx::icon(self, name, rect, color);
     }
+    fn line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [f32; 4], cap: Cap) {
+        PaintCtx::vector(self, x1, y1, x2, y2, thickness, color, cap);
+    }
+    fn arc(&mut self, cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4]) {
+        PaintCtx::arc(self, cx, cy, radius, thickness, start, end, color);
+    }
+    fn circle(&mut self, cx: f32, cy: f32, radius: f32, color: [f32; 4]) {
+        PaintCtx::circle(self, cx, cy, radius, color);
+    }
 
     fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
         self.quad(Rect { x, y, width: w, height: h }, color);

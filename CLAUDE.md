@@ -1822,6 +1822,14 @@ falls back to, and never built from primitives. Apps hold to the same rule.
   markdown's unrenderable embed (`Draw::Icon`, `link`), the tree list's
   missing-icon fallback (now an empty slot) and the copy button's fallback
   ("📋" → "Copy").
+- **A flat host gets glyphs, strokes, arcs and discs.** `render_widget`
+  replays a widget onto a host's `RenderTarget` and dropped every image,
+  vector, arc and circle: after the symbols became glyphs a flat host lost
+  them all, and a graph there (cce-files' Graph page) never showed a wire. A
+  bundled glyph now goes to `RenderTarget::icon`, a stroke to `line`, an arc
+  to `arc`, a disc to `circle` — each a no-op by default, so a host draws what
+  it implements (`a_widget_glyph_reaches_a_flat_host`,
+  `a_graphs_wires_reach_a_flat_host`).
 - **Kept as shapes**, being indicators and not symbols: `StatusDot`'s LED
   disc and the plate dock's corner dot.
 

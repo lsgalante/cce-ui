@@ -4115,6 +4115,14 @@ pub trait RenderTarget {
     /// A bundled cce-icons glyph — see `PaintCtx::icon`. A target that
     /// cannot draw images (the legacy `PopoverCollector`) draws nothing.
     fn icon(&mut self, _name: &str, _rect: crate::scene::layout::Rect, _color: [f32; 4]) {}
+    /// A straight stroke — see `PaintCtx::vector`. What a graph's wires are
+    /// made of; a target that draws none (the default) shows no wires.
+    fn line(&mut self, _x1: f32, _y1: f32, _x2: f32, _y2: f32, _thickness: f32, _color: [f32; 4], _cap: crate::scene::paint::Cap) {}
+    /// A stroked arc, `radius` its OUTER edge — see `PaintCtx::arc`. A
+    /// rounded wire's bends.
+    fn arc(&mut self, _cx: f32, _cy: f32, _radius: f32, _thickness: f32, _start: f32, _end: f32, _color: [f32; 4]) {}
+    /// A filled disc — see `PaintCtx::circle`. A graph's ports.
+    fn circle(&mut self, _cx: f32, _cy: f32, _radius: f32, _color: [f32; 4]) {}
     /// A flush inset control plate ([`PaintCtx::inset_plate`]) — the raised
     /// control surface (groove ring down, beveled lip back up). Lets a popover
     /// draw the ACTUAL widget surface expanded (the Dropdown's grown trigger).
@@ -4450,6 +4458,36 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
                 match font {
                     Some(ref f) => pc.text_with_font_and_bounds(&text, x, y, font_size, color_f32, f, merged),
                     None => pc.text_with_bounds(&text, x, y, font_size, color_f32, merged),
+                }
+            }
+            // Strokes, arcs and discs — a graph's wires and ports, chiefly.
+            // Until 2026-10-06 these were dropped too, so a graph in a flat
+            // host (cce-files' Graph page) drew its nodes and no wires.
+            Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => {
+                if let Some(c) = item.clip {
+                    pc.push_clip_rect(c.x, c.y, c.width, c.height);
+                }
+                pc.line(x1, y1, x2, y2, thickness, color, cap);
+                if item.clip.is_some() {
+                    pc.pop_clip_rect();
+                }
+            }
+            Prim::Arc { cx, cy, radius, thickness, start, end, color } => {
+                if let Some(c) = item.clip {
+                    pc.push_clip_rect(c.x, c.y, c.width, c.height);
+                }
+                pc.arc(cx, cy, radius, thickness, start, end, color);
+                if item.clip.is_some() {
+                    pc.pop_clip_rect();
+                }
+            }
+            Prim::Circle { cx, cy, radius, color } => {
+                if let Some(c) = item.clip {
+                    pc.push_clip_rect(c.x, c.y, c.width, c.height);
+                }
+                pc.circle(cx, cy, radius, color);
+                if item.clip.is_some() {
+                    pc.pop_clip_rect();
                 }
             }
             // A widget's GLYPH (a dropdown's arrow, a spinbox's −/+, a menu
@@ -6626,6 +6664,51 @@ mod tests {
         fn text_with_bounds(&mut self, content: &str, x: f32, y: f32, _size: f32, _color: [f32; 4], bounds: Option<[f32; 4]>) {
             self.bounded.push((content.to_string(), x, y, bounds));
         }
+    }
+
+    /// A graph's wires and ports reach a flat host: `render_widget` hands
+    /// its strokes to `RenderTarget::line` (and arcs and discs to `arc` and
+    /// `circle`), where it used to drop them, so cce-files' Graph page drew
+    /// nodes and no wires.
+    #[test]
+    fn a_graphs_wires_reach_a_flat_host() {
+        #[derive(Default)]
+        struct Strokes {
+            lines: usize,
+            circles: usize,
+        }
+        impl RenderTarget for Strokes {
+            fn rect(&mut self, _: [f32; 4], _: f32, _: f32, _: f32, _: f32) {}
+            fn text(&mut self, _: &str, _: f32, _: f32, _: f32, _: [f32; 4]) {}
+            fn line(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: [f32; 4], _: crate::scene::paint::Cap) {
+                self.lines += 1;
+            }
+            fn arc(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: [f32; 4]) {
+                self.lines += 1;
+            }
+            fn circle(&mut self, _: f32, _: f32, _: f32, _: [f32; 4]) {
+                self.circles += 1;
+            }
+        }
+        use crate::widget::GraphController;
+        let node = |name: &str, pos: (f32, f32), input: Option<&str>| crate::widget::GraphNode {
+            id: name.to_string(),
+            name: name.to_string(),
+            position: pos,
+            parameters: input.map(|i| vec![("input".to_string(), i.to_string(), "string".to_string())]).unwrap_or_default(),
+            geom_visible: true,
+            node_type: String::new(),
+            inputs: 1,
+            outputs: 1,
+        };
+        let mut graph = crate::widget::Graph::new();
+        graph.set_grid_origin(100.0, 100.0);
+        graph.set_nodes(&[node("a", (0.0, 0.0), None), node("b", (0.0, 1.0), Some("a"))]);
+        let mut pc = Strokes::default();
+        let mut ctx = crate::context::UiContext::new();
+        render_widget(&mut pc, &mut graph, 0.0, 0.0, 600.0, 600.0, &mut ctx);
+        assert!(pc.lines > 0, "the wire a -> b reached the host");
+        assert!(pc.circles > 0, "the ports reached the host");
     }
 
     /// A widget's glyph reaches a flat host: `render_widget` hands the
