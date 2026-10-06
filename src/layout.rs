@@ -5947,7 +5947,18 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         } else {
             ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0).min(2.0) as usize
         };
-        let content_start_y = top + pad + 19.0;
+        // Under relief styling the content stands off the well's top wall by
+        // the same inset it keeps from the side walls (`margin_x`, which is
+        // also what `finish` leaves below it), so a well reads as one even
+        // frame. The outline style's `pad + 19` predates the title tab: under
+        // relief the tab alone is `font_size + 10` tall, which left the first
+        // line touching the well's top wall at the default padding while the
+        // sides kept 20px and more.
+        let content_start_y = if relief_style {
+            relief_tab.map(|t| t.1 + t.3).unwrap_or(top) + margin_x
+        } else {
+            top + pad + 19.0
+        };
         let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
 
         Self {
@@ -6313,7 +6324,11 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let y = self.top + 7.0;
         let w = self.cw - 2.0 * pad;
         let h = self.content_y - y;
-        let extra_bottom = pad + 12.0;
+        // Under relief the well's walls are the allocation's edges, so the
+        // floor below the content matches the inset beside and above it (see
+        // `new`). The outline frame sits `pad` in from its allocation and
+        // keeps its own slack.
+        let extra_bottom = if self.relief_style { self.content_margin() } else { pad + 12.0 };
         let bottom = y + h + extra_bottom;
 
         if self.relief_style {
