@@ -19,6 +19,15 @@ use super::{ImageQuad, TextSpan};
 
 /// The atlas is one ATLAS_SIZE² RGBA8 texture (unorm, sampled nearest).
 pub const ATLAS_SIZE: u32 = 1024;
+
+/// What changed in a [`GlyphAtlas`] since a generation a renderer holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AtlasChange {
+    None,
+    /// One rectangle, in texels, covering every glyph written since.
+    Region { x: u32, y: u32, w: u32, h: u32 },
+    Full,
+}
 const ATLAS_PAD: u32 = 1;
 
 #[repr(C)]
@@ -93,6 +102,13 @@ pub struct GlyphAtlas {
     pixels: Vec<u8>,
     /// Bumped whenever `pixels` changes; a renderer re-uploads on a change.
     generation: u64,
+    /// The rectangle each glyph insert wrote, with the generation it made —
+    /// what [`changes_since`](Self::changes_since) unions so a renderer can
+    /// upload only what moved. Cleared by a repack.
+    dirty: Vec<(u64, [u32; 4])>,
+    /// Generations at or below this are no longer in `dirty` (a repack, or
+    /// the log's cap): a renderer that last saw one re-uploads it all.
+    dirty_floor: u64,
     glyphs: HashMap<CacheKey, GlyphEntry>,
     shelf: Shelf,
     /// The staged text: replaced only by the next [`prepare`](Self::prepare),
@@ -111,9 +127,42 @@ impl GlyphAtlas {
         Self {
             pixels: vec![0u8; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize],
             generation: 1,
+            dirty: Vec::new(),
+            dirty_floor: 0,
             glyphs: HashMap::new(),
             shelf: Shelf::new(),
             vertices: Vec::new(),
+        }
+    }
+
+    /// What a renderer holding generation `since` must upload to be
+    /// current: nothing, one rectangle covering every glyph written since,
+    /// or the whole atlas (a repack happened, or `since` predates the log).
+    /// Generation 1 is the cleared atlas a new one starts as.
+    pub fn changes_since(&self, since: u64) -> AtlasChange {
+        if since >= self.generation {
+            return AtlasChange::None;
+        }
+        if since < self.dirty_floor {
+            return AtlasChange::Full;
+        }
+        let mut rect: Option<[u32; 4]> = None;
+        for &(generation, [x, y, w, h]) in &self.dirty {
+            if generation <= since {
+                continue;
+            }
+            rect = Some(match rect {
+                None => [x, y, w, h],
+                Some([rx, ry, rw, rh]) => {
+                    let (x0, y0) = (rx.min(x), ry.min(y));
+                    let (x1, y1) = ((rx + rw).max(x + w), (ry + rh).max(y + h));
+                    [x0, y0, x1 - x0, y1 - y0]
+                }
+            });
+        }
+        match rect {
+            Some([x, y, w, h]) => AtlasChange::Region { x, y, w, h },
+            None => AtlasChange::None,
         }
     }
 
@@ -178,6 +227,15 @@ impl GlyphAtlas {
             }
         }
         self.generation += 1;
+        // Bounded: past the cap the oldest entries go, and a renderer that
+        // has fallen that far behind gets a full upload instead.
+        const DIRTY_CAP: usize = 4096;
+        if self.dirty.len() >= DIRTY_CAP {
+            let drop = self.dirty.len() / 2;
+            self.dirty_floor = self.dirty[drop - 1].0;
+            self.dirty.drain(..drop);
+        }
+        self.dirty.push((self.generation, [u, v, w, h]));
 
         let entry = GlyphEntry {
             u,
@@ -212,6 +270,8 @@ impl GlyphAtlas {
             self.shelf = Shelf::new();
             self.pixels.fill(0);
             self.generation += 1;
+            self.dirty.clear();
+            self.dirty_floor = self.generation;
             self.vertices.clear();
             if !self.try_prepare(font_system, swash_cache, spans, width, height) {
                 log::error!("glyph atlas full even after repack; text truncated this frame");
@@ -353,4 +413,39 @@ pub fn image_quad_vertices(images: &[ImageQuad], width: u32, height: u32) -> Vec
         verts.extend([tl, tr, bl, tr, br, bl]);
     }
     verts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn changes_since_unions_the_glyphs_written_after_a_generation() {
+        let mut atlas = GlyphAtlas::new();
+        assert_eq!(atlas.changes_since(1), AtlasChange::None, "a new atlas is the cleared one");
+        // Two glyphs written, as `rasterize` records them.
+        atlas.generation += 1;
+        atlas.dirty.push((atlas.generation, [10, 0, 8, 12]));
+        atlas.generation += 1;
+        atlas.dirty.push((atlas.generation, [18, 0, 6, 14]));
+        assert_eq!(atlas.changes_since(1), AtlasChange::Region { x: 10, y: 0, w: 14, h: 14 });
+        assert_eq!(atlas.changes_since(2), AtlasChange::Region { x: 18, y: 0, w: 6, h: 14 });
+        assert_eq!(atlas.changes_since(3), AtlasChange::None);
+    }
+
+    #[test]
+    fn a_repack_or_a_fallen_behind_reader_uploads_it_all() {
+        let mut atlas = GlyphAtlas::new();
+        atlas.generation += 1;
+        atlas.dirty.push((atlas.generation, [0, 0, 4, 4]));
+        // What `prepare` does on a full atlas.
+        atlas.generation += 1;
+        atlas.dirty.clear();
+        atlas.dirty_floor = atlas.generation;
+        assert_eq!(atlas.changes_since(2), AtlasChange::Full, "a reader from before the repack");
+        assert_eq!(atlas.changes_since(3), AtlasChange::None, "a reader of the cleared atlas");
+        atlas.generation += 1;
+        atlas.dirty.push((atlas.generation, [0, 0, 5, 5]));
+        assert_eq!(atlas.changes_since(3), AtlasChange::Region { x: 0, y: 0, w: 5, h: 5 });
+    }
 }

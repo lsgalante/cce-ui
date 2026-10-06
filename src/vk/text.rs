@@ -26,15 +26,25 @@ use cosmic_text::{FontSystem, SwashCache};
 
 use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 pub use crate::draw::TextSpan;
-use crate::draw::glyphs::{GlyphAtlas, GlyphVertex, ATLAS_SIZE};
+use crate::draw::glyphs::{AtlasChange, GlyphAtlas, GlyphVertex, ATLAS_SIZE};
 
 struct TextFrame {
     vertex: AllocatedBuffer,
     vertex_count: u32,
+    /// Holds what this frame copies into the atlas image: one region's rows
+    /// packed tight, or the whole atlas after a repack. Grown on demand —
+    /// a full-size buffer per frame in flight was 8 MiB of mapped memory
+    /// per window, held whether or not a glyph ever changed again.
     staging: AllocatedBuffer,
-    /// Atlas generation this frame's staging buffer last uploaded.
-    uploaded_generation: u64,
+    /// What this frame's staging holds for the image and the atlas
+    /// generation it brings the image to, recorded by `write_frame_buffers`
+    /// and copied by `record_upload` (which is when the image counts as
+    /// holding it).
+    pending: Option<(AtlasChange, u64)>,
 }
+
+/// Staging a frame starts with: room for a run of new glyphs.
+const STAGING_START: vk::DeviceSize = 64 * 1024;
 
 pub(crate) struct TextStage {
     pipeline: vk::Pipeline,
@@ -51,6 +61,11 @@ pub(crate) struct TextStage {
     /// The atlas and glyph quads (CPU side, shared with every renderer).
     atlas: GlyphAtlas,
     atlas_initialized: bool,
+    /// The atlas generation the GPU image holds (copied, or about to be by
+    /// a recorded frame). One image serves every frame in flight, so this
+    /// is one number, not one per frame. 1 is the cleared atlas, which the
+    /// image is cleared to on first use rather than uploaded.
+    image_generation: u64,
     frames: Vec<TextFrame>,
 }
 
@@ -283,7 +298,6 @@ impl TextStage {
                 &[],
             );
 
-            let atlas_bytes = (ATLAS_SIZE * ATLAS_SIZE * 4) as vk::DeviceSize;
             let frames = (0..frames_in_flight)
                 .map(|_| TextFrame {
                     vertex: create_cpu_buffer(
@@ -297,11 +311,11 @@ impl TextStage {
                     staging: create_cpu_buffer(
                         device,
                         allocator,
-                        atlas_bytes,
+                        STAGING_START,
                         vk::BufferUsageFlags::TRANSFER_SRC,
                         "atlas-staging",
                     ),
-                    uploaded_generation: 0,
+                    pending: None,
                 })
                 .collect();
 
@@ -318,6 +332,7 @@ impl TextStage {
                 atlas_allocation: Some(atlas_allocation),
                 atlas: GlyphAtlas::new(),
                 atlas_initialized: false,
+                image_generation: 1,
                 frames,
             }
         }
@@ -368,23 +383,53 @@ impl TextStage {
         }
         frame.vertex_count = self.atlas.vertices().len() as u32;
 
+        // Stage only what changed since the image was last brought up to
+        // date: the rows of one region, or everything after a repack. Until
+        // 2026-10-06 each frame in flight re-staged and re-copied the whole
+        // 4 MiB atlas for any new glyph.
+        let change = self.atlas.changes_since(self.image_generation);
         let frame = &mut self.frames[frame_index];
-        if frame.uploaded_generation != self.atlas.generation() {
-            let pixels = self.atlas.pixels();
-            frame.staging.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()
-                [..pixels.len()]
-                .copy_from_slice(pixels);
+        frame.pending = None;
+        let (row_bytes, rows, x0, y0) = match change {
+            AtlasChange::None => return,
+            AtlasChange::Full => (ATLAS_SIZE * 4, ATLAS_SIZE, 0, 0),
+            AtlasChange::Region { x, y, w, h } => (w * 4, h, x, y),
+        };
+        let needed = (row_bytes * rows) as vk::DeviceSize;
+        if needed > frame.staging.size {
+            let mut old = std::mem::replace(&mut frame.staging, AllocatedBuffer::null());
+            destroy_cpu_buffer(device, allocator, &mut old);
+            frame.staging = create_cpu_buffer(
+                device,
+                allocator,
+                needed.next_power_of_two(),
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                "atlas-staging",
+            );
         }
+        let pixels = self.atlas.pixels();
+        let mapped = frame.staging.allocation.as_mut().unwrap().mapped_slice_mut().unwrap();
+        let stride = (ATLAS_SIZE * 4) as usize;
+        for r in 0..rows as usize {
+            let src = (y0 as usize + r) * stride + x0 as usize * 4;
+            let dst = r * row_bytes as usize;
+            mapped[dst..dst + row_bytes as usize].copy_from_slice(&pixels[src..src + row_bytes as usize]);
+        }
+        frame.pending = Some((change, self.atlas.generation()));
     }
 
     /// Record the atlas upload (if this frame's staging is newer than the image).
     /// Must be called outside a render pass.
     pub(crate) fn record_upload(&mut self, device: &ash::Device, cmd: vk::CommandBuffer, frame_index: usize) {
         let frame = &mut self.frames[frame_index];
-        if frame.uploaded_generation == self.atlas.generation() {
+        let pending = frame.pending.take();
+        if pending.is_none() && self.atlas_initialized {
             return;
         }
-        frame.uploaded_generation = self.atlas.generation();
+        if let Some((_, generation)) = pending {
+            self.image_generation = generation;
+        }
+        let pending = pending.map(|(change, _)| change);
 
         let range = vk::ImageSubresourceRange::default()
             .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -423,26 +468,41 @@ impl TextStage {
                     .image(self.atlas_image)
                     .subresource_range(range)],
             );
-            device.cmd_copy_buffer_to_image(
-                cmd,
-                frame.staging.buffer,
-                self.atlas_image,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &[vk::BufferImageCopy::default()
-                    .buffer_offset(0)
-                    .buffer_row_length(ATLAS_SIZE)
-                    .buffer_image_height(ATLAS_SIZE)
-                    .image_subresource(
-                        vk::ImageSubresourceLayers::default()
-                            .aspect_mask(vk::ImageAspectFlags::COLOR)
-                            .layer_count(1),
-                    )
-                    .image_extent(vk::Extent3D {
-                        width: ATLAS_SIZE,
-                        height: ATLAS_SIZE,
-                        depth: 1,
-                    })],
-            );
+            // A fresh image is cleared to the empty atlas rather than
+            // uploaded from it (`image_generation` starts at the cleared one).
+            if old_layout == vk::ImageLayout::UNDEFINED {
+                device.cmd_clear_color_image(
+                    cmd,
+                    self.atlas_image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &vk::ClearColorValue { float32: [0.0; 4] },
+                    &[range],
+                );
+            }
+            let region = match pending {
+                Some(AtlasChange::Full) => Some((0, 0, ATLAS_SIZE, ATLAS_SIZE)),
+                Some(AtlasChange::Region { x, y, w, h }) => Some((x, y, w, h)),
+                Some(AtlasChange::None) | None => None,
+            };
+            if let Some((x, y, w, h)) = region {
+                device.cmd_copy_buffer_to_image(
+                    cmd,
+                    frame.staging.buffer,
+                    self.atlas_image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[vk::BufferImageCopy::default()
+                        .buffer_offset(0)
+                        .buffer_row_length(w)
+                        .buffer_image_height(h)
+                        .image_subresource(
+                            vk::ImageSubresourceLayers::default()
+                                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                .layer_count(1),
+                        )
+                        .image_offset(vk::Offset3D { x: x as i32, y: y as i32, z: 0 })
+                        .image_extent(vk::Extent3D { width: w, height: h, depth: 1 })],
+                );
+            }
             device.cmd_pipeline_barrier(
                 cmd,
                 vk::PipelineStageFlags::TRANSFER,
