@@ -586,6 +586,15 @@ impl Paint for MenuBar {
             (srgb[1] * 255.0) as u8,
             (srgb[2] * 255.0) as u8,
         ];
+        // The title's context arrow: the `chevron-down` glyph in the title's
+        // colour, standing where the " ▼" it replaced stood (the title's
+        // width is still measured with it, so nothing moves). A label at
+        // (x, y) sized `fs` puts it there.
+        let arrow_tint = [srgb[0], srgb[1], srgb[2], 1.0];
+        let arrow_at = |ctx: &mut PaintCtx, x: f32, y: f32, fs: f32| {
+            let side = (fs * 0.6).round();
+            ctx.icon("chevron-down", Rect { x, y: y + 0.5 * (fs - side), width: side, height: side }, arrow_tint);
+        };
         let padding_x = crate::layout::paginator_tab_padding_x();
 
         if let Some(ref label) = self.label {
@@ -637,6 +646,10 @@ impl Paint for MenuBar {
                     font_size,
                     text_color,
                 ) {
+                    if l.text == "▼" {
+                        arrow_at(ctx, l.x, l.y, l.font_size);
+                        continue;
+                    }
                     ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, None,
                         Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]));
                 }
@@ -656,6 +669,10 @@ impl Paint for MenuBar {
                 for (i, c) in self.display_title().chars().enumerate() {
                     let char_str = c.to_string();
                     let y_pos = start_y + i as f32 * line_height;
+                    if c == '▼' {
+                        arrow_at(ctx, x_pos, y_pos, font_size);
+                        continue;
+                    }
                     ctx.text_with(char_str, x_pos, y_pos, font_size, text_color, None,
                         Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]));
                 }
@@ -681,8 +698,13 @@ impl Paint for MenuBar {
             } else {
                 rect.x + start_x
             };
-            ctx.text_with(display_title, x_pos, text_y, font_size, text_color, None,
+            ctx.text_with(self.title.clone(), x_pos, text_y, font_size, text_color, None,
                 Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]));
+            if !self.context_options.is_empty() {
+                let lead = format!("{} ", self.title);
+                let ax = x_pos + crate::widget::display::measure_text_width(&lead, &font_fam, font_size);
+                arrow_at(ctx, ax, text_y, font_size);
+            }
         }
 
         // Every word this widget draws is bounded by the widget. A menu's
@@ -759,18 +781,20 @@ impl Paint for MenuBar {
                         let checked = self.menu_dropdown_checked.get(menu_idx)
                             .and_then(|menu| menu.get(i))
                             .and_then(|&v| v);
-                        let prefix = match checked {
-                            Some(true) => "✓ ",
-                            Some(false) => "  ",
-                            None => "",
-                        };
-                        let text = format!("{}{}", prefix, option);
+                        // A checkable item keeps a mark's room before its
+                        // text; a checked one wears the `check` glyph in it.
+                        const MARK: f32 = 9.0;
+                        let indent = if checked.is_some() { MARK + 6.0 } else { 0.0 };
                         let color = item_color(self.hovered_dropdown_item == Some(i), checked == Some(true));
                         let iy = crate::layout::align_text_y(dy + i as f32 * DROPDOWN_ITEM_H, DROPDOWN_ITEM_H, 12.0, 0.0);
+                        if checked == Some(true) {
+                            let my = dy + i as f32 * DROPDOWN_ITEM_H + 0.5 * (DROPDOWN_ITEM_H - MARK);
+                            pc.icon("check", Rect { x: dx + 8.0, y: my, width: MARK, height: MARK }, color);
+                        }
                         if let Some(ref f) = font {
-                            pc.text_with_font_and_bounds(&text, dx + 8.0, iy, 12.0, color, f, bounds);
+                            pc.text_with_font_and_bounds(option, dx + 8.0 + indent, iy, 12.0, color, f, bounds);
                         } else {
-                            pc.text_with_bounds(&text, dx + 8.0, iy, 12.0, color, bounds);
+                            pc.text_with_bounds(option, dx + 8.0 + indent, iy, 12.0, color, bounds);
                         }
                     }
                 }
@@ -1134,8 +1158,10 @@ impl MenuController for MenuBar {
                         let checked = self.menu_dropdown_checked.get(i)
                             .and_then(|menu| menu.get(item_idx))
                             .and_then(|&v| v);
+                        // `context_menu`'s mark convention: a checked item
+                        // is drawn with the `check` glyph.
                         let prefix = match checked {
-                            Some(true) => "✓ ",
+                            Some(true) => crate::widget::context_menu::MARK_CHECK,
                             Some(false) => "  ",
                             None => "",
                         };

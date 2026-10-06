@@ -116,17 +116,6 @@ impl FontSelector {
             }
         }
 
-        // The picker glyph: "Aa", the font-picker convention, in the dropdown arrow's
-        // grey — a text glyph every face has (the emoji this drew rendered as tofu
-        // wherever no emoji font was installed).
-        labels.push(TextLabel {
-            text: "Aa".to_string(),
-            x: rect.x + rect.width - 24.0,
-            y: crate::layout::align_text_y(rect.y, rect.height, 11.0, 0.0),
-            font_size: 11.0,
-            color: [0x83, 0x83, 0x8a],
-        });
-
         labels
     }
 }
@@ -196,18 +185,20 @@ impl Paint for FontSelector {
 }
 
 impl FontSelector {
-    /// Labels: family text clipped short of the picker glyph (the legacy per-label
-    /// bounds), glyph unclipped.
+    /// Labels: family text clipped short of the picker glyph, then the glyph
+    /// itself — the `font` icon in the dropdown arrow's grey, at the right
+    /// end (it was the text "Aa" until 2026-10-05, and an emoji that
+    /// rendered as tofu before that).
     fn paint_labels(&self, rect: Rect, ctx: &mut PaintCtx) {
         let font = self.widget_font();
         let clip_right = rect.x + rect.width - 24.0;
         let bounds = Some([rect.x, rect.y, clip_right, rect.y + rect.height]);
-        let labels = self.field_labels(rect);
-        let count = labels.len();
-        for (idx, l) in labels.into_iter().enumerate() {
-            let b = if idx < count - 1 { bounds } else { None };
-            ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, font.clone(), b);
+        for l in self.field_labels(rect) {
+            ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, font.clone(), bounds);
         }
+        const SIDE: f32 = 12.0;
+        let g = Rect { x: rect.x + rect.width - 24.0 + 0.5 * (24.0 - SIDE) - 2.0, y: rect.y + 0.5 * (rect.height - SIDE), width: SIDE, height: SIDE };
+        ctx.icon("font", g, [0x83 as f32 / 255.0, 0x83 as f32 / 255.0, 0x8a as f32 / 255.0, 1.0]);
     }
 }
 

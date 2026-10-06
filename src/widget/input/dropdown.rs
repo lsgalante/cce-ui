@@ -50,7 +50,14 @@ fn monospace_cell_width(font_family: &str, font_size: f32) -> f32 {
     ((w_m20 - w_m10) / 10.0).max(1.0)
 }
 
-/// Width of the ARROW SLOT, a trigger's right end in which its ▼ is
+/// The side of a trigger's arrow, the `chevron-down` glyph: the size the
+/// "▼" it replaced drew at in the 10px face it was set in.
+pub(crate) const ARROW_SIDE: f32 = 8.0;
+/// The arrow's colour: the grey the "▼" was drawn in (raw sRGB, as a text
+/// colour is).
+const ARROW_COLOR: [f32; 4] = [0x83 as f32 / 255.0, 0x83 as f32 / 255.0, 0x8a as f32 / 255.0, 1.0];
+
+/// Width of the ARROW SLOT, a trigger's right end in which its arrow is
 /// centred: `ARROW_SLOT` and a relief wall at this band height. A textpick
 /// picker (`ParametersBg`) is exactly this wide with its arrow in its middle,
 /// so its arrow lines up with every other trigger's in a column of rows.
@@ -161,7 +168,7 @@ pub struct Dropdown {
     /// parameter pane's textpick picker button nested in its TextBox), where
     /// the menu should span the whole field, not the button sliver.
     pub popover_anchor: Option<Rect>,
-    /// The ▼ stands in the MIDDLE of the trigger instead of in the arrow
+    /// The arrow stands in the MIDDLE of the trigger instead of in the arrow
     /// slot at its right end — for a trigger that carries nothing else
     /// (the textpick picker), whose padding about the arrow should be even.
     pub center_arrow: bool,
@@ -203,7 +210,7 @@ pub struct Dropdown {
     /// Keyboard focus (FocusIn / FocusOut): lights the trigger plate's rim.
     focused: bool,
     /// The open menu REPLACES the trigger instead of growing out of it: no
-    /// trigger band (display text + ▼) in the open surface, the rows alone,
+    /// trigger band (display text + arrow) in the open surface, the rows alone,
     /// with the menu's edge anchored where the trigger's was (its bottom for
     /// an upward menu, its top for a downward one) so the rows occupy the
     /// trigger's slot. The trigger itself stops painting once the revealed
@@ -296,7 +303,7 @@ impl Dropdown {
 
     /// Horizontal inset added to a measured label to get a dropdown width the label fits inside
     /// without tripping `paint_text`'s right-edge fade: an 8px left pad plus the 28px right
-    /// reservation (`right_limit = w - 28`, room for the 10px gap and the ▼ arrow) = 36px, plus a
+    /// reservation (`right_limit = w - 28`, room for the 10px gap and the arrow) = 36px, plus a
     /// 2px cushion for the small gap between the ink-`measure_text_width` used here and the M-dummy
     /// advance the paint pass measures with. Shared by `content_width` (widest option) and
     /// `display_width` (collapsed display text) so the two can't drift.
@@ -751,18 +758,23 @@ impl Dropdown {
         }
     }
 
-    /// Where the ▼ is drawn on a trigger band: centred in the arrow slot
-    /// at its right end ([`arrow_slot`]), or in the whole band under
-    /// `center_arrow`. Measured at the size the glyph is drawn at — the
-    /// configured font's, which the runner reads off the font string.
+    /// Where the arrow is drawn on a trigger band: the `chevron-down` glyph,
+    /// [`ARROW_SIDE`] square, centred in the arrow slot at the band's right
+    /// end ([`arrow_slot`]), or in the whole band under `center_arrow`.
     /// Until 2026-10-02 it stood 18 px in from the right end, and the
-    /// picker's centred arrow stood two pixels left of every other.
-    fn arrow_x(&self, band: Rect, font_family: &str, font_size: f32) -> f32 {
+    /// picker's centred arrow stood two pixels left of every other; until
+    /// 2026-10-05 it was a "▼" in the control font.
+    pub(crate) fn arrow_rect(&self, band: Rect) -> Rect {
         let slot = if self.center_arrow { band.width } else { arrow_slot(band.height).min(band.width) };
-        band.x + band.width - 0.5 * (slot + text_advance("▼", font_family, font_size))
+        Rect {
+            x: band.x + band.width - 0.5 * (slot + ARROW_SIDE),
+            y: band.y + 0.5 * (band.height - ARROW_SIDE),
+            width: ARROW_SIDE,
+            height: ARROW_SIDE,
+        }
     }
 
-    /// Emit the selected-text (per-character fade against the right edge) and the ▼ arrow —
+    /// Emit the selected-text (per-character fade against the right edge) and the arrow glyph —
     /// the legacy `text_labels` body minus the control label (the adapter's base-label
     /// machinery draws that, with the +4px `detached_label_inset`).
     fn paint_text(&self, content: Rect, ctx: &mut PaintCtx) {
@@ -852,16 +864,8 @@ impl Dropdown {
         // fight rather than help.
         // The glyph is drawn at the configured font's size (the runner
         // reads it off the font string), so that is the size it is measured at.
-        let arrow_x = self.arrow_x(content, &font_family, font_size);
-        ctx.text_with(
-            "▼",
-            arrow_x,
-            crate::layout::center_text_y(content.y, content.height, 10.0),
-            10.0,
-            [0x83, 0x83, 0x8a],
-            Some(crate::layout::control_label_font_detached()),
-            Some([content.x, content.y, content.x + content.width, content.y + content.height]),
-        );
+        let _ = (&font_family, font_size);
+        ctx.icon("chevron-down", self.arrow_rect(content), ARROW_COLOR);
     }
 
     /// Port of the legacy `keyboard_input` body.
@@ -1132,7 +1136,7 @@ impl Paint for Dropdown {
         }
 
         // Trigger content redrawn over its band (the box covers the widget-pass
-        // trigger paint) — display text left, ▼ right, the paint_text palette.
+        // trigger paint) — display text left, arrow right, the paint_text palette.
         // A menu that replaces the trigger has no band to redraw on.
         if !self.menu_replaces_trigger {
             let (tx, ty) = (rect.x, rect.y);
@@ -1149,16 +1153,7 @@ impl Paint for Dropdown {
                 &font,
                 band_bounds,
             );
-            let (family, size) = crate::layout::control_label_font_detached_parsed();
-            pc.text_with_font_and_bounds(
-                "▼",
-                self.arrow_x(rect, &family, size),
-                crate::layout::center_text_y(ty, th, 10.0),
-                10.0,
-                [0x83 as f32 / 255.0, 0x83 as f32 / 255.0, 0x8a as f32 / 255.0, 1.0],
-                &font,
-                band_bounds,
-            );
+            pc.icon("chevron-down", self.arrow_rect(rect), ARROW_COLOR);
         }
 
         if let Some(h_idx) = self.hovered_item {
@@ -1456,7 +1451,7 @@ mod tests {
             .items
             .into_iter()
             .filter_map(|item| match item.prim {
-                crate::scene::paint::Prim::Text { text, x, .. } if text != "▼" => Some((text, x)),
+                crate::scene::paint::Prim::Text { text, x, .. } => Some((text, x)),
                 _ => None,
             })
             .collect();
@@ -1668,11 +1663,11 @@ mod tests {
         dd.set_rect(10.0, 10.0, 100.0, 24.0); // very narrow dropdown
 
         let labels = dd.own_text_labels();
-        // Labels are individual characters of selected_text, then the ▼ arrow (prim order).
+        // Labels are individual characters of selected_text (the arrow is a glyph, not text).
         assert!(labels.len() > 2);
 
-        // The last character label (excluding the arrow) should be faded (i.e. not the default color)
-        let last_char_idx = labels.len() - 2;
+        // The last character label should be faded (i.e. not the default color)
+        let last_char_idx = labels.len() - 1;
         let first_char = &labels[0];
         let last_char = &labels[last_char_idx];
 
@@ -1694,10 +1689,9 @@ mod tests {
             let mut dd = Dropdown::new(vec!["a".to_string()], 0).with_custom_display_text("");
             dd.inner_mut().center_arrow = center;
             dd.set_rect(10.0, 10.0, 30.0, 24.0);
-            dd.own_text_labels().into_iter().find(|l| l.text == "▼").expect("the arrow").x
+            dd.inner().arrow_rect(Rect { x: 10.0, y: 10.0, width: 30.0, height: 24.0 }).x
         };
-        let (family, size) = crate::layout::control_label_font_detached_parsed();
-        let adv = super::text_advance("▼", &family, size);
+        let adv = super::ARROW_SIDE;
         let x = arrow_x(true);
         assert!((x + 0.5 * adv - 25.0).abs() < 1e-3, "centred on the trigger's middle: {x} + {adv}/2");
         let slot = super::arrow_slot(24.0);

@@ -516,14 +516,28 @@ impl Paint for Spreadsheet {
                 continue;
             }
             let cx = xoff + col_w * i as f32 + 8.0;
-            let (label, color) = match self.sort {
+            match self.sort {
                 Some((col, ascending)) if col == i => {
-                    let mark = if ascending { '\u{25b2}' } else { '\u{25bc}' };
-                    (format!("{header} {mark}"), [0xff, 0xff, 0xff])
+                    // The sorted column: its name, then the `chevron-up` or
+                    // `chevron-down` glyph a cell after it — the room of
+                    // the " ▲" it was until 2026-10-05, taken out of the
+                    // name's budget.
+                    let b = budget.saturating_sub(2);
+                    let shown: String = if b < 3 || header.chars().count() <= b {
+                        header.clone()
+                    } else {
+                        let mut out: String = header.chars().take(b - 1).collect();
+                        out.push('\u{2026}');
+                        out
+                    };
+                    let tx = cx + shown.chars().count() as f32 * char_w + 0.5 * char_w;
+                    ctx.text_with(shown, cx, y + 6.0, 12.0, [0xff, 0xff, 0xff], None, col_bounds(i, y, HEADER_H));
+                    const SIDE: f32 = 8.0;
+                    let r = Rect { x: tx, y: y + 0.5 * (HEADER_H - SIDE), width: SIDE, height: SIDE };
+                    ctx.icon(if ascending { "chevron-up" } else { "chevron-down" }, r, [1.0, 1.0, 1.0, 1.0]);
                 }
-                _ => (header.clone(), [0xdd, 0xdd, 0xee]),
-            };
-            ctx.text_with(fit(label), cx, y + 6.0, 12.0, color, None, col_bounds(i, y, HEADER_H));
+                _ => ctx.text_with(fit(header.clone()), cx, y + 6.0, 12.0, [0xdd, 0xdd, 0xee], None, col_bounds(i, y, HEADER_H)),
+            }
         }
         // A row half scrolled under the header or off the bottom draws its
         // text CUT at the body band, as its zebra fill is. Until 2026-09-30

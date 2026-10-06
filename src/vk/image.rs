@@ -131,6 +131,12 @@ pub(crate) struct ImageStage {
     staging_idle: u32,
     /// Per frame in flight: this frame's quad vertices (6 per ImageQuad).
     frame_buffers: Vec<AllocatedBuffer>,
+    /// Whether this table takes the process-wide upload queue. True for a
+    /// window's renderer; false for a renderer that keeps images of its own
+    /// (the context menu's popup), which must not drain the queue — an
+    /// upload meant for the window, queued between the window's frame and
+    /// the popup's, would land in the popup's table and never be drawn.
+    pub(crate) shared_uploads: bool,
 }
 
 impl ImageStage {
@@ -325,6 +331,7 @@ impl ImageStage {
                 staging: None,
                 staging_idle: 0,
                 frame_buffers,
+                shared_uploads: true,
             }
         }
     }
@@ -338,6 +345,9 @@ impl ImageStage {
         queue: vk::Queue,
         command_pool: vk::CommandPool,
     ) {
+        if !self.shared_uploads {
+            return;
+        }
         let pending: Vec<Pending> = take_pending();
         if pending.is_empty() {
             self.staging_idle = self.staging_idle.saturating_add(1);
@@ -439,6 +449,25 @@ impl ImageStage {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Upload RGBA8 pixels into THIS table now, rather than queueing them for
+    /// whichever renderer drains the shared queue next — for a renderer with
+    /// images of its own (see [`Self::shared_uploads`]). The id comes from
+    /// the process-wide counter, so it never collides with a queued one.
+    pub(crate) fn upload_now(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        queue: vk::Queue,
+        command_pool: vk::CommandPool,
+        pixels: &[u8],
+        width: u32,
+        height: u32,
+    ) -> u32 {
+        let id = crate::draw::images::next_image_id();
+        self.upload(device, allocator, queue, command_pool, id, pixels, width, height, PixelFormat::Rgba, false);
+        id
+    }
+
     fn upload(
         &mut self,
         device: &ash::Device,

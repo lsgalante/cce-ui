@@ -68,6 +68,18 @@ impl Paginator {
 }
 
 impl Adapted<Paginator> {
+    /// A cce-icons glyph per page, worn at the top of its sidebar tab — see
+    /// [`ButtonStrip::icons`].
+    pub fn with_icons(mut self, icons: Vec<Option<String>>) -> Self {
+        let p = self.inner_mut();
+        p.sidebar_menu.inner_mut().set_icons(icons);
+        p.sidebar_w = p.sidebar_w();
+        let w = p.sidebar_w;
+        let (x, y, _, h) = p.sidebar_menu.rect();
+        p.sidebar_menu.set_rect(x, y, w, h);
+        self
+    }
+
     pub fn with_sidebar_mode(self, _enabled: bool) -> Self {
         self
     }
@@ -122,26 +134,12 @@ impl PageSelector for Paginator {
         let font_size = font_info.1;
         let padding = crate::layout::button_padding();
 
-        let mut max_w = 0.0;
-        for label in &self.page_labels {
-            let trimmed = label.trim();
-            let space_idx = trimmed.find(' ');
-            let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
-            let content_w = if has_icon {
-                let space_idx = space_idx.unwrap();
-                let (icon, _) = trimmed.split_at(space_idx);
-                let icon = icon.trim();
-                let icon_font_size = 14.0;
-                let est_icon_w = crate::widget::display::measure_text_width(icon, &font_fam, icon_font_size);
-                est_icon_w.max(font_size)
-            } else {
-                font_size
-            };
-            let w = content_w + 2.0 * padding;
-            if w > max_w {
-                max_w = w;
-            }
-        }
+        let _ = font_fam;
+        // A page with a glyph (`with_icons`) needs the glyph's width; one
+        // without, a line of its rotated label.
+        let has_icons = self.sidebar_menu.inner().icons.iter().any(|i| i.is_some());
+        let content_w = if has_icons { ButtonStrip::ICON_SIDE.max(font_size) } else { font_size };
+        let max_w = content_w + 2.0 * padding;
         max_w.max(1.0)
     }
 }

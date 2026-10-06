@@ -1170,6 +1170,41 @@ impl PaintCtx {
         self.push(Prim::Image { image, rect, alpha });
     }
 
+    /// A bundled cce-icons glyph (`cce-icons/svg/<name>.svg`) drawn at
+    /// `rect`, tinted `color` — given as a text colour is, raw sRGB, so a
+    /// glyph and the label beside it match — with the colour's alpha as the
+    /// image's. Rasterized at twice the rect's longer side so it stays crisp
+    /// on a 2x output, and cached (see [`crate::upload_icon_tinted`]).
+    /// `false`, and nothing drawn, when the glyph is missing.
+    ///
+    /// The ONE way the toolkit draws a symbol: a chevron, a mark, a + or a
+    /// − is this, never a character in whatever face the font falls back to.
+    /// A `weather-*` glyph carries its own colours; draw it with
+    /// [`icon_untinted`](Self::icon_untinted).
+    pub fn icon(&mut self, name: &str, rect: Rect, color: [f32; 4]) -> bool {
+        let px = (rect.width.max(rect.height) * 2.0).ceil().max(1.0) as u32;
+        match crate::upload_icon_tinted(name, px, crate::icon_tint(color)) {
+            Some((id, _, _)) => {
+                self.image(id, rect, color[3]);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// [`icon`](Self::icon) for a glyph that carries its own colours (the
+    /// `weather-*` family): drawn as it is, at `alpha`.
+    pub fn icon_untinted(&mut self, name: &str, rect: Rect, alpha: f32) -> bool {
+        let px = (rect.width.max(rect.height) * 2.0).ceil().max(1.0) as u32;
+        match crate::upload_icon(name, px) {
+            Some((id, _, _)) => {
+                self.image(id, rect, alpha);
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn rounded_rect(&mut self, rect: Rect, radius: f32, corners: (bool, bool, bool, bool), color: [f32; 4]) {
         let rect = self.apply_offset(rect);
         self.push(Prim::RoundedRect { rect, radius, corners, color });
@@ -1980,6 +2015,10 @@ impl PaintCtx {
 /// plates, rounded rects, bounded text — instead of the flattened
 /// `PopoverCollector` view (which stays for legacy tuple hosts).
 impl crate::layout::RenderTarget for PaintCtx {
+    fn icon(&mut self, name: &str, rect: Rect, color: [f32; 4]) {
+        PaintCtx::icon(self, name, rect, color);
+    }
+
     fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
         self.quad(Rect { x, y, width: w, height: h }, color);
     }

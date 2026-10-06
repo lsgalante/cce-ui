@@ -3663,7 +3663,7 @@ impl ParamController for ParametersBg {
                         // in the box's recess, not a bare glyph beside it.
                         Some(
                             Dropdown::new(options, 0)
-                                .with_custom_display_text("\u{25be}")
+                                .with_custom_display_text("")
                                 .with_raised(true),
                         )
                     }
@@ -3923,7 +3923,8 @@ mod tests {
         ]);
         let arrow = |i: usize| {
             let d = p.choices[i].as_ref().unwrap();
-            d.own_text_labels().into_iter().find(|l| l.text == "▼").expect("an arrow").x
+            let (x, y, w, h) = d.rect();
+            d.inner().arrow_rect(crate::scene::layout::Rect { x, y, width: w, height: h }).x
         };
         assert!((arrow(0) - arrow(1)).abs() < 1e-3, "picker {} vs dropdown {}", arrow(0), arrow(1));
     }

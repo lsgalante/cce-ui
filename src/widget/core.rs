@@ -507,11 +507,67 @@ pub mod context_menu {
         }
     }
 
-    /// The mark a row that leads to a PAGE carries at its right end.
+    /// The mark a row that leads to a PAGE carries at its right end. Drawn
+    /// as the `chevron-right` glyph; the character is what a host that lays
+    /// out its own rows (the designer's dialog) may reserve room by.
     pub const PAGE_MARK: &str = "›";
     /// What a page's back band leads with, before the title of the plate it
-    /// goes back to.
+    /// goes back to. Drawn as the `chevron-left` glyph.
     pub const BACK_MARK: &str = "‹";
+
+    /// A row whose label BEGINS with one of these wears the mark as a
+    /// cce-icons glyph at its left, and the label is drawn without it: a
+    /// checked item (`check`), a switch or radio that is on (`circle`), one
+    /// that is off (`circle-outline`). The text stays the row's identity —
+    /// a host matching its own labels still matches `"✓ Show Grid"` — and
+    /// the toolkit owns how a mark looks, so no menu draws one as a
+    /// character in whatever face its font falls back to.
+    pub const MARK_CHECK: &str = "✓ ";
+    /// See [`MARK_CHECK`]: a switch or radio row that is on.
+    pub const MARK_ON: &str = "● ";
+    /// See [`MARK_CHECK`]: a switch or radio row that is off.
+    pub const MARK_OFF: &str = "○ ";
+
+    /// The glyph a label's leading mark names, and the label without it.
+    pub fn split_mark(label: &str) -> (Option<&'static str>, &str) {
+        for (mark, glyph) in [(MARK_CHECK, "check"), (MARK_ON, "circle"), (MARK_OFF, "circle-outline")] {
+            if let Some(rest) = label.strip_prefix(mark) {
+                return (Some(glyph), rest);
+            }
+        }
+        (None, label)
+    }
+
+    /// How wide a row mark is drawn, at menu font size `size`, and the gap
+    /// after it: the glyph box at the font size, so the mark (a disc fills
+    /// three quarters of its box) stands about as tall as a capital.
+    fn mark_size(size: f32) -> f32 {
+        (size * 0.95).round()
+    }
+    const MARK_GAP: f32 = 6.0;
+    /// The page and back chevrons, smaller still: they point, they do not
+    /// label.
+    fn chevron_size(size: f32) -> f32 {
+        (size * 0.8).round()
+    }
+
+    /// A glyph a menu draws: name, top-left, side, colour.
+    #[derive(Debug, Clone)]
+    pub(crate) struct MenuGlyph {
+        pub(crate) name: &'static str,
+        x: f32,
+        y: f32,
+        side: f32,
+        color: [f32; 4],
+    }
+
+    /// Draw `g` (shifted by `dx`, at `alpha`): the glyph tinted to the
+    /// label colour beside it — `PaintCtx::icon`.
+    fn paint_glyph(ctx: &mut crate::scene::paint::PaintCtx, g: &MenuGlyph, dx: f32, alpha: f32) {
+        let r = crate::scene::layout::Rect { x: g.x + dx, y: g.y, width: g.side, height: g.side };
+        let [cr, cg, cb, ca] = g.color;
+        ctx.icon(g.name, r, [cr, cg, cb, ca * alpha]);
+    }
 
     /// A page turn the menu has been asked for, drained by the host with
     /// [`take_turn`] (a swipe) or read with [`turn_at`] (a press). The menu
@@ -721,6 +777,8 @@ pub mod context_menu {
                 .options
                 .iter()
                 .map(|s| {
+                    let (mark, s) = split_mark(s);
+                    let mark_w = if mark.is_some() { mark_size(size) + MARK_GAP } else { 0.0 };
                     let inked = crate::widget::display::measure_text_width(s, &family, size);
                     let shaped = crate::geometry_font_system()
                         .lock()
@@ -731,7 +789,7 @@ pub mod context_menu {
                                 .map(|&(_, total)| total)
                         })
                         .unwrap_or(0.0);
-                    inked.max(shaped)
+                    mark_w + inked.max(shaped)
                 })
                 .fold(0.0f32, f32::max);
             self.w = (widest + 2.0 * PAD).max(120.0);
@@ -759,7 +817,9 @@ pub mod context_menu {
             }
             let (family, size) = label_font();
             let measure = |t: &str| crate::widget::display::measure_text_width(t, &family, size);
-            let need = PAD + measure(&self.options[idx]) + SLIDER_GAP + measure(PAGE_MARK) + PAD;
+            let (mark, label) = split_mark(&self.options[idx]);
+            let mark_w = if mark.is_some() { mark_size(size) + MARK_GAP } else { 0.0 };
+            let need = PAD + mark_w + measure(label) + SLIDER_GAP + chevron_size(size) + PAD;
             self.w = self.w.max(need);
             self.pages[idx] = true;
         }
@@ -796,9 +856,8 @@ pub mod context_menu {
                 dir: if back.is_some() { 1.0 } else { -1.0 },
             });
             if let Some(title) = back {
-                let label = format!("{BACK_MARK} {title}");
                 let (family, size) = label_font();
-                let need = PAD + crate::widget::display::measure_text_width(&label, &family, size) + PAD;
+                let need = PAD + chevron_size(size) + MARK_GAP + crate::widget::display::measure_text_width(title, &family, size) + PAD;
                 self.w = self.w.max(need);
                 self.back = Some(title.to_string());
                 self.content_h += ROW_H;
@@ -1474,10 +1533,15 @@ pub mod context_menu {
                 let bounds = Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]);
                 let (lo, hi) = (-t.dir * e * TURN_SLIDE, t.dir * (1.0 - e) * TURN_SLIDE);
                 let (out, into) = turn_fades(e);
-                for (labels, dx, alpha) in [(t.from.labels(), lo, out), (self.labels(), hi, into)] {
-                    for label in labels {
+                for (rows, dx, alpha) in [(&*t.from, lo, out), (self, hi, into)] {
+                    for label in rows.labels() {
                         ctx.text_faded(label.text, label.x + dx, label.y, label.font_size, label.color, alpha, Some(family.clone()), bounds);
                     }
+                    ctx.clip(rect, |ctx| {
+                        for g in rows.glyphs() {
+                            paint_glyph(ctx, &g, dx, alpha);
+                        }
+                    });
                 }
                 return;
             }
@@ -1496,6 +1560,12 @@ pub mod context_menu {
                     bounds,
                 );
             }
+            let plate = crate::scene::layout::Rect { x: self.x, y: self.y, width: self.w, height: self.h };
+            ctx.clip(plate, |ctx| {
+                for g in self.glyphs() {
+                    paint_glyph(ctx, &g, 0.0, 1.0);
+                }
+            });
         }
 
         pub fn text_labels(&self) -> Vec<TextLabel> {
@@ -1506,14 +1576,14 @@ pub mod context_menu {
         }
 
         /// The labels as the rows stand, shown or not.
-        fn labels(&self) -> Vec<TextLabel> {
+        pub(crate) fn labels(&self) -> Vec<TextLabel> {
             let mut labels = Vec::new();
 
             if let Some(title) = &self.back {
                 let (_, label_size) = label_font();
                 labels.push(TextLabel {
-                    text: format!("{BACK_MARK} {title}"),
-                    x: self.x + PAD,
+                    text: title.clone(),
+                    x: self.x + PAD + chevron_size(label_size) + MARK_GAP,
                     y: self.back_band_y() + (ROW_H - label_size) / 2.0,
                     font_size: label_size,
                     color: rgb8(if self.back_hovered { crate::color::TEXT_HEADER } else { crate::color::TEXT_DIM }),
@@ -1544,25 +1614,17 @@ pub mod context_menu {
                     rgb8(crate::color::TEXT_FG)
                 };
 
+                // A leading mark is drawn as a glyph (see `glyphs`); the
+                // label follows it.
+                let (mark, text) = split_mark(opt);
+                let mark_w = if mark.is_some() { mark_size(label_size) + MARK_GAP } else { 0.0 };
                 labels.push(TextLabel {
-                    text: opt.clone(),
-                    x: self.x + PAD,
+                    text: text.to_string(),
+                    x: self.x + PAD + mark_w,
                     y: iy,
                     font_size: label_size,
                     color: text_color,
                 });
-                // A row that leads to a page says so at its right end.
-                if self.leads_to_page(idx) {
-                    let (family, _) = label_font();
-                    let tw = crate::widget::display::measure_text_width(PAGE_MARK, &family, label_size);
-                    labels.push(TextLabel {
-                        text: PAGE_MARK.to_string(),
-                        x: self.x + self.w - PAD - tw.max(label_size * 0.4),
-                        y: iy,
-                        font_size: label_size,
-                        color: text_color,
-                    });
-                }
                 // A slider row's readout, right-aligned against its band.
                 if let Some(s) = self.slider(idx) {
                     let (family, _) = label_font();
@@ -1578,6 +1640,54 @@ pub mod context_menu {
                 }
             }
             labels
+        }
+
+        /// The glyphs the rows wear, as they stand: each row's leading mark
+        /// (see [`MARK_CHECK`]), the chevron at the right end of a row that
+        /// leads to a page, and the back band's chevron. Each takes its
+        /// row's text colour.
+        pub(crate) fn glyphs(&self) -> Vec<MenuGlyph> {
+            let mut glyphs = Vec::new();
+            let (_, size) = label_font();
+            let (ms, cs) = (mark_size(size), chevron_size(size));
+            if self.back.is_some() {
+                glyphs.push(MenuGlyph {
+                    name: "chevron-left",
+                    x: self.x + PAD,
+                    y: self.back_band_y() + (ROW_H - cs) / 2.0,
+                    side: cs,
+                    color: if self.back_hovered { crate::color::TEXT_HEADER } else { crate::color::TEXT_DIM },
+                });
+            }
+            for (idx, opt) in self.options.iter().enumerate() {
+                if opt == "-" {
+                    continue;
+                }
+                let top = self.row_y(idx);
+                if top + ROW_H < self.y || top > self.y + self.h {
+                    continue;
+                }
+                let color = if idx < self.header_count {
+                    crate::color::TEXT_DIM
+                } else if self.hovered_item == Some(idx) {
+                    crate::color::TEXT_HEADER
+                } else {
+                    crate::color::TEXT_FG
+                };
+                if let (Some(name), _) = split_mark(opt) {
+                    glyphs.push(MenuGlyph { name, x: self.x + PAD, y: top + (ROW_H - ms) / 2.0, side: ms, color });
+                }
+                if self.leads_to_page(idx) {
+                    glyphs.push(MenuGlyph {
+                        name: "chevron-right",
+                        x: self.x + self.w - PAD - cs,
+                        y: top + (ROW_H - cs) / 2.0,
+                        side: cs,
+                        color,
+                    });
+                }
+            }
+            glyphs
         }
     }
 
@@ -2180,7 +2290,7 @@ mod context_menu_slider_tests {
 
 #[cfg(test)]
 mod context_menu_padding_tests {
-    use super::context_menu::{self, ContextMenuState, PAD, ROW_H};
+    use super::context_menu::{self, split_mark, ContextMenuState, PAD, ROW_H};
     use crate::widget::WidgetId;
 
     /// The shared menu is a popover for the window-drag question too: a
@@ -2198,6 +2308,77 @@ mod context_menu_padding_tests {
         assert!(ctx.drag_allowed_at(10.0, 10.0), "away from the menu the drag question is the widgets'");
         context_menu::hide();
         assert!(ctx.drag_allowed_at(110.0, 200.0 + PAD + ROW_H * 0.5), "hidden, it vetoes nothing");
+    }
+
+    /// A row's leading mark is a glyph, not a character: the label is drawn
+    /// without it and after the glyph's room, the glyph is the mark's
+    /// (`check`, `circle`, `circle-outline`), and a page row's chevron and a
+    /// page's back chevron are glyphs too — no row draws "✓", "●", "○", "›"
+    /// or "‹" as text.
+    #[test]
+    fn menu_marks_and_chevrons_are_glyphs() {
+        let mut m = ContextMenuState::new();
+        m.show(0.0, 0.0, vec!["✓ Show Grid".into(), "● On".into(), "○ Off".into(), "Plain".into(), "Add Tab".into()], 0, WidgetId(1));
+        m.set_row_page(4);
+        let labels = m.labels();
+        let texts: Vec<&str> = labels.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["Show Grid", "On", "Off", "Plain", "Add Tab"]);
+        assert!(labels[0].x > labels[3].x, "a marked label stands after its mark's room");
+        let names: Vec<&str> = m.glyphs().iter().map(|g| g.name).collect();
+        assert_eq!(names, ["check", "circle", "circle-outline", "chevron-right"]);
+        m.show_page(0.0, 0.0, Some("View"), vec!["○ Wireframe".into()], 0, WidgetId(1));
+        assert_eq!(m.labels()[0].text, "View", "the back band reads its title, its chevron a glyph");
+        assert_eq!(m.glyphs().iter().map(|g| g.name).collect::<Vec<_>>(), ["chevron-left", "circle-outline"]);
+        for l in m.labels() {
+            assert!(!l.text.contains(['✓', '●', '○', '›', '‹']), "{:?} draws a mark as text", l.text);
+        }
+        assert_eq!(split_mark("✓ Collapse controls"), (Some("check"), "Collapse controls"));
+        assert_eq!(split_mark("Collapse controls"), (None, "Collapse controls"));
+    }
+
+    /// Every glyph the toolkit draws by name is in the icon set: a name
+    /// with no file draws NOTHING (a missing icon is not an error at paint),
+    /// so the miss is caught here. Skipped where the icon set is not checked
+    /// out beside the crate.
+    #[test]
+    fn every_glyph_the_toolkit_names_is_in_the_icon_set() {
+        let dir = std::path::Path::new(&crate::icons_dir()).to_path_buf();
+        if !dir.is_dir() {
+            eprintln!("skipped: no icon set at {}", dir.display());
+            return;
+        }
+        let mut names = std::collections::BTreeSet::new();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![root];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                    continue;
+                }
+                if p.extension().is_none_or(|x| x != "rs") {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&p).unwrap();
+                for call in [".icon(\"", "upload_icon(\"", "upload_icon_tinted(\"", "with_icon_name(\"", "new_icon(\""] {
+                    for (i, _) in src.match_indices(call) {
+                        let rest = &src[i + call.len()..];
+                        if let Some(end) = rest.find('"') {
+                            let n = &rest[..end];
+                            if !n.is_empty() && n.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+                                names.insert(n.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for g in ["check", "circle", "circle-outline", "chevron-left", "chevron-right", "chevron-up", "chevron-down"] {
+            names.insert(g.to_string());
+        }
+        let missing: Vec<_> = names.iter().filter(|n| !dir.join(format!("{n}.svg")).is_file()).collect();
+        assert!(missing.is_empty(), "named but not in {}: {missing:?}", dir.display());
     }
 
     /// The plate pads its rows evenly: the height is the rows plus a pad

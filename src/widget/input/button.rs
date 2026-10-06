@@ -153,7 +153,7 @@ impl Button {
     }
 
     pub fn new_copy_icon(x: f32, y: f32, w: f32, h: f32) -> Adapted<Button> {
-        Button::new_icon("copy", "📋", x, y, w, h)
+        Button::new_icon("copy", "Copy", x, y, w, h)
     }
 
     /// A plateless icon button faced with the bundled cce-icons glyph
@@ -258,9 +258,6 @@ impl Button {
     /// that holds this lock across a widget call (the flat host, around
     /// `prepare_text`) never reaches a Button's measure — keep it that way.
     fn label_width(&self, label: &str) -> f32 {
-        if label == "📋" {
-            return 12.0;
-        }
         let (family, size) = self.font();
         let font = Paint::widget_font(self);
         crate::geometry_font_system()

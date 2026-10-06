@@ -279,11 +279,34 @@ impl<A: Application> EngineState<A> {
 
         let mut items = Vec::new();
         collect_dl_text(self.font_system.as_mut().unwrap(), &dl, &mut items);
-        let (verts, dl_batches, _images, plate_features) = tessellate_display_list(&dl, w, h, scale);
+        let (verts, dl_batches, dl_images, plate_features) = tessellate_display_list(&dl, w, h, scale);
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
         let spans = dl_text_spans(&items, scale, bounds, &[]);
         renderer.prepare_text(self.font_system.as_mut().unwrap(), &mut self.swash_cache, &spans);
         let batches = dl_batches_2d(&dl_batches, scale);
+        // The menu's glyphs (its marks, its page and back chevrons) were
+        // painted with the WINDOW renderer's ids; this renderer keeps images
+        // of its own, so each is drawn by its copy here, uploaded once.
+        let icon_ids = &mut self.menu_icon_ids;
+        let images: Vec<crate::vk::ImageQuad> = dl_images
+            .iter()
+            .filter_map(|di| {
+                let own = *icon_ids.entry(di.image).or_insert_with(|| {
+                    let (name, px, tint) = crate::icon_source(di.image)?;
+                    let (rgba, iw, ih) = crate::icon_pixels(&name, px, tint)?;
+                    Some(renderer.upload_rgba_now(&rgba, iw, ih))
+                });
+                Some(crate::vk::ImageQuad {
+                    image: own?,
+                    rect: (di.rect.x * scale, di.rect.y * scale, di.rect.width * scale, di.rect.height * scale),
+                    alpha: di.alpha,
+                    z_before: di.at,
+                    clip: di.clip.map(|c| {
+                        ((c.x * scale).max(0.0) as u32, (c.y * scale).max(0.0) as u32, (c.width * scale) as u32, (c.height * scale) as u32)
+                    }),
+                })
+            })
+            .collect();
 
         let e = renderer.pending_extent();
         if e.width != pw || e.height != ph {
@@ -297,7 +320,7 @@ impl<A: Application> EngineState<A> {
             verts: &verts,
             batches: &batches,
             overlay_verts: &[],
-            images: &[],
+            images: &images,
             plate_features: &plate_features,
             clear_color: [0.0; 4],
             damage: None,
@@ -318,7 +341,7 @@ impl<A: Application> PopupHandler for EngineState<A> {
         let (x, y) = (config.position.0 as f32 / f, config.position.1 as f32 / f);
         let (w, h) = (config.width.max(1) as f32 / f, config.height.max(1) as f32 / f);
         let (scale_factor, display) = (self.scale_factor, self.display_ptr);
-        let (mp, slot) = (self.menu_popup.as_mut(), &mut self.menu_renderer);
+        let (mp, slot, icon_ids) = (self.menu_popup.as_mut(), &mut self.menu_renderer, &mut self.menu_icon_ids);
         let Some(mp) = mp else { return };
         mp.placed = Some((x, y, w, h));
         let handoff = std::mem::take(&mut mp.handoff);
@@ -342,7 +365,14 @@ impl<A: Application> PopupHandler for EngineState<A> {
                 let t = std::time::Instant::now();
                 let made = unsafe { VkRenderer::try_new(display_ptr, surface_ptr, pw, ph, 0.0) };
                 log::debug!("[menu_popup] renderer created in {:?}", t.elapsed());
-                made.map(|r| *slot = Some(r))
+                // A new renderer holds none of the old one's copies.
+                icon_ids.clear();
+                made.map(|mut r| {
+                    // Its images are its own (the menu's glyphs, copied in
+                    // `render_menu_popup`); the shared queue is the window's.
+                    r.set_shared_uploads(false);
+                    *slot = Some(r)
+                })
             }
         };
         // A lost surface is the connection dying under the menu; the window's

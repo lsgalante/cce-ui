@@ -477,7 +477,7 @@ impl Paint for Spinbox {
             }
         }
 
-        // Value, unit, and -/+ glyphs.
+        // Value, unit, and the minus/plus glyphs.
         let tc = colors::spinbox_text_color();
         let text_color = [(tc[0] * 255.0) as u8, (tc[1] * 255.0) as u8, (tc[2] * 255.0) as u8];
         // The value and its unit live in the FIELD, which ends where the -/+
@@ -492,11 +492,14 @@ impl Paint for Spinbox {
         if g.btn_w > 0.0 {
             let dec_center_x = g.dec_c;
             let inc_center_x = g.inc_c;
-            let ty = crate::layout::align_text_y(g.y, g.h, 12.0, 0.0);
-            let dec_box = Some([g.run_x, g.y, g.seam_x, g.y + g.h]);
-            let inc_box = Some([g.seam_x, g.y, g.run_end, g.y + g.h]);
-            ctx.text_with("-".to_string(), dec_center_x - 4.0, ty, 12.0, text_color, None, dec_box);
-            ctx.text_with("+".to_string(), inc_center_x - 4.0, ty, 12.0, text_color, None, inc_box);
+            // The `minus` and `plus` glyphs, in the value's colour, centred
+            // on their buttons (they were "-" and "+" in the 12px face).
+            const SIDE: f32 = 8.0;
+            let gy = g.y + 0.5 * (g.h - SIDE);
+            let tint = [tc[0], tc[1], tc[2], 1.0];
+            let glyph = |cx: f32| crate::scene::layout::Rect { x: cx - 0.5 * SIDE, y: gy, width: SIDE, height: SIDE };
+            ctx.icon("minus", glyph(dec_center_x), tint);
+            ctx.icon("plus", glyph(inc_center_x), tint);
         }
     }
 }

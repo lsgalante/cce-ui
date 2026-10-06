@@ -47,6 +47,13 @@ pub enum Pending {
 
 static PENDING: Mutex<Vec<Pending>> = Mutex::new(Vec::new());
 static NEXT_ID: AtomicU32 = AtomicU32::new(1);
+
+/// A fresh image id from the process-wide counter, for a renderer that
+/// uploads into its own table directly (`ImageStage::upload_now`) — never
+/// one a queued upload also holds.
+pub(crate) fn next_image_id() -> u32 {
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
 /// How many image tables have been built in this process. See
 /// [`renderer_epoch`].
 static STAGES_BUILT: AtomicU32 = AtomicU32::new(0);

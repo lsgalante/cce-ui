@@ -4112,6 +4112,9 @@ pub trait RenderTarget {
     }
     fn push_clip_rect(&mut self, _x: f32, _y: f32, _w: f32, _h: f32) {}
     fn pop_clip_rect(&mut self) {}
+    /// A bundled cce-icons glyph — see `PaintCtx::icon`. A target that
+    /// cannot draw images (the legacy `PopoverCollector`) draws nothing.
+    fn icon(&mut self, _name: &str, _rect: crate::scene::layout::Rect, _color: [f32; 4]) {}
     /// A flush inset control plate ([`PaintCtx::inset_plate`]) — the raised
     /// control surface (groove ring down, beveled lip back up). Lets a popover
     /// draw the ACTUAL widget surface expanded (the Dropdown's grown trigger).

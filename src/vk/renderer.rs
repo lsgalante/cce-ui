@@ -1686,6 +1686,29 @@ impl VkRenderer {
         self.surface != vk::SurfaceKHR::null()
     }
 
+    /// Whether this renderer takes the process-wide image upload queue
+    /// ([`crate::vk::upload_rgba`] and kin) — true by default. A renderer
+    /// that keeps images of its own, uploaded with
+    /// [`upload_rgba_now`](Self::upload_rgba_now), turns it off so it never
+    /// takes an upload the window's renderer was meant to draw.
+    pub fn set_shared_uploads(&mut self, on: bool) {
+        self.image.shared_uploads = on;
+    }
+
+    /// Upload RGBA8 pixels into this renderer's image table now, returning
+    /// the id to draw them by in this renderer's frames.
+    pub fn upload_rgba_now(&mut self, pixels: &[u8], width: u32, height: u32) -> u32 {
+        self.image.upload_now(
+            &self.core.device,
+            self.core.allocator.as_mut().unwrap(),
+            self.core.queue,
+            self.core.command_pool,
+            pixels,
+            width,
+            height,
+        )
+    }
+
     /// The extent the next `draw_frame` will render at: the pending size when a
     /// swapchain rebuild is queued, otherwise the live one.
     pub fn pending_extent(&self) -> vk::Extent2D {

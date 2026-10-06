@@ -83,13 +83,15 @@ pub enum Draw {
     Dot { cx: f32, cy: f32, r: f32, color: [f32; 4] },
     /// An embedded image, by its link text; its id is asked for at paint.
     Image { target: String, rect: Rect },
+    /// A bundled cce-icons glyph, tinted `color` (sRGB, as a text colour).
+    Icon { name: &'static str, rect: Rect, color: [f32; 4] },
 }
 
 impl Draw {
     fn top_bottom(&self) -> (f32, f32) {
         match self {
             Draw::Text { y, size, .. } => (*y, y + size * 1.3),
-            Draw::Quad { rect, .. } | Draw::Round { rect, .. } | Draw::Image { rect, .. } => (rect.y, rect.y + rect.height),
+            Draw::Quad { rect, .. } | Draw::Round { rect, .. } | Draw::Image { rect, .. } | Draw::Icon { rect, .. } => (rect.y, rect.y + rect.height),
             Draw::Line { y1, y2, width, .. } => (y1.min(*y2) - width, y1.max(*y2) + width),
             Draw::Check { cy, r, .. } | Draw::Dot { cy, r, .. } => (cy - r, cy + r),
         }
@@ -178,6 +180,9 @@ impl Layout {
                     Some(img) => pc.image(img.id, rect(r), 1.0),
                     None => pc.rounded_rect(rect(r), 4.0 * k, (true, true, true, true), CODE_BG),
                 },
+                Draw::Icon { name, rect: r, color } => {
+                    pc.icon(name, rect(r), *color);
+                }
             }
         }
     }
@@ -290,16 +295,27 @@ impl<'a> Layouter<'a> {
                 y + ih
             }
             Block::Embed { target, subpath, .. } => {
+                // An embed that cannot be shown inline (a note, a missing
+                // image) is a link to it, led by the `link` glyph in the
+                // link colour (it was "↳ " until 2026-10-05).
                 let shown = match subpath {
-                    Some(s) => format!("↳ {target}#{s}"),
-                    None => format!("↳ {target}"),
+                    Some(s) => format!("{target}#{s}"),
+                    None => target.clone(),
                 };
+                let size = self.theme.size;
+                let side = (size * 0.85).round();
+                let gap = (size * 0.4).round();
+                self.out.draws.push(Draw::Icon {
+                    name: "link",
+                    rect: Rect { x, y: y + 0.5 * (size * 1.3 - side), width: side, height: side },
+                    color: LINK,
+                });
                 let span = Span {
                     text: shown,
                     style: Style::default(),
                     link: Some(SpanLink::Note { target: target.clone(), subpath: subpath.clone() }),
                 };
-                self.inline(std::slice::from_ref(&span), x, w, y, self.plain_style())
+                self.inline(std::slice::from_ref(&span), x + side + gap, (w - side - gap).max(0.0), y, self.plain_style())
             }
             Block::List { start, items, .. } => self.list(*start, items, x, w, y),
             Block::Quote { callout, blocks, .. } => self.quote(callout.as_ref(), blocks, x, w, y),

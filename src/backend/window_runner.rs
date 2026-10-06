@@ -123,6 +123,13 @@ pub struct EngineState<A: Application> {
     /// surface to the next: a renderer costs a device and every pipeline
     /// (tens of ms), a re-attach costs one swapchain.
     pub menu_renderer: Option<VkRenderer>,
+    /// The popup renderer's copies of the bundled glyphs the menu draws,
+    /// by the window renderer's id for the same glyph (see
+    /// `crate::icon_source`). The popup keeps images of its own — it does
+    /// not take the shared upload queue — so a glyph the menu paints by the
+    /// window's id is uploaded again into the popup's table, once. Cleared
+    /// with the renderer it names.
+    pub menu_icon_ids: std::collections::HashMap<u32, Option<u32>>,
     /// The `wl_display` the renderers were made from, as an address.
     pub display_ptr: usize,
 
@@ -1881,6 +1888,7 @@ fn run_session<'l, A: Application>(
         sent_popover_region: None,
         menu_popup: None,
         menu_renderer: None,
+        menu_icon_ids: std::collections::HashMap::new(),
         display_ptr: 0,
         exit: false,
         redraw: false,

@@ -9,6 +9,12 @@ pub struct ButtonStrip {
     w: f32,
     h: f32,
     pub buttons: Vec<String>,
+    /// A bundled cce-icons glyph per button (`None` for one without): in a
+    /// VERTICAL strip it stands at the top of its button, above the
+    /// rotated label. Until 2026-10-05 the glyph was the label's first
+    /// character when that was a word of its own ("📁 Browse"), drawn as
+    /// text — an emoji or a symbol in whatever face the font fell back to.
+    pub icons: Vec<Option<String>>,
     pub selected: Option<usize>,
     pub vertical: bool,
     pub just_clicked: Option<usize>,
@@ -49,6 +55,7 @@ impl ButtonStrip {
             w,
             h,
             buttons: Vec::new(),
+            icons: Vec::new(),
             selected: None,
             vertical: false,
             just_clicked: None,
@@ -108,6 +115,27 @@ impl ButtonStrip {
         self.generate_rotated_labels();
         self
     }
+
+    /// The glyph each button wears in a vertical strip — see [`Self::icons`].
+    pub fn with_icons(mut self, icons: Vec<Option<String>>) -> Self {
+        self.set_icons(icons);
+        self
+    }
+
+    /// See [`Self::with_icons`].
+    pub fn set_icons(&mut self, icons: Vec<Option<String>>) {
+        self.icons = icons;
+        self.tab_quads_cache.clear();
+        self.generate_rotated_labels();
+    }
+
+    /// Button `i`'s glyph, if it has one.
+    pub fn icon_of(&self, i: usize) -> Option<&str> {
+        self.icons.get(i).and_then(|n| n.as_deref())
+    }
+
+    /// The side of a vertical button's glyph.
+    pub const ICON_SIDE: f32 = 14.0;
 
     pub fn with_selected(mut self, selected: Option<usize>) -> Self {
         self.selected = selected;
@@ -180,13 +208,8 @@ impl ButtonStrip {
             let hex_color = format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2]);
 
             let trimmed = page_name.trim();
-            let space_idx = trimmed.find(' ');
-            let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
-            let label_text = if has_icon {
-                trimmed.split_at(space_idx.unwrap()).1.trim()
-            } else {
-                trimmed
-            };
+            let has_icon = self.icon_of(i).is_some();
+            let label_text = trimmed;
 
             let r = self.item_rect(i);
             let padding_y = crate::layout::button_padding();
@@ -272,13 +295,8 @@ impl ButtonStrip {
             let font_size = font_info.1;
             let padding = crate::layout::button_padding();
             if self.vertical {
-                let space_idx = trimmed.find(' ');
-                let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
-                let label_text = if has_icon {
-                    trimmed.split_at(space_idx.unwrap()).1.trim()
-                } else {
-                    trimmed
-                };
+                let has_icon = self.icon_of(i).is_some();
+                let label_text = trimmed;
                 let text_w = crate::widget::display::measure_text_width(label_text, &font_fam, font_size);
                 if has_icon {
                     (text_w + 12.0 + 3.0 * padding).max(1.0)
@@ -418,12 +436,15 @@ impl crate::widget::Paint for ButtonStrip {
                 if i < self.tab_text_quads.len() {
                     let min_y = self.y;
                     let max_y = self.y + self.h;
-                    let page_name = &self.buttons[i];
-                    let trimmed = page_name.trim();
-                    let space_idx = trimmed.find(' ');
-                    let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
+                    let has_icon = self.icon_of(i).is_some();
                     let padding_y = crate::layout::button_padding();
                     let y_offset = if has_icon { padding_y + 12.0 } else { 0.0 };
+                    if let Some(name) = self.icon_of(i) {
+                        let c = if Some(i) == self.selected { [0xf0, 0xf0, 0xf5] } else { [0xa8, 0xa8, 0xb3] };
+                        let side = Self::ICON_SIDE;
+                        let g = Rect { x: r.0 + 0.5 * (r.2 - side), y: r.1 + (padding_y - 2.0).max(0.0), width: side, height: side };
+                        pc.icon(name, g, [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0]);
+                    }
 
                     for &(qx, qy, qw, qh, qc) in &self.tab_text_quads[i] {
                         let absolute_x = r.0 + qx;
@@ -440,7 +461,7 @@ impl crate::widget::Paint for ButtonStrip {
             }
         }
 
-        // Own labels (horizontal button text / vertical icon glyphs).
+        // Own labels (horizontal button text).
         for tl in self.own_labels() {
             pc.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
         }
@@ -582,27 +603,8 @@ impl ButtonStrip {
                 [0xa8, 0xa8, 0xb3]
             };
             if self.vertical {
-                let trimmed = btn_label.trim();
-                let space_idx = trimmed.find(' ');
-                let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
-                if has_icon {
-                    let space_idx = space_idx.unwrap();
-                    let (icon, _) = trimmed.split_at(space_idx);
-                    let icon = icon.trim();
-                    if !icon.is_empty() {
-                        let icon_font_size = 14.0;
-                        let est_icon_w = crate::widget::display::measure_text_width(icon, &font_fam, icon_font_size);
-                        let padding_y = crate::layout::button_padding();
-                        let icon_y = r.1 + (padding_y - 2.0).max(0.0);
-                        labels.push(TextLabel {
-                            text: icon.to_string(),
-                            x: r.0 + (r.2 - est_icon_w) / 2.0,
-                            y: icon_y,
-                            font_size: icon_font_size,
-                            color,
-                        });
-                    }
-                }
+                // A vertical button's label is the rotated texture and its
+                // glyph an icon, both drawn in `paint`.
             } else {
                 let est_w = crate::widget::display::measure_text_width(btn_label, &font_fam, font_size);
                 labels.push(TextLabel {

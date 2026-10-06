@@ -114,13 +114,76 @@ pub fn icons_dir() -> String {
 ///
 /// [`Button::new_icon`]: widget::Button::new_icon
 pub fn upload_icon(name: &str, px: u32) -> Option<(u32, u32, u32)> {
+    upload_icon_as(name, px, None)
+}
+
+/// [`upload_icon`] in a colour: the glyph's pixels multiplied by `rgb`
+/// (raw sRGB, as a [`TextLabel`](widget::display::TextLabel)'s colour is,
+/// so a glyph tinted with a label's colour matches the label). The artwork
+/// is white, so multiplying IS tinting, and what a glyph shades darker (a
+/// knocked-out mark) stays proportionally darker. Cached per
+/// `(name, px, rgb)` like [`upload_icon`], and re-uploaded after a renderer
+/// rebuild the same way.
+///
+/// A `PaintCtx::image` carries alpha and no colour, which is why a colour
+/// has to be baked into the texture; [`icon_tint`] is the colour a
+/// toolkit `[f32; 4]` becomes. The `weather-*` glyphs carry colours of
+/// their own and are drawn with [`upload_icon`].
+pub fn upload_icon_tinted(name: &str, px: u32, rgb: [u8; 3]) -> Option<(u32, u32, u32)> {
+    upload_icon_as(name, px, Some(rgb))
+}
+
+/// The `[u8; 3]` tint a toolkit colour becomes — the conversion a
+/// `TextLabel` applies to its own colour, so glyph and text match.
+pub fn icon_tint(color: [f32; 4]) -> [u8; 3] {
+    [
+        (color[0] * 255.0).round().clamp(0.0, 255.0) as u8,
+        (color[1] * 255.0).round().clamp(0.0, 255.0) as u8,
+        (color[2] * 255.0).round().clamp(0.0, 255.0) as u8,
+    ]
+}
+
+/// A bundled glyph rasterized at `px`, tinted when `tint` is given: the
+/// pixels [`upload_icon`] and [`upload_icon_tinted`] upload, for a caller
+/// that uploads them itself (a renderer with images of its own).
+pub fn icon_pixels(name: &str, px: u32, tint: Option<[u8; 3]>) -> Option<(Vec<u8>, u32, u32)> {
+    let path = format!("{}/{name}.svg", icons_dir());
+    let data = std::fs::read(&path).ok()?;
+    let (mut rgba, w, h) = rasterize_svg(&data, px)?;
+    if let Some(rgb) = tint {
+        for p in rgba.chunks_exact_mut(4) {
+            for (c, &t) in p[..3].iter_mut().zip(rgb.iter()) {
+                *c = ((*c as u16 * t as u16 + 127) / 255) as u8;
+            }
+        }
+    }
+    Some((rgba, w, h))
+}
+
+/// What a bundled glyph's image id holds: `(name, px, tint)`.
+type IconSource = (String, u32, Option<[u8; 3]>);
+
+/// Every id [`upload_icon`] and [`upload_icon_tinted`] have handed out, and
+/// the glyph it holds — see [`icon_source`].
+static ICON_SOURCES: std::sync::Mutex<Option<std::collections::HashMap<u32, IconSource>>> =
+    std::sync::Mutex::new(None);
+
+/// The glyph an image id from [`upload_icon`] / [`upload_icon_tinted`]
+/// holds, or `None` for any other image. What lets a renderer that keeps
+/// images of its own (the context menu's popup) draw the same glyph from a
+/// display list painted with the window's ids.
+pub fn icon_source(id: u32) -> Option<IconSource> {
+    ICON_SOURCES.lock().unwrap().as_ref()?.get(&id).cloned()
+}
+
+fn upload_icon_as(name: &str, px: u32, tint: Option<[u8; 3]>) -> Option<(u32, u32, u32)> {
     use std::collections::HashMap;
     use std::sync::Mutex;
     /// The cached ids, and the renderer epoch they were uploaded to.
-    static CACHE: Mutex<Option<(u32, HashMap<(String, u32), Option<(u32, u32, u32)>>)>> =
+    static CACHE: Mutex<Option<(u32, HashMap<IconSource, Option<(u32, u32, u32)>>)>> =
         Mutex::new(None);
     let epoch = crate::draw::renderer_epoch();
-    let key = (name.to_string(), px);
+    let key = (name.to_string(), px, tint);
     let mut guard = CACHE.lock().unwrap();
     let (cached_epoch, cache) = guard.get_or_insert_with(|| (epoch, HashMap::new()));
     if *cached_epoch != epoch {
@@ -132,12 +195,11 @@ pub fn upload_icon(name: &str, px: u32) -> Option<(u32, u32, u32)> {
     if let Some(hit) = cache.get(&key) {
         return *hit;
     }
-    let loaded = (|| {
-        let path = format!("{}/{name}.svg", icons_dir());
-        let data = std::fs::read(&path).ok()?;
-        let (rgba, w, h) = rasterize_svg(&data, px)?;
-        Some((crate::draw::upload_rgba(rgba, w, h), w, h))
-    })();
+    let loaded = icon_pixels(name, px, tint).map(|(rgba, w, h)| {
+        let id = crate::draw::upload_rgba(rgba, w, h);
+        ICON_SOURCES.lock().unwrap().get_or_insert_with(HashMap::new).insert(id, key.clone());
+        (id, w, h)
+    });
     cache.insert(key, loaded);
     loaded
 }

@@ -1763,6 +1763,52 @@ System fonts are loaded only when `$CCE_LOAD_SYSTEM_FONTS` is set (or via
 `create_font_system_with_system_fonts()`, used by the font picker). Configured custom font
 families are validated at startup with a warning if missing.
 
+### Every symbol is a cce-icons glyph (since 2026-10-05)
+
+The DE's one icon source is `cce-icons/svg`, and the toolkit draws a symbol
+— a chevron, a check, a mark, a + or a − — ONLY as one of those glyphs, never
+as a character (`▼`, `✓`, `●`, `›`, `+`, an emoji) in whatever face the font
+falls back to, and never built from primitives. Apps hold to the same rule.
+
+- **`PaintCtx::icon(name, rect, color)`** draws a glyph tinted like the text
+  beside it (raw sRGB, as a text colour is; its alpha the image's), rasterized
+  at twice the rect so it is crisp on a 2x output. `icon_untinted` is for the
+  `weather-*` family, the one set that carries its own colours.
+  `RenderTarget::icon` is the same call for the legacy target (a
+  `PopoverCollector` draws nothing). Underneath, `upload_icon_tinted` /
+  `icon_tint` / `icon_pixels`: the artwork is white, so multiplying is
+  tinting.
+- **A context-menu row MARK is a glyph**: a label beginning `MARK_CHECK`
+  (`"✓ "`), `MARK_ON` (`"● "`) or `MARK_OFF` (`"○ "`) draws `check`, `circle`
+  or `circle-outline` at its left and the label without it. The text stays the
+  row's identity, so hosts that match their own labels still match. A page
+  row's `›` and the back band's `‹` are `chevron-right` / `chevron-left`.
+- **The menu popup has images now.** Its renderer used to pass none
+  (`images: &[]`). It keeps its OWN copies (`menu_icon_ids`): a glyph painted
+  by the window renderer's id is looked up with `icon_source` and uploaded
+  once into the popup's table (`VkRenderer::upload_rgba_now`). And it no
+  longer drains the shared upload queue (`set_shared_uploads(false)`) — it
+  did, so an upload queued between the window's frame and the popup's landed
+  in the popup's table and never drew in the window.
+- **A vertical `ButtonStrip` / `Paginator` takes glyphs by name**
+  (`with_icons`). It took the label's first character when that was a word of
+  its own ("📁 Browse") and drew it as text.
+- Converted: dropdown arrow (`arrow_rect`, `ARROW_SIDE`), the params pane's
+  picker face (it drew "▾" AND the arrow), menubar title arrow and checked
+  items, spreadsheet sort marks (`chevron-up` / `chevron-down`), spinbox −/+,
+  font selector ("Aa" → `font`), breadcrumb overflow (`more-horizontal`),
+  markdown's unrenderable embed (`Draw::Icon`, `link`), the tree list's
+  missing-icon fallback (now an empty slot) and the copy button's fallback
+  ("📋" → "Copy").
+- **Kept as shapes**, being indicators and not symbols: `StatusDot`'s LED
+  disc and the plate dock's corner dot.
+
+`every_glyph_the_toolkit_names_is_in_the_icon_set` scans the source for glyph
+names and fails on one with no file — a missing glyph draws NOTHING, silently
+(skipped where the icon set is not checked out). `menu_marks_and_chevrons_are_glyphs`
+holds the menu convention. **A shadow session needs `CCE_ICONS_DIR`**: its
+HOME is isolated, so the default path finds no icons and every glyph is blank.
+
 ## Debug environment variables
 
 All opt-in, all read once, all quiet when unset — set one and run any client.

@@ -125,6 +125,11 @@ impl Breadcrumb {
         (family, size.unwrap_or(BREADCRUMB_FONT_SIZE))
     }
 
+    /// The side of the folded-segments marker glyph at font size `size`.
+    fn marker_side(size: f32) -> f32 {
+        (size * 0.9).round()
+    }
+
     /// The segments to actually paint, each with its BUTTON BOX left edge/width and its
     /// *logical* index (position in [`virtual_segs`]; `None` marks the leading "…" ellipsis).
     /// This is the one source for hit-testing, the hover overlay, the plates, and the text
@@ -143,8 +148,12 @@ impl Breadcrumb {
         let avail = (rect.width - 2.0 * Self::SEG_INSET).max(0.0);
 
         let (font, size) = Self::font_and_size();
-        let box_w =
-            |s: &str| crate::widget::display::measure_text_width(s, &font, size) + 2.0 * SEG_PAD_X;
+        // The "…" marker is drawn as the `more-horizontal` glyph, so its box
+        // is the glyph's width, not the character's.
+        let box_w = |s: &str| {
+            let inner = if s == "…" { Self::marker_side(size) } else { crate::widget::display::measure_text_width(s, &font, size) };
+            inner + 2.0 * SEG_PAD_X
+        };
 
         // Lay a list of (text, logical index) out left-to-right from the widget's left edge,
         // one button box per segment.
@@ -440,6 +449,15 @@ impl Paint for Breadcrumb {
         let (_, size) = Self::font_and_size();
         let last_logical = self.virtual_segs().len().saturating_sub(1);
         for vs in segs {
+            if vs.logical.is_none() {
+                // The marker for the segments folded away: the
+                // `more-horizontal` glyph in the dimmed colour, centred in
+                // its box.
+                let side = Self::marker_side(size);
+                let g = Rect { x: vs.x + SEG_PAD_X, y: rect.y + 0.5 * (rect.height - side), width: side, height: side };
+                ctx.icon("more-horizontal", g, [0x88 as f32 / 255.0, 0x88 as f32 / 255.0, 0x99 as f32 / 255.0, 1.0]);
+                continue;
+            }
             let color =
                 if vs.logical == Some(last_logical) { [0xcc, 0xcc, 0xd4] } else { [0x88, 0x88, 0x99] };
             // `visible_segs` already drops segments behind a "…" to make the

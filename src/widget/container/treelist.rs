@@ -1642,7 +1642,7 @@ impl TreeList {
     /// Type cells clip at their separators so text can't bleed into the next
     /// column; sections span the whole row.
     /// The section-row chevron (cce-icons), cached per size by `upload_icon`;
-    /// `None` when the icon set is missing (rows fall back to text triangles).
+    /// `None` when the icon set is missing (the slot is left empty).
     fn chevron_icon(collapsed: bool) -> Option<(u32, u32, u32)> {
         crate::upload_icon(if collapsed { "chevron-right" } else { "chevron-down" }, 32)
     }
@@ -1697,17 +1697,14 @@ impl TreeList {
             }
 
             match item {
-                TreeElement::Section { name, indent, collapsed, .. } => {
+                TreeElement::Section { name, indent, .. } => {
                     if self.editing_key_idx != Some(i) {
                         let sx = list_left + 8.0 + *indent as f32 * 12.0;
-                        // Chevron icons (cce-icons) replace the text triangles
-                        // when available — paint() draws the image in the slot
-                        // this leaves open. Text triangles are the fallback.
-                        let (text, tx) = if Self::chevron_icon(*collapsed).is_some() {
-                            (name.clone(), sx + tree_font_size + 6.0)
-                        } else {
-                            (format!("{} {}", if *collapsed { "▶" } else { "▼" }, name), sx)
-                        };
+                        // The chevron glyph (cce-icons) stands in the slot
+                        // this leaves open — paint() draws it. A machine
+                        // without the icon set shows the slot empty: no
+                        // symbol is drawn as a character.
+                        let (text, tx) = (name.clone(), sx + tree_font_size + 6.0);
                         labels.push((TextLabel {
                             text,
                             x: tx,
