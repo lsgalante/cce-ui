@@ -483,6 +483,24 @@ its modules exited, the launcher's backoff grew while nobody was logged in, and 
 StatusNotifierWatcher came back seconds after the next login — Dropbox, starting into the
 gap, reported no tray.
 
+### A layer app can have no surface while it is empty (`Application::wants_surface`, 2026-10-05)
+
+A layer-shell app that is usually empty — the notifier, between notifications — returns
+false from `wants_surface` while it has nothing to show. On that turn the runner drops the
+renderer and then the layer surface (SCTK destroys the role, then the `wl_surface`); on the
+turn it says true again it builds a fresh `wl_surface`, re-attaches the same layer role and
+a new renderer, and the first configure makes it presentable as at session start. The app
+keeps running throughout — its calloop sources, D-Bus thread and state are untouched; only
+the surface goes. Why bother: an always-mapped transparent overlay still made the
+compositor blur behind it whenever anything under it changed, and it kept a fullscreen
+client off direct scanout (scenefx scans out only a one-entry render list).
+
+`surface_hidden` tells the app it happened. Image ids it uploads from then on are queued
+for the NEXT renderer, so that renderer's `renderer_init` must not re-upload them the way
+it would after a lost connection (the notifier keeps a flag for this). Rebuilding costs a
+renderer: a card after an empty spell appeared ~45 ms after `Notify` in a scale-2 shadow.
+Default true; xdg windows ignore it.
+
 ### `renderer_init` — GPU handles do not survive a reconnect
 
 A connection is one **session**. A Wayland transport cannot be repaired once it breaks,
