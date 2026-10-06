@@ -64,7 +64,7 @@
 //! DE-wide loader are unchanged — free-form specs from cce-designer or a
 //! hand-edited config still load everywhere.
 
-use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
+use cce_ui::engine::{Application, AppSender, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::layout::RELIEF_PROFILE_IDENTITY_SPEC as IDENTITY_SPEC;
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{Cap, DisplayList, PaintCtx};
@@ -73,7 +73,6 @@ use cce_ui::widget::{
     Adapted, Button, Dropdown, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta,
     Slider, WidgetHost, WidgetId,
 };
-use wayland_client::QueueHandle;
 
 const HEADER_FONT_SIZE: f32 = 13.0;
 const HEADER_COLOR: [u8; 3] = [0x9a, 0x9a, 0xa4];
@@ -1383,10 +1382,7 @@ impl BevelPopup {
 impl Application for BevelPopup {
     type Message = BevelMsg;
 
-    fn new(
-        _qh: &QueueHandle<EngineState<Self>>,
-        _sender: calloop::channel::Sender<Self::Message>,
-    ) -> Self {
+    fn create(_sender: AppSender<Self::Message>) -> Self {
         cce_ui::scale::set_scale_factor(1.0);
         // Force the lazy config load BEFORE reading the registry: the knob
         // strings are read directly (no getter wraps them), so nothing else

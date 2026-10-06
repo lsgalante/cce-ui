@@ -13,14 +13,13 @@
 //! Architecture mirrors the reference `DemoApp` (`src/main.rs`): display-list
 //! frame, routed events, in-frame popovers.
 
-use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
+use cce_ui::engine::{Application, AppSender, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
 use cce_ui::widget::{
     Adapted, Button, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, Ramp,
     WidgetHost,
 };
-use wayland_client::QueueHandle;
 
 /// Transparent rim between the surface edge and the plate: room for the ramp's
 /// key pegs (r=28, +45 selected halo) to render outside the window frame
@@ -92,10 +91,7 @@ impl RampPopup {
 impl Application for RampPopup {
     type Message = RampMsg;
 
-    fn new(
-        _qh: &QueueHandle<EngineState<Self>>,
-        _sender: calloop::channel::Sender<Self::Message>,
-    ) -> Self {
+    fn create(_sender: AppSender<Self::Message>) -> Self {
         cce_ui::scale::set_scale_factor(1.0);
         let mut ramp = Ramp::new();
 

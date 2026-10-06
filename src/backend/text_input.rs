@@ -1,232 +1,237 @@
-// text-input-v3 (zwp_text_input_v3): the seat's text input follows the
-// frame's claim (`crate::text_input`).
-//
-// While some widget claims a field, the text input is enabled and carries
-// the caret's rectangle; the first frame nobody claims, it is disabled. The
-// compositor only listens while this client holds keyboard focus (between
-// `enter` and `leave`), so the last frame's claim is kept and replayed on
-// `enter`, and `leave` disables: wlroots keeps a text input's enabled state
-// across a leave, and a stale "enabled" would turn the next enable into a
-// plain commit the compositor ignores.
-//
-// Nothing here types. Keys arrive over wl_keyboard as before (the on-screen
-// keyboard is a virtual keyboard); a `commit_string` from an input method is
-// delivered to the app as one typed key (`EngineState::type_text`).
+//! `text-input-unstable-v3`: the Wayland shell's half of input-method
+//! composition (`crate::ime`), as the hidden textarea is the browser's and
+//! `NSTextInputClient` the AppKit shell's.
+//!
+//! The compositor relays between this object and the input method (an
+//! `input-method-v2` client: fcitx5, IBus through its Wayland frontend, …):
+//!
+//! - **What we tell it.** While a widget is editing text (`ime::caret` is
+//!   set) and the seat's text-input focus is on our surface (`enter`), the
+//!   text input is ENABLED, with a normal content type and the caret as the
+//!   cursor rectangle (surface px), re-sent when the caret moves; otherwise
+//!   it is disabled. A composition a widget dropped (`ime::take_reset`) is
+//!   cancelled by disabling and enabling again, which resets the input
+//!   method's state. Every state change is one `commit`, counted.
+//! - **What it tells us.** `preedit_string`, `commit_string` and
+//!   `delete_surrounding_text` are double-buffered and applied on `done`, in
+//!   the protocol's order: the old composition out, the commit typed
+//!   (`Driver::commit_text`), the new composition in (`Driver::preedit`).
+//!   A batch with no `preedit_string` ends the composition. We send no
+//!   surrounding text, so a deletion has nothing to count its bytes in and
+//!   is not applied. A `done` whose serial is behind our commits still
+//!   applies its text — the protocol asks only that it not change our state.
+//! - `enter` applies the last frame's caret at once (an idle window builds
+//!   no frame to do it); `leave` drops any composition, as the protocol
+//!   asks, and an enabled text input is disabled there and then: wlroots
+//!   keeps a text input's enabled state across a leave, and a stale
+//!   "enabled" turns the next enable into a plain commit the compositor
+//!   ignores.
+//!
+//! The pure part — what a batch does, and what state to send — is
+//! [`Batch::apply_order`] and [`TextInput::plan`], tested with no
+//! compositor.
 
-use smithay_client_toolkit::reexports::client::{Connection, Dispatch, QueueHandle};
-use wayland_protocols::wp::text_input::zv3::client::{
-    zwp_text_input_manager_v3::ZwpTextInputManagerV3,
-    zwp_text_input_v3::{self, ZwpTextInputV3},
-};
+use crate::ime::Preedit;
 
-use super::window_runner::{Application, EngineState};
+/// The double-buffered text a `done` applies.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Batch {
+    pub preedit: Option<Preedit>,
+    pub commit: Option<String>,
+    pub delete: Option<(u32, u32)>,
+}
 
-/// A request the sync wants sent, in order. `Commit` closes each batch.
+/// One step of applying a batch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Apply {
+    Preedit(Option<Preedit>),
+    Commit(String),
+}
+
+impl Batch {
+    /// A `preedit_string` event: the protocol's cursor (bytes, -1 for
+    /// hidden) as `Preedit`'s.
+    pub fn set_preedit(&mut self, text: Option<String>, begin: i32, end: i32) {
+        let text = text.unwrap_or_default();
+        let cursor = (begin >= 0 && end >= 0).then(|| (begin as usize, end as usize));
+        self.preedit = (!text.is_empty()).then(|| Preedit::new(text, cursor));
+    }
+
+    /// The batch as the protocol's `done` orders it: the old composition
+    /// out, the commit typed, the new composition in.
+    pub fn apply_order(self) -> Vec<Apply> {
+        let mut steps = Vec::new();
+        if let Some(text) = self.commit.filter(|t| !t.is_empty()) {
+            steps.push(Apply::Preedit(None));
+            steps.push(Apply::Commit(text));
+        }
+        steps.push(Apply::Preedit(self.preedit));
+        steps
+    }
+}
+
+/// What to send the compositor this turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Request {
-    Enable,
+pub enum Send {
+    /// Nothing changed.
+    Nothing,
+    /// `enable` (after a `disable` if `reset`), the content type, the
+    /// cursor rectangle, `commit`.
+    Enable { rect: [i32; 4], reset: bool },
+    /// The cursor rectangle moved: it, then `commit`.
+    Move { rect: [i32; 4] },
+    /// `disable`, `commit`.
     Disable,
-    CursorRectangle([i32; 4]),
-    Commit,
 }
 
-/// What the compositor has been told, and what the app wants. Pure, so the
-/// enter/leave/claim interplay is tested without a compositor.
+/// The text input's state on our side.
 #[derive(Debug, Default)]
-pub struct Sync {
-    entered: bool,
-    enabled: bool,
-    sent_rect: Option<[i32; 4]>,
-    wanted: Option<[i32; 4]>,
-}
-
-impl Sync {
-    /// A frame was built; `claim` is what it claimed.
-    pub fn frame(&mut self, claim: Option<[f32; 4]>) -> Vec<Request> {
-        self.wanted = claim.map(|[x, y, w, h]| [x.round() as i32, y.round() as i32, w.round().max(1.0) as i32, h.round().max(1.0) as i32]);
-        self.apply()
-    }
-
-    pub fn enter(&mut self) -> Vec<Request> {
-        self.entered = true;
-        self.apply()
-    }
-
-    pub fn leave(&mut self) -> Vec<Request> {
-        let out = if self.enabled { vec![Request::Disable, Request::Commit] } else { Vec::new() };
-        self.entered = false;
-        self.enabled = false;
-        self.sent_rect = None;
-        out
-    }
-
-    fn apply(&mut self) -> Vec<Request> {
-        if !self.entered {
-            return Vec::new();
-        }
-        let mut out = Vec::new();
-        match self.wanted {
-            Some(rect) => {
-                if !self.enabled {
-                    // `enable` resets the state, so the rectangle follows it.
-                    out.push(Request::Enable);
-                    self.enabled = true;
-                    self.sent_rect = None;
-                }
-                if self.sent_rect != Some(rect) {
-                    out.push(Request::CursorRectangle(rect));
-                    self.sent_rect = Some(rect);
-                }
-            }
-            None => {
-                if self.enabled {
-                    out.push(Request::Disable);
-                    self.enabled = false;
-                    self.sent_rect = None;
-                }
-            }
-        }
-        if !out.is_empty() {
-            out.push(Request::Commit);
-        }
-        out
-    }
-}
-
-/// The seat's text input and its sync.
 pub struct TextInput {
-    proxy: ZwpTextInputV3,
-    sync: Sync,
-    /// An input method's `commit_string`, held until its `done`.
-    pending_commit: Option<String>,
+    /// The seat's text-input focus is on our surface.
+    pub entered: bool,
+    /// We have committed an `enable` (and no `disable` since).
+    pub enabled: bool,
+    /// The cursor rectangle last committed.
+    pub sent_rect: Option<[i32; 4]>,
+    /// `commit` requests issued: what a current `done` carries as its serial.
+    pub commits: u32,
+    /// The batch since the last `done`.
+    pub pending: Batch,
 }
 
 impl TextInput {
-    pub fn new<A: Application>(
-        manager: &ZwpTextInputManagerV3,
-        seat: &smithay_client_toolkit::reexports::client::protocol::wl_seat::WlSeat,
-        qh: &QueueHandle<EngineState<A>>,
-    ) -> Self {
-        TextInput { proxy: manager.get_text_input(seat, qh, ()), sync: Sync::default(), pending_commit: None }
-    }
-
-    pub fn frame(&mut self, claim: Option<[f32; 4]>) {
-        let requests = self.sync.frame(claim);
-        self.send(&requests);
-    }
-
-    fn send(&self, requests: &[Request]) {
-        for r in requests {
-            match *r {
-                Request::Enable => {
-                    self.proxy.enable();
-                    self.proxy.set_content_type(
-                        zwp_text_input_v3::ContentHint::empty(),
-                        zwp_text_input_v3::ContentPurpose::Normal,
-                    );
-                }
-                Request::Disable => self.proxy.disable(),
-                Request::CursorRectangle([x, y, w, h]) => self.proxy.set_cursor_rectangle(x, y, w, h),
-                Request::Commit => self.proxy.commit(),
+    /// What the state should become, given the editing widget's caret
+    /// (`ime::caret`, in the app's logical px), the surface's px per
+    /// logical px, and whether a widget asked for its composition to be
+    /// cancelled. Records the new state as sent.
+    pub fn plan(&mut self, caret: Option<[f32; 4]>, surface_scale: f32, reset: bool) -> Send {
+        let rect = caret.map(|[x, y, w, h]| {
+            let s = surface_scale;
+            [(x * s).round() as i32, (y * s).round() as i32, ((w * s).round() as i32).max(1), ((h * s).round() as i32).max(1)]
+        });
+        let send = match (self.entered, rect) {
+            (true, Some(rect)) if !self.enabled || reset => Send::Enable { rect, reset: self.enabled && reset },
+            (true, Some(rect)) if self.sent_rect != Some(rect) => Send::Move { rect },
+            (true, Some(_)) => Send::Nothing,
+            (true, None) if self.enabled => Send::Disable,
+            _ => Send::Nothing,
+        };
+        match send {
+            Send::Enable { rect, reset } => {
+                self.enabled = true;
+                self.sent_rect = Some(rect);
+                // A reset commits its disable before the enable.
+                self.commits += if reset { 2 } else { 1 };
             }
+            Send::Move { rect } => {
+                self.sent_rect = Some(rect);
+                self.commits += 1;
+            }
+            Send::Disable => {
+                self.enabled = false;
+                self.sent_rect = None;
+                self.commits += 1;
+            }
+            Send::Nothing => {}
         }
+        send
     }
-}
 
-impl Drop for TextInput {
-    fn drop(&mut self) {
-        self.proxy.destroy();
+    /// `enter`: our surface has the text-input focus; the next plan enables
+    /// if a widget is editing.
+    pub fn enter(&mut self) {
+        self.entered = true;
+        self.enabled = false;
+        self.sent_rect = None;
     }
-}
 
-impl<A: Application> Dispatch<ZwpTextInputManagerV3, ()> for EngineState<A> {
-    fn event(
-        _state: &mut Self,
-        _proxy: &ZwpTextInputManagerV3,
-        _event: <ZwpTextInputManagerV3 as smithay_client_toolkit::reexports::client::Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-    ) {
-    }
-}
-
-impl<A: Application> Dispatch<ZwpTextInputV3, ()> for EngineState<A> {
-    fn event(
-        state: &mut Self,
-        _proxy: &ZwpTextInputV3,
-        event: zwp_text_input_v3::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-    ) {
-        let Some(ti) = state.text_input.as_mut() else { return };
-        match event {
-            zwp_text_input_v3::Event::Enter { .. } => {
-                let requests = ti.sync.enter();
-                ti.send(&requests);
-            }
-            zwp_text_input_v3::Event::Leave { .. } => {
-                let requests = ti.sync.leave();
-                ti.send(&requests);
-                ti.pending_commit = None;
-            }
-            zwp_text_input_v3::Event::CommitString { text } => {
-                ti.pending_commit = text;
-            }
-            zwp_text_input_v3::Event::Done { .. } => {
-                if let Some(text) = ti.pending_commit.take().filter(|t| !t.is_empty()) {
-                    state.type_text(text);
-                }
-            }
-            // No preedit display and no surrounding text: an input method
-            // composing in place is not supported, only its committed text.
-            _ => {}
+    /// `leave`: the focus went. True when we were enabled, and so owe a
+    /// `disable` and `commit` (counted here): wlroots keeps the enabled
+    /// state across a leave, and the next `enter`'s enable would otherwise
+    /// be a plain commit it ignores.
+    pub fn leave(&mut self) -> bool {
+        let owed = self.enabled;
+        if owed {
+            self.commits += 1;
         }
+        self.entered = false;
+        self.enabled = false;
+        self.sent_rect = None;
+        self.pending = Batch::default();
+        owed
+    }
+
+    /// `done`: the batch to apply, the pending state back to initial.
+    pub fn done(&mut self) -> Batch {
+        std::mem::take(&mut self.pending)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Request::*;
     use super::*;
 
-    const R: [f32; 4] = [10.0, 20.0, 100.0, 30.0];
-    const RI: [i32; 4] = [10, 20, 100, 30];
-
     #[test]
-    fn nothing_is_sent_before_enter() {
-        let mut s = Sync::default();
-        assert!(s.frame(Some(R)).is_empty());
-        assert_eq!(s.enter(), vec![Enable, CursorRectangle(RI), Commit], "the claim waits for enter");
+    fn a_done_ends_the_composition_types_the_commit_and_starts_the_next() {
+        let mut b = Batch::default();
+        b.commit = Some("日本".into());
+        b.set_preedit(Some("ご".into()), 3, 3);
+        assert_eq!(
+            b.apply_order(),
+            vec![
+                Apply::Preedit(None),
+                Apply::Commit("日本".into()),
+                Apply::Preedit(Some(Preedit::new("ご", Some((3, 3))))),
+            ]
+        );
+        // A batch with no preedit_string ends the composition; a hidden
+        // cursor is none.
+        assert_eq!(Batch::default().apply_order(), vec![Apply::Preedit(None)]);
+        let mut b = Batch::default();
+        b.set_preedit(Some("か".into()), -1, -1);
+        assert_eq!(b.apply_order(), vec![Apply::Preedit(Some(Preedit::new("か", None)))]);
     }
 
     #[test]
-    fn a_claim_enables_once_and_follows_the_caret() {
-        let mut s = Sync::default();
-        s.enter();
-        assert_eq!(s.frame(Some(R)), vec![Enable, CursorRectangle(RI), Commit]);
-        assert!(s.frame(Some(R)).is_empty(), "an unchanged frame sends nothing");
-        let moved = [12.0, 20.0, 100.0, 30.0];
-        assert_eq!(s.frame(Some(moved)), vec![CursorRectangle([12, 20, 100, 30]), Commit]);
-        assert_eq!(s.frame(None), vec![Disable, Commit]);
-        assert!(s.frame(None).is_empty());
+    fn enabled_only_while_focused_and_editing_and_every_change_one_commit() {
+        let mut ti = TextInput::default();
+        let caret = Some([10.0, 20.0, 1.5, 16.0]);
+        // Editing, but not yet entered: nothing to say.
+        assert_eq!(ti.plan(caret, 1.0, false), Send::Nothing);
+        ti.enter();
+        assert_eq!(ti.plan(caret, 1.0, false), Send::Enable { rect: [10, 20, 2, 16], reset: false });
+        assert_eq!(ti.plan(caret, 1.0, false), Send::Nothing);
+        // The caret moves; at a forced scale of 2 the surface is twice the app.
+        assert_eq!(ti.plan(Some([30.0, 20.0, 1.5, 16.0]), 2.0, false), Send::Move { rect: [60, 40, 3, 32] });
+        // A widget dropped its composition: disable and enable again.
+        assert_eq!(ti.plan(Some([30.0, 20.0, 1.5, 16.0]), 2.0, true), Send::Enable { rect: [60, 40, 3, 32], reset: true });
+        // Nothing editing.
+        assert_eq!(ti.plan(None, 1.0, false), Send::Disable);
+        assert_eq!(ti.plan(None, 1.0, false), Send::Nothing);
+        assert_eq!(ti.commits, 5, "enable, move, disable + enable, disable");
+        // The focus leaves; editing again enables nothing until it is back.
+        assert!(!ti.leave(), "nothing enabled, nothing owed");
+        assert_eq!(ti.plan(caret, 1.0, false), Send::Nothing);
+        ti.enter();
+        assert!(matches!(ti.plan(caret, 1.0, false), Send::Enable { reset: false, .. }));
     }
 
     #[test]
-    fn leave_disables_and_enter_restores() {
-        let mut s = Sync::default();
-        s.enter();
-        s.frame(Some(R));
-        assert_eq!(s.leave(), vec![Disable, Commit]);
-        assert!(s.frame(Some(R)).is_empty(), "unfocused: the compositor is not listening");
-        assert_eq!(s.enter(), vec![Enable, CursorRectangle(RI), Commit]);
+    fn a_leave_while_enabled_owes_a_disable_and_enter_enables_again() {
+        let mut ti = TextInput::default();
+        let caret = Some([10.0, 20.0, 1.5, 16.0]);
+        ti.enter();
+        ti.plan(caret, 1.0, false);
+        assert!(ti.leave(), "wlroots keeps the enabled state across a leave");
+        assert_eq!(ti.commits, 2, "the enable, then the disable");
+        ti.enter();
+        assert_eq!(ti.plan(caret, 1.0, false), Send::Enable { rect: [10, 20, 2, 16], reset: false });
     }
 
     #[test]
-    fn leave_without_a_field_sends_nothing() {
-        let mut s = Sync::default();
-        s.enter();
-        assert!(s.leave().is_empty());
+    fn a_reset_with_nothing_enabled_is_an_ordinary_enable() {
+        let mut ti = TextInput::default();
+        ti.enter();
+        assert_eq!(ti.plan(Some([0.0, 0.0, 1.0, 10.0]), 1.0, true), Send::Enable { rect: [0, 0, 1, 10], reset: false });
     }
 }

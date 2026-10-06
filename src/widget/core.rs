@@ -269,65 +269,173 @@ pub mod hover_animation {
     }
 }
 
+/// The system clipboard, as text: what every widget's copy, cut and paste go
+/// through. One synchronous pair, with a backend per platform:
+///
+/// - **Wayland** (Linux and the other non-Apple unixes): `wl-copy` /
+///   `wl-paste`, `xclip` where those are missing.
+/// - **macOS**: the general `NSPasteboard`, plain-text type.
+/// - **A page**: a browser hands a page the clipboard only inside a `paste`
+///   event, so a read is the text of the last one the browser shell saw (it
+///   holds a ⌘/Ctrl+V back until the event has come; `web::shell`), or what
+///   the page itself copied last. A copy writes through the async Clipboard
+///   API where the page is a secure context, and the shell also answers the
+///   `copy` / `cut` event a ⌘/Ctrl+C or X raises with it, which needs none.
+///   Before this a copy in a page panicked (`std::thread::spawn`).
 pub mod clipboard {
+    /// Put `text` on the clipboard.
     pub fn copy_to_clipboard(text: &str) {
-        let text = text.to_string();
-        std::thread::spawn(move || {
-            if let Ok(mut child) = std::process::Command::new("wl-copy")
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-            {
-                if let Some(mut stdin) = child.stdin.take() {
-                    use std::io::Write;
-                    let _ = stdin.write_all(text.as_bytes());
-                }
-                let _ = child.wait();
-            } else if let Ok(mut child) = std::process::Command::new("xclip")
-                .arg("-selection")
-                .arg("clipboard")
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-            {
-                if let Some(mut stdin) = child.stdin.take() {
-                    use std::io::Write;
-                    let _ = stdin.write_all(text.as_bytes());
-                }
-                let _ = child.wait();
-            }
-        });
+        imp::copy(text);
     }
 
+    /// The clipboard's text, if it has any.
     pub fn read_from_clipboard() -> Option<String> {
-        match std::process::Command::new("wl-paste")
-            .arg("-n")
-            .output()
-        {
-            Ok(output) => {
-                if output.status.success() {
-                    if let Ok(text) = String::from_utf8(output.stdout) {
-                        return Some(text);
-                    }
-                }
-            }
-            Err(_) => {}
-        }
-        match std::process::Command::new("xclip")
-            .arg("-selection")
-            .arg("clipboard")
-            .arg("-o")
-            .output()
-        {
-            Ok(output) => {
-                if output.status.success() {
-                    if let Ok(text) = String::from_utf8(output.stdout) {
-                        return Some(text);
-                    }
-                }
-            }
-            Err(_) => {}
-        }
-        None
+        imp::read()
     }
+
+    #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
+    mod imp {
+        pub fn copy(text: &str) {
+            let text = text.to_string();
+            std::thread::spawn(move || {
+                if let Ok(mut child) = std::process::Command::new("wl-copy")
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                {
+                    if let Some(mut stdin) = child.stdin.take() {
+                        use std::io::Write;
+                        let _ = stdin.write_all(text.as_bytes());
+                    }
+                    let _ = child.wait();
+                } else if let Ok(mut child) = std::process::Command::new("xclip")
+                    .arg("-selection")
+                    .arg("clipboard")
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                {
+                    if let Some(mut stdin) = child.stdin.take() {
+                        use std::io::Write;
+                        let _ = stdin.write_all(text.as_bytes());
+                    }
+                    let _ = child.wait();
+                }
+            });
+        }
+
+        pub fn read() -> Option<String> {
+            match std::process::Command::new("wl-paste")
+                .arg("-n")
+                .output()
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        if let Ok(text) = String::from_utf8(output.stdout) {
+                            return Some(text);
+                        }
+                    }
+                }
+                Err(_) => {}
+            }
+            match std::process::Command::new("xclip")
+                .arg("-selection")
+                .arg("clipboard")
+                .arg("-o")
+                .output()
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        if let Ok(text) = String::from_utf8(output.stdout) {
+                            return Some(text);
+                        }
+                    }
+                }
+                Err(_) => {}
+            }
+            None
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    mod imp {
+        use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+        use objc2_foundation::NSString;
+
+        pub fn copy(text: &str) {
+            let board = NSPasteboard::generalPasteboard();
+            board.clearContents();
+            // SAFETY: an extern static AppKit defines.
+            let ty = unsafe { NSPasteboardTypeString };
+            board.setString_forType(&NSString::from_str(text), ty);
+        }
+
+        pub fn read() -> Option<String> {
+            // SAFETY: as above.
+            let ty = unsafe { NSPasteboardTypeString };
+            NSPasteboard::generalPasteboard().stringForType(ty).map(|s| s.to_string())
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    mod imp {
+        use std::cell::RefCell;
+
+        #[derive(Default)]
+        struct Page {
+            /// What a read answers: the last paste the shell saw, or the
+            /// page's own last copy, whichever came later.
+            text: Option<String>,
+            /// A copy not yet handed to a `copy` / `cut` event.
+            copied: Option<String>,
+        }
+
+        thread_local! {
+            static PAGE: RefCell<Page> = RefCell::new(Page::default());
+        }
+
+        pub fn copy(text: &str) {
+            PAGE.with(|p| {
+                let mut p = p.borrow_mut();
+                p.text = Some(text.to_string());
+                p.copied = Some(text.to_string());
+            });
+            write_text(text);
+        }
+
+        pub fn read() -> Option<String> {
+            PAGE.with(|p| p.borrow().text.clone())
+        }
+
+        /// Write through the async Clipboard API, if the page has one: it is
+        /// undefined outside a secure context, and calling into undefined
+        /// would throw through the wasm frames. Its promise is awaited only
+        /// to keep a refusal (no user activation, no focus) off the console
+        /// as an unhandled rejection; the `copy` event path covers it.
+        fn write_text(text: &str) {
+            let Some(nav) = web_sys::window().map(|w| w.navigator()) else { return };
+            let has = js_sys::Reflect::get(&nav, &"clipboard".into()).is_ok_and(|c| !c.is_undefined() && !c.is_null());
+            if !has {
+                return;
+            }
+            let promise = nav.clipboard().write_text(text);
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            });
+        }
+
+        /// The copy a `copy` / `cut` event should carry, taken.
+        pub(crate) fn take_copied() -> Option<String> {
+            PAGE.with(|p| p.borrow_mut().copied.take())
+        }
+
+        /// A `paste` event's text: what reads answer from now on.
+        pub(crate) fn pasted(text: String) {
+            PAGE.with(|p| p.borrow_mut().text = Some(text));
+        }
+    }
+
+    /// The browser shell's half: the clipboard events it answers.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) use imp::{pasted, take_copied};
 }
 
 pub mod context_menu {
@@ -448,7 +556,7 @@ pub mod context_menu {
     struct Turning {
         /// The plate as it stood when the turn began: its size and its rows.
         from: Box<ContextMenuState>,
-        start: std::time::Instant,
+        start: web_time::Instant,
         /// +1 forward (the page comes in from the right, where `›` points),
         /// -1 back.
         dir: f32,
@@ -514,7 +622,7 @@ pub mod context_menu {
         /// When the menu was last hidden: a page shown in the same moment
         /// turns from it, as a host that closes one menu and shows the next
         /// in one dispatch means it to.
-        hidden_at: Option<std::time::Instant>,
+        hidden_at: Option<web_time::Instant>,
         /// The slider row a press took hold of, until the release.
         pub slider_drag: Option<usize>,
         /// A trackpad's leftover fraction of a wheel notch.
@@ -618,7 +726,7 @@ pub mod context_menu {
                         .lock()
                         .ok()
                         .and_then(|mut fs| {
-                            crate::backend::window_runner::shaped_cluster_offsets(&mut fs, s, size, Some(&family))
+                            crate::backend::text::shaped_cluster_offsets(&mut fs, s, size, Some(&family))
                                 .last()
                                 .map(|&(_, total)| total)
                         })
@@ -684,7 +792,7 @@ pub mod context_menu {
             self.turned = true;
             self.turning = from.map(|from| Turning {
                 from,
-                start: std::time::Instant::now(),
+                start: web_time::Instant::now(),
                 dir: if back.is_some() { 1.0 } else { -1.0 },
             });
             if let Some(title) = back {
@@ -733,7 +841,7 @@ pub mod context_menu {
             from.hovered_item = None;
             from.w = w;
             from.h = h;
-            self.turning = Some(Turning { from: Box::new(from), start: std::time::Instant::now(), dir: if forward { 1.0 } else { -1.0 } });
+            self.turning = Some(Turning { from: Box::new(from), start: web_time::Instant::now(), dir: if forward { 1.0 } else { -1.0 } });
         }
 
         /// How far the turn in progress has gone, eased, 0..1; `None` when
@@ -1040,7 +1148,7 @@ pub mod context_menu {
             self.back_hovered = false;
             self.turn = None;
             self.turning = None;
-            self.hidden_at = Some(std::time::Instant::now());
+            self.hidden_at = Some(web_time::Instant::now());
         }
 
         pub fn hit_test(&self, px: f32, py: f32) -> bool {
@@ -2131,7 +2239,7 @@ mod context_menu_padding_tests {
         let (family, size) = super::context_menu::label_font();
         let drawn = {
             let mut fs = crate::geometry_font_system().lock().unwrap();
-            crate::backend::window_runner::shaped_cluster_offsets(&mut fs, "● Follow Active Editor", size, Some(&family))
+            crate::backend::text::shaped_cluster_offsets(&mut fs, "● Follow Active Editor", size, Some(&family))
                 .last()
                 .map(|&(_, t)| t)
                 .unwrap()

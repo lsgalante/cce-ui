@@ -190,7 +190,7 @@ impl Paint for ColorSelector {
         // default family) and record char-index → x for the caret.
         let text = if self.editing { self.edit_buffer.clone() } else { self.value_hex() };
         let clusters =
-            crate::backend::window_runner::shaped_cluster_offsets(fs, &text, 12.0, None);
+            crate::backend::text::shaped_cluster_offsets(fs, &text, 12.0, None);
         let mut offsets = vec![0.0f32; text.chars().count() + 1];
         for (byte, x) in clusters {
             let ci = text[..byte.min(text.len())].chars().count();
@@ -248,7 +248,8 @@ impl Paint for ColorSelector {
         // Typing a hex value: the on-screen keyboard follows
         // (`crate::text_input`).
         if self.editing {
-            crate::text_input::claim(rect.x, rect.y, pick_x - rect.x, visual_h);
+            let (ox, oy) = ctx.offset();
+            crate::text_input::claim(rect.x + ox, rect.y + oy, pick_x - rect.x, visual_h);
         }
 
         // The text field has NO face of its own — a frame over the host plate,
@@ -659,31 +660,7 @@ impl Input for ColorSelector {
                 self.command.clone()
             };
 
-            // Ask the compositor to open the picker at this control instead of
-            // its remembered position: the pointer is on the swatch right now,
-            // so its location IS the control's location. One-shot, best-effort
-            // (`place-next` consumed at the picker's map; ignored off-cce).
-            if let Ok(reply) = crate::ipc::send_command("cce", "pointer-location") {
-                let mut px = None;
-                let mut py = None;
-                for tok in reply.split_whitespace() {
-                    if let Some(v) = tok.strip_prefix("x=") {
-                        px = v.parse::<f64>().ok();
-                    } else if let Some(v) = tok.strip_prefix("y=") {
-                        py = v.parse::<f64>().ok();
-                    }
-                }
-                if let (Some(x), Some(y)) = (px, py) {
-                    let app_id = std::path::Path::new(&self.command)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| self.command.clone());
-                    let _ = crate::ipc::send_command(
-                        "cce",
-                        &format!("place-next {} {:.0} {:.0}", app_id, x, y),
-                    );
-                }
-            }
+            place_picker_at_pointer(&self.command);
 
             let mut cmd = std::process::Command::new(&cmd_path);
             cmd.arg(&hex);
@@ -832,6 +809,39 @@ impl Input for ColorSelector {
 fn parse_hex(s: &str) -> Option<[u8; 4]> {
     crate::color::parse_hex_bytes(s)
 }
+
+/// Ask the compositor to open the picker at this control instead of its
+/// remembered position. Native only: in a browser there is no compositor to ask.
+#[cfg(not(target_arch = "wasm32"))]
+fn place_picker_at_pointer(command: &str) {
+    // The pointer is on the swatch right now, so its location IS the
+    // control's location. One-shot, best-effort (`place-next` consumed at
+    // the picker's map; ignored off-cce).
+    if let Ok(reply) = crate::ipc::send_command("cce", "pointer-location") {
+        let mut px = None;
+        let mut py = None;
+        for tok in reply.split_whitespace() {
+            if let Some(v) = tok.strip_prefix("x=") {
+                px = v.parse::<f64>().ok();
+            } else if let Some(v) = tok.strip_prefix("y=") {
+                py = v.parse::<f64>().ok();
+            }
+        }
+        if let (Some(x), Some(y)) = (px, py) {
+            let app_id = std::path::Path::new(&command)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| command.to_string());
+            let _ = crate::ipc::send_command(
+                "cce",
+                &format!("place-next {} {:.0} {:.0}", app_id, x, y),
+            );
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn place_picker_at_pointer(_command: &str) {}
 
 #[cfg(test)]
 mod tests {
@@ -1091,5 +1101,3 @@ mod tests {
     }
 
 }
-
-

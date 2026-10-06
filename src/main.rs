@@ -19,7 +19,7 @@
 //!    plate is prims, not a root plate container; popovers draw INTO the frame (there is no popup
 //!    surface); app state — not any widget tree — is the source of truth.
 
-use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
+use cce_ui::engine::{Application, AppSender, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::arena::Arena;
 use cce_ui::scene::layout::{
     compute_layout, FitMode, LayoutBox, Length, Rect, Size as LSize, Style,
@@ -29,10 +29,9 @@ use cce_ui::widget::{
     Adapted, Button, Dropdown, ImageView, WidgetHost, WidgetId, ElementState, Event, KeyEvent,
     MouseButton, MouseScrollDelta, Slider, TextBox, Toggle,
 };
-use wayland_client::QueueHandle;
 
 #[derive(Debug, Clone)]
-enum DemoMessage {
+pub(crate) enum DemoMessage {
     Exit,
 }
 
@@ -48,7 +47,7 @@ fn text_leaf_height(font_size: f32) -> f32 {
     (font_size * 1.2).ceil()
 }
 
-struct DemoApp {
+pub(crate) struct DemoApp {
     // ── Widgets: app-owned values on the narrow-trait adapter. Their addresses must be
     // stable across frames (plain struct fields, not Vec elements): the UiContext
     // registry and the router's drag-target bookkeeping hold pointers to them.
@@ -143,10 +142,7 @@ impl DemoApp {
 impl Application for DemoApp {
     type Message = DemoMessage;
 
-    fn new(
-        _qh: &QueueHandle<EngineState<Self>>,
-        _sender: calloop::channel::Sender<Self::Message>,
-    ) -> Self {
+    fn create(_sender: AppSender<Self::Message>) -> Self {
         cce_ui::scale::set_scale_factor(1.0);
         // One procedurally generated gradient (no asset dependency), uploaded
         // once and SHARED by both ImageViews — the widget borrows ids;
@@ -163,7 +159,7 @@ impl Application for DemoApp {
                 gradient.push(255);
             }
         }
-        let gradient_id = cce_ui::vk::upload_rgba(gradient, GRADIENT_W, GRADIENT_H);
+        let gradient_id = cce_ui::draw::upload_rgba(gradient, GRADIENT_W, GRADIENT_H);
         Self {
             // Relief styling (raised buttons/toggles/dropdowns, recessed
             // wells) is the `control_relief` config default — no opt-in.
@@ -567,5 +563,7 @@ impl Application for DemoApp {
 }
 
 fn main() {
+    // In a browser the same app is run by `examples/demo_web.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
     cce_ui::engine::run::<DemoApp>();
 }

@@ -86,7 +86,7 @@ pub struct UiContext {
     /// inertia), so a second tick per frame would run them at double speed.
     tick_count: u64,
     pub spatial_grid: SpatialGrid,
-    pub last_scroll_time: Option<std::time::Instant>,
+    pub last_scroll_time: Option<web_time::Instant>,
     pub scroll_initiate_widget_id: Option<WidgetId>,
     pub scroll_gesture_new: bool,
     pub ctrl_pressed: bool,
@@ -148,7 +148,7 @@ impl UiContext {
     /// take it (2026-09-20: the Settings list would not scroll after the
     /// params pane had).
     pub fn note_scroll_event(&mut self) {
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         let elapsed_ms = match self.last_scroll_time {
             None => 999999,
             Some(last) => now.duration_since(last).as_millis(),

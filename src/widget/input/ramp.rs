@@ -126,7 +126,7 @@ pub struct Ramp {
     /// the last scroll-event instant: when the event stream stops, the tick
     /// keeps the latched key coasting with exponential decay.
     scroll_vel: (f32, f32),
-    last_key_scroll: Option<std::time::Instant>,
+    last_key_scroll: Option<web_time::Instant>,
 
     // Child controls for key editing & deletion. The key pad is a 2-axis
     // slider driving the selected key's position (x) and value (y).
@@ -1674,7 +1674,7 @@ impl Input for Ramp {
                         // applied delta over inter-event time. A leisurely
                         // wheel produces negligible velocity (big gaps clamp
                         // to 0.1s); fast trackpad streams build real speed.
-                        let now = std::time::Instant::now();
+                        let now = web_time::Instant::now();
                         let dt_ev = self
                             .last_key_scroll
                             .map(|t| now.duration_since(t).as_secs_f32())

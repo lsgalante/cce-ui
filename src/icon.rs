@@ -126,7 +126,7 @@ pub fn lookup_in(name: &str, contexts: &[&str]) -> Option<PathBuf> {
 /// still skips the disk read and the rasterizer, which is where the time goes.
 pub fn upload_themed(name: &str, px: u32) -> Option<(u32, u32, u32)> {
     let (pixels, w, h) = decode(name, px)?;
-    Some((crate::vk::upload_rgba(pixels, w, h), w, h))
+    Some((crate::draw::upload_rgba(pixels, w, h), w, h))
 }
 
 /// [`upload_themed`]'s cached half: name → straight RGBA8 pixels + dimensions.
@@ -159,7 +159,7 @@ fn decode(name: &str, px: u32) -> Option<(Vec<u8>, u32, u32)> {
 }
 
 /// Decode a PNG to straight (un-premultiplied) RGBA8, the layout
-/// [`crate::vk::upload_rgba`] takes. `EXPAND` folds palette, sub-byte grayscale
+/// [`crate::draw::upload_rgba`] takes. `EXPAND` folds palette, sub-byte grayscale
 /// and `tRNS` into plain channels, which leaves only the four color types below;
 /// 16-bit samples are truncated to their high byte.
 fn decode_png(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {

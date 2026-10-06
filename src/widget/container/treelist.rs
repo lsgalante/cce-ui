@@ -188,7 +188,7 @@ pub struct TreeList {
     pub deleted_key_path: Option<String>,
     pub edit_box: crate::widget::Adapted<TextBox>,
     pub editing_key_idx: Option<usize>,
-    pub double_click_timer: Option<(std::time::Instant, usize)>,
+    pub double_click_timer: Option<(web_time::Instant, usize)>,
     pub rename_request: Option<(String, String)>,
 }
 
@@ -459,7 +459,7 @@ impl TreeList {
                     let item = self.items[row_idx].clone();
                     
                     let mut is_double = false;
-                    let now = std::time::Instant::now();
+                    let now = web_time::Instant::now();
                     if let Some((prev_time, prev_row)) = self.double_click_timer {
                         if prev_row == row_idx && now.duration_since(prev_time).as_millis() < 300 {
                             is_double = true;

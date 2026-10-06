@@ -103,7 +103,7 @@ fn shaped_clusters(text: &str, font_size: f32) -> Option<Vec<(usize, f32)>> {
     let font = crate::layout::control_label_font_detached();
     let mut fs = crate::geometry_font_system().lock().ok()?;
     let clusters =
-        crate::backend::window_runner::shaped_cluster_offsets(&mut fs, text, font_size, Some(&font));
+        crate::backend::text::shaped_cluster_offsets(&mut fs, text, font_size, Some(&font));
     (clusters.len() > 1 && clusters.last().is_some_and(|&(_, total)| total > 0.0)).then_some(clusters)
 }
 
@@ -218,7 +218,7 @@ pub struct Dropdown {
     /// close. `closing` keeps `open` (and the shrinking popover) alive while
     /// everything interactive gates on `!closing`.
     anim_from: f32,
-    anim_start: Option<std::time::Instant>,
+    anim_start: Option<web_time::Instant>,
     closing: bool,
     /// Per-frame SNAPSHOT of the wall-clock progress, refreshed in `tick`
     /// (before each render) and on every routed event. All geometry readers —
@@ -366,7 +366,7 @@ impl Dropdown {
 
     fn begin_open(&mut self) {
         self.anim_from = self.anim_progress_now();
-        self.anim_start = Some(std::time::Instant::now());
+        self.anim_start = Some(web_time::Instant::now());
         self.open = true;
         self.closing = false;
         self.anim_snap = self.anim_progress_now();
@@ -377,7 +377,7 @@ impl Dropdown {
             return;
         }
         self.anim_from = self.anim_progress_now();
-        self.anim_start = Some(std::time::Instant::now());
+        self.anim_start = Some(web_time::Instant::now());
         self.closing = true;
         self.anim_snap = self.anim_progress_now();
     }
@@ -409,7 +409,7 @@ impl Dropdown {
     /// wall clock).
     #[cfg(test)]
     fn land_anim_for_test(&mut self) {
-        self.anim_start = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        self.anim_start = Some(web_time::Instant::now() - std::time::Duration::from_secs(1));
         self.settle_anim();
     }
 

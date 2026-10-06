@@ -13,7 +13,7 @@ fn lattice_survives_tessellation_inside_a_clip() {
     let kinds: Vec<String> = dl.items.iter().map(|i| format!("{:?}", std::mem::discriminant(&i.prim))).collect();
     let n_lattice = dl.items.iter().filter(|i| matches!(i.prim, Prim::Lattice { .. })).count();
     assert_eq!(n_lattice, 1, "display list: {kinds:?}");
-    let (verts, batches, _, _) = cce_ui::backend::window_runner::tessellate_display_list(&dl, 1280.0, 720.0, 2.0);
+    let (verts, batches, _, _) = cce_ui::backend::tessellate::tessellate_display_list(&dl, 1280.0, 720.0, 2.0);
     let modes: Vec<f32> = batches.iter().filter_map(|b| b.plate.as_ref().map(|p| p.mode)).collect();
     eprintln!("verts={} batches={} plate modes={modes:?}", verts.len(), batches.len());
     assert!(modes.contains(&13.0), "no lattice batch; modes={modes:?}");
@@ -83,7 +83,7 @@ fn grout_tessellates_to_a_mode_15_batch_in_its_colour() {
     let clip = Rect { x: 40.0, y: 40.0, width: 600.0, height: 300.0 };
     pc.clip(clip, |pc| pc.grout(clip, (85.0, 43.0), (60.0, 60.0), (71.0, 31.0), 15.5, [0.5, 0.5, 0.5, 0.1]));
     let dl = pc.finish();
-    let (verts, batches, _, _) = cce_ui::backend::window_runner::tessellate_display_list(&dl, 1280.0, 720.0, 2.0);
+    let (verts, batches, _, _) = cce_ui::backend::tessellate::tessellate_display_list(&dl, 1280.0, 720.0, 2.0);
     let modes: Vec<f32> = batches.iter().filter_map(|b| b.plate.as_ref().map(|p| p.mode)).collect();
     assert_eq!(modes, vec![15.0]);
     assert_eq!(verts.len(), 6);

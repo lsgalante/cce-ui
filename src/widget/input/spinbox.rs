@@ -315,7 +315,7 @@ impl Paint for Spinbox {
         // keyed by byte; the editor state is char-indexed.
         let text = self.value_text();
         let clusters =
-            crate::backend::window_runner::shaped_cluster_offsets(fs, &text, 14.0, None);
+            crate::backend::text::shaped_cluster_offsets(fs, &text, 14.0, None);
         let mut offsets = vec![0.0f32; text.chars().count() + 1];
         for (byte, x) in clusters {
             let ci = text[..byte.min(text.len())].chars().count();
@@ -359,7 +359,8 @@ impl Paint for Spinbox {
         let g = self.geom(rect);
         // Typing a value: the on-screen keyboard follows (`crate::text_input`).
         if self.editing {
-            crate::text_input::claim(g.x, g.y, g.w, g.h);
+            let (ox, oy) = ctx.offset();
+            crate::text_input::claim(g.x + ox, g.y + oy, g.w, g.h);
         }
         let radius = crate::layout::spinbox_corner_radius();
         let rounded = radius > 0.0;

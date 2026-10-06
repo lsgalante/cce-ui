@@ -48,8 +48,8 @@ impl Rendered {
 pub(crate) fn render(dl: &DisplayList, logical_w: f32, logical_h: f32, scale: f32) -> Option<Rendered> {
     let mut core = std::panic::catch_unwind(VkCore::new_headless).ok()?;
     let (verts, dl_batches, _images, features) =
-        crate::backend::window_runner::tessellate_display_list(dl, logical_w, logical_h, scale);
-    let batches = crate::backend::window_runner::dl_batches_2d(&dl_batches, scale);
+        crate::backend::tessellate::tessellate_display_list(dl, logical_w, logical_h, scale);
+    let batches = crate::backend::tessellate::dl_batches_2d(&dl_batches, scale);
     assert!(
         batches.iter().all(|b| !b.blur_behind),
         "plate_probe draws no blur-behind batch: give the plates an unfrosted material"
@@ -376,7 +376,7 @@ mod tests {
         let (w, h, scale) = (540.0f32, 280.0f32, 2.0f32);
         let dl = two_plates(w, h);
         // Not vacuous: the left plate's five carves really are grouped.
-        let (_, _, _, features) = crate::backend::window_runner::tessellate_display_list(&dl, w, h, scale);
+        let (_, _, _, features) = crate::backend::tessellate::tessellate_display_list(&dl, w, h, scale);
         assert_eq!(features.len(), 5, "the left plate's carves should group");
         let Some(img) = render(&dl, w, h, scale) else {
             eprintln!("skipping: no Vulkan device");

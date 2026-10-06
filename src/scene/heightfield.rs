@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-use crate::backend::window_runner::DlBatch;
+use crate::backend::tessellate::DlBatch;
 use crate::scene::relief_shade::{RECESS_DEPTH, ROLL_CUT};
 use crate::units::MetricSource;
 
@@ -502,7 +502,7 @@ pub fn export_png(hf: &HeightField, path: &Path, mm_per_sample: Option<f32>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vk::PlatePush;
+    use crate::draw::PlatePush;
 
     fn plate(rect: [f32; 4], t: f32, host: [f32; 4]) -> DlBatch {
         DlBatch {

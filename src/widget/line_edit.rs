@@ -11,6 +11,20 @@
 //! [`LineEdit::press`] / [`LineEdit::drag_to`] / [`LineEdit::release`]. cce-browser's URL bar and its dialog
 //! fields (HTTP auth, JS prompts) are built on it.
 //!
+//! **An input method's composition** (see `crate::ime`) is SHOWN, never
+//! held: `text` keeps what was typed, and [`LineEdit::display`] splices the
+//! composition in at the caret, with [`LineEdit::display_index`] /
+//! [`LineEdit::text_index`] mapping across it (the caret lands where the
+//! input method has its cursor; a press inside the composition is the caret)
+//! and [`LineEdit::composition_range`] the span to underline. The app calls
+//! [`LineEdit::sync_ime`] each frame the field has the keyboard, before
+//! drawing it, reports the caret it draws with `ime::report_caret` (that is
+//! also what tells the shell text input is wanted), and calls
+//! [`LineEdit::drop_composition`] when the field loses the keyboard. The
+//! commit arrives as typed text through [`LineEdit::handle_key`], which
+//! takes no other key while a composition is up — they are the input
+//! method's.
+//!
 //! Indices are **byte** offsets into `text`, always on a char boundary
 //! ([`prev_boundary`] / [`next_boundary`] step them), which is what slicing
 //! and shaping want. [`TextEditorState`](super::TextEditorState), the model
@@ -19,9 +33,11 @@
 //!
 //! [`TextBox`]: super::TextBox
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use crate::history::History;
+use crate::ime::{self, Preedit};
 use crate::widget::{ElementState, Key, KeyEvent, NamedKey};
 
 /// How close two presses at the same offset must be to count as one double
@@ -59,6 +75,10 @@ pub struct LineEdit {
     /// Undo and redo for what [`LineEdit::handle_key`] changes. Never kept
     /// for a masked field (see [`LineEdit::undo`]).
     history: History<Snapshot>,
+    /// The input method's composition, shown at the caret (see the module
+    /// doc), and the `ime::generation` it was taken at.
+    composition: Option<Preedit>,
+    ime_seen: u64,
 }
 
 /// What an undo step restores: the text, and where the caret and selection
@@ -128,13 +148,77 @@ impl LineEdit {
         Self { masked: true, ..Self::default() }
     }
 
-    /// What to draw. Never returns the password itself.
+    /// What to draw: the text, with an input method's composition at the
+    /// caret. Never returns the password itself.
     pub fn display(&self) -> String {
-        if self.masked {
+        let mut shown = if self.masked {
             "\u{2022}".repeat(self.text.chars().count())
         } else {
             self.text.clone()
+        };
+        if let Some(p) = &self.composition {
+            shown.insert_str(self.display_index_held(self.cursor), &self.shown(p));
         }
+        shown
+    }
+
+    /// A composition as drawn: its text, or a bullet a char when masked.
+    fn shown(&self, p: &Preedit) -> String {
+        if self.masked {
+            "\u{2022}".repeat(p.text.chars().count())
+        } else {
+            p.text.clone()
+        }
+    }
+
+    // ---- the input method ----
+
+    /// Take up the input method's composition, if it has moved since this
+    /// field last did. Call each frame the field has the keyboard, before
+    /// drawing it; true when what [`LineEdit::display`] shows changed. A
+    /// composition begun over a selection replaces it, as typing would.
+    pub fn sync_ime(&mut self) -> bool {
+        let generation = ime::generation();
+        if generation == self.ime_seen {
+            return false;
+        }
+        self.ime_seen = generation;
+        let next = ime::preedit();
+        if next.is_some() && self.composition.is_none() && self.selection.is_some_and(|(a, b)| a < b) {
+            let before = self.snapshot();
+            self.take_selection();
+            if !self.masked {
+                self.history.record(before);
+            }
+        }
+        if next.is_some() {
+            self.selection = None;
+        }
+        let changed = next != self.composition;
+        self.composition = next;
+        changed
+    }
+
+    /// The field lost the keyboard, or a press moved its caret: a
+    /// composition it was showing is dropped, and the input method asked to
+    /// cancel it.
+    pub fn drop_composition(&mut self) {
+        if self.composition.take().is_some() {
+            ime::request_reset();
+        }
+        self.ime_seen = ime::generation();
+    }
+
+    /// Whether an input method's composition is showing.
+    pub fn composing(&self) -> bool {
+        self.composition.is_some()
+    }
+
+    /// The composition's span in [`LineEdit::display`], to underline.
+    pub fn composition_range(&self) -> Option<(usize, usize)> {
+        let p = self.composition.as_ref()?;
+        let at = self.display_index_held(self.cursor);
+        Some((at, at + self.shown(p).len()))
     }
 
     pub fn select_all(&mut self) {
@@ -165,6 +249,8 @@ impl LineEdit {
     }
 
     fn press_at(&mut self, at: usize, extend: bool, now: Instant) {
+        // The caret moves: a composition is left where it was, cancelled.
+        self.drop_composition();
         // A click moves the caret: typing after it is a new undo step.
         self.history.break_group();
         let at = self.boundary(at);
@@ -316,7 +402,19 @@ impl LineEdit {
     /// A byte offset into [`LineEdit::display`] as the offset into `text` it
     /// stands for: the same offset unless the field is masked, where each
     /// bullet stands for one character of the text.
+    /// Across a composition: a point inside it is the caret, one after it
+    /// the text it is drawn after.
     pub fn text_index(&self, display_at: usize) -> usize {
+        match self.composition_range() {
+            Some((a, _)) if display_at <= a => self.text_index_held(display_at),
+            Some((_, b)) if display_at < b => self.cursor,
+            Some((a, b)) => self.text_index_held(display_at - (b - a)),
+            None => self.text_index_held(display_at),
+        }
+    }
+
+    /// [`LineEdit::text_index`] over the held text alone.
+    fn text_index_held(&self, display_at: usize) -> usize {
         if !self.masked {
             return self.boundary(display_at);
         }
@@ -327,7 +425,25 @@ impl LineEdit {
     /// The other direction: a byte offset into `text` (the caret, a selection
     /// edge) as the offset into [`LineEdit::display`] where it is drawn — the
     /// same offset unless masked, where it is that many bullets in.
+    ///
+    /// Across a composition: the caret is drawn where the input method has
+    /// its cursor in it, and what follows the caret after it.
     pub fn display_index(&self, at: usize) -> usize {
+        let held = self.display_index_held(at);
+        let Some(p) = &self.composition else { return held };
+        let at = self.boundary(at);
+        if at > self.cursor {
+            held + self.shown(p).len()
+        } else if at == self.cursor {
+            let caret = p.caret_chars();
+            held + if self.masked { caret * '\u{2022}'.len_utf8() } else { p.text.char_indices().nth(caret).map_or(p.text.len(), |(b, _)| b) }
+        } else {
+            held
+        }
+    }
+
+    /// [`LineEdit::display_index`] over the held text alone.
+    fn display_index_held(&self, at: usize) -> usize {
         let at = self.boundary(at);
         if !self.masked {
             return at;
@@ -387,6 +503,12 @@ impl LineEdit {
     /// redo. (A DE chord bound to Ctrl+Y is offered to the app first, as
     /// any chord is, and never gets this far.)
     pub fn handle_key(&mut self, event: &KeyEvent) -> EditOutcome {
+        // While an input method composes, its keys are its own: a shell does
+        // not deliver them, and one that does is not editing this text.
+        self.sync_ime();
+        if self.composition.is_some() {
+            return EditOutcome::Edited;
+        }
         // Before the recording below, which would file the redo as a fresh
         // edit and so drop everything left to redo.
         if event.state == ElementState::Pressed
@@ -641,6 +763,52 @@ mod tests {
     }
     fn named(n: NamedKey) -> KeyEvent {
         ev(Key::Named(n), false)
+    }
+
+    /// A composition is shown, not held: `display` has it at the caret, the
+    /// indices map across it, `text` never sees it; keys wait while it is up;
+    /// the commit is typed; a press drops it and asks the input method to
+    /// cancel; a masked field shows it as bullets.
+    #[test]
+    fn a_composition_is_shown_at_the_caret_and_never_held() {
+        let mut e = LineEdit::with_text("ab");
+        e.cursor = 1;
+        let _ = ime::take_reset();
+        // "にほ", the input method's cursor after "に" (three bytes in).
+        ime::set_preedit(Some(Preedit::new("にほ", Some((3, 3)))));
+        assert!(e.sync_ime());
+        assert_eq!(e.text, "ab");
+        assert_eq!(e.display(), "aにほb");
+        assert_eq!(e.composition_range(), Some((1, 7)));
+        assert_eq!(e.display_index(1), 4, "the caret after に");
+        assert_eq!(e.display_index(2), 8, "what follows, after the composition");
+        assert_eq!(e.text_index(5), 1, "inside the composition is the caret");
+        assert_eq!(e.text_index(8), 2);
+        assert_eq!(e.handle_key(&ch("x")), EditOutcome::Edited);
+        assert_eq!(e.text, "ab", "keys wait while the input method composes");
+
+        // The commit: the composition ends, its text is typed.
+        ime::set_preedit(None);
+        e.handle_key(&ch("日本"));
+        assert_eq!((e.text.as_str(), e.cursor), ("a日本b", 7));
+        assert_eq!(e.display(), "a日本b");
+
+        // A press drops a composition and asks for it to be cancelled.
+        ime::set_preedit(Some(Preedit::new("か", None)));
+        e.sync_ime();
+        assert!(e.composing());
+        e.press(0, false);
+        assert!(!e.composing());
+        assert!(ime::take_reset());
+        assert_eq!(e.text, "a日本b");
+
+        // Masked: bullets for the composition too.
+        let mut m = LineEdit::masked();
+        ime::set_preedit(Some(Preedit::new("ab", None)));
+        m.sync_ime();
+        assert_eq!(m.display(), "\u{2022}\u{2022}");
+        assert_eq!(m.text, "");
+        ime::set_preedit(None);
     }
 
     fn typed(e: &mut LineEdit, s: &str) {

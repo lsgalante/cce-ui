@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# check-mac — does cce-ui still build for macOS? Type-checks the library,
+# the demo, the examples and the tests for aarch64-apple-darwin, with and
+# without the optional features. On Linux nothing here can be LINKED (no
+# macOS SDK, no Apple linker), so this is a type-check only: the AppKit
+# shell (src/mac) and the MoltenVK path of the Vulkan renderer are checked
+# against their bindings, never run. On a Mac, `cargo run` is the real test.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+target=aarch64-apple-darwin
+if ! rustup target list --installed 2>/dev/null | grep -qx "$target"; then
+    echo "check-mac: the $target target is not installed:" >&2
+    echo "    rustup target add $target" >&2
+    exit 2
+fi
+cargo check --target "$target" --lib --bins --examples --tests
+cargo check --target "$target" --lib --features markdown,doc_editor
+echo "check-mac: ok"

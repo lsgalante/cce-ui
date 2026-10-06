@@ -168,7 +168,7 @@ impl StyledLabel {
         if is_vert {
             final_text = text.chars().map(|c| c.to_string()).collect::<Vec<_>>().join("\n");
         }
-        let mut buffer = crate::backend::window_runner::get_text_buffer(fs, &final_text, size, Some(family));
+        let mut buffer = crate::backend::text::get_text_buffer(fs, &final_text, size, Some(family));
         if is_vert {
             let bar_thickness = crate::BAR_THICKNESS.load(std::sync::atomic::Ordering::Relaxed) as f32;
             buffer.set_size(fs, Some(bar_thickness * scale as f32), None);

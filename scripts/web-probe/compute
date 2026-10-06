@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# web-probe/compute — run the compute probe's jobs (examples/compute_probe/)
+# on WebGPU in headless Chromium and print one line each, the format the
+# native half prints:
+#
+#     cargo run --example compute_native > native.txt
+#     scripts/web-probe/compute > web.txt && diff native.txt web.txt
+#
+# Every job's arithmetic is exact in f32, so each line says `exact` and the
+# digests of the two runs agree to the bit. Needs what `run` needs, but no
+# fonts.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+cd "$here/../.."
+cargo build --release --target wasm32-unknown-unknown --example compute_web >&2
+site=$(mktemp -d)
+trap 'rm -rf "$site"' EXIT
+wasm-bindgen --target web --no-typescript --out-dir "$site" \
+    target/wasm32-unknown-unknown/release/examples/compute_web.wasm
+cp "$here/compute.html" "$site/compute.html"
+node "$here/compute.mjs" "$site"

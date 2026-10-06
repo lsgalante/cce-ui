@@ -30,8 +30,14 @@ static FONT_DB: OnceLock<resvg::usvg::fontdb::Database> = OnceLock::new();
 pub fn get_font_db() -> &'static resvg::usvg::fontdb::Database {
     FONT_DB.get_or_init(|| {
         let mut db = resvg::usvg::fontdb::Database::new();
-        db.load_system_fonts();
-        db.load_fonts_dir(crate::fonts_dir());
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            db.load_system_fonts();
+            db.load_fonts_dir(crate::fonts_dir());
+        }
+        // A page has neither: the fonts it handed the browser shell.
+        #[cfg(target_arch = "wasm32")]
+        crate::page_fonts::load_into(&mut db);
         db
     })
 }
@@ -107,6 +113,15 @@ pub struct TextBox {
     /// The laid-out base rect, cached from [`Layout::rect_assigned`] — the cursor/scroll math
     /// reads geometry between events, which the narrow traits don't otherwise carry.
     rect: Rect,
+    /// An input method's composition, shown in `edit_buffer` as a PROVISIONAL run:
+    /// its start and length in chars. Everything that draws the buffer — wrap,
+    /// scroll, caret, the glyph advances — draws it as it draws typed text, and
+    /// the selection quads underline it. It is never committed, recorded in the
+    /// history or reported as a change: `committed_buffer` is the buffer without
+    /// it. See `crate::ime`.
+    composing: Option<(usize, usize)>,
+    /// The `ime::generation` the run shows.
+    ime_seen: u64,
     /// Recessed style: a `Recess` overlay is carved over the box's own fill —
     /// an inset well, the input-direction counterpart of the raised controls.
     recessed: Option<bool>,
@@ -164,6 +179,8 @@ impl TextBox {
             hovered: false,
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             recessed: None,
+            composing: None,
+            ime_seen: 0,
         })
     }
 
@@ -373,8 +390,9 @@ impl TextBox {
 
     pub fn take_change(&mut self) -> bool {
         if self.update_on_type {
-            if self.text != self.edit_buffer {
-                self.text = self.edit_buffer.clone();
+            let held = self.committed_buffer();
+            if self.text != held {
+                self.text = held;
                 self.just_changed = true;
             }
         }
@@ -669,10 +687,80 @@ impl TextBox {
         self.clamp_scroll();
     }
 
+    /// `edit_buffer` without an input method's provisional run: what the box
+    /// holds, as opposed to what it shows.
+    pub fn committed_buffer(&self) -> String {
+        match self.composing {
+            Some((start, len)) => self.edit_buffer.chars().enumerate().filter(|(i, _)| *i < start || *i >= start + len).map(|(_, c)| c).collect(),
+            None => self.edit_buffer.clone(),
+        }
+    }
+
+    /// Take the provisional run out of the buffer, the caret back where it
+    /// began. Whether there was one.
+    fn strip_composition(&mut self) -> bool {
+        let Some((start, _)) = self.composing else { return false };
+        self.edit_buffer = self.committed_buffer();
+        self.composing = None;
+        self.cursor_idx = start.min(self.edit_buffer.chars().count());
+        self.select_anchor = None;
+        self.all_selected = false;
+        true
+    }
+
+    /// Drop a composition this box is showing, and have the input method
+    /// cancel it: the box is no longer where it is going.
+    fn abandon_composition(&mut self) {
+        if self.strip_composition() {
+            crate::ime::request_reset();
+            self.sync_editor_state();
+        }
+        self.ime_seen = crate::ime::generation();
+    }
+
+    /// Show the input method's current composition, if it has moved since
+    /// this box last showed one: the old run out, the new one in at the
+    /// caret, the caret where the input method has its cursor. A composition
+    /// begun over a selection replaces it, as typing would.
+    fn sync_preedit(&mut self) {
+        if !self.editing {
+            return;
+        }
+        let generation = crate::ime::generation();
+        if generation == self.ime_seen {
+            return;
+        }
+        self.ime_seen = generation;
+        self.strip_composition();
+        if let Some(p) = crate::ime::preedit() {
+            let before = self.snapshot();
+            if before.all_selected || before.selected_range().is_some() {
+                let mut state = before.clone();
+                state.insert_text("");
+                self.history.record(before);
+                self.edit_buffer = state.buffer;
+                self.cursor_idx = state.cursor_idx;
+            }
+            let start = self.cursor_idx.min(self.edit_buffer.chars().count());
+            let at = self.edit_buffer.char_indices().nth(start).map_or(self.edit_buffer.len(), |(b, _)| b);
+            self.edit_buffer.insert_str(at, &p.text);
+            self.composing = Some((start, p.text.chars().count()));
+            self.cursor_idx = start + p.caret_chars();
+            self.select_anchor = None;
+            self.all_selected = false;
+        }
+        self.sync_editor_state();
+        self.scroll_to_cursor();
+    }
+
     /// The legacy `focus()` body minus the global-focus claim (the caller's, via
     /// `EventCtx::request_focus`).
     fn begin_editing(&mut self) {
         if self.disabled { return; }
+        // A composition still going is the input method's for wherever the
+        // caret was; this box starts with none.
+        self.composing = None;
+        self.ime_seen = crate::ime::generation();
         self.editing = true;
         self.edit_buffer = self.text.clone();
         let len = self.edit_buffer.chars().count();
@@ -687,6 +775,7 @@ impl TextBox {
     /// The legacy `unfocus()` body: leave edit mode and commit the buffer.
     fn commit_editing(&mut self) {
         if self.editing {
+            self.abandon_composition();
             self.editing = false;
             if self.text != self.edit_buffer {
                 self.text = self.edit_buffer.clone();
@@ -741,6 +830,12 @@ impl TextBox {
     fn handle_key(&mut self, event: &KeyEvent) -> bool {
         if !self.editing || self.disabled { return false; }
         if event.state != ElementState::Pressed { return false; }
+        // While an input method composes, its keys are its own: a shell does
+        // not deliver them, and one that does is not editing this text.
+        self.sync_preedit();
+        if self.composing.is_some() {
+            return true;
+        }
 
         let control = event.ctrl;
 
@@ -1002,10 +1097,14 @@ impl TextBox {
     /// Selection highlight + caret quads, shared by both render branches. `x`/`w` are the
     /// (possibly label-inset) horizontal span the branch draws in — the legacy paths differed
     /// (non-rounded and rounded alike use the full base span).
-    fn selection_quads(&self, x: f32, w: f32, out: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) {
+    /// The selection highlight, an input method's composition underlined, and
+    /// the caret, as quads. Returns the caret's rect while editing (unclipped,
+    /// in the box's coordinates), which the painter reports to the input method.
+    fn selection_quads(&self, x: f32, w: f32, out: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) -> Option<[f32; 4]> {
         if !(self.editing || self.select_anchor.is_some()) {
-            return;
+            return None;
         }
+        let mut caret = None;
         let top = self.label_top();
         let char_width = self.char_width();
         let line_height = self.line_height();
@@ -1066,11 +1165,34 @@ impl TextBox {
                 }
             }
 
+            if let Some((cs, cl)) = self.composing {
+                // The composition's underline, a line at a time, under the
+                // glyphs it covers.
+                let last_line = index_map.get((cs + cl).saturating_sub(1).min(index_map.len() - 1)).map_or(0, |p| p.0);
+                let first_line = index_map.get(cs.min(index_map.len() - 1)).map_or(0, |p| p.0);
+                for line_idx in first_line..=last_line {
+                    let cols: Vec<usize> = (cs..cs + cl)
+                        .filter_map(|i| index_map.get(i).filter(|p| p.0 == line_idx).map(|p| p.1))
+                        .collect();
+                    if let (Some(&a), Some(&b)) = (cols.iter().min(), cols.iter().max()) {
+                        let ux = x + 8.0 + self.line_col_x(line_idx, a) - self.scroll_x;
+                        let uw = self.line_col_x(line_idx, b + 1) - self.line_col_x(line_idx, a);
+                        let uy = self.rect.y + top + 8.0 + ((line_idx + 1) as f32 * line_height) - 2.0 - self.scroll_y;
+                        let left = ux.max(x + 8.0);
+                        let right = (ux + uw).min(x + w - 8.0);
+                        if left < right && uy >= view_top && uy + 1.5 <= view_bottom {
+                            out.push((left, uy, right - left, 1.5, cursor_color));
+                        }
+                    }
+                }
+            }
+
             if self.editing {
                 let caret_h = self.font_size * 1.15;
                 let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
                 let cursor_x = x + 8.0 + self.line_col_x(cursor_l, cursor_c) - self.scroll_x;
                 let cursor_y = self.rect.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0 - self.scroll_y;
+                caret = Some([cursor_x, cursor_y, 1.5, caret_h]);
                 let clipped_y = cursor_y.max(view_top);
                 let clipped_bottom = (cursor_y + caret_h).min(view_bottom);
                 if cursor_x >= x + 8.0 && cursor_x <= x + w - 8.0 {
@@ -1098,6 +1220,16 @@ impl TextBox {
                 }
             }
 
+            if let Some((cs, cl)) = self.composing {
+                let at = |i: usize| self.glyph_positions.get(i).copied().unwrap_or(i as f32 * char_width);
+                let left = (x + 8.0 + at(cs) - self.scroll_x).max(x + 8.0);
+                let right = (x + 8.0 + at(cs + cl) - self.scroll_x).min(x + w - 8.0);
+                if left < right {
+                    let text_y = crate::layout::align_text_y(self.rect.y, self.rect.height, self.font_size, top);
+                    out.push((left, text_y + self.font_size + 1.0, right - left, 1.5, cursor_color));
+                }
+            }
+
             if self.editing {
                 let offset = if self.glyph_positions.is_empty() {
                     self.cursor_idx as f32 * char_width
@@ -1105,13 +1237,15 @@ impl TextBox {
                     self.cursor_x_offset
                 };
                 let cursor_x = x + 8.0 + offset - self.scroll_x;
+                let text_y = crate::layout::align_text_y(self.rect.y, self.rect.height, self.font_size, top);
+                let cursor_y = text_y + (self.font_size - caret_h) / 2.0;
+                caret = Some([cursor_x, cursor_y, 1.5, caret_h]);
                 if cursor_x >= x + 8.0 && cursor_x <= x + w - 8.0 {
-                    let text_y = crate::layout::align_text_y(self.rect.y, self.rect.height, self.font_size, top);
-                    let cursor_y = text_y + (self.font_size - caret_h) / 2.0;
                     out.push((cursor_x, cursor_y, 1.5, caret_h, cursor_color));
                 }
             }
         }
+        caret
     }
 
     /// The value/placeholder text lines — the legacy `text_labels` body minus the control
@@ -1394,6 +1528,8 @@ impl Paint for TextBox {
     /// The legacy `prepare_text`: sync font family/size with the live config defaults, then
     /// shape the display text and record per-glyph advances (`map_x_to_idx` reads them).
     fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
+        // The input method's composition, shown before the buffer is shaped.
+        self.sync_preedit();
         let (style_family, style_size) = crate::layout::control_label_font_detached_parsed();
         if self.font_size == self.default_font_size {
             self.font_size = style_size;
@@ -1422,7 +1558,7 @@ impl Paint for TextBox {
             display_text.to_string()
         };
 
-        let buffer = crate::backend::window_runner::get_text_buffer(fs, &render_text, self.font_size, font_fam);
+        let buffer = crate::backend::text::get_text_buffer(fs, &render_text, self.font_size, font_fam);
 
         let char_count = render_text.chars().count();
         let mut x_offsets = vec![0.0; char_count + 1];
@@ -1431,14 +1567,14 @@ impl Paint for TextBox {
 
         // One column's advance, from the same shaping path as the labels (buffer-cached,
         // so this is a lookup after the first frame per family/size).
-        let probe = crate::backend::window_runner::get_text_buffer(fs, "MMMMMMMM", self.font_size, font_fam);
+        let probe = crate::backend::text::get_text_buffer(fs, "MMMMMMMM", self.font_size, font_fam);
         self.shaped_char_advance = probe
             .layout_runs()
             .next()
             .and_then(|run| run.glyphs.last().map(|g| (g.x + g.w) / scale / 8.0))
             .unwrap_or(0.0);
 
-        for (start, gx, gw) in crate::backend::window_runner::normalized_glyph_starts(&buffer, &render_text) {
+        for (start, gx, gw) in crate::backend::text::normalized_glyph_starts(&buffer, &render_text) {
             let c_idx = render_text[..start.min(render_text.len())].chars().count();
             if c_idx < x_offsets.len() {
                 x_offsets[c_idx] = gx / scale;
@@ -1480,11 +1616,11 @@ impl Paint for TextBox {
             };
             let (lines, _) = self.wrap_text(max_chars);
             for line in &lines {
-                let line_buffer = crate::backend::window_runner::get_text_buffer(fs, line, self.font_size, font_fam);
+                let line_buffer = crate::backend::text::get_text_buffer(fs, line, self.font_size, font_fam);
                 let n = line.chars().count();
                 let mut offs = vec![0.0f32; n + 1];
                 let mut line_total: f32 = 0.0;
-                for (start, gx, gw) in crate::backend::window_runner::normalized_glyph_starts(&line_buffer, line) {
+                for (start, gx, gw) in crate::backend::text::normalized_glyph_starts(&line_buffer, line) {
                     let c_idx = line[..start.min(line.len())].chars().count();
                     if c_idx < offs.len() {
                         offs[c_idx] = gx / scale;
@@ -1514,9 +1650,11 @@ impl Paint for TextBox {
         let border_w = self.border_width();
 
         // Open for typing: say so to the compositor this frame (the
-        // on-screen keyboard follows it). The field stands in for the caret.
+        // on-screen keyboard follows it). The field stands in for the caret
+        // until the caret is drawn below, which reports itself.
         if self.editing && !self.disabled {
-            crate::text_input::claim(self.rect.x, self.rect.y + top, self.rect.width, visual_h);
+            let (ox, oy) = ctx.offset();
+            crate::text_input::claim(self.rect.x + ox, self.rect.y + top + oy, self.rect.width, visual_h);
         }
 
         // Keep the model's cached rect and the paint rect consistent: paint receives the
@@ -1544,7 +1682,10 @@ impl Paint for TextBox {
                     quads.push((self.rect.x, self.rect.y + top, self.rect.width, visual_h, border_color));
                     quads.push((self.rect.x + border_w, self.rect.y + top + border_w, self.rect.width - 2.0 * border_w, visual_h - 2.0 * border_w, bg_color));
                 }
-                self.selection_quads(self.rect.x, self.rect.width, &mut quads);
+                if let Some([cx, cy, cw, ch]) = self.selection_quads(self.rect.x, self.rect.width, &mut quads) {
+                    let (ox, oy) = ctx.offset();
+                    crate::ime::report_caret(cx + ox, cy + oy, cw, ch);
+                }
             }
             for (qx, qy, qw, qh, qc) in quads {
                 ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
@@ -1582,7 +1723,10 @@ impl Paint for TextBox {
             }
 
             let mut quads: Vec<(f32, f32, f32, f32, [f32; 4])> = Vec::new();
-            self.selection_quads(x, w, &mut quads);
+            if let Some([cx, cy, cw, ch]) = self.selection_quads(x, w, &mut quads) {
+                let (ox, oy) = ctx.offset();
+                crate::ime::report_caret(cx + ox, cy + oy, cw, ch);
+            }
             for (qx, qy, qw, qh, qc) in quads {
                 ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
             }
@@ -1653,6 +1797,11 @@ impl Input for TextBox {
     }
 
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        // A press moves the caret: a composition in progress is left where
+        // it was, cancelled.
+        if let Event::MouseButton { state: ElementState::Pressed, .. } = event {
+            self.abandon_composition();
+        }
         match event {
             Event::MouseButton { button: MouseButton::Right, state: ElementState::Pressed, x: px, y: py, .. } => {
                 if self.disabled { return false; }
@@ -1986,6 +2135,62 @@ mod tests {
             "typing must insert into the prefilled value, not replace it"
         );
         assert!(tb.edit_buffer.starts_with("imap"), "the existing value survives the first keystroke");
+    }
+
+    /// An input method's composition is a provisional run in the buffer: shown
+    /// at the caret with the caret where the input method has it, never held
+    /// (`committed_buffer`, `take_change`), replaced by the commit, which is
+    /// typed — and dropped, the input method told, when editing ends under it.
+    #[test]
+    fn a_composition_is_shown_in_place_and_the_commit_is_typed() {
+        use crate::ime::{self, Preedit};
+        let mut dummy = crate::context::UiContext::new();
+        let mut tb = TextBox::new("ab".to_string()).with_update_on_type(true);
+        tb.set_rect(10.0, 10.0, 300.0, 30.0);
+        tb.focus();
+        tb.cursor_idx = 1;
+        tb.select_anchor = None;
+        tb.all_selected = false;
+        let _ = ime::take_reset();
+
+        // "にほ", the input method's cursor after "に".
+        ime::set_preedit(Some(Preedit::new("にほ", Some((0, 3)))));
+        tb.sync_preedit();
+        assert_eq!(tb.edit_buffer, "aにほb");
+        assert_eq!(tb.composing, Some((1, 2)));
+        assert_eq!(tb.cursor_idx, 2);
+        assert_eq!(tb.committed_buffer(), "ab");
+        assert!(!tb.take_change(), "a composition is not a change");
+        // A key the input method lets through mid-composition is not typed.
+        let typed = |t: &str| KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Character(t.to_string()),
+            text: Some(t.to_string()),
+            repeat: false,
+            ctrl: false,
+            shift: false,
+            alt: false,
+        };
+        assert!(tb.keyboard_input(&typed("x"), &mut dummy));
+        assert_eq!(tb.edit_buffer, "aにほb");
+
+        // The commit: the composition ends, then its text is typed.
+        ime::set_preedit(None);
+        assert!(tb.keyboard_input(&typed("日本"), &mut dummy));
+        assert_eq!(tb.edit_buffer, "a日本b");
+        assert_eq!((tb.composing, tb.cursor_idx), (None, 3));
+        assert!(tb.take_change());
+        assert_eq!(tb.text, "a日本b");
+
+        // Editing ends mid-composition: the run goes, the input method is
+        // told, and the text is what was held.
+        ime::set_preedit(Some(Preedit::new("か", None)));
+        tb.sync_preedit();
+        assert_eq!(tb.edit_buffer, "a日本かb");
+        tb.commit_editing();
+        assert_eq!(tb.text, "a日本b");
+        assert!(ime::take_reset());
+        assert_eq!(ime::preedit(), None);
     }
 
     /// Undo/redo over an editing session: a typed word is one step, a

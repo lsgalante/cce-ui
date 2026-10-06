@@ -134,7 +134,7 @@ fn scene(sw: f32, sh: f32) -> cce_ui::scene::paint::DisplayList {
 
 fn dump(out: &mut String, label: &str, dl: &cce_ui::scene::paint::DisplayList, sw: f32, sh: f32, scale: f32) {
     let (verts, batches, images, features) =
-        cce_ui::backend::window_runner::tessellate_display_list(dl, sw, sh, scale);
+        cce_ui::backend::tessellate::tessellate_display_list(dl, sw, sh, scale);
     writeln!(out, "== {label} scale={scale} verts={} batches={} images={} features={}",
         verts.len(), batches.len(), images.len(), features.len()).unwrap();
     for (i, v) in verts.iter().enumerate() {

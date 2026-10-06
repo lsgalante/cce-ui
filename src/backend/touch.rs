@@ -26,13 +26,9 @@
 // satisfy the compositor's pointer-grab check, so `xdg_toplevel.move` from a
 // touch would be refused. Overview and the Super-held adjust mode, where the
 // compositor drives the pointer itself, move windows by finger instead.
-
-use smithay_client_toolkit::reexports::client::protocol::{wl_surface::WlSurface, wl_touch::WlTouch};
-use smithay_client_toolkit::reexports::client::{Connection, QueueHandle};
-use smithay_client_toolkit::seat::touch::TouchHandler;
-
-use super::window_runner::{Application, EngineState, LogicalPosition};
-use crate::widget::{ElementState, MouseButton, MouseScrollDelta, Position, ScrollPhase};
+//
+// The tracker is platform-neutral, and what its actions do is the driver's
+// (`Driver::touch`); only the `wl_touch` binding below is Wayland's.
 
 /// Travel (logical px) a finger may wander and still be a tap or a hold.
 pub const SLOP: f32 = 10.0;
@@ -155,165 +151,106 @@ impl TouchTracker {
     }
 }
 
-impl<A: Application> EngineState<A> {
-    /// A surface-local touch position in the app's window coordinates: the
-    /// forced-scale divide and the menu popup's offset, as the pointer path
-    /// applies them.
-    fn touch_pos(&self, (x, y): (f64, f64)) -> (f32, f32) {
-        let forced = crate::scale::forced_scale().unwrap_or(1.0);
-        let (ox, oy) = self.touch_offset;
-        (x as f32 / forced + ox, y as f32 / forced + oy)
-    }
+/// The `wl_touch` binding: a finger's events, in the window's coordinates,
+/// through the tracker and on to the driver.
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
+mod wayland {
+    use smithay_client_toolkit::reexports::client::protocol::{wl_surface::WlSurface, wl_touch::WlTouch};
+    use smithay_client_toolkit::reexports::client::{Connection, QueueHandle};
+    use smithay_client_toolkit::seat::touch::TouchHandler;
 
-    /// The seat stopped offering touch: end the finger's gesture as a
-    /// cancel would, and drop the object.
-    pub(crate) fn touch_lost(&mut self) {
-        if let Some(touch) = self.touch.take() {
-            touch.release();
+    use super::TouchAction;
+    use crate::backend::shell::Shell;
+    use crate::backend::window_runner::{Application, EngineState};
+
+    impl<A: Application> EngineState<A> {
+        /// A surface-local touch position in the app's window coordinates: the
+        /// forced-scale divide and the menu popup's offset, as the pointer path
+        /// applies them.
+        fn touch_pos(&self, (x, y): (f64, f64)) -> (f32, f32) {
+            let forced = crate::scale::forced_scale().unwrap_or(1.0);
+            let (ox, oy) = self.touch_offset;
+            (x as f32 / forced + ox, y as f32 / forced + oy)
         }
-        self.cancel_touch();
-    }
 
-    fn cancel_touch(&mut self) {
-        let actions = self.touch_tracker.cancel();
-        self.run_touch_actions(actions);
-        self.touch_scroll_at = None;
-    }
-
-    fn run_touch_actions(&mut self, actions: Vec<TouchAction>) {
-        for action in actions {
-            let mut rebuild = false;
-            match action {
-                TouchAction::Hover(x, y) | TouchAction::Drag(x, y) => {
-                    self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(x, y), &mut rebuild);
-                }
-                TouchAction::Leave => {
-                    self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(-10000.0, -10000.0), &mut rebuild);
-                }
-                TouchAction::Press(x, y) => {
-                    // Outside-press close for open popovers, as the pointer's
-                    // press does before the app's own dispatch.
-                    let app = self.inner.as_mut().unwrap();
-                    let offsets: Vec<_> = app
-                        .ui_context()
-                        .map(|ctx| ctx.popover_owners())
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|id| (id, app.popover_offset(id)))
-                        .collect();
-                    if let Some(ctx) = app.ui_context_mut() {
-                        ctx.close_popovers_missed_by_press_with(x, y, |id| {
-                            offsets.iter().find(|(o, _)| *o == id).map_or((0.0, 0.0), |&(_, d)| d)
-                        });
-                    }
-                    self.touch_button(ElementState::Pressed, x, y, &mut rebuild);
-                }
-                TouchAction::Release(x, y) => self.touch_button(ElementState::Released, x, y, &mut rebuild),
-                TouchAction::Scroll(dx, dy) => {
-                    self.touch_wheel(ScrollPhase::Finger, dx, dy, &mut rebuild);
-                }
-                TouchAction::ScrollEnd => self.touch_wheel(ScrollPhase::FingerEnd, 0.0, 0.0, &mut rebuild),
+        /// The seat stopped offering touch: end the finger's gesture as a
+        /// cancel would, and drop the object.
+        pub(crate) fn touch_lost(&mut self) {
+            if let Some(touch) = self.touch.take() {
+                touch.release();
             }
-            if rebuild {
-                self.redraw = true;
-            }
+            self.cancel_touch();
         }
-        // A press may queue an app-driven window move; it cannot be honoured
-        // from a touch (see the module comment), and left queued it would
-        // run on the next pointer press with that press's serial.
-        let _ = self.inner.as_mut().unwrap().take_window_action();
-    }
 
-    fn touch_button(&mut self, state: ElementState, x: f32, y: f32, rebuild: &mut bool) {
-        let app = self.inner.as_mut().unwrap();
-        if let Some(msg) = app.handle_mouse_input(MouseButton::Left, state, LogicalPosition::new(x, y), rebuild) {
-            let mut update_rebuild = false;
-            app.update(msg, &mut update_rebuild, &mut self.exit);
-            *rebuild |= update_rebuild;
-        }
-    }
-
-    /// Finger travel as a trackpad pixel scroll. A finger is always
-    /// "natural" — the content goes where it is pushed — so the dispatch runs
-    /// with natural scrolling on whatever the trackpad's setting, and a value
-    /// control (`MouseScrollDelta::value_notches_y`) reads the finger's real
-    /// direction. 1:1, without the trackpad's per-app factor: the content
-    /// stays under the finger.
-    fn touch_wheel(&mut self, phase: ScrollPhase, dx: f32, dy: f32, rebuild: &mut bool) {
-        let Some((x, y)) = self.touch_scroll_at else { return };
-        crate::widget::scroll_motion::set_scroll_phase(phase);
-        let delta = MouseScrollDelta::PixelDelta(Position { x: dx as f64, y: dy as f64 });
-        if crate::scroll_debug() {
-            eprintln!("[scroll] touch: phase={phase:?} -> {delta:?} at ({x:.0},{y:.0})");
-        }
-        if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {
-            ctx.ctrl_pressed = self.ctrl_pressed;
-            ctx.shift_pressed = self.shift_pressed;
-            ctx.alt_pressed = self.alt_pressed;
-            ctx.logo_pressed = self.logo_pressed;
-        }
-        let app = self.inner.as_mut().unwrap();
-        crate::input::with_natural_scroll(true, || {
-            app.handle_mouse_wheel(&delta, LogicalPosition::new(x, y), rebuild);
-        });
-    }
-}
-
-impl<A: Application> TouchHandler for EngineState<A> {
-    fn down(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _touch: &WlTouch,
-        _serial: u32,
-        time: u32,
-        surface: WlSurface,
-        id: i32,
-        position: (f64, f64),
-    ) {
-        if self.touch_tracker.id().is_some() {
-            return;
-        }
-        // An event on the context menu's popup surface is the app's too, at
-        // the popup's offset from the window; fixed for the finger's life,
-        // since every later event of it is about the same surface.
-        self.touch_offset = self.menu_popup_offset(&surface).unwrap_or((0.0, 0.0));
-        let (x, y) = self.touch_pos(position);
-        // A scroll is dispatched where the finger went down: the gesture
-        // belongs to what it began on, as a trackpad scroll does
-        // (`scroll_initiate_widget_id`), however far the content moves.
-        self.touch_scroll_at = Some((x, y));
-        let actions = self.touch_tracker.down(id, x, y, time);
-        self.run_touch_actions(actions);
-    }
-
-    fn up(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _touch: &WlTouch, _serial: u32, _time: u32, id: i32) {
-        let actions = self.touch_tracker.up(id);
-        self.run_touch_actions(actions);
-        if self.touch_tracker.id().is_none() {
+        fn cancel_touch(&mut self) {
+            let actions = self.touch_tracker.cancel();
+            self.run_touch_actions(actions);
             self.touch_scroll_at = None;
         }
-    }
 
-    fn motion(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _touch: &WlTouch, time: u32, id: i32, position: (f64, f64)) {
-        if self.touch_tracker.id() != Some(id) {
-            return;
+        fn run_touch_actions(&mut self, actions: Vec<TouchAction>) {
+            let scroll_at = self.touch_scroll_at;
+            let (driver, t) = self.turn();
+            driver.touch(t, actions, scroll_at);
         }
-        let (x, y) = self.touch_pos(position);
-        let actions = self.touch_tracker.motion(id, x, y, time);
-        self.run_touch_actions(actions);
     }
 
-    fn shape(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlTouch, _: i32, _: f64, _: f64) {}
+    impl<A: Application> TouchHandler for EngineState<A> {
+        fn down(
+            &mut self,
+            _conn: &Connection,
+            _qh: &QueueHandle<Self>,
+            _touch: &WlTouch,
+            _serial: u32,
+            time: u32,
+            surface: WlSurface,
+            id: i32,
+            position: (f64, f64),
+        ) {
+            if self.touch_tracker.id().is_some() {
+                return;
+            }
+            // An event on the context menu's popup surface is the app's too, at
+            // the popup's offset from the window; fixed for the finger's life,
+            // since every later event of it is about the same surface.
+            self.touch_offset = self.menu_popup_offset(&surface).unwrap_or((0.0, 0.0));
+            let (x, y) = self.touch_pos(position);
+            // A scroll is dispatched where the finger went down: the gesture
+            // belongs to what it began on, as a trackpad scroll does
+            // (`scroll_initiate_widget_id`), however far the content moves.
+            self.touch_scroll_at = Some((x, y));
+            let actions = self.touch_tracker.down(id, x, y, time);
+            self.run_touch_actions(actions);
+        }
 
-    fn orientation(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlTouch, _: i32, _: f64) {}
+        fn up(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _touch: &WlTouch, _serial: u32, _time: u32, id: i32) {
+            let actions = self.touch_tracker.up(id);
+            self.run_touch_actions(actions);
+            if self.touch_tracker.id().is_none() {
+                self.touch_scroll_at = None;
+            }
+        }
 
-    fn cancel(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _touch: &WlTouch) {
-        self.cancel_touch();
+        fn motion(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _touch: &WlTouch, time: u32, id: i32, position: (f64, f64)) {
+            if self.touch_tracker.id() != Some(id) {
+                return;
+            }
+            let (x, y) = self.touch_pos(position);
+            let actions = self.touch_tracker.motion(id, x, y, time);
+            self.run_touch_actions(actions);
+        }
+
+        fn shape(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlTouch, _: i32, _: f64, _: f64) {}
+
+        fn orientation(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlTouch, _: i32, _: f64) {}
+
+        fn cancel(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _touch: &WlTouch) {
+            self.cancel_touch();
+        }
     }
+
+    smithay_client_toolkit::delegate_touch!(@<A: Application> EngineState<A>);
 }
-
-smithay_client_toolkit::delegate_touch!(@<A: Application> EngineState<A>);
 
 #[cfg(test)]
 mod tests {

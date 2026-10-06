@@ -16,121 +16,8 @@ use gpu_allocator::MemoryLocation;
 
 use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 
-/// Layout-identical to the app's `geometry::Vertex3D` (bytemuck-castable at cutover).
-#[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Vertex3D {
-    pub position: [f32; 3],
-    pub color: [f32; 3],
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MeshId(usize);
-
-/// One draw in the staged scene: a mesh under an mvp. The window-size/radius
-/// tail of shader_3d's uniform block is filled in by the renderer.
-pub struct SceneDraw {
-    pub mesh: MeshId,
-    pub mvp: [[f32; 4]; 4],
-    /// Rasterize through the line pipeline (LINE_LIST topology): the mesh
-    /// must be an EDGE mesh (vertex pairs), not the triangle fill mesh.
-    pub wireframe: bool,
-    /// rgb + mix: the fragment color is mixed toward `wire_tint.rgb` by
-    /// `wire_tint[3]`. Zero = vertex colors untouched (the default draw).
-    /// A wireframe pass overlaid on its own filled mesh needs this — the
-    /// lines inherit the mesh's colors and would otherwise vanish into the
-    /// identical fill beneath.
-    pub wire_tint: [f32; 4],
-    /// Whole-draw alpha multiplier (1.0 = opaque). The pass blends with
-    /// straight alpha, so translucent draws show whatever rendered beneath.
-    pub opacity: f32,
-    /// Rasterized line width in framebuffer pixels for wireframe draws
-    /// (ignored on fills). Clamped to the device's wideLines cap — 1.0
-    /// everywhere when the feature is absent.
-    pub line_width: f32,
-    /// FILL draws only: the width of a wire pass that will ride on this
-    /// fill (0 = none). The fill is pushed back by its own slope-scaled
-    /// polygon offset sized to that width, so the coplanar wires win the
-    /// depth test solidly: a w-px line samples the fill's plane up to
-    /// (w/2 + 0.5) px off the true edge, and biasing the LINE can't cover
-    /// that (its own depth slope is along-axis — near zero for
-    /// contour-following wires) while the fill's slope is exactly the
-    /// quantity needed.
-    pub wire_base_width: f32,
-    /// FILL draws only: the vertex colours already carry their lighting, so
-    /// the fragment shader skips its derivative-normal flat shading and
-    /// draws them as they are. A host that wants SMOOTH shading bakes it —
-    /// the light is fixed in world space (`VkRenderer::set_scene_light`,
-    /// which the host should light by), so lighting per vertex from
-    /// interpolated normals is exact for a static light,
-    /// and the vertex format needs no normal. False for an ordinary draw.
-    pub prelit: bool,
-    /// FILL draws only: draw through the SEE-THROUGH twin of the fill
-    /// pipeline — no face culling and no depth writes (the depth TEST stays
-    /// on, so what is drawn before the fill still hides it) — so a
-    /// translucent mesh shows its own far side and everything behind it,
-    /// wires included, since nothing it draws can occlude them. Blending is
-    /// then order-dependent: the host should submit the triangles back to
-    /// front for the current eye. False for an ordinary fill.
-    pub see_through: bool,
-}
-
-/// A user image standing in the 3D scene: a textured quad, unlit, depth
-/// tested against the meshes and seen from both sides.
-///
-/// Staged with `VkRenderer::stage_scene_images`, beside the scene's
-/// `SceneDraw`s rather than as one of them: a mesh draw names a mesh and an
-/// image draw names four corners and a texture, and the two share nothing but
-/// the pass.
-pub struct SceneImage {
-    /// Id from `upload_rgba`. A draw whose upload has not landed is skipped.
-    pub image: u32,
-    /// The quad's corners in the space `mvp` transforms, in the image's own
-    /// order: top-left, top-right, bottom-right, bottom-left.
-    pub corners: [[f32; 3]; 4],
-    pub mvp: [[f32; 4]; 4],
-    /// Whole-draw alpha multiplier over the image's own alpha.
-    pub opacity: f32,
-    /// Draw order: this image renders before the `SceneDraw` at this index
-    /// of the staged list, `u32::MAX` after them all. The pass blends in
-    /// submission order, so an image goes after the opaque things it may
-    /// show through to and before the translucent ones that may cover it.
-    pub before: u32,
-}
-
-/// One corner of a `SceneImage` quad.
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct ImageVertex3D {
-    position: [f32; 3],
-    uv: [f32; 2],
-}
-
-/// shader_3d.wgsl's uniform block.
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct SceneUniforms {
-    mvp: [[f32; 4]; 4],
-    window_size: [f32; 2],
-    window_radius: f32,
-    corner_shape: f32,
-    wire_tint: [f32; 4],
-    opacity: f32,
-    /// 1.0 on wireframe draws: the fragment shader skips the derivative-
-    /// normal flat shading, whose screen-space derivatives are degenerate on
-    /// line fragments (along-axis only) and light the wires with noise.
-    is_wire: f32,
-    /// 1.0 on `SceneDraw::prelit` draws: the flat shading is skipped too.
-    prelit: f32,
-    _pad: [f32; 1],
-    /// xyz: toward the light, world space, unit length; w unused.
-    light: [f32; 4],
-}
-
-/// The direction toward the raster pass's light until a host sets one —
-/// the light this pass always had, (-0.55, 0.45, 0.7) as the shader dotted
-/// it with its INWARD derivative normal, said the right way round.
-pub(crate) const DEFAULT_SCENE_LIGHT: [f32; 3] = [0.55, -0.45, -0.7];
+pub use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
+use crate::draw::scene::{image_quads_3d, scene_uniforms, wire_base_bias, ImageVertex3D, SceneUniforms, DEFAULT_SCENE_LIGHT};
 
 const UNIFORM_SIZE: vk::DeviceSize = std::mem::size_of::<SceneUniforms>() as vk::DeviceSize;
 
@@ -952,58 +839,15 @@ impl SceneStage {
             Self::write_descriptor(device, frame);
         }
         let window_size = [self.extent.width as f32, self.extent.height as f32];
-        let corner_shape = crate::layout::corner_shape();
-        let light = [self.light[0], self.light[1], self.light[2], 0.0];
         let mapped = frame.uniforms.allocation.as_mut().unwrap().mapped_slice_mut().unwrap();
-        for (i, draw) in staged.draws.iter().enumerate() {
-            let uniforms = SceneUniforms {
-                mvp: draw.mvp,
-                window_size,
-                window_radius: corner_radius_px,
-                corner_shape,
-                wire_tint: draw.wire_tint,
-                opacity: draw.opacity,
-                is_wire: if draw.wireframe { 1.0 } else { 0.0 },
-                prelit: if draw.prelit { 1.0 } else { 0.0 },
-                _pad: [0.0; 1],
-                light,
-            };
+        let blocks = scene_uniforms(&staged.draws, &staged.images, window_size, corner_radius_px, self.light);
+        for (i, uniforms) in blocks.iter().enumerate() {
             let offset = (self.uniform_stride as usize) * i;
-            mapped[offset..offset + UNIFORM_SIZE as usize]
-                .copy_from_slice(bytemuck::bytes_of(&uniforms));
-        }
-        for (j, image) in staged.images.iter().enumerate() {
-            let uniforms = SceneUniforms {
-                mvp: image.mvp,
-                window_size,
-                window_radius: corner_radius_px,
-                corner_shape,
-                wire_tint: [0.0; 4],
-                opacity: image.opacity,
-                is_wire: 0.0,
-                prelit: 1.0,
-                _pad: [0.0; 1],
-                light,
-            };
-            let offset = (self.uniform_stride as usize) * (staged.draws.len() + j);
-            mapped[offset..offset + UNIFORM_SIZE as usize]
-                .copy_from_slice(bytemuck::bytes_of(&uniforms));
+            mapped[offset..offset + UNIFORM_SIZE as usize].copy_from_slice(bytemuck::bytes_of(uniforms));
         }
         frame.draw_count = staged.draws.len() as u32;
 
-        let mut verts: Vec<ImageVertex3D> = Vec::with_capacity(staged.images.len() * 6);
-        for image in &staged.images {
-            let [tl, tr, br, bl] = image.corners;
-            let v = |position: [f32; 3], uv: [f32; 2]| ImageVertex3D { position, uv };
-            verts.extend([
-                v(tl, [0.0, 0.0]),
-                v(bl, [0.0, 1.0]),
-                v(tr, [1.0, 0.0]),
-                v(tr, [1.0, 0.0]),
-                v(bl, [0.0, 1.0]),
-                v(br, [1.0, 1.0]),
-            ]);
-        }
+        let verts = image_quads_3d(&staged.images);
         let bytes: &[u8] = bytemuck::cast_slice(&verts);
         if bytes.len() as vk::DeviceSize > frame.image_verts.size {
             let mut old = std::mem::replace(&mut frame.image_verts, AllocatedBuffer::null());
@@ -1145,15 +989,11 @@ impl SceneStage {
                     device.cmd_set_line_width(cmd, draw.line_width.clamp(1.0, self.max_line_width));
                     device.cmd_set_depth_bias(cmd, 0.0, 0.0, 0.0);
                 } else if draw.wire_base_width > 0.0 {
-                    // Push this fill behind its coming wire overlay. The
-                    // slope term must cover not just the wires' across-width
-                    // sampling offset (w/2 px) but the NEIGHBOR facet's
-                    // plane: a wire lies on edge A|B and its fragments carry
-                    // A's plane depth, while the fill under the far half of
-                    // the wire is B's plane, which on a convex surface tilts
-                    // closer — hence the extra pixel of slope headroom.
+                    // Push this fill behind its coming wire overlay (see
+                    // `wire_base_bias`).
                     let w = draw.wire_base_width.clamp(1.0, self.max_line_width);
-                    device.cmd_set_depth_bias(cmd, 2.0, 0.0, 1.5 + w);
+                    let (constant, slope) = wire_base_bias(w);
+                    device.cmd_set_depth_bias(cmd, constant, 0.0, slope);
                 } else {
                     device.cmd_set_depth_bias(cmd, 0.0, 0.0, 0.0);
                 }

@@ -18,35 +18,12 @@ use gpu_allocator::MemoryLocation;
 use crate::engine::Vertex;
 
 use super::core::SurfaceLost;
-use super::image::{ImageQuad, ImageStage};
+use super::image::ImageStage;
+pub use crate::draw::{Batch2D, Frame2D, PlatePush, MAX_PLATE_FEATURES};
+pub(crate) use crate::draw::{batch_push_constants, PUSH_CONSTANT_FLOATS};
 use super::rt::{RtCamera, RtEnvironment, RtImage, RtImageSource, RtMaterial, RtStage, RtTriangle};
 use super::scene::{MeshId, SceneDraw, SceneImage, SceneStage, Vertex3D};
 use super::text::{TextSpan, TextStage};
-
-/// One scissored draw range of a 2D frame. `scissor` is (x, y, w, h) in
-/// physical pixels; None draws with the full-surface scissor. `clip_rrect` is an
-/// optional rounded-rect clip `[cx, cy, bx, by, r]` (center, SDF half-extents, corner
-/// radius; physical px) applied via push constants — fragments outside it discard, so a
-/// plate's children cut off at its rounded corners.
-pub struct Batch2D {
-    pub scissor: Option<(u32, u32, u32, u32)>,
-    pub clip_rrect: Option<[f32; 5]>,
-    pub start: u32,
-    pub end: u32,
-    /// When set, this batch is a single SDF-lit plate cover quad: the params go
-    /// out as push constants and shader2d's plate branch lights it per pixel.
-    pub plate: Option<PlatePush>,
-    /// A blur-behind plate (negative-alpha color): the renderer suspends the UI
-    /// pass, copies the swapchain-so-far into its snapshot image, and resumes —
-    /// so the plate's blur samples everything painted beneath it (background,
-    /// widgets, wires), not just the 3D scene backdrop.
-    pub blur_behind: bool,
-}
-
-/// Floats in the fragment push-constant block: the rounded-rect clip (`rect0`,
-/// `rect1` — 6 clip/flag floats plus the plate mode and corner shape) followed
-/// by [`PlatePush`]'s six vec4s. Field for field, this is shader2d's `RRectClip`.
-pub(crate) const PUSH_CONSTANT_FLOATS: usize = 32;
 
 /// The block in bytes. **This is exactly `maxPushConstantsSize`'s
 /// Vulkan-guaranteed minimum, so the budget is full** — every one of the 32
@@ -70,100 +47,6 @@ const _: () = assert!(
      query limits.max_push_constants_size at device init and add a fallback path \
      before raising PUSH_CONSTANT_FLOATS"
 );
-
-/// The fragment push-constant block for one batch: its rounded-rect clip,
-/// and its plate block when it is a plate cover quad. `feature_base` is the
-/// frame slot's first entry in the feature UBO, added to a plate's (or a
-/// union carve's) feature offset. Shared with the offscreen test harness
-/// (`vk::plate_probe`), so the two cannot push different blocks.
-pub(crate) fn batch_push_constants(batch: &Batch2D, clip_shape: f32, feature_base: usize) -> [f32; PUSH_CONSTANT_FLOATS] {
-    let rr = batch.clip_rrect.unwrap_or([0.0; 5]);
-    let enabled = if batch.clip_rrect.is_some() { 1.0f32 } else { 0.0 };
-    let mut pc = [0.0f32; PUSH_CONSTANT_FLOATS];
-    pc[..5].copy_from_slice(&rr);
-    pc[5] = enabled;
-    pc[7] = clip_shape;
-    if let Some(p) = &batch.plate {
-        pc[6] = p.mode;
-        pc[7] = p.shape;
-        pc[8..12].copy_from_slice(&p.rect);
-        pc[12..16].copy_from_slice(&p.radii);
-        pc[16..20].copy_from_slice(&p.light);
-        pc[20..24].copy_from_slice(&p.material);
-        pc[24..28].copy_from_slice(&p.host);
-        pc[28..32].copy_from_slice(&p.specular_tint);
-        if p.mode == 1.0 || p.mode == 14.0 {
-            // Rebase the feature offset onto this frame's UBO slot (a plate's
-            // CSG carves, or a union carve's boxes).
-            pc[24] += feature_base as f32;
-        }
-    }
-    pc
-}
-
-/// Push-constant block for one SDF-lit plate batch (physical px throughout).
-/// Mirrors the `p_*` fields of shader2d's `RRectClip`.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub struct PlatePush {
-    /// SDF box: center + half-extents. May extend past the cover quad — that is
-    /// how a recess suppresses a wall.
-    pub rect: [f32; 4],
-    /// Per-corner radii [tl, tr, br, bl].
-    pub radii: [f32; 4],
-    /// xyz = unit vector toward the light (+z out of the screen), w = roll width px.
-    pub light: [f32; 4],
-    /// [shading strength, specular strength, shininess, curvature/AO strength].
-    pub material: [f32; 4],
-    /// Mode 1: `[feature offset, feature count, frost z, frost w]` — xy into
-    /// the frame's `plate_features`, the carves CSG'd out of this plate (the
-    /// renderer adds the frame slot's base offset at record time); zw the
-    /// plate's frost recipe, `scene::material::Frost::pack` (compression and
-    /// refraction packed in z, the blur sigma in physical px in w). Mode 14 uses the same
-    /// `[offset, count]` for the union's boxes. Mode 2: the host-plate box
-    /// (center + half-extents) a free recess fades out against; far-away sides
-    /// (±1e5) disable the fade.
-    pub host: [f32; 4],
-    /// RGB multiplies the roll's specular color. Neutral white normally; the
-    /// focused-pane bevel carries the highlight color here, with w = 1 marking
-    /// the plate (or carve) as accent-tinted — the shader's focus branch,
-    /// which recolours the light AND the shadow (see shader2d's FOCUS_*).
-    pub specular_tint: [f32; 4],
-    /// 1.0 = raised lit plate, 2.0 = recess overlay, 3.0 = boss, 4.0 = ridge,
-    /// 5.0 = sphere, 6.0/7.0 = concave fillet (recessed/raised), 8.0 = groove
-    /// (slab carve about a line: `rect` = [cx, cy, half-width, _], `radii.xy` =
-    /// the line's unit normal, `host` = the surface it is engraved into),
-    /// 9.0 = trough, 10.0 = droplet (`radii` = [sag, belly r, belly half-w,
-    /// blend k] px, `host` = [sheet corner r px, clarity, dome amplitude,
-    /// attach r px], `material.w` = fresnel rim, `specular_tint` = [core
-    /// density, _, _, bottom-bow rise px] — droplet glints are always white,
-    /// so the tint RGB is repurposed; see shader2d's MODE_DROPLET).
-    pub mode: f32,
-    /// Corner shape exponent: 2.0 = circular arcs, > 2 = superellipse
-    /// (continuous-curvature) corners — see shader2d's `plate_sdf_grad`.
-    pub shape: f32,
-}
-
-/// A full 2D frame: the display-list vertices (optionally split into scissored
-/// batches), overlay vertices drawn after text, and the clear color (linear;
-/// only used on frames without a backdrop copy).
-pub struct Frame2D<'a> {
-    pub verts: &'a [Vertex],
-    pub batches: &'a [Batch2D],
-    pub overlay_verts: &'a [Vertex],
-    /// User images drawn interleaved with `verts` by each quad's `z_before`.
-    pub images: &'a [ImageQuad],
-    /// Carves CSG'd into this frame's SDF-lit plates, 12 floats each (rect
-    /// center+half-extents, per-corner radii, [width px, depth px, 0, 0]).
-    /// Plate batches reference them by offset+count in `PlatePush::host`.
-    pub plate_features: &'a [[f32; 12]],
-    pub clear_color: [f32; 4],
-    /// The only part of the surface that differs from the previous frame,
-    /// (x, y, w, h) in physical pixels; None = all of it. With a rect the
-    /// renderer keeps the pixels outside it (see [`ImageAge`]) and tells the
-    /// compositor that only the rect changed. The caller vouches for it: a
-    /// pixel that changed outside the rect stays as it was.
-    pub damage: Option<(u32, u32, u32, u32)>,
-}
 
 /// How far a swapchain image's pixels are behind the latest frame. A frame
 /// with [`Frame2D::damage`] repaints only what the image it acquired is
@@ -213,51 +96,14 @@ fn rect_intersect(a: vk::Rect2D, b: vk::Rect2D) -> vk::Rect2D {
 }
 
 pub(crate) const FRAMES_IN_FLIGHT: usize = 2;
-/// Max plate-carve features per frame; the shader's UBO holds one slot of this
-/// size per frame in flight.
-pub const MAX_PLATE_FEATURES: usize = 64;
-pub(crate) const PLATE_FEATURE_BYTES: usize = 48;
-/// shader2d's WindowInfo UBO: [size/clip vec4][bevel-profile meta vec4]
-/// [8 vec4 of profile slope samples].
-// [size/clip vec4][carve profile meta + 8 vec4][roll profile meta + 8 vec4].
-// [size/clip vec4][carve profile meta][8 carve slopes][roll profile meta]
-// [8 roll slopes][relief heights][backdrop meta] = 21 vec4. Grows only at the
-// END — every offset above is addressed by index from both sides.
-pub(crate) const WINDOW_INFO_BYTES: vk::DeviceSize = 320;
+pub(crate) use crate::draw::PLATE_FEATURE_BYTES;
+/// shader2d's WindowInfo uniform, in bytes (layout in `draw::window_info_data`).
+pub(crate) const WINDOW_INFO_BYTES: vk::DeviceSize = crate::draw::WINDOW_INFO_BYTES as vk::DeviceSize;
+pub(crate) use crate::draw::relief_px_at;
 
-/// The pinned relief heights (carve, roll) in physical px at `scale`, 0 =
-/// follow the width.
-pub(crate) fn relief_px_at(scale: f32) -> (f32, f32) {
-    let s = scale.max(0.001);
-    (
-        crate::layout::bevel_height().map_or(0.0, |h| h * s),
-        crate::layout::roll_height().map_or(0.0, |h| h * s),
-    )
-}
-
-/// shader2d's `WindowInfo` block for a target of `extent` whose corners clip
-/// at `clip_corner_radius` (physical px), with the pinned relief heights
-/// `relief` (carve, roll; physical px, 0 = unpinned) — the profiles and the
-/// corner shape from the live style. Shared with the offscreen test harness.
-pub(crate) fn window_info_data(extent: vk::Extent2D, clip_corner_radius: f32, relief: (f32, f32)) -> [f32; WINDOW_INFO_BYTES as usize / 4] {
-    let mut data = [0.0f32; WINDOW_INFO_BYTES as usize / 4];
-    data[0] = extent.width as f32;
-    data[1] = extent.height as f32;
-    data[2] = clip_corner_radius;
-    data[3] = crate::layout::corner_shape();
-    if let Some(slopes) = crate::layout::bevel_profile_slopes() {
-        data[4] = 1.0;
-        data[5] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
-        data[8..8 + slopes.len()].copy_from_slice(&slopes);
-    }
-    if let Some(slopes) = crate::layout::roll_profile_slopes() {
-        data[40] = 1.0;
-        data[41] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
-        data[44..44 + slopes.len()].copy_from_slice(&slopes);
-    }
-    data[76] = relief.0;
-    data[77] = relief.1;
-    data
+/// [`crate::draw::window_info_data`] for a Vulkan extent.
+pub(crate) fn window_info_data(extent: vk::Extent2D, clip_corner_radius: f32, relief: (f32, f32)) -> [f32; crate::draw::WINDOW_INFO_BYTES / 4] {
+    crate::draw::window_info_data(extent.width, extent.height, clip_corner_radius, relief)
 }
 
 pub(crate) struct AllocatedBuffer {
@@ -594,22 +440,22 @@ pub(crate) fn compile_wgsl(source: &str) -> Vec<u32> {
 /// so compile each shader once per process.
 pub(crate) fn shader2d_spirv() -> &'static [u32] {
     static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(include_str!("shader2d.wgsl")))
+    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::SHADER2D))
 }
 
 pub(crate) fn glyph_spirv() -> &'static [u32] {
     static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(include_str!("glyph.wgsl")))
+    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::GLYPH))
 }
 
 pub(crate) fn scene3d_spirv() -> &'static [u32] {
     static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(include_str!("scene3d.wgsl")))
+    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::SCENE3D))
 }
 
 pub(crate) fn scene3d_image_spirv() -> &'static [u32] {
     static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(include_str!("scene3d_image.wgsl")))
+    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::SCENE3D_IMAGE))
 }
 
 /// Like [`compile_wgsl`], but with naga's RAY_QUERY capability and SPIR-V 1.4
@@ -744,10 +590,29 @@ impl VkRenderer {
         height: u32,
         corner_radius_px: f32,
     ) -> Result<Self, SurfaceLost> {
+        Self::try_new_for(
+            super::core::SurfaceTarget::Wayland { display: display_ptr, surface: surface_ptr },
+            width,
+            height,
+            corner_radius_px,
+        )
+    }
+
+    /// A renderer presenting to any window [`SurfaceTarget`](super::core::SurfaceTarget)
+    /// names — a Wayland surface, or on macOS a `CAMetalLayer` — on the same
+    /// terms as [`try_new`](Self::try_new).
+    ///
+    /// # Safety
+    /// The target's pointers must be live and outlive the renderer.
+    pub unsafe fn try_new_for(
+        target: super::core::SurfaceTarget,
+        width: u32,
+        height: u32,
+        corner_radius_px: f32,
+    ) -> Result<Self, SurfaceLost> {
         let t_new = std::time::Instant::now();
-        let (mut core, surface) =
-            super::core::VkCore::new_for_wayland_surface(display_ptr, surface_ptr)?;
-        log::debug!("[timing] VkCore::new_for_wayland_surface: {:?}", t_new.elapsed());
+        let (mut core, surface) = super::core::VkCore::new_for_surface(target)?;
+        log::debug!("[timing] VkCore::new_for_surface: {:?}", t_new.elapsed());
         let t_rest = std::time::Instant::now();
         // Locals over the core for the setup below (methods use self.core.*).
         let device = core.device.clone();
@@ -1787,10 +1652,28 @@ impl VkRenderer {
         width: u32,
         height: u32,
     ) -> Result<(), SurfaceLost> {
+        self.attach_surface_to(
+            super::core::SurfaceTarget::Wayland { display: display_ptr, surface: surface_ptr },
+            width,
+            height,
+        )
+    }
+
+    /// [`attach_surface`](Self::attach_surface) for any window
+    /// [`SurfaceTarget`](super::core::SurfaceTarget).
+    ///
+    /// # Safety
+    /// The target's pointers must be live and outlive the attachment.
+    pub unsafe fn attach_surface_to(
+        &mut self,
+        target: super::core::SurfaceTarget,
+        width: u32,
+        height: u32,
+    ) -> Result<(), SurfaceLost> {
         if self.surface != vk::SurfaceKHR::null() {
             self.detach_surface();
         }
-        self.surface = self.core.create_wayland_surface(display_ptr, surface_ptr)?;
+        self.surface = self.core.create_surface(target)?;
         self.surface_lost = false;
         self.resize(width, height);
         self.swapchain_dirty = true;
@@ -2482,6 +2365,41 @@ pub(crate) fn present_debug() -> bool {
     *FLAG.get_or_init(|| std::env::var_os("CCE_PRESENT_DEBUG").is_some())
 }
 
+/// The 3D half of the renderer, as an app stages it through
+/// `Application::init_3d` / `stage_3d` — each method is the inherent one.
+impl crate::draw::scene::Stage3D for VkRenderer {
+    fn create_mesh(&mut self, verts: &[Vertex3D]) -> MeshId {
+        VkRenderer::create_mesh(self, verts)
+    }
+    fn update_mesh(&mut self, id: MeshId, verts: &[Vertex3D]) {
+        VkRenderer::update_mesh(self, id, verts)
+    }
+    fn stage_scene(&mut self, scissor: (u32, u32, u32, u32), draws: Vec<SceneDraw>) {
+        VkRenderer::stage_scene(self, scissor, draws)
+    }
+    fn stage_scene_images(&mut self, images: Vec<SceneImage>) {
+        VkRenderer::stage_scene_images(self, images)
+    }
+    fn set_scene_light(&mut self, toward: [f32; 3]) {
+        VkRenderer::set_scene_light(self, toward)
+    }
+    fn set_rt_scene_with_image(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial], image: Option<RtImage>) {
+        VkRenderer::set_rt_scene_with_image(self, triangles, materials, image)
+    }
+    fn set_rt_environment(&mut self, environment: RtEnvironment) {
+        VkRenderer::set_rt_environment(self, environment)
+    }
+    fn set_rt_background(&mut self, color: Option<[f32; 3]>) {
+        VkRenderer::set_rt_background(self, color)
+    }
+    fn stage_rt(&mut self, pane: (u32, u32, u32, u32), camera: RtCamera) {
+        VkRenderer::stage_rt(self, pane, camera)
+    }
+    fn rt_accumulating(&self) -> bool {
+        VkRenderer::rt_accumulating(self)
+    }
+}
+
 impl Drop for VkRenderer {
     fn drop(&mut self) {
         unsafe {
@@ -2556,6 +2474,31 @@ mod tests {
         assert!(!super::shader2d_spirv().is_empty());
     }
 
+    /// The WebGPU variants validate with no capabilities at all — WebGPU has
+    /// no push constants — and the 2D one carries its block as the uniform
+    /// the web renderer binds. naga does not see everything a browser's
+    /// compiler rejects (its derivative-uniformity analysis does not follow
+    /// calls), so the browser probe is the last word; this catches a
+    /// substitution that silently stopped applying.
+    #[test]
+    fn the_webgpu_shaders_validate_without_push_constants() {
+        let web2d = crate::draw::shaders::shader2d_for_webgpu();
+        assert!(!web2d.contains("var<push_constant>"));
+        assert!(web2d.contains("@group(1) @binding(0) var<uniform> rrect_clip: RRectClip;"));
+        for (name, src) in [("shader2d (web)", web2d.as_str()), ("glyph", crate::draw::shaders::GLYPH)] {
+            let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(src)));
+            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("{name} does not validate for WebGPU: {e:?}"));
+        }
+        // And the block's size is what the renderers lay out.
+        let module = naga::front::wgsl::parse_str(&web2d).unwrap();
+        let block = module.types.iter().find(|(_, t)| t.name.as_deref() == Some("RRectClip")).expect("RRectClip").1;
+        let naga::TypeInner::Struct { span, .. } = block.inner else { panic!("RRectClip is a struct") };
+        assert_eq!(span as usize, crate::draw::PUSH_CONSTANT_FLOATS * 4);
+        assert!(span as usize <= crate::draw::shaders::WEBGPU_BLOCK_STRIDE);
+    }
+
     #[test]
     fn scene3d_compiles() {
         assert!(!super::scene3d_spirv().is_empty());
@@ -2577,7 +2520,7 @@ mod tests {
     /// shape here, so it measures the thing it is guarding.
     #[test]
     fn window_info_layout_matches_the_uniform_size() {
-        let src = include_str!("shader2d.wgsl");
+        let src = crate::draw::shaders::SHADER2D;
         let body = src
             .split_once("struct WindowInfo {")
             .expect("WindowInfo moved; this test scans for it")

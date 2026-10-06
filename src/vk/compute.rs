@@ -35,78 +35,8 @@ use ash::vk;
 use std::collections::HashMap;
 use std::ffi::CString;
 
-/// A compute shader: WGSL source and the `@compute` entry point to run.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Kernel {
-    pub source: String,
-    pub entry: String,
-}
-
-impl Kernel {
-    pub fn new(source: impl Into<String>, entry: impl Into<String>) -> Self {
-        Kernel { source: source.into(), entry: entry.into() }
-    }
-}
-
-/// How a binding is declared to the shader, in `@binding(i)` order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BindKind {
-    /// `var<storage, read>` or `var<storage, read_write>`.
-    Storage,
-    /// `var<uniform>`: a small parameter block, 16-byte layout rules apply.
-    Uniform,
-}
-
-/// One buffer of a job, bound at `@group(0) @binding(i)` for its index in
-/// the list handed to [`ComputeDevice::run`].
-pub enum Binding<'a> {
-    /// Read-write storage: uploaded before the dispatch and READ BACK into
-    /// the same slice after it.
-    Storage(&'a mut [u8]),
-    /// Read-only storage: uploaded, never read back.
-    Input(&'a [u8]),
-    /// A uniform block: uploaded, never read back.
-    Uniform(&'a [u8]),
-}
-
-impl<'a> Binding<'a> {
-    /// A read-write binding over a typed slice (`&mut [f32]`, `&mut [[f32; 3]]`, …).
-    pub fn rw<T: bytemuck::Pod>(data: &'a mut [T]) -> Self {
-        Binding::Storage(bytemuck::cast_slice_mut(data))
-    }
-
-    /// A read-only storage binding over a typed slice.
-    pub fn input<T: bytemuck::Pod>(data: &'a [T]) -> Self {
-        Binding::Input(bytemuck::cast_slice(data))
-    }
-
-    /// A uniform binding over one `Pod` struct.
-    pub fn uniform<T: bytemuck::Pod>(value: &'a T) -> Self {
-        Binding::Uniform(bytemuck::bytes_of(value))
-    }
-
-    fn kind(&self) -> BindKind {
-        match self {
-            Binding::Storage(_) | Binding::Input(_) => BindKind::Storage,
-            Binding::Uniform(_) => BindKind::Uniform,
-        }
-    }
-
-    fn bytes(&self) -> &[u8] {
-        match self {
-            Binding::Storage(b) => b,
-            Binding::Input(b) => b,
-            Binding::Uniform(b) => b,
-        }
-    }
-}
-
-/// Workgroups needed to cover `items` at `per_group` invocations each — the
-/// `@workgroup_size` of the entry point, which [`ComputeDevice::run_over`]
-/// reads for you.
-pub fn workgroups(items: u32, per_group: u32) -> u32 {
-    items.div_ceil(per_group.max(1)).max(1)
-}
+pub use crate::compute::{workgroups, BindKind, Binding, Kernel, MAX_BINDINGS};
+use crate::compute::{check_job, padded_len, parse_kernel, result_slot, slot_for};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct PipelineKey {
@@ -122,10 +52,6 @@ struct Pipeline {
     workgroup_size: [u32; 3],
 }
 
-/// Storage bindings are bound whole, so a buffer's size has to be a multiple
-/// of the widest element stride a shader may declare; 16 covers `vec4<f32>`.
-const BUFFER_ALIGN: usize = 16;
-
 /// A headless device that runs compute jobs. See the module docs.
 pub struct ComputeDevice {
     pipelines: HashMap<PipelineKey, Pipeline>,
@@ -137,9 +63,6 @@ pub struct ComputeDevice {
     /// Declared last: everything above is destroyed before the device.
     core: VkCore,
 }
-
-/// The most bindings one job may carry (the descriptor pool is sized to it).
-pub const MAX_BINDINGS: usize = 16;
 
 impl ComputeDevice {
     /// A device on the machine's preferred GPU (`CCE_VK_DEVICE` steers it,
@@ -272,33 +195,7 @@ impl ComputeDevice {
         passes: u32,
         ping_pong: Option<(usize, usize)>,
     ) -> Result<(), String> {
-        if bindings.len() > MAX_BINDINGS {
-            return Err(format!("{} bindings; a job may carry at most {MAX_BINDINGS}", bindings.len()));
-        }
-        if groups.iter().any(|&g| g == 0) {
-            return Err(format!("workgroup count {groups:?} has a zero"));
-        }
-        if passes == 0 {
-            return Err("a job needs at least one pass".to_string());
-        }
-        if let Some((a, b)) = ping_pong {
-            if a == b || a >= bindings.len() || b >= bindings.len() {
-                return Err(format!("ping-pong pair ({a}, {b}) does not name two distinct bindings of {}", bindings.len()));
-            }
-            if !matches!(bindings[a], Binding::Input(_)) {
-                return Err(format!("ping-pong binding {a} must be a read-only Input: it is where the first pass reads"));
-            }
-            if !matches!(bindings[b], Binding::Storage(_)) {
-                return Err(format!("ping-pong binding {b} must be a read-write Storage: it is where the result lands"));
-            }
-            if bindings[a].bytes().len() != bindings[b].bytes().len() {
-                return Err(format!(
-                    "ping-pong bindings {a} and {b} differ in length ({} vs {} bytes)",
-                    bindings[a].bytes().len(),
-                    bindings[b].bytes().len()
-                ));
-            }
-        }
+        check_job(bindings, groups, passes, ping_pong)?;
         let kinds: Vec<BindKind> = bindings.iter().map(Binding::kind).collect();
         let key = PipelineKey { kernel: kernel.clone(), kinds };
         let (pipeline, layout, set_layout) = {
@@ -312,7 +209,7 @@ impl ComputeDevice {
         let mut sizes = Vec::with_capacity(bindings.len());
         for (i, b) in bindings.iter().enumerate() {
             let bytes = b.bytes();
-            let padded = bytes.len().max(BUFFER_ALIGN).div_ceil(BUFFER_ALIGN) * BUFFER_ALIGN;
+            let padded = padded_len(bytes.len());
             if b.kind() == BindKind::Uniform {
                 let cap = unsafe {
                     self.core.instance.get_physical_device_properties(self.core.physical_device).limits.max_uniform_buffer_range
@@ -366,17 +263,10 @@ impl ComputeDevice {
                         .set_layouts(&set_layouts),
                 )
                 .map_err(|e| format!("descriptor set: {e}"))?;
-            let slot_for = |binding: usize, swapped: bool| -> usize {
-                match ping_pong {
-                    Some((a, b)) if swapped && binding == a => b,
-                    Some((a, b)) if swapped && binding == b => a,
-                    _ => binding,
-                }
-            };
             let mut infos: Vec<[vk::DescriptorBufferInfo; 1]> = Vec::with_capacity(set_count * bindings.len());
             for (si, _) in sets.iter().enumerate() {
                 for i in 0..bindings.len() {
-                    let slot = slot_for(i, si == 1);
+                    let slot = slot_for(i, si == 1, ping_pong);
                     infos.push([vk::DescriptorBufferInfo::default()
                         .buffer(self.slots[slot].buffer)
                         .offset(0)
@@ -452,15 +342,9 @@ impl ComputeDevice {
 
         // Read back the read-write bindings — the ping-pong output from
         // whichever buffer the last pass wrote.
-        let last_written = |i: usize| -> usize {
-            match ping_pong {
-                Some((a, b)) if i == b && passes % 2 == 0 => a,
-                _ => i,
-            }
-        };
         for (i, b) in bindings.iter_mut().enumerate() {
             if let Binding::Storage(out) = b {
-                let mapped = self.slots[last_written(i)]
+                let mapped = self.slots[result_slot(i, passes, ping_pong)]
                     .allocation
                     .as_ref()
                     .and_then(|a| a.mapped_slice())
@@ -570,36 +454,15 @@ impl Drop for ComputeDevice {
 /// workgroup size. `compile_wgsl` in the renderer panics on a bad shader,
 /// which is right for the toolkit's own; a kernel here may be a user's.
 fn compile_kernel(kernel: &Kernel) -> Result<(Vec<u32>, [u32; 3]), String> {
-    let module = naga::front::wgsl::parse_str(&kernel.source)
-        .map_err(|e| format!("WGSL parse error: {}", e.emit_to_string(&kernel.source).trim_end()))?;
-    let entry = module
-        .entry_points
-        .iter()
-        .find(|ep| ep.name == kernel.entry && ep.stage == naga::ShaderStage::Compute)
-        .ok_or_else(|| {
-            let offered: Vec<&str> = module
-                .entry_points
-                .iter()
-                .filter(|ep| ep.stage == naga::ShaderStage::Compute)
-                .map(|ep| ep.name.as_str())
-                .collect();
-            format!(
-                "no @compute entry point named `{}`; the module offers {}",
-                kernel.entry,
-                if offered.is_empty() { "none".to_string() } else { offered.join(", ") }
-            )
-        })?;
-    let workgroup_size = entry.workgroup_size;
-    let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
-        .validate(&module)
-        .map_err(|e| format!("WGSL validation error: {}", e.emit_to_string(&kernel.source).trim_end()))?;
+    let parsed = parse_kernel(kernel)?;
     let options = naga::back::spv::Options {
         lang_version: (1, 0),
         flags: naga::back::spv::WriterFlags::LABEL_VARYINGS,
         ..Default::default()
     };
-    let spirv = naga::back::spv::write_vec(&module, &info, &options, None).map_err(|e| format!("SPIR-V: {e}"))?;
-    Ok((spirv, workgroup_size))
+    let spirv =
+        naga::back::spv::write_vec(&parsed.module, &parsed.info, &options, None).map_err(|e| format!("SPIR-V: {e}"))?;
+    Ok((spirv, parsed.workgroup_size))
 }
 
 #[cfg(test)]

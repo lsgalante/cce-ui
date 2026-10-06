@@ -31,7 +31,8 @@ set outright.
   per-corner radii, vectors with caps, arcs, circles, and the **relief primitives** — the
   lit-surface family: bevels, plates, recesses, bosses, ridges, fillets, grooves, lattices, box unions; see the
   `Prim` enum doc in `src/scene/paint.rs`). Tessellators live in
-  `backend/window_runner.rs` and are re-exported through `src/engine.rs`.
+  `backend/tessellate.rs` and are re-exported through `backend/window_runner.rs` and
+  `src/engine.rs`.
 - It is **both a library and a binary.** `src/lib.rs` is the toolkit; `src/main.rs` is
   `DemoApp`, the reference `Application` — a small widget gallery on the Phase 6 target
   architecture (display-list frame, scene-solver layout, routed events, in-frame
@@ -56,6 +57,336 @@ scattering of widgets (`text_box`, `slider`, `dropdown`, `treelist`, …). When 
 engine, that module's tests are the fast feedback loop; run `cargo test -p cce-ui scene::` before
 anything else.
 
+**The library also builds for the browser** (`wasm32-unknown-unknown`, since 2026-10-04):
+`scripts/check-wasm` type-checks it, with and without the optional features. The native
+shell and renderer — `vk`, the Wayland shell (`backend::{window_runner, menu_popup, dnd}`),
+`wayland`, `protocol`, `ipc`, `mcp`, `file_dialog` — and their crates (ash, smithay, calloop,
+wayland-*, libc, rfd) are `cfg(not(target_arch = "wasm32"))`; so are the Wayland-typed parts
+of the client contract: `Application::new(qh, …)`, `layer()` and `LayerSettings`,
+`register_sources`, and `renderer_init` / `stage_renderer`, which take a `VkRenderer`.
+`WindowAction::Resize` takes `app::WindowEdge` — xdg's `ResizeEdge` on Linux, as before.
+Since macOS joined (2026-10-05) "native" is two things: the Vulkan renderer and the native
+services (`vk`, `ipc`, `file_dialog`; ash, libc, rfd) are `cfg(not(target_arch = "wasm32"))`,
+and the WAYLAND shell — `backend::{window_runner, menu_popup, dnd}`, `wayland`, `protocol`,
+`mcp`, the crates smithay / calloop / wayland-* / xkeysym, and the contract's `new(qh, …)`,
+`layer()`, `LayerSettings` and `register_sources` — is
+`cfg(not(any(target_arch = "wasm32", target_os = "macos")))`. `renderer_init` /
+`stage_renderer` are on macOS too, since it has the Vulkan renderer.
+Portable code keeps time with `web_time::Instant` (std's own type natively; std's panics in
+the browser), and reaches what a renderer draws through `crate::draw`, not `crate::vk`. A
+change that makes portable code call into a native module fails `check-wasm` first — put
+the native half behind the cfg, as `color_selector::place_picker_at_pointer` does.
+
+**It draws in the browser too** (`src/web`, `WebRenderer`, since 2026-10-04): the Vulkan
+renderer's 2D path on WebGPU through web-sys, from the same `Frame2D`, shaders, glyph atlas
+and image queue. web-sys still ships its WebGPU bindings behind `--cfg=web_sys_unstable_apis`;
+`.cargo/config.toml` sets it for the wasm target, and **cargo reads that file from the
+directory it is run in** — so build the browser half from inside `cce-ui` (as
+`check-wasm` does), and a client crate that builds cce-ui for the browser needs the same line
+in its own config.
+
+**And an `Application` runs in a page** (`web::run::<App>(canvas, fonts, sizing).await`, since
+2026-10-05): the browser shell (`src/web/shell.rs`) is the Wayland shell's counterpart over a
+`<canvas>`, on the same `Driver` and `Pacer`. What it does in the page's terms:
+
+- **Events**: pointer (captured on press, so a drag outside the canvas still ends), wheel,
+  key and focus events on the canvas, mapped by `backend::dom` — `map_key` gives a key the
+  TEXT xkb's `utf8` would (Tab "\t", Enter "\r", Ctrl+letter its control code: the Wayland
+  shell hands widgets exactly that, and a focused text box inserts Tab's), `wheel_frame`
+  reads a whole notch-sized pixel delta (Chromium's 100 px) or a line / page delta as a wheel
+  notch and anything else as a finger, and a finger gesture's lift is synthesized after
+  120 ms without a frame (`FINGER_LIFT`), since a page reports none. The browser's own key
+  repeats are dropped: the driver repeats, as on Wayland. On a Mac, Command is the shortcut
+  key (⌘Z is undo). A page has no grabs, so a press on a CSD border is the app's.
+- **Pacing**: a turn per animation frame at the pacer's ACTIVE cadence, a timer at its idle
+  one; any event, and any `AppSender::send` (through `backend::app::set_wake`), wakes the
+  loop for the next frame. Measured idle: 5 turns in 5 s, the native count.
+- **Size**: `Sizing::App` sizes the canvas from `WindowSettings` and `desired_size` (CSS px),
+  as a window; `Sizing::Page` leaves it to the page's CSS and ignores size requests (a tiling
+  compositor's answer); a ResizeObserver wakes a turn on relayout, and `devicePixelRatio` is
+  the scale. The context menu is drawn in the canvas and kept inside it, as on a layer surface.
+- **Fonts** (`web::Fonts`): the files, and the generic serif / sans / mono families — a page
+  has no font directory and no fontconfig, so it says both. `lib::page_fonts` holds them, and
+  on wasm EVERY font database the toolkit builds loads them: the shell's, the widget-geometry
+  one (`geometry_font_system`) and the text-measurement one (`widget::input::get_font_db`,
+  resvg's — the toggle's label is centred by it). cosmic-text has no family fallback list on
+  wasm (`fallback/other.rs` is empty), where on Linux it walks Noto Sans → DejaVu Sans → …,
+  so `page_fonts::stand_in_for_missing` gives the families the toolkit names (the configured
+  fonts, "Berkeley Mono") the faces of the first family of that Linux list the set has; a
+  family an app names itself must be in the set. Order matters: the measuring fallback is the
+  first face with the glyph.
+- **`web::capture().await`**: the next frame, read back from the GPU. Headless Chromium
+  composites in software and leaves a WebGPU canvas out of its screenshots and `toDataURL`.
+- **The clipboard** (since 2026-10-05): `widget::clipboard` is one synchronous text pair
+  (`copy_to_clipboard` / `read_from_clipboard`, every widget's copy, cut and paste) with a
+  backend per platform — `wl-copy` / `wl-paste` (`xclip`) on Wayland, `NSPasteboard` on
+  macOS, and in a page the page's own clipboard events, because a page may read the
+  clipboard only inside a `paste` event. So the canvas lets ⌘/Ctrl+C, X and V keep their
+  defaults (`dom::clipboard_key`), and a ⌘/Ctrl+V is HELD from the app until its `paste`
+  event has handed over the text (then a read answers it) — or, if none comes, until a
+  zero timer, when a read answers the page's own last copy or paste; a release never
+  overtakes it. A copy writes through `navigator.clipboard.writeText` where the page has it
+  (a secure context; checked first, since calling into undefined throws through the wasm
+  frames), and the `copy` / `cut` event the key raises carries it too, which needs no
+  secure context. Until then a copy in a page panicked (`std::thread::spawn`).
+  `scripts/web-probe/clipboard` is the check: copy, paste, copy with `writeText` refused,
+  and paste with the `paste` event swallowed, each read back from the system clipboard —
+  all four pass in headless Chromium (2026-10-05). (Five since the IME: a `paste`
+  swallowed with its default kept pastes into the keyboard sink, an `input` of type
+  `insertFromPaste`, which is the paste too.)
+- **The keyboard is a hidden `<textarea>`'s** (the keyboard sink, since 2026-10-05), not
+  the canvas's: a page composes input-method text only into an editable element. It takes
+  the focus a press on the canvas gave the canvas (a canvas focused another way hands it
+  over, and a blur over to the canvas is not a focus loss); its keys are the app's as the
+  canvas's were, except one the input method takes (`isComposing`, keyCode 229); its
+  `input` events while composing are the composition (`Driver::preedit`, the cursor from
+  its selection via `dom::utf16_range_to_bytes`), `compositionend` the commit, and text
+  with no composition (an emoji panel, dictation) a commit as it comes. After each frame
+  it is moved to the editing widget's caret (`ime::caret`), where the candidates open; a
+  composition a widget dropped (`ime::take_reset`) is cancelled by blurring and refocusing
+  it INSIDE the turn, where the events that raises reach no handler.
+  `scripts/web-probe/ime` is the check, through Chromium's own IME path (CDP
+  `Input.imeSetComposition` / `insertText`): a composition shown with the sink at its
+  caret, the commit replacing it, a cancelled one leaving the box, a no-composition
+  insert, and plain keys — all six pass (2026-10-05), and the 24-step demo replay is
+  identical to the pixel to the run before the sink through step 18.
+
+Not there yet: drag and drop, file dialogs, and an app whose
+text is not the display list's (`display_list_text` false — it stages its own through the
+native-only `stage_renderer`, so draws no text here).
+
+**Compute jobs run in the browser too** (`web::ComputeDevice`, since 2026-10-05). What a job
+IS moved out of `vk` into the portable `crate::compute` — `Kernel`, `Binding`, `BindKind`,
+`workgroups`, `MAX_BINDINGS`, and the rules a job is held to before any device sees it
+(`check_job`, the ping-pong `slot_for` / `result_slot`, `parse_kernel`: naga's WGSL
+frontend, now a dependency on every target, validates a kernel and reads its
+`@workgroup_size` — WebGPU can report neither) — and `vk::compute` re-exports every one at
+its old path. The browser device takes the same jobs and answers them the same way, with
+one difference the platform makes: readback is a promise, so its `run`, `run_over`,
+`run_passes`, `run_passes_over` and `workgroup_size` are `async`. Two things WebGPU does
+differently underneath: its layouts tell read-only storage from read-write (the module
+says which, `ParsedKernel::read_only_storage`), and a device starts at the spec's default
+of eight storage buffers a stage, so it asks for the adapter's own (SwiftShader offers
+ten; a job past the adapter's ceiling is an `Err` naming the limit). What WebGPU rejects
+is caught in a validation error scope and returned. `examples/compute_probe/jobs.rs` is
+the check — a map, a uniform, a 33- and a 34-pass ping-pong, a 2D dispatch, ten bindings,
+a bad kernel and a missing entry, each exact against a CPU reference in f32 — run by
+`compute_native` and by `scripts/web-probe/compute`: the two outputs are identical to the
+bit (lavapipe vs SwiftShader, 2026-10-05). A reference written for a length that is not
+a multiple of four floats must know that `arrayLength` counts the 16-byte padding, on
+both devices.
+
+**3D scenes draw in the browser too** (`Stage3D`, since 2026-10-05). What an app stages a
+scene through is a trait, `draw::scene::Stage3D` (`create_mesh`, `update_mesh`,
+`stage_scene`, `stage_scene_images`, `set_scene_light`), implemented by `VkRenderer` (each
+method its inherent one) and `WebRenderer`; the scene's types (`Vertex3D`, `MeshId`,
+`SceneDraw`, `SceneImage`), its uniform blocks (`scene_uniforms`), image quads and the
+wire-base depth bias (`wire_base_bias`) moved to `draw::scene`, and `scene3d.wgsl` /
+`scene3d_image.wgsl` to `draw/`, shared by both renderers; `vk` and `engine` re-export them.
+Two portable `Application` hooks take a `&mut dyn Stage3D`: **`init_3d`** (once per
+renderer — make meshes) and **`stage_3d`** (every frame, just before the draw; true asks
+for another frame). Natively `renderer_init` and `stage_renderer` forward to them by
+default, as `new` forwards to `create`, so an app that overrides the native hooks (the
+designer) is untouched, and one that moves to the portable pair runs on both shells. The
+WebGPU pass (`web/scene.rs`) is the Vulkan `SceneStage`'s port: a full-size backdrop in the
+canvas's sRGB view format with a depth32 buffer, copied into the canvas under a UI pass
+that LOADS it and samples it for blur — and kept, as on Vulkan, until the next staged
+scene. Depth bias is pipeline state in WebGPU, and a WebGPU line is one pixel (no
+wideLines), so the biased fill is a pipeline of its own at `wire_base_bias(1.0)` — what a
+Vulkan device without wideLines uses. `scene3d.wgsl` takes its derivatives at the top of
+`fs_main` (WebGPU rejects one under a branch on a varying); natively pixel-identical.
+`examples/probe3d/scene.rs` is the check, on the portable hooks — background quad, flat and
+prelit fills, a wire-carrying fill and its wires, a see-through fill and its edges, an
+image in the scene before the translucent draw, a host light, frost over the pane — run by
+`probe3d_native` and `scripts/web-probe/probe3d`: 2026-10-05, lavapipe vs SwiftShader,
+195 px differ by more than 8 levels, all on 1 px wires (where along its length a line
+steps a row is the rasterizer's), everything else within 2.
+
+**And so does the path tracer** (since 2026-10-05). `Stage3D` carries the tracer's half
+too — `set_rt_scene` / `set_rt_scene_with_image`, `set_rt_environment`,
+`set_rt_background`, `stage_rt`, `rt_accumulating` — and what it traces from moved to
+`draw::rt`: the schema (`RtTriangle`, `RtMaterial`, `RtImage`, `RtCamera`,
+`RtEnvironment`), the binned-SAH BVH and its tests, the buffers (`pack_scene`) and
+parameter blocks (`rt_params`, `denoise_params`) as the shaders read them, and the
+constants; the shaders (`rt_common` / `rt_bvh` / `rt_query` / `rt_denoise`) moved to `draw/`.
+`vk::rt` re-exports the schema and keeps its own state (frames in flight, the ray-query
+tier, `RtOffscreen`) — it now packs and lays out through `draw::rt`, verified by its
+GPU tests (`cargo test --lib rt -- --ignored`, lavapipe). `web/rt.rs` is the compute tier on
+WebGPU: the same shaders and packing, the same rules for restarting the accumulation, one
+sample a frame plus the three à-trous iterations in one compute pass. Two differences:
+WebGPU has no ray tracing, so there is no ray-query tier (the compute tier is what every
+Vulkan device without RT cores runs too); and Vulkan BLITS the tracer's `rgba8unorm`
+image into the sRGB backdrop, converting as it copies, which WebGPU's copies cannot — a
+small render pass loads each texel and writes it through the backdrop's sRGB view, the
+same conversion. The probe's traced mode (`Probe3d<true>`, `PROBE3D_TRACE=1` natively,
+`scripts/web-probe/probe3d <out> traced`) stages exactly eight frames and stops, so both
+are compared at eight samples: 2026-10-05, Vulkan compute tier (`CCE_VK_RT=compute`) on
+lavapipe vs SwiftShader, the traced pane's mean differs by 0.10 of a level, every pixel
+within 8, 47 channels in the frame past 8 — a few paths that diverged.
+
+**The reference app runs on both, through one input script.** `examples/demo_web.rs` is
+`src/main.rs`'s `DemoApp` (included by `#[path]`, hence `pub(crate)`) in a page;
+`scripts/web-probe/demo <dir>` builds it, serves it with the machine's fonts and replays the
+native harness's 24 steps (`drive.mjs`: moves, clicks, a drag, a wheel, typing, undo, the
+menu, Tab, held keys, the CSD bands), one captured frame per step, which `compare.py` diffs
+against the native run's screenshots (`--mask` the cursor's box; never sway's
+`hide_cursor`, which clears pointer focus, so the native app drops its hover). Measured
+2026-10-05 against lavapipe: steps 00–18 differ only at the slider band's two pointed tips,
+1 px of rasterizer tie-break (≤ 63 channels beyond 8 levels; everything else within 2),
+with `DEMO_FAMILIES=FreeSerif,FreeSans,FreeMono` — what native's fontdb made of this
+machine's fontconfig, not `fc-match`'s DejaVu. Steps 19–20 hold a key, and the driver
+repeats once per turn: SwiftShader takes ~250 ms a frame, so the page gets fewer repeats
+than native in the same 1.5 s. Timing, not routing.
+
+**The renderer probe holds the two renderers to each other.** `examples/probe/scene.rs`
+is one 1280x800 frame of nearly every prim — root, pane and frosted plates, every control
+stance, fields, carves, bevel, sphere, grooves, vector caps, text at four sizes in two
+families, an image at two sizes. `cargo run --example probe_native` draws it through
+Vulkan (a Wayland session; screenshot it); `scripts/web-probe/run <out.rgba>` builds
+`probe_web` for wasm, binds it with wasm-bindgen-cli (the version in Cargo.lock) and draws
+it in headless Chromium on SwiftShader, reading the frame back from the GPU; and
+`scripts/web-probe/compare.py native.png out.rgba 1280 800` diffs them. Both halves must
+have the same fonts — the native one with `CCE_LOAD_SYSTEM_FONTS=1`, the web one handed the
+DejaVu files (`$PROBE_FONTS_DIR`) — and the screenshot must not carry a cursor (sway:
+`seat * hide_cursor 200`), which is a difference the diff cannot tell from the renderer's.
+Lavapipe against SwiftShader, 2026-10-04: 96.8% of channels equal, every other within 2
+levels but ONE at 3 — rounding at antialiased edges and in the blur, no shading difference.
+Chromium needs `--use-angle=swiftshader --enable-unsafe-swiftshader
+--disable-gpu-compositing` beside the WebGPU flags (`browser.mjs`): headless, with GPU
+compositing it has no shared-image backing for a WebGPU canvas and loses the device on the
+first present ("A valid external Instance reference no longer exists").
+
+**And on a Mac, type-checked only** (`src/mac`, since 2026-10-05). The fourth shell is an
+AppKit window over the same `Driver`, `Pacer`, `build_frame` and **Vulkan renderer, on
+Metal through MoltenVK**: `vk::SurfaceTarget` names what a window's `VkSurfaceKHR` is made
+from — `Wayland { display, surface }` or `Metal { layer }` (a `CAMetalLayer`) —
+`VkRenderer::try_new_for` / `attach_surface_to` and `VkCore::new_for_surface` /
+`create_surface` take one, and the Wayland-pointer forms forward to them unchanged. The
+instance enables VK_EXT_metal_surface when the loader offers it, and on macOS only
+VK_KHR_portability_enumeration (the loader lists MoltenVK to no instance that does not ask);
+a device that offers VK_KHR_portability_subset gets it enabled, as the spec requires, and
+no Linux driver offers it — so a Linux instance and device are the ones they always were.
+`engine::run::<App>()` is the AppKit shell's `run` on macOS, so a client's `main` does not
+change. What the shell does, in AppKit's terms (module doc in `src/mac/mod.rs`):
+
+- **The window**: transparent, its titlebar transparent over full-size content, so the root
+  plate fills it with the traffic lights on its corner. AppKit resizes from its own window
+  edges, so the driver's CSD resize band is the app's (`PressSite::own_edges`, new; false
+  on the other shells); a press the driver reads as a move drags the window
+  (`performWindowDragWithEvent:`).
+- **Events**: a flipped, layer-hosting `NSView` maps mouse, scroll, magnify and keys through
+  `backend::appkit` (portable, tested on Linux like `dom`): named keys from the hardware key
+  code (AppKit spells them in private-use characters, and Backspace as DEL), the rest from
+  `characters`, or with ⌘/Ctrl from `charactersIgnoringModifiers` so ⌘Z is z typing ^Z;
+  Command reads as `ctrl`, as in a page on a Mac; a Control-click is a right click. AppKit
+  sends NO keyUp for a ⌘-combination, so the shell releases one as it presses it (else the
+  driver repeats ⌘Z until focus is lost). Its key repeats are dropped (the driver repeats)
+  and so is the system's scroll MOMENTUM (the toolkit coasts a flick itself; both would
+  coast twice). The system has applied natural scrolling to the wheel too, where a Linux
+  compositor applies it to the trackpad alone, so a wheel notch is turned back to the
+  wheel's own direction, and each trackpad event's `isDirectionInvertedFromDevice` sets
+  `input::force_natural_scroll` on the main thread: the system setting rules, not input.kdl's.
+- **Pacing**: main-queue dispatches (`dispatch2`); an event or any `AppSender::send`, from
+  any thread (`app::set_wake`, process-wide on macOS, per thread in a page), asks for a turn
+  at most one ACTIVE frame after the last; between, the pacer's sleep. A superseded turn is
+  dropped by its generation. Quit (⌘Q) and the close button ask the app to exit as a
+  compositor's close does; the run loop is stopped once it has.
+- **Fonts**: the system set is always loaded on macOS (`build_font_system`) — it is what
+  cosmic-text's macOS fallback list names.
+- **Clipboard**: the general `NSPasteboard`'s plain-text type, behind the same
+  `widget::clipboard` pair every widget uses; ⌘C / ⌘X / ⌘V reach the widgets as Ctrl+C /
+  X / V do on Linux, since Command reads as `ctrl`.
+- **Input methods**: the view is an `NSTextInputClient`. While a widget is editing text
+  (`ime::caret` is set) a key press without ⌘ goes through `interpretKeyEvents:` first:
+  `setMarkedText:` is the composition, `insertText:` the commit — unless it is a plain
+  key typing its own characters with nothing marked, which is left to the key path so it
+  keeps its named key and the driver's repeat — and `doCommandBySelector:` leaves the key
+  to the key path. `firstRectForCharacterRange:` is the caret in screen coordinates. With
+  nothing editing, keys skip the input method, so one left on does not eat an app's
+  single-key commands. After each frame a dropped composition is discarded through the
+  input context (the marked text cleared first, so the `unmarkText` that may call commits
+  nothing) and a moved caret invalidates the character coordinates.
+
+Not there yet: drag and drop, the context menu
+in a popup window (it is drawn in the window, as on a layer surface), blur behind the window,
+a menu bar beyond Quit. **None of it has run**: this is Linux, where an Apple target can be
+type-checked but not linked. `scripts/check-mac` type-checks the library, the demo, every
+example and the tests for `aarch64-apple-darwin` (`rustup target add aarch64-apple-darwin`);
+the four examples that still used the legacy `new(qh, …)` moved to `create`, and
+`plate_probe` / two integration tests reach the tessellator at `backend::tessellate` rather
+than through `window_runner`. On a Mac, MoltenVK and the Vulkan loader must be installed
+(the LunarG SDK, or Homebrew's `molten-vk` and `vulkan-loader`); `cargo run` is the test.
+
+**Input-method composition is one model for every shell** (`crate::ime`, since
+2026-10-05). Three things cross between the text widget and the shell's input method:
+the COMMIT is delivered as typed text (`Driver::commit_text`: a press of a key whose text
+it is, then its release — never a shortcut, never repeated, past the chords), so every
+widget that inserts a key's text takes it unchanged (`TextBox`, `LineEdit`, the
+`DocEditor`, an app's own field); the COMPOSITION (`ime::Preedit`: text and the input
+method's cursor as a byte range) is shared per thread, set through `Driver::preedit`; and
+the CARET goes back — a widget editing text reports it as it paints
+(`ime::report_caret`, in window px with the `PaintCtx` offset), `build_frame` brackets
+the frame (`begin_frame` / `end_frame`), and `ime::caret()` is where the candidates go and
+whether text is wanted at all. **`TextBox` shows a composition as a PROVISIONAL run** in
+`edit_buffer` (`composing`: its char start and length), so wrap, scroll, caret and the
+glyph advances draw it as typed text, and `selection_quads` underlines it; it is never
+held (`committed_buffer`, which `take_change` publishes under `update_on_type`), never in
+the history, and the box takes no key while it composes. It is applied in `prepare_text`
+and at the top of `handle_key`, against `ime::generation`; a press, or editing ending,
+drops it and asks the input method to cancel (`ime::request_reset`). A composition begun
+over a selection replaces it, as typing would. `a_composition_is_shown_in_place_and_the_
+commit_is_typed` is the test.
+
+**`LineEdit` and the `DocEditor` show it too** (since 2026-10-05), each without letting it
+into what it holds — a host reads `LineEdit::text` directly and saves the `DocEditor`'s
+buffer, so neither ever contains it. `LineEdit` splices it into `display()` at the caret,
+and `display_index` / `text_index` map across it (the caret lands where the input method
+has its cursor, a point inside the composition is the caret, one after it is the text it is
+drawn after); `composition_range` is the span to underline, a masked field shows bullets.
+The app, which draws the field, calls `sync_ime` each frame the field has the keyboard,
+reports the caret it draws (`ime::report_caret` — also what tells the shell text is
+wanted), and `drop_composition` when the field loses it. The `DocEditor` lays out the
+caret's line WITH the composition (an active line, raw anyway) and maps every column read
+off that layout across it (`laid_col` / `source_col`: the caret, `caret_rect`, `pos_at`);
+it underlines it, and reports its caret itself while painted focused; a host calls
+`drop_composition` when the editor loses the keyboard. Both take no key while a
+composition is up, take the commit as typed, and treat a press as dropping the
+composition (cancelled in the input method) and placing the caret — the `DocEditor`'s read
+through the line as drawn. `a_composition_is_shown_at_the_caret_and_never_held` and
+`a_composition_is_laid_out_in_place_and_never_held` are the tests; cce-notes, built against
+this tree, was driven under the headless sway with the stand-in input method (2026-10-05):
+the composition underlined at the caret, the commit typed, a second composition left up
+through the editor's autosave and then dropped by a click — and the note on disk held the
+commit and never the composition. cce-browser's URL bar, bookmarks search and dialog
+fields are the `LineEdit` hosts (its `keyboard_field` / `sync_ime`, lsgalante/cce-browser#1).
+
+Not there yet: no shell sends surrounding text, so an input
+method's `delete_surrounding_text` (text-input-v3) is not applied; and a password box is
+announced with the normal content purpose.
+
+**On Wayland it is `text-input-v3`** (`backend/text_input.rs`, since 2026-10-05), relayed
+by the compositor to an `input-method-v2` client (fcitx5, IBus's Wayland frontend). The
+text input is the first keyboard seat's, made with the keyboard. After each render
+(`EngineState::sync_text_input`) it is ENABLED while the seat's text-input focus is on our
+surface (`enter`) and a widget is editing (`ime::caret`), with a normal content type and
+the caret as the cursor rectangle (surface px — the app's logical px times a forced scale,
+as pointer input is divided), re-sent when the caret moves; DISABLED when nothing is
+editing; and disabled-then-enabled for a composition a widget dropped (`ime::take_reset`),
+which resets the input method. Every change is one `commit`, counted (`TextInput::commits`,
+what a current `done`'s serial is). `preedit_string` / `commit_string` /
+`delete_surrounding_text` are double-buffered and applied on `done` in the protocol's
+order (`Batch::apply_order`: the old composition out, the commit typed, the new one in;
+a batch with no `preedit_string` ends the composition, a cursor of -1 hides it); `leave`
+drops the composition. The decisions are pure (`TextInput::plan`, `Batch`) and tested
+with no compositor (`backend::text_input::tests`). Verified end to end under the headless
+sway with a scriptable `input-method-v2` client standing in for fcitx5 (2026-10-05): no
+activation until a box is clicked into; a composition shown underlined at the caret; the
+commit replacing it; a cancel; a press mid-composition dropping it with a
+disable-and-enable; Escape disabling — and under `WAYLAND_DEBUG` the cursor rectangle
+following the caret through every step, each `done`'s serial equal to the commits sent.
+Sway routes text-input focus only while an input method is bound, so with none (the
+24-step harness) nothing changes: 0 px.
+
 CI (`.github/workflows/ci.yml`, every push and PR) builds and tests on Ubuntu 24.04 with
 default and with all features, warnings as errors. It installs `libwayland-dev` and
 `libxkbcommon-dev` (the two native libraries the build links, through pkg-config) and Mesa's lavapipe, a software Vulkan device,
@@ -70,31 +401,44 @@ no `build.rs` and no codegen step to run.
 
 ## The `Application` trait — the client contract
 
-Every client implements `Application` (`src/backend/window_runner.rs`, re-exported from
-`engine.rs`). A client's `main.rs` is typically a struct implementing it plus a one-line
+Every client implements `Application` (`src/backend/app.rs`, re-exported from
+`window_runner` and `engine.rs`). A client's `main.rs` is typically a struct implementing it plus a one-line
 `cce_ui::engine::run::<MyApp>();`. When adding a widget or client, **mirror an existing client**
 (e.g. `cce-status-interface`) — do not invent a new structure.
 
-Key methods (see the trait def around `window_runner.rs:1450`):
-- `new`, `settings()` (→ `WindowSettings`), `layer()` (→ optional `LayerSettings` for
+Key methods (see the trait def in `backend/app.rs`):
+- `create(sender)`, `settings()` (→ `WindowSettings`), `layer()` (→ optional `LayerSettings` for
   layer-shell surfaces like the status bar), `update(msg, needs_rebuild, exit)`, `tick(dt, …)`.
   **`tick` is not a clock.** Since 2026-09-11 the runner sleeps between ticks while the
   window is idle (no redraw pending, no animation, no key held, no warm-down) — up to
   `IDLE_DISPATCH` (1 s, `CCE_UI_IDLE_MS` overrides) — and is woken by Wayland events and
-  by messages on the calloop `Sender` handed to `new`. It used to tick a flat 16 ms
+  by messages on the `AppSender` handed to `create`. It used to tick a flat 16 ms
   forever: every client awake 60×/s doing nothing. So: deliver background results
-  through that `Sender`, never by draining a `std::sync::mpsc` in `tick`; if a widget
+  through that sender, never by draining a `std::sync::mpsc` in `tick`; if a widget
   or app must poll something the loop cannot see, say so — a widget returns `true`
   from `tick` while the session is live (ColorSelector's picker), an app overrides
   `Application::idle_poll_interval` (cce-authenticator, cce-system-interface,
   cce-designer while a pane is detached). Any animation keeps the frame cadence by
   itself because it reports a change.
+- **Construction is `create(sender: AppSender<Self::Message>)`** (since 2026-10-03).
+  `AppSender` is cce-ui's own handle — `send`, `Clone`, `Send`, and `From` both ways
+  with `calloop::channel::Sender` for a client that still stores calloop's type — so
+  the constructor names no window system, which is what lets a second shell (macOS,
+  the browser) run the same `Application`. The legacy `new(qh, sender)` still works:
+  the runner calls `new`, whose default forwards to `create`, so a client implements
+  ONE of the two and moves when it likes (no client ever used `qh`). Implementing
+  neither panics at startup naming the app. `new` is removed once no client
+  implements it, the way `VkRenderer::new` went. `register_sources` stays a
+  calloop-only hook: it is the Wayland shell's, not part of the portable contract.
 - **Draw**: `view` / `view_rounded_quads` / `view_vectors` / `overlay_quads` push legacy
   primitive tuples; `text_items()` returns text; `custom_vertices()` appends raw vertices (e.g.
   graph geometry). `display_list()` is the new opt-in path (see below).
 - **Input**: `handle_pointer_move`, `handle_mouse_input`, `handle_mouse_wheel`,
   `handle_key_input` — most return an optional `Message`. `needs_rebuild: &mut bool` is how a
   handler requests a redraw; the loop is demand-driven and idles when nothing sets it.
+- **3D**: `init_3d(stage)` / `stage_3d(stage, size, scale)` — the portable pair, through
+  `Stage3D` (see "3D scenes draw in the browser too"); the native `renderer_init` /
+  `stage_renderer` take the `VkRenderer` itself and forward to them by default.
 - `ui_context()` / `ui_context_mut()` expose the widget tree (`UiContext`) for apps built on the
   retained widget system rather than immediate drawing.
 - **Undo/redo**: the runner owns the routing. A press matching the `undo` / `redo` chord
@@ -198,7 +542,8 @@ nothing.
 ## Rendering: one paint path (the Phase 3 state)
 
 The backend `render()` **always builds a `scene::paint::DisplayList` and tessellates that single
-list** (`window_runner.rs` ~1799). Two ways an app feeds it:
+list** (`backend::frame::build_frame`, which the Wayland shell's `EngineState::render` presents).
+Two ways an app feeds it:
 
 1. **Migrated**: return `Some(DisplayList)` from `Application::display_list()`.
 2. **Legacy (default)**: return `None`, and the backend wraps the app's `view*`/`view_vectors`
@@ -1075,6 +1420,12 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `config.rs` — KDL loading and `kdl_to_json` conversion (see workspace `CLAUDE.md` for paths).
 - `context.rs` — `UiContext`: the retained widget tree, event routing, spatial grid, dirty
   tracking, hit-testing.
+- `compute.rs` — what a compute job is, apart from the device that runs it: `Kernel`,
+  `Binding`, the job rules and naga's parse (see "Compute jobs run in the browser too").
+  `vk::ComputeDevice` and `web::ComputeDevice` run them.
+- `ime.rs` — input-method composition shared between the editing widget and the shell:
+  `Preedit`, the composition and its generation, the reported caret, the reset request
+  (see "Input-method composition is one model for every shell").
 - `history.rs` — `History<T>`: the undo/redo snapshot stack (cap, gestures, grouped runs).
   The toolkit defines the stack and the routing, never the step — see the trait section.
 - `widget/` — `container/` (vbox/hbox/scroll/menu/treelist/…), `input/` (button/slider/text_box/
@@ -1083,6 +1434,62 @@ cce-system-interface) to confirm behavior, not just the test suite.
   of a one-line field an app draws itself — cce-browser's URL bar and dialog fields) and
   `core.rs`. (The KDL/JSON-driven `json_layout.rs` is dissolved; `scene/layout.rs` is the
   box model.)
+- `backend/` — the runner, split (since 2026-10-03) so a second shell (macOS, the browser)
+  can share everything that is not Wayland: `app.rs` (the `Application` trait, `AppSender`,
+  the plain types it speaks in), `driver.rs` (`Driver`: input state and routing — modifiers,
+  key repeat, the undo/redo and plate-navigation chords, the CSD hit zones, the
+  outside-press popover close, held-button release on a lost pointer, the scroll phase,
+  the pinch fallback — fed in cce-ui's own terms and unit-tested with no compositor),
+  `dom.rs` (the DOM's key and wheel vocabulary as the driver's: `map_key`, `wheel_frame` —
+  portable, so tested natively), `appkit.rs` (AppKit's, likewise: key codes and
+  characters, scroll deltas and phases, modifier flags and buttons), `frame.rs` (`build_frame`: the app's display list, damage, custom vertices and overlays,
+  widget shaping, text and the popover-occlusion rects, tessellated into a `BuiltFrame` the
+  renderer draws — no window system in it, tested with no GPU), `shell.rs` (the `Shell`
+  trait — a window system's side of the run loop: exit, size requests, per-turn sync,
+  title, the frame gate, configured, present — and `Pacer`, one turn of the loop over any
+  shell: the tick's `dt` and its idle clamp, `desired_size`, key repeat, the title, the
+  present-or-warm-down decision, and the ACTIVE / idle cadence; tested against a mock
+  shell), `tessellate.rs`, `text.rs`, and `window_runner.rs`, the Wayland shell
+  (`EngineState` implements `Shell`; its loop is dispatch, the connection's health checks,
+  `pacer.turn`, and the close fade): it maps evdev
+  buttons, xkb keysyms and `wl_pointer` axis frames into driver calls and carries out the
+  grabs and cursors the driver asks for, and presents what `build_frame` built (grid patch,
+  input region, glyph upload, the extent gate and buffer scale, the frame callback,
+  `stage_renderer`, the draw). A routing change belongs in `driver.rs`, a change to
+  what a frame contains in `frame.rs` and a pacing change in `shell.rs`, never in the
+  Wayland code. A second shell implements `Shell` and calls `Pacer::turn` from its own
+  loop (an animation frame, a run-loop observer), sleeping or scheduling for the `Step`. `menu_popup.rs`, `dnd.rs` and `text_input.rs` (`text-input-v3`, the input method's way in) are Wayland-only.
+- `draw/` — what a renderer draws, with no renderer in it (since 2026-10-04): `Frame2D`,
+  `Batch2D`, `PlatePush` and `batch_push_constants` (the one layout of a batch's 32-float
+  parameter block — Vulkan pushes it, a renderer without push constants puts it in a
+  uniform), `TextSpan`, `ImageQuad`, and `draw::images`, the image-id queue
+  (`upload_rgba`, `update_pixels`, `free_image`, `renderer_epoch`, …) that a renderer
+  drains with `take_pending`. They lived in `vk/` while Vulkan was the only renderer;
+  `vk` re-exports every one at its old path, so `cce_ui::vk::upload_rgba` and the rest
+  are unchanged for clients. Also here, shared by every renderer: `draw::glyphs`
+  (`GlyphAtlas` — rasterizing, packing and the glyph quads; a renderer uploads
+  `pixels()` when `generation()` moves — and `image_quad_vertices`), `window_info_data`
+  (shader2d's `WindowInfo` block), and `draw::shaders`: `shader2d.wgsl` and `glyph.wgsl`
+  live in `src/draw/` now, one source for both renderers. WebGPU has no push constants,
+  so `shader2d_for_webgpu()` swaps the one push-block line for a `@group(1)` uniform read
+  at a per-batch dynamic offset (`WEBGPU_BLOCK_STRIDE`); the backdrop is sampled with
+  `textureSampleLevel(…, 0.0)` because WebGPU rejects implicit-LOD sampling in the
+  non-uniform blur branch (the backdrop has one level, so the texel is the same —
+  `frost_pair` is identical to the pixel either way). And the 3D halves: `draw::scene`
+  (the raster scene's types, uniforms and the `Stage3D` trait) and `draw::rt` (the path
+  tracer's schema, BVH and parameter blocks), with their shaders beside the 2D ones.
+- `web/` — wasm32 only: `WebRenderer` (`new(canvas).await`, `resize`, `prepare_text`,
+  `draw_frame_2d`, and `capture_next_frame` / `take_capture().await` or
+  `take_pending_capture` to read a frame back). Its module doc lists what differs from the
+  Vulkan path: an sRGB VIEW of the canvas's unorm format, the parameter block as a
+  dynamic-offset uniform, a 1x1 backdrop, the blur snapshot as end-pass / copy / resume,
+  every frame drawn whole. And `shell.rs`, the browser shell: `run`, `Fonts`, `Sizing`,
+  `capture` (see "And an `Application` runs in a page" above); `scene.rs`, the 3D pass;
+  `rt.rs`, the path tracer's compute tier;
+  `compute.rs`, the async
+  `ComputeDevice`; and `request_device`, the adapter and device every one of them asks
+  for (with the limits a caller names raised to the adapter's).
+- `mac/` — macOS only: the AppKit shell, `run` (see "And on a Mac, type-checked only").
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
   the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance
@@ -1466,9 +1873,10 @@ before moving is a held left button (a slider thumb, a text selection, a
 scrollbar). The hold needs no timer: nothing is sent while the finger rests
 inside the slop, so the choice is made at the first motion past it. Other
 fingers are ignored until the first lifts. `TouchTracker` is the pure state
-machine (tested in that file); the `TouchHandler` impl and the dispatch are
-beside it, so `window_runner.rs` carries only the fields and the capability
-hook.
+machine (tested in that file, and portable); what its actions do is the
+driver's (`Driver::touch`, routing like every other input), and only the
+`TouchHandler` impl beside the tracker is Wayland's, so `window_runner.rs`
+carries only the fields and the capability hook.
 
 A finger is always natural — the content goes where it is pushed — so the
 dispatch runs inside `input::with_natural_scroll(true, …)` and a value
@@ -1487,20 +1895,25 @@ drives it.
 ### A field being edited says so (text-input-v3, since 2026-10-05)
 
 A widget open for typing calls `cce_ui::text_input::claim(x, y, w, h)` from
-its paint, every frame; once the display list is built the runner takes the
-frame's claim and `backend/text_input.rs` enables the seat's
-`zwp_text_input_v3` with that rectangle, or disables it when nobody claimed.
-The compositor raises the on-screen keyboard on an enable that follows a touch
-(`cce-compositor`'s `osk.rs`). A claim per frame, not an enable/disable pair,
-because a field leaves editing on many paths (Enter, Escape, a click
-elsewhere, focus loss, its page dropped) and a widget that stops painting has
-stopped claiming. `TextBox`, `Spinbox`, `Slider`'s readout, `ColorSelector`,
-the params pane's code rows and a focused `DocEditor` claim; an app that draws
-its own text (a `LineEdit`, a terminal, an editor) must call `claim` itself
-from `display_list` while it has a caret, or the board will not follow it.
-Keys still come over `wl_keyboard`; an input method's `commit_string` is
-delivered as one typed `Key::Character` (`EngineState::type_text`). Preedit
-and surrounding text are not implemented.
+its paint, every frame (window px, the `PaintCtx` offset added). A claim per
+frame, not an enable/disable pair, because a field leaves editing on many
+paths (Enter, Escape, a click elsewhere, focus loss, its page dropped) and a
+widget that stops painting has stopped claiming. `claim` is
+`ime::report_caret` by its first name — the two were written the same day on
+two branches and merged into one: the frame's last claim is `ime::caret()`,
+which every shell reads (see "On Wayland it is `text-input-v3`" above for the
+Wayland half, `backend/text_input.rs`). The compositor raises the on-screen
+keyboard on an enable that follows a touch (`cce-compositor`'s `osk.rs`).
+`Spinbox`, `Slider`'s readout, `ColorSelector`, the params pane's code rows
+claim their field; `TextBox` and a focused `DocEditor` claim their field (the
+viewport) and then report the caret once it is drawn, which wins; an app that
+draws its own text (a `LineEdit`, a terminal, an editor) must claim from
+`display_list` while it has a caret, or the board will not follow it. Keys
+still come over `wl_keyboard`; an input method's commit is typed through
+`Driver::commit_text`. On `enter` the last frame's claim is applied at once,
+and `leave` disables an enabled text input: wlroots keeps the enabled state
+across a leave, and a stale "enabled" turns the next enable into a plain
+commit the compositor ignores.
 
 ### A host may name the phase; a test may pin the settings (2026-09-30)
 

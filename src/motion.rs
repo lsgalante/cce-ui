@@ -85,7 +85,7 @@ fn enabled_on_this_machine() -> bool {
         return forced;
     }
     use std::sync::Mutex;
-    use std::time::Instant;
+    use web_time::Instant;
     static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let now = Instant::now();

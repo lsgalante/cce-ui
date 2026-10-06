@@ -1,25 +1,44 @@
+// Modules under `cfg(not(target_arch = "wasm32"))` are the native renderer
+// and services (Vulkan, the compositor IPC, file dialogs); those under
+// `cfg(not(any(target_arch = "wasm32", target_os = "macos")))` are the
+// Wayland shell's, which macOS replaces with `mac` (AppKit). Everything else
+// builds for the browser too: `scripts/check-wasm` is the check, and
+// `scripts/check-mac` the macOS one.
 pub mod color;
+pub mod compute;
 pub mod widget;
 pub mod config;
 pub mod input;
 pub mod history;
+pub mod ime;
 pub mod layout;
 pub mod relief_spec;
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod wayland;
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod protocol;
 pub mod engine;
 pub mod scale;
 pub mod units;
 pub mod backend;
 pub mod context;
+pub mod draw;
 pub mod scene;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod file_dialog;
 pub mod icon;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ipc;
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod mcp;
 pub mod motion;
 pub mod text_input;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod vk;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
+#[cfg(target_os = "macos")]
+pub mod mac;
 
 pub mod colors {
     pub use crate::color::*;
@@ -100,7 +119,7 @@ pub fn upload_icon(name: &str, px: u32) -> Option<(u32, u32, u32)> {
     /// The cached ids, and the renderer epoch they were uploaded to.
     static CACHE: Mutex<Option<(u32, HashMap<(String, u32), Option<(u32, u32, u32)>>)>> =
         Mutex::new(None);
-    let epoch = crate::vk::renderer_epoch();
+    let epoch = crate::draw::renderer_epoch();
     let key = (name.to_string(), px);
     let mut guard = CACHE.lock().unwrap();
     let (cached_epoch, cache) = guard.get_or_insert_with(|| (epoch, HashMap::new()));
@@ -117,7 +136,7 @@ pub fn upload_icon(name: &str, px: u32) -> Option<(u32, u32, u32)> {
         let path = format!("{}/{name}.svg", icons_dir());
         let data = std::fs::read(&path).ok()?;
         let (rgba, w, h) = rasterize_svg(&data, px)?;
-        Some((crate::vk::upload_rgba(rgba, w, h), w, h))
+        Some((crate::draw::upload_rgba(rgba, w, h), w, h))
     })();
     cache.insert(key, loaded);
     loaded
@@ -196,6 +215,7 @@ pub fn create_font_system_with_system_fonts() -> cosmic_text::FontSystem {
 /// list of well-known files keeps startup cheap while giving cosmic-text's
 /// unix script fallback (family names "Noto Sans CJK *", "Noto Color Emoji")
 /// real faces to land on. `$CCE_NO_FALLBACK_FONTS` opts out.
+#[cfg(not(target_arch = "wasm32"))]
 fn load_fallback_fonts(db: &mut cosmic_text::fontdb::Database) {
     if std::env::var("CCE_NO_FALLBACK_FONTS").is_ok() {
         return;
@@ -219,38 +239,56 @@ fn load_fallback_fonts(db: &mut cosmic_text::fontdb::Database) {
     }
 }
 
-fn build_font_system(load_system_fonts: bool) -> cosmic_text::FontSystem {
-    let mut db = cosmic_text::fontdb::Database::new();
-    db.load_fonts_dir(fonts_dir());
-    load_fallback_fonts(&mut db);
-    if load_system_fonts || std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
-        db.load_system_fonts();
-    }
-    // An empty database guarantees a panic on the first shaped glyph
-    // (cosmic-text: "no default font found"), so if the bundled dir yielded
-    // nothing (missing $HOME/Dropbox/Fonts — e.g. the greeter running as
-    // root), fall back to system fonts rather than crash.
-    if db.faces().next().is_none() {
-        db.load_system_fonts();
-    }
-
-    // Pin the generic families to faces that actually exist. fontdb's defaults
-    // name Windows faces ("Arial"/"Times New Roman"), so Family::SansSerif /
-    // Monospace never resolved here and every glyph of generic-family text
-    // dropped into the per-glyph fallback chain — where Noto Color Emoji sits
-    // high (cosmic-text common_fallback) and hijacked spaces and digits with
-    // emoji metrics. Berkeley Mono is the house mono; Noto Sans CJK SC (the
-    // targeted fallback face above) doubles as a full Latin sans.
+/// Pin the generic families to faces that actually exist. fontdb's defaults
+/// name Windows faces ("Arial"/"Times New Roman"), so Family::SansSerif /
+/// Monospace never resolved here and every glyph of generic-family text
+/// dropped into the per-glyph fallback chain — where Noto Color Emoji sits
+/// high (cosmic-text common_fallback) and hijacked spaces and digits with
+/// emoji metrics. Berkeley Mono is the house mono; Noto Sans CJK SC (the
+/// targeted fallback face) doubles as a full Latin sans. Shared by every
+/// shell's font system, the browser's included, so a font set resolves the
+/// same families wherever it is loaded.
+fn pin_generic_families(db: &mut cosmic_text::fontdb::Database) {
     fn has_family(db: &cosmic_text::fontdb::Database, fam: &str) -> bool {
         db.faces()
             .any(|f| f.families.iter().any(|(n, _)| n == fam))
     }
-    if has_family(&db, "Berkeley Mono") {
+    if has_family(db, "Berkeley Mono") {
         db.set_monospace_family("Berkeley Mono");
     }
-    if has_family(&db, "Noto Sans CJK SC") {
+    if has_family(db, "Noto Sans CJK SC") {
         db.set_sans_serif_family("Noto Sans CJK SC");
     }
+}
+
+fn build_font_system(load_system_fonts: bool) -> cosmic_text::FontSystem {
+    let mut db = cosmic_text::fontdb::Database::new();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        db.load_fonts_dir(fonts_dir());
+        load_fallback_fonts(&mut db);
+        // On macOS the system set is always loaded: it is a curated one,
+        // and what cosmic-text's fallback list there names ("Apple Color
+        // Emoji", "PingFang SC", …) — where on Linux the probe above finds
+        // the Noto faces in its place.
+        if load_system_fonts || cfg!(target_os = "macos") || std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
+            db.load_system_fonts();
+        }
+        // An empty database guarantees a panic on the first shaped glyph
+        // (cosmic-text: "no default font found"), so if the bundled dir yielded
+        // nothing (missing $HOME/Dropbox/Fonts — e.g. the greeter running as
+        // root), fall back to system fonts rather than crash.
+        if db.faces().next().is_none() {
+            db.load_system_fonts();
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = load_system_fonts;
+        page_fonts::load_into(&mut db);
+    }
+
+    pin_generic_families(&mut db);
 
     // Validate configured custom fonts
     let font_getters = vec![
@@ -289,5 +327,129 @@ fn build_font_system(load_system_fonts: bool) -> cosmic_text::FontSystem {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    page_fonts::stand_in_for_missing(&mut db);
+
     cosmic_text::FontSystem::new_with_locale_and_db("en-US".to_string(), db)
+}
+
+/// The fonts a page hands the browser shell (`web::run`). A page has no font
+/// directory and no fontconfig, so on wasm every font database the toolkit
+/// builds — the shell's, its own for widget geometry
+/// ([`geometry_font_system`]) and the text-measurement one
+/// (`widget::input::get_font_db`) — is loaded from these, one shared copy of
+/// each file, with the generic families the page named.
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod page_fonts {
+    use std::sync::{Arc, Mutex};
+
+    use cosmic_text::fontdb::{Database, Language};
+
+    type Font = Arc<dyn AsRef<[u8]> + Send + Sync>;
+
+    struct Provided {
+        files: Vec<Font>,
+        serif: Option<String>,
+        sans_serif: Option<String>,
+        monospace: Option<String>,
+    }
+
+    static PROVIDED: Mutex<Provided> =
+        Mutex::new(Provided { files: Vec::new(), serif: None, sans_serif: None, monospace: None });
+
+    /// What every font database built from now on loads: `files` (each a
+    /// font file's bytes), in order, and the families the generic ones name —
+    /// a fontconfig's answer, which on Linux `load_system_fonts` reads.
+    pub(crate) fn provide(files: Vec<Vec<u8>>, serif: Option<String>, sans_serif: Option<String>, monospace: Option<String>) {
+        let mut p = PROVIDED.lock().unwrap();
+        p.files.extend(files.into_iter().map(|f| Arc::new(f) as Font));
+        p.serif = serif.or(p.serif.take());
+        p.sans_serif = sans_serif.or(p.sans_serif.take());
+        p.monospace = monospace.or(p.monospace.take());
+    }
+
+    /// Load the page's fonts into `db`, as `load_system_fonts` loads the
+    /// system's: the files, then the generic families.
+    pub(crate) fn load_into(db: &mut Database) {
+        let p = PROVIDED.lock().unwrap();
+        for font in &p.files {
+            db.load_font_source(cosmic_text::fontdb::Source::Binary(font.clone()));
+        }
+        if let Some(f) = &p.serif {
+            db.set_serif_family(f.clone());
+        }
+        if let Some(f) = &p.sans_serif {
+            db.set_sans_serif_family(f.clone());
+        }
+        if let Some(f) = &p.monospace {
+            db.set_monospace_family(f.clone());
+        }
+    }
+
+    fn has(db: &Database, family: &str) -> bool {
+        db.faces().any(|f| f.families.iter().any(|(n, _)| n.eq_ignore_ascii_case(family)))
+    }
+
+    /// cosmic-text falls back from a family the database lacks through a
+    /// list of well-known families per OS — on Linux "Noto Sans", then
+    /// "DejaVu Sans", "FreeSans", … (its `fallback/unix.rs`) — and has no
+    /// list at all on wasm, where such text lands on whichever face happens
+    /// to come first (Noto Color Emoji, in a set loaded as Linux loads it).
+    /// So here the families the toolkit itself names — the configured
+    /// fonts, and the house default "Berkeley Mono" — are given, when absent,
+    /// the faces of the first family of that Linux list the page provided,
+    /// and the generic sans and serif families likewise unless the page named
+    /// them; "monospace" (the name `fc-match` would have resolved) is given
+    /// the first monospaced one.
+    /// Text then resolves to the face it would on a Linux box with the same
+    /// fonts. A family an app names itself must be among the page's fonts.
+    pub(crate) fn stand_in_for_missing(db: &mut Database) {
+        const SANS: [&str; 6] = ["Noto Sans", "DejaVu Sans", "FreeSans", "Noto Sans Mono", "DejaVu Sans Mono", "FreeMono"];
+        const MONO: [&str; 4] = ["Noto Sans Mono", "DejaVu Sans Mono", "FreeMono", "Liberation Mono"];
+        let first = |db: &Database, list: &[&str]| list.iter().find(|f| has(db, f)).map(|f| f.to_string());
+        let alias = |db: &mut Database, name: &str, to: &str| {
+            if name.is_empty() || has(db, name) {
+                return;
+            }
+            let faces: Vec<_> =
+                db.faces().filter(|f| f.families.iter().any(|(n, _)| n == to)).cloned().collect();
+            for mut face in faces {
+                face.families = vec![(name.to_string(), Language::English_UnitedStates)];
+                db.push_face_info(face);
+            }
+        };
+        if let Some(sans) = first(db, &SANS) {
+            let mut names: Vec<String> = vec!["Berkeley Mono".into()];
+            names.extend(
+                [
+                    crate::layout::list_font_parsed().0,
+                    crate::layout::menubar_font_parsed().0,
+                    crate::layout::statusbar_font_parsed().0,
+                    crate::layout::font_selector_font_parsed().0,
+                    crate::layout::button_strip_font_parsed().0,
+                    crate::layout::control_label_font_parsed().0,
+                    crate::layout::control_label_font_detached_parsed().0,
+                    crate::layout::tree_font_parsed().0,
+                    crate::layout::graph_font_parsed().0,
+                    crate::layout::graph_node_font_parsed().0,
+                ]
+                .into_iter()
+                .filter(|f| !matches!(f.as_str(), "sans-serif" | "serif" | "monospace")),
+            );
+            for name in &names {
+                alias(db, name, &sans);
+            }
+            for generic in [cosmic_text::Family::SansSerif, cosmic_text::Family::Serif] {
+                if !has(db, db.family_name(&generic)) {
+                    match generic {
+                        cosmic_text::Family::SansSerif => db.set_sans_serif_family(sans.clone()),
+                        _ => db.set_serif_family(sans.clone()),
+                    }
+                }
+            }
+        }
+        if let Some(mono) = first(db, &MONO) {
+            alias(db, "monospace", &mono);
+        }
+    }
 }

@@ -41,7 +41,7 @@
 //! ```
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::widget::MouseScrollDelta;
 

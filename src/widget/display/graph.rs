@@ -308,7 +308,7 @@ pub struct Graph {
     /// the first press's timer never survived to the second press, so
     /// double-click detection could not fire at all. Same id-keyed survival
     /// as `selected_id` and the hovered-port remap.
-    double_click_timer: Option<(std::time::Instant, String)>,
+    double_click_timer: Option<(web_time::Instant, String)>,
     grid_snap_enabled: bool,
     node_geom_toggled: Option<(usize, bool)>,
 
@@ -1330,7 +1330,7 @@ impl Graph {
             }
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 if px >= nx && px < nx + nw && py >= ny && py < ny + nh {
-                    let now = std::time::Instant::now();
+                    let now = web_time::Instant::now();
                     let clicked_id = self.nodes[i].id.clone();
                     if let Some((prev_time, prev_id)) = self.double_click_timer.take() {
                         if prev_id == clicked_id && now.duration_since(prev_time) < std::time::Duration::from_millis(500) {

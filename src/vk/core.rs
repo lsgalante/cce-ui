@@ -2,8 +2,9 @@
 //! validation layers), physical device + graphics queue, gpu-allocator, and
 //! the shared command pool.
 //!
-//! Two ways in: [`VkCore::new_for_wayland_surface`] picks a present-capable
-//! device for a window (what `VkRenderer` uses), and [`VkCore::new_headless`]
+//! Two ways in: [`VkCore::new_for_surface`] picks a present-capable device
+//! for a window — a Wayland surface, or on macOS a `CAMetalLayer` through
+//! MoltenVK (what `VkRenderer` uses) — and [`VkCore::new_headless`]
 //! builds the same core with no surface at all — for offscreen consumers
 //! (thumbnail rendering, previews, the future RT engine) that render into
 //! images instead of a swapchain.
@@ -86,6 +87,8 @@ struct SharedInstance {
     _debug: Option<(ash::ext::debug_utils::Instance, vk::DebugUtilsMessengerEXT)>,
     /// VK_KHR_surface + VK_KHR_wayland_surface were available and enabled.
     has_wayland_surface: bool,
+    /// VK_KHR_surface + VK_EXT_metal_surface were (MoltenVK, on macOS).
+    has_metal_surface: bool,
     api_version: u32,
 }
 
@@ -135,13 +138,28 @@ fn shared_instance() -> &'static SharedInstance {
                 .iter()
                 .any(|e| CStr::from_ptr(e.extension_name.as_ptr()) == name)
         };
-        let has_wayland_surface =
-            has_inst_ext(ash::khr::surface::NAME) && has_inst_ext(ash::khr::wayland_surface::NAME);
+        let has_surface = has_inst_ext(ash::khr::surface::NAME);
+        let has_wayland_surface = has_surface && has_inst_ext(ash::khr::wayland_surface::NAME);
+        let has_metal_surface = has_surface && has_inst_ext(ash::ext::metal_surface::NAME);
+        // MoltenVK is a PORTABILITY driver: since loader 1.3.216 the loader
+        // lists one only to an instance that asks for portability
+        // enumeration, and a device of one must enable
+        // VK_KHR_portability_subset (below). macOS only, so the instance a
+        // Linux driver sees is the one it always saw.
+        let portability = cfg!(target_os = "macos") && has_inst_ext(ash::khr::portability_enumeration::NAME);
 
         let mut extension_names: Vec<*const i8> = Vec::new();
-        if has_wayland_surface {
+        if has_wayland_surface || has_metal_surface {
             extension_names.push(ash::khr::surface::NAME.as_ptr());
+        }
+        if has_wayland_surface {
             extension_names.push(ash::khr::wayland_surface::NAME.as_ptr());
+        }
+        if has_metal_surface {
+            extension_names.push(ash::ext::metal_surface::NAME.as_ptr());
+        }
+        if portability {
+            extension_names.push(ash::khr::portability_enumeration::NAME.as_ptr());
         }
         if validation_available {
             extension_names.push(ash::ext::debug_utils::NAME.as_ptr());
@@ -156,6 +174,11 @@ fn shared_instance() -> &'static SharedInstance {
         let instance = entry
             .create_instance(
                 &vk::InstanceCreateInfo::default()
+                    .flags(if portability {
+                        vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR
+                    } else {
+                        vk::InstanceCreateFlags::empty()
+                    })
                     .application_info(&app_info)
                     .enabled_extension_names(&extension_names)
                     .enabled_layer_names(&layer_names),
@@ -193,9 +216,50 @@ fn shared_instance() -> &'static SharedInstance {
             instance,
             _debug: debug,
             has_wayland_surface,
+            has_metal_surface,
             api_version,
         }
     })
+}
+
+/// What a window's `VkSurfaceKHR` is made from: the window system's own
+/// handles, as raw pointers.
+#[derive(Debug, Clone, Copy)]
+pub enum SurfaceTarget {
+    /// A `wl_display` and a `wl_surface` on it.
+    Wayland { display: *mut c_void, surface: *mut c_void },
+    /// A `CAMetalLayer` (macOS, through MoltenVK's VK_EXT_metal_surface).
+    Metal { layer: *const c_void },
+}
+
+impl SurfaceTarget {
+    /// Make the surface on `instance`, or fail as [`SurfaceLost`] (a dead
+    /// display connection). A loader with no extension for this kind of
+    /// window is a broken install, and panics naming it.
+    unsafe fn create(self, instance: &ash::Instance) -> Result<vk::SurfaceKHR, SurfaceLost> {
+        let shared = shared_instance();
+        match self {
+            SurfaceTarget::Wayland { display, surface } => {
+                if !shared.has_wayland_surface {
+                    panic!("Vulkan loader offers no VK_KHR_wayland_surface but a window was requested");
+                }
+                ash::khr::wayland_surface::Instance::new(&shared.entry, instance)
+                    .create_wayland_surface(
+                        &vk::WaylandSurfaceCreateInfoKHR::default().display(display).surface(surface),
+                        None,
+                    )
+                    .map_err(|result| SurfaceLost { call: "vkCreateWaylandSurfaceKHR", result })
+            }
+            SurfaceTarget::Metal { layer } => {
+                if !shared.has_metal_surface {
+                    panic!("Vulkan loader offers no VK_EXT_metal_surface (is MoltenVK installed?) but a window was requested");
+                }
+                ash::ext::metal_surface::Instance::new(&shared.entry, instance)
+                    .create_metal_surface(&vk::MetalSurfaceCreateInfoEXT::default().layer(layer.cast()), None)
+                    .map_err(|result| SurfaceLost { call: "vkCreateMetalSurfaceEXT", result })
+            }
+        }
+    }
 }
 
 /// A Vulkan call on a window surface failed — in practice
@@ -273,7 +337,17 @@ impl VkCore {
         display_ptr: *mut c_void,
         surface_ptr: *mut c_void,
     ) -> Result<(Self, vk::SurfaceKHR), SurfaceLost> {
-        let (core, surface) = Self::new_inner(Some((display_ptr, surface_ptr)))?;
+        Self::new_for_surface(SurfaceTarget::Wayland { display: display_ptr, surface: surface_ptr })
+    }
+
+    /// A core bound to a window's surface, whatever the window system: the
+    /// general form of [`new_for_wayland_surface`](Self::new_for_wayland_surface).
+    ///
+    /// # Safety
+    /// The target's pointers must be live and outlive the core and
+    /// everything created from it.
+    pub unsafe fn new_for_surface(target: SurfaceTarget) -> Result<(Self, vk::SurfaceKHR), SurfaceLost> {
+        let (core, surface) = Self::new_inner(Some(target))?;
         Ok((core, surface.expect("surface requested but not created")))
     }
 
@@ -289,16 +363,16 @@ impl VkCore {
         display_ptr: *mut c_void,
         surface_ptr: *mut c_void,
     ) -> Result<vk::SurfaceKHR, SurfaceLost> {
-        let shared = shared_instance();
-        let wayland_loader = ash::khr::wayland_surface::Instance::new(&shared.entry, &self.instance);
-        let surface = wayland_loader
-            .create_wayland_surface(
-                &vk::WaylandSurfaceCreateInfoKHR::default()
-                    .display(display_ptr)
-                    .surface(surface_ptr),
-                None,
-            )
-            .map_err(|result| SurfaceLost { call: "vkCreateWaylandSurfaceKHR", result })?;
+        self.create_surface(SurfaceTarget::Wayland { display: display_ptr, surface: surface_ptr })
+    }
+
+    /// A new `VkSurfaceKHR` on another window, from this core's instance:
+    /// the general form of [`create_wayland_surface`](Self::create_wayland_surface).
+    ///
+    /// # Safety
+    /// The target's pointers must be live and outlive the returned surface.
+    pub unsafe fn create_surface(&self, target: SurfaceTarget) -> Result<vk::SurfaceKHR, SurfaceLost> {
+        let surface = target.create(&self.instance)?;
         // The device was chosen for the FIRST surface's present support; a
         // later surface on the same display is presentable from the same
         // family on every driver this runs on, but say so if not.
@@ -320,7 +394,7 @@ impl VkCore {
     }
 
     unsafe fn new_inner(
-        wayland: Option<(*mut c_void, *mut c_void)>,
+        window: Option<SurfaceTarget>,
     ) -> Result<(Self, Option<vk::SurfaceKHR>), SurfaceLost> {
         // CCE_VK_DEVICE: "integrated" (the default), "discrete", or a device
         // name substring. An explicit request also lifts a session-wide ICD
@@ -340,27 +414,12 @@ impl VkCore {
         let entry = &shared.entry;
         let instance = shared.instance.clone();
         let api_version = shared.api_version;
-        if wayland.is_some() && !shared.has_wayland_surface {
-            panic!("Vulkan loader offers no VK_KHR_wayland_surface but a window was requested");
-        }
 
         // Instance-level loader; only usable when VK_KHR_surface was enabled.
         let surface_loader = ash::khr::surface::Instance::new(entry, &instance);
 
-        let surface = match wayland {
-            Some((display_ptr, surface_ptr)) => {
-                let wayland_loader = ash::khr::wayland_surface::Instance::new(entry, &instance);
-                Some(
-                    wayland_loader
-                        .create_wayland_surface(
-                            &vk::WaylandSurfaceCreateInfoKHR::default()
-                                .display(display_ptr)
-                                .surface(surface_ptr),
-                            None,
-                        )
-                        .map_err(|result| SurfaceLost { call: "vkCreateWaylandSurfaceKHR", result })?,
-                )
-            }
+        let surface = match window {
+            Some(target) => Some(target.create(&instance)?),
             None => None,
         };
 
@@ -468,7 +527,7 @@ impl VkCore {
         let queue_infos = [vk::DeviceQueueCreateInfo::default()
             .queue_family_index(queue_family)
             .queue_priorities(&queue_priorities)];
-        let mut device_extensions: Vec<*const i8> = if wayland.is_some() {
+        let mut device_extensions: Vec<*const i8> = if window.is_some() {
             vec![ash::khr::swapchain::NAME.as_ptr()]
         } else {
             Vec::new()
@@ -548,7 +607,12 @@ impl VkCore {
             .queue_create_infos(&queue_infos)
             .enabled_features(&enabled_features);
         let incremental_present =
-            wayland.is_some() && has_ext(ash::khr::incremental_present::NAME);
+            window.is_some() && has_ext(ash::khr::incremental_present::NAME);
+        // A portability driver's device (MoltenVK) MUST enable the subset
+        // extension it offers; no Linux driver offers it.
+        if has_ext(ash::khr::portability_subset::NAME) {
+            device_extensions.push(ash::khr::portability_subset::NAME.as_ptr());
+        }
         if incremental_present {
             device_extensions.push(ash::khr::incremental_present::NAME.as_ptr());
         }

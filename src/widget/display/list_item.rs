@@ -33,7 +33,7 @@ impl TextItem {
         font: Option<&str>,
         bounds: Option<[f32; 4]>,
     ) -> Self {
-        let buffer = crate::backend::window_runner::get_text_buffer(fs, text, size, font);
+        let buffer = crate::backend::text::get_text_buffer(fs, text, size, font);
         Self { buffer, x, y, color, bounds, clip_circle: None, clip_rrect: None }
     }
 }

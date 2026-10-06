@@ -48,7 +48,7 @@ pub struct Slider {
     /// stream stops (fingers lifted), `tick` keeps the value coasting with
     /// exponential decay instead of stopping dead.
     scroll_vel: f32,
-    last_wheel: Option<std::time::Instant>,
+    last_wheel: Option<web_time::Instant>,
     /// Keyboard focus (FocusIn / FocusOut): the band lights in the highlight;
     /// the arrows adjust, Home / End go to the ends, Enter opens the readout.
     focused: bool,
@@ -359,7 +359,8 @@ impl Paint for Slider {
         // Typing into the readout: the on-screen keyboard follows
         // (`crate::text_input`).
         if self.editing {
-            crate::text_input::claim(g.x, g.y, g.w, g.h);
+            let (ox, oy) = ctx.offset();
+            crate::text_input::claim(g.x + ox, g.y + oy, g.w, g.h);
         }
         let radius = crate::layout::slider_corner_radius();
         let rounded = radius > 0.0;
@@ -479,7 +480,7 @@ impl Input for Slider {
                         // negligible velocity (big gaps clamp to 0.1s); fast
                         // trackpad streams build real speed. Hitting an end
                         // stops dead — no glide pinned at the bounds.
-                        let now = std::time::Instant::now();
+                        let now = web_time::Instant::now();
                         let idt = self
                             .last_wheel
                             .map_or(0.1, |l| now.duration_since(l).as_secs_f32())

@@ -628,7 +628,7 @@ mod tests {
         assert_eq!(Frost::Unfrosted.pack(2.0), [0.0, 0.0]);
         assert_eq!(Frost::Frosted { compression: 0.0, refraction: 0.0, radius: 0.0 }.pack(2.0), [0.0, 0.0]);
 
-        let wgsl = include_str!("../vk/shader2d.wgsl");
+        let wgsl = include_str!("../draw/shader2d.wgsl");
         let lit = |name: &str| -> f32 {
             let rest = wgsl.split(&format!("const {name}: f32 = ")).nth(1).unwrap_or_else(|| panic!("{name} missing"));
             rest.split(';').next().unwrap().trim().parse().unwrap()
