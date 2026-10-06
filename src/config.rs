@@ -210,16 +210,29 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
 /// its per-app config (`~/.config/cce/<name>/config.kdl`) and its `input.kdl`
 /// domain.
 ///
-/// Derived from `/proc/self/exe` on every call, which the kernel renders as
+/// Derived from `/proc/self/exe` once per process, which the kernel renders as
 /// `<path> (deleted)` once the binary on disk has been replaced (`ccebuild
 /// install` unlinks before writing). Without the strip, a still-running client
 /// would resolve its override to `~/.config/cce/<name> (deleted)/config.kdl`
 /// on its next config reload and silently lose the whole file — the status
 /// bar's droplet bubbles reverted to square boxes this way on 2026-09-03.
+///
+/// Cached because every config getter reaches it (through
+/// [`config_files_modified`]), many of them per frame; the stripped basename
+/// cannot change for the life of the process.
 pub fn get_app_name() -> Option<String> {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.file_name().and_then(|s| s.to_str().map(app_name_from_exe_basename)))
+    app_name().map(str::to_string)
+}
+
+/// [`get_app_name`] without the allocation.
+fn app_name() -> Option<&'static str> {
+    static NAME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_name().and_then(|s| s.to_str().map(app_name_from_exe_basename)))
+    })
+    .as_deref()
 }
 
 /// [`get_app_name`]'s normalization: the kernel's ` (deleted)` marker on an
@@ -254,8 +267,8 @@ pub fn parse_kdl_to_json(content: &str) -> serde_json::Value {
         serde_json::json!({})
     };
 
-    if let Some(app_name) = get_app_name() {
-        let app_path = get_app_config_path(&app_name);
+    if let Some(app_name) = app_name() {
+        let app_path = get_app_config_path(app_name);
         if let Ok(override_content) = std::fs::read_to_string(&app_path) {
             if let Ok(override_doc) = override_content.parse::<kdl::KdlDocument>() {
                 let override_val = kdl_to_json(&override_doc);
@@ -604,7 +617,9 @@ pub fn get_config_path() -> std::path::PathBuf {
 
 struct ConfigCache {
     last_modified: Option<std::time::SystemTime>,
-    parsed: Option<serde_json::Value>,
+    /// Shared, not cloned per read: the getters below run many times a frame,
+    /// and a deep copy of the whole tree to read one key was most of their cost.
+    parsed: Option<std::sync::Arc<serde_json::Value>>,
     raw_content: String,
 }
 
@@ -622,8 +637,8 @@ static CONFIG_CACHE: std::sync::RwLock<ConfigCache> = std::sync::RwLock::new(Con
 /// drops back to the shared mtime) also invalidates.
 pub fn config_files_modified() -> Option<std::time::SystemTime> {
     let shared = std::fs::metadata(get_config_path()).ok().and_then(|m| m.modified().ok());
-    let app = get_app_name()
-        .and_then(|n| std::fs::metadata(get_app_config_path(&n)).ok())
+    let app = app_name()
+        .and_then(|n| std::fs::metadata(get_app_config_path(n)).ok())
         .and_then(|m| m.modified().ok());
     match (shared, app) {
         (Some(a), Some(b)) => Some(a.max(b)),
@@ -632,6 +647,11 @@ pub fn config_files_modified() -> Option<std::time::SystemTime> {
 }
 
 pub fn cached_config() -> serde_json::Value {
+    (*cached_config_arc()).clone()
+}
+
+/// [`cached_config`] without the copy — what every getter here reads.
+pub fn cached_config_arc() -> std::sync::Arc<serde_json::Value> {
     let path = get_config_path();
     // Both files participate in the parse (parse_kdl_to_json merges the
     // per-app override), so both participate in the cache key.
@@ -646,7 +666,7 @@ pub fn cached_config() -> serde_json::Value {
     }
 
     let content = std::fs::read_to_string(&path).unwrap_or_default();
-    let val = parse_kdl_to_json(&content);
+    let val = std::sync::Arc::new(parse_kdl_to_json(&content));
     if let Ok(mut cache) = CONFIG_CACHE.write() {
         cache.last_modified = current_modified;
         cache.parsed = Some(val.clone());
@@ -657,7 +677,7 @@ pub fn cached_config() -> serde_json::Value {
 
 /// The raw text of the cce config, cached alongside [`cached_config`].
 pub fn cached_config_content() -> String {
-    let _ = cached_config();
+    let _ = cached_config_arc();
     CONFIG_CACHE.read().map(|c| c.raw_content.clone()).unwrap_or_default()
 }
 
@@ -673,6 +693,11 @@ static SHARED_CONFIG_CACHE: std::sync::RwLock<ConfigCache> = std::sync::RwLock::
 /// but must not desynchronize it from the DE. Mtime-cached like
 /// [`cached_config`].
 pub fn cached_shared_config() -> serde_json::Value {
+    (*cached_shared_config_arc()).clone()
+}
+
+/// [`cached_shared_config`] without the copy.
+pub fn cached_shared_config_arc() -> std::sync::Arc<serde_json::Value> {
     let path = get_config_path();
     let current_modified = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
 
@@ -685,11 +710,11 @@ pub fn cached_shared_config() -> serde_json::Value {
     }
 
     let content = std::fs::read_to_string(&path).unwrap_or_default();
-    let val = if let Ok(doc) = content.parse::<kdl::KdlDocument>() {
+    let val = std::sync::Arc::new(if let Ok(doc) = content.parse::<kdl::KdlDocument>() {
         kdl_to_json(&doc)
     } else {
         serde_json::json!({})
-    };
+    });
     if let Ok(mut cache) = SHARED_CONFIG_CACHE.write() {
         cache.last_modified = current_modified;
         cache.parsed = Some(val.clone());
@@ -701,13 +726,13 @@ pub fn cached_shared_config() -> serde_json::Value {
 /// Read an i64 at `pointer` from the SHARED config only (no per-app merge),
 /// or `default` — see [`cached_shared_config`].
 pub fn get_i64_shared(pointer: &str, default: i64) -> i64 {
-    cached_shared_config().pointer(pointer).and_then(|v| v.as_i64()).unwrap_or(default)
+    cached_shared_config_arc().pointer(pointer).and_then(|v| v.as_i64()).unwrap_or(default)
 }
 
 /// [`get_i64_shared`] without a default — for canonical-first alias chains
 /// (RFC Phase 7a) where absence must fall through to the next spelling.
 pub fn get_i64_shared_opt(pointer: &str) -> Option<i64> {
-    cached_shared_config().pointer(pointer).and_then(|v| v.as_i64())
+    cached_shared_config_arc().pointer(pointer).and_then(|v| v.as_i64())
 }
 
 // ── Typed accessors over the cached config ──────────────────────────────────
@@ -716,12 +741,12 @@ pub fn get_i64_shared_opt(pointer: &str) -> Option<i64> {
 
 /// Read a boolean at `pointer` from the cached config, or `default`.
 pub fn get_bool(pointer: &str, default: bool) -> bool {
-    cached_config().pointer(pointer).and_then(|v| v.as_bool()).unwrap_or(default)
+    cached_config_arc().pointer(pointer).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
 /// Read an f32 at `pointer` from the cached config, or `default`.
 pub fn get_f32(pointer: &str, default: f32) -> f32 {
-    cached_config()
+    cached_config_arc()
         .pointer(pointer)
         .and_then(|v| v.as_f64())
         .map(|f| f as f32)
@@ -730,12 +755,12 @@ pub fn get_f32(pointer: &str, default: f32) -> f32 {
 
 /// Read an i64 at `pointer` from the cached config, or `default`.
 pub fn get_i64(pointer: &str, default: i64) -> i64 {
-    cached_config().pointer(pointer).and_then(|v| v.as_i64()).unwrap_or(default)
+    cached_config_arc().pointer(pointer).and_then(|v| v.as_i64()).unwrap_or(default)
 }
 
 /// Read a string at `pointer` from the cached config.
 pub fn get_string(pointer: &str) -> Option<String> {
-    cached_config().pointer(pointer).and_then(|v| v.as_str()).map(|s| s.to_string())
+    cached_config_arc().pointer(pointer).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
 
 /// Read a hex color string at `pointer` and parse it to raw sRGB RGBA (`[0,1]`).
