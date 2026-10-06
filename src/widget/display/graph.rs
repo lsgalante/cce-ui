@@ -285,6 +285,10 @@ const WIDGET_CORNERS: (bool, bool, bool, bool) = (false, false, true, true);
 
 pub struct Graph {
     show_network_grid: bool,
+    /// Whether nodes wear the geometry toggle (see `toggle_rect`). A host
+    /// whose nodes have no geometry to show (cce-files' directory graph)
+    /// turns it off with `set_show_toggles(false)`.
+    show_toggles: bool,
     /// The pitch: centre of one grid line to the centre of the next, per
     /// axis. The grid's one size.
     pitch_x: f32,
@@ -365,6 +369,7 @@ impl Graph {
 
         Adapted::new(Graph {
             show_network_grid: false,
+            show_toggles: true,
             pitch_x,
             pitch_y,
             node_w,
@@ -400,6 +405,11 @@ impl Graph {
 
     pub fn set_network_opacity(&mut self, opacity: f32) {
         self.network_opacity = opacity;
+    }
+    /// Show or hide every node's geometry toggle — the disc at a node's
+    /// right end, and its hit target with it.
+    pub fn set_show_toggles(&mut self, show: bool) {
+        self.show_toggles = show;
     }
     pub fn set_node_opacity(&mut self, opacity: f32) {
         self.node_opacity = opacity;
@@ -531,6 +541,9 @@ impl Graph {
     }
 
     pub fn toggle_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
+        if !self.show_toggles {
+            return None;
+        }
         if let Some(node) = self.nodes.get(idx) {
             // Settings containers have no geometry to toggle: utility nodes,
             // the designer's session node that now nests them, and the
@@ -1632,6 +1645,19 @@ mod tests {
         };
         g.set_nodes(&[node("a", "alpha", 0.0, 0.0), node("b", "beta", 1.0, 1.0)]);
         g
+    }
+
+    /// A host can hide the geometry toggle: no node wears the disc, and
+    /// nothing is there to hit.
+    #[test]
+    fn a_host_can_hide_the_geometry_toggles() {
+        let mut g = two_nodes();
+        assert!(g.toggle_rect(0).is_some(), "toggles show by default");
+        g.set_show_toggles(false);
+        assert!(g.toggle_rect(0).is_none() && g.toggle_rect(1).is_none());
+        let rect = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let big = g.port_circles(rect).iter().filter(|c| c.2 > 5.0).count();
+        assert_eq!(big, 0, "no toggle disc is drawn");
     }
 
     /// A node against the pane's right edge keeps its name: the label flips
