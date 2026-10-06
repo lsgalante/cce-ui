@@ -150,6 +150,10 @@ impl<A: Application> Turn<'_, A> {
 /// The input state a session carries, and the routing over it.
 pub struct Driver {
     pub mods: Modifiers,
+    /// When the last input event of any kind arrived — what makes a redraw
+    /// interactive, which is the redraw the runner's warm-down is for
+    /// (`shell::Pacer`).
+    pub last_input: Option<std::time::Instant>,
     pub pressed_key: Option<PressedKey>,
     /// The pointer's last position, window-logical (popup events translated).
     pub cursor_pos: (f32, f32),
@@ -215,6 +219,7 @@ impl Driver {
         Self {
             mods: Modifiers::default(),
             pressed_key: None,
+            last_input: None,
             cursor_pos: (0.0, 0.0),
             buttons_down: 0,
             last_pinch_scale: 1.0,
@@ -282,12 +287,18 @@ impl Driver {
     /// hover state is stale from enter to first move, and a press in that
     /// window can misroute (e.g. a divider press falling through to the
     /// movable-root plate window drag).
+    fn note_input(&mut self) {
+        self.last_input = Some(std::time::Instant::now());
+    }
+
     pub fn pointer_enter<A: Application>(&mut self, t: Turn<'_, A>, pos: LogicalPosition) {
+        self.note_input();
         self.pointer_motion(t, pos);
     }
 
     /// The pointer moved to `pos`.
     pub fn pointer_motion<A: Application>(&mut self, t: Turn<'_, A>, pos: LogicalPosition) {
+        self.note_input();
         let mut rebuild = false;
         t.app.handle_pointer_move(pos, &mut rebuild);
         if rebuild {
@@ -302,6 +313,7 @@ impl Driver {
     /// first; then clear hover with an off-screen move — safe now that no
     /// drag is held.
     pub fn pointer_leave<A: Application>(&mut self, mut t: Turn<'_, A>) {
+        self.note_input();
         if self.buttons_down != 0 {
             let (px, py) = self.cursor_pos;
             for btn in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
@@ -336,6 +348,7 @@ impl Driver {
         pos: LogicalPosition,
         site: PressSite,
     ) -> Press {
+        self.note_input();
         self.buttons_down |= button_bit(btn);
         let (lx, ly) = (pos.x, pos.y);
 
@@ -389,6 +402,7 @@ impl Driver {
 
     /// A button came up at `pos`.
     pub fn pointer_release<A: Application>(&mut self, mut t: Turn<'_, A>, btn: MouseButton, pos: LogicalPosition) {
+        self.note_input();
         self.buttons_down &= !button_bit(btn);
         let mut rebuild = false;
         let msg = t.app.handle_mouse_input(btn, ElementState::Released, pos, &mut rebuild);
@@ -398,6 +412,7 @@ impl Driver {
     /// One coalesced frame of scrolling at `pos`. Publishes the frame's
     /// phase (`scroll_motion::set_scroll_phase`) before the app sees it.
     pub fn scroll<A: Application>(&mut self, t: Turn<'_, A>, frame: ScrollFrame, pos: LogicalPosition) {
+        self.note_input();
         let ScrollFrame { h, v, discrete_h, discrete_v, source, stop } = frame;
         // Per-app scroll factors from input.kdl (`<app>`/`cce-ui` domain
         // `input { }` blocks); the compositor's global device scaling has
@@ -438,6 +453,7 @@ impl Driver {
         actions: Vec<super::touch::TouchAction>,
         scroll_at: Option<(f32, f32)>,
     ) {
+        self.note_input();
         use super::touch::TouchAction;
         for action in actions {
             let mut rebuild = false;
@@ -514,6 +530,7 @@ impl Driver {
 
     /// The pinch's cumulative `scale` moved, with the pointer where it last was.
     pub fn pinch_update<A: Application>(&mut self, t: Turn<'_, A>, scale: f32) {
+        self.note_input();
         let factor = scale / self.last_pinch_scale;
         self.last_pinch_scale = scale;
 
@@ -564,6 +581,7 @@ impl Driver {
     /// The window gained (`true`) or lost keyboard focus. Losing it drops a
     /// held key and the held modifiers, whose releases go elsewhere.
     pub fn keyboard_focus<A: Application>(&mut self, t: Turn<'_, A>, focused: bool) {
+        self.note_input();
         if !focused {
             self.pressed_key = None;
             self.mods.ctrl = false;
@@ -587,6 +605,7 @@ impl Driver {
         text: Option<String>,
         state: ElementState,
     ) {
+        self.note_input();
         let event = KeyEvent {
             state,
             logical_key,
@@ -648,6 +667,7 @@ impl Driver {
     /// commits on its own keys), never repeated, and past the chords: a
     /// commit of "z" is a "z", not half of an undo.
     pub fn commit_text<A: Application>(&mut self, t: Turn<'_, A>, text: String) {
+        self.note_input();
         if text.is_empty() {
             return;
         }
@@ -678,6 +698,7 @@ impl Driver {
     /// commit, or the commit follows). The editing widget shows it from the
     /// next frame.
     pub fn preedit<A: Application>(&mut self, t: Turn<'_, A>, preedit: Option<crate::ime::Preedit>) {
+        self.note_input();
         crate::ime::set_preedit(preedit);
         *t.redraw = true;
     }

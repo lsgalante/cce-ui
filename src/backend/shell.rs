@@ -38,6 +38,18 @@ pub const IDLE_DISPATCH: Duration = Duration::from_millis(1000);
 /// compositor.
 pub const WARM_DOWN: Duration = Duration::from_millis(200);
 
+/// A redraw this soon after the previous one, or after input, belongs to a
+/// sequence and gets the [`WARM_DOWN`]; one further from both is an
+/// isolated update and does not.
+///
+/// The warm-down is for interaction and for streams (a terminal printing, a
+/// sync narrating progress): a run of commits close together, where a late
+/// frame callback would delay the next one. An app's own isolated update —
+/// the status bar's stats once a second, a clock once a minute — has no next
+/// frame to delay, and each one used to buy twelve more wakes at frame rate:
+/// the stats module woke ~13 times a second for one redraw (2026-10-06).
+pub const SEQUENCE_GAP: Duration = Duration::from_millis(500);
+
 /// Upper bound on an idle sleep. The loop is woken early by any event the
 /// shell's window system delivers and by messages on the app's sender, so
 /// this only caps how long an app-side poll that bypasses both (see
@@ -117,13 +129,15 @@ pub struct Pacer {
     slept_idle: bool,
     /// Turns stay at frame rate until this instant (see [`WARM_DOWN`]).
     warm_until: Option<Instant>,
+    /// When the last genuine redraw was presented (see [`SEQUENCE_GAP`]).
+    last_redraw: Option<Instant>,
     last_title: String,
 }
 
 impl Pacer {
     /// Before the first turn the loop runs at [`ACTIVE_DISPATCH`].
     pub fn new(title: String) -> Self {
-        Self { last_tick: Instant::now(), slept_idle: false, warm_until: None, last_title: title }
+        Self { last_tick: Instant::now(), slept_idle: false, warm_until: None, last_redraw: None, last_title: title }
     }
 
     /// One turn of the loop. The cadence is ACTIVE while anything is in
@@ -177,9 +191,17 @@ impl Pacer {
         let pending = shell.frame_pending();
 
         if *shell.redraw() {
-            // Genuine dirt (input, app state, animation) extends the warm window;
+            // Genuine dirt that is part of a sequence — input just arrived, or
+            // the last redraw was moments ago — extends the warm window;
             // warm-down renders below do NOT, so idle decays in one window.
-            self.warm_until = Some(Instant::now() + WARM_DOWN);
+            // An isolated update gets none (see `SEQUENCE_GAP`).
+            let now = Instant::now();
+            let recent = |t: Option<Instant>| t.is_some_and(|t| now.duration_since(t) < SEQUENCE_GAP);
+            let input = shell.turn().0.last_input;
+            if recent(input) || recent(self.last_redraw) {
+                self.warm_until = Some(now + WARM_DOWN);
+            }
+            self.last_redraw = Some(now);
         }
         let mut rendered = false;
         if *shell.redraw() && !pending {
@@ -346,6 +368,8 @@ mod tests {
     #[test]
     fn a_redraw_presents_then_warms_down_at_frame_rate() {
         let (mut p, mut s) = (Pacer::new(String::new()), Mock::new());
+        // Interactive: an input event just arrived.
+        s.driver.last_input = Some(Instant::now());
         s.redraw = true;
         assert_eq!(p.turn(&mut s), Step::Sleep(ACTIVE_DISPATCH));
         assert_eq!(s.did, vec![Did::Present(true)]);
@@ -354,6 +378,31 @@ mod tests {
         // Inside the warm window: re-render, and keep the frame cadence.
         assert_eq!(p.turn(&mut s), Step::Sleep(ACTIVE_DISPATCH));
         assert_eq!(s.did.last(), Some(&Did::Present(false)));
+    }
+
+    #[test]
+    fn an_isolated_update_presents_and_goes_idle_without_a_warm_down() {
+        let (mut p, mut s) = (Pacer::new(String::new()), Mock::new());
+        // No input, no recent redraw: the app's own once-a-second update.
+        s.redraw = true;
+        assert_eq!(p.turn(&mut s), Step::Sleep(ACTIVE_DISPATCH));
+        assert_eq!(s.did, vec![Did::Present(true)]);
+        // No warm-down re-render: straight to the idle sleep.
+        assert_eq!(p.turn(&mut s), idle());
+        assert_eq!(s.did, vec![Did::Present(true)], "an isolated update warmed down");
+    }
+
+    #[test]
+    fn a_redraw_soon_after_another_warms_down_without_input() {
+        let (mut p, mut s) = (Pacer::new(String::new()), Mock::new());
+        s.redraw = true;
+        p.turn(&mut s);
+        p.turn(&mut s);
+        // A stream: the next update lands well inside SEQUENCE_GAP.
+        s.redraw = true;
+        assert_eq!(p.turn(&mut s), Step::Sleep(ACTIVE_DISPATCH));
+        assert_eq!(p.turn(&mut s), Step::Sleep(ACTIVE_DISPATCH));
+        assert_eq!(s.did.last(), Some(&Did::Present(false)), "the stream lost its warm-down");
     }
 
     #[test]
