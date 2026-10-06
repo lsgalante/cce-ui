@@ -1599,7 +1599,7 @@ Two opt-in features for the clients that show notes (Obsidian-on-cce):
 ## A graph's wires are strokes in a style (since 2026-09-30)
 
 `Graph` draws its wires in one of four `WireStyle`s: **orthogonal** (down,
-across at half the height, down — what every wire was), **rounded** (the
+across, down — what every wire was), **rounded** (the
 same with the two bends rounded, the radius at most half a node's height),
 **bezier** (a cubic that leaves the output and reaches the input heading
 down, so a wire back up the graph loops) and **straight**. The style is
@@ -1615,6 +1615,15 @@ NOTHING until this change, when the wires were a hard-coded cyan 3 px.
   it after the grid; a host drawing the quads itself (the designer) calls
   it between `paint_grid` and the bodies. The legacy `extra_quads` view has
   no wires.
+- **The run across is on the first lattice line below the source**
+  (`Graph::wire_turn_y`, since 2026-10-06), for orthogonal and rounded
+  wires running down. It was halfway between the ports, so a wire spanning
+  several rows ran down its source's column through any node standing
+  there before it turned (row -1 to row 3 turned on row 1's line, through
+  the node on it). Between adjacent rows no line lies between the bodies,
+  and a wire running up has the source's own line first: both turn
+  halfway, as before, and so does the connection being dragged. A rounded
+  bend's radius fits the shorter leg. `a_wire_turns_on_the_first_line_below_its_source`.
 - **One path, drawn and hit**: `wire_path` derives each style's pieces, and
   the splice hit test (`splice_wire_at`) walks the same pieces against the
   dragged ghost, so a drop lands on the wire as drawn in any style.
