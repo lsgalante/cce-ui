@@ -289,6 +289,28 @@ impl Breadcrumb {
             .collect()
     }
 
+    /// How far the run's rounded end stands in from its upright edge at height
+    /// `yc`, for a band `y..y + h` with corner radius `r` — the wash's outer
+    /// ends follow the plate's silhouette by this. The corner is the DE's
+    /// family, `|x|^n + |y|^n = r^n` at exponent `n` (`layout::corner_shape`):
+    /// the plate is drawn at the nominal radius in that family, so a circular
+    /// arc here (as it was) cut inside a squircle plate's corners and left
+    /// them unwashed — some 4 px at the top and bottom rows at n = 4.5.
+    fn end_inset(r: f32, n: f32, y: f32, h: f32, yc: f32) -> f32 {
+        let dy = if yc < y + r {
+            r - (yc - y)
+        } else if yc > y + h - r {
+            yc - (y + h - r)
+        } else {
+            return 0.0;
+        };
+        if r <= 0.0 {
+            return 0.0;
+        }
+        let t = (dy / r).clamp(0.0, 1.0);
+        r - r * (1.0 - t.powf(n)).max(0.0).powf(1.0 / n)
+    }
+
     fn bg_color(&self) -> [f32; 4] {
         let c = crate::color::breadcrumb_bg_color();
         [c[0], c[1], c[2], self.network_opacity]
@@ -416,17 +438,8 @@ impl Paint for Breadcrumb {
                 let first = segs.first().map(|s| s.x) == Some(sx0);
                 let last = segs.last().map(|s| s.x + s.w) == Some(sx0 + sw);
                 let rr = crate::layout::dropdown_corner_radius().min(rh * 0.5);
-                // The rounded end's horizontal inset at height yc.
-                let arc = |yc: f32| -> f32 {
-                    let dy = if yc < ry + rr {
-                        rr - (yc - ry)
-                    } else if yc > ry + rh - rr {
-                        yc - (ry + rh - rr)
-                    } else {
-                        return 0.0;
-                    };
-                    rr - (rr * rr - dy * dy).max(0.0).sqrt()
-                };
+                let n = crate::layout::corner_shape();
+                let arc = |yc: f32| Self::end_inset(rr, n, ry, rh, yc);
                 let mut y = hy;
                 while y < hy + hh {
                     let bh = 1.0f32.min(hy + hh - y);
@@ -873,6 +886,24 @@ mod tests {
             assert_eq!(breadcrumb.seg_at(rect, right - 0.5, py), Some(1));
             assert_eq!(breadcrumb.seg_at(rect, right + 0.5, py), None);
         }
+    }
+
+    /// The wash's rounded ends are the plate's corner family: a circle at
+    /// n = 2, and at a squircle's exponent the corner stays nearer the square,
+    /// so the inset at the top row is smaller — what a circular arc got wrong.
+    #[test]
+    fn the_wash_ends_follow_the_plates_corner_family() {
+        let (r, y, h) = (10.0, 0.0, 24.0);
+        let top = 0.5;
+        let circle = Breadcrumb::end_inset(r, 2.0, y, h, top);
+        let dy: f32 = r - top;
+        assert!((circle - (r - (r * r - dy * dy).sqrt())).abs() < 1e-4);
+        let squircle = Breadcrumb::end_inset(r, 4.5, y, h, top);
+        assert!(squircle < circle - 2.0, "squircle {squircle} vs circle {circle}");
+        // Mid-height is the upright edge in either family, and the band's
+        // two ends mirror each other.
+        assert_eq!(Breadcrumb::end_inset(r, 4.5, y, h, h * 0.5), 0.0);
+        assert!((Breadcrumb::end_inset(r, 4.5, y, h, h - top) - squircle).abs() < 1e-4);
     }
 
     #[test]
