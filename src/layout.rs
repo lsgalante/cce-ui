@@ -4452,6 +4452,25 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
                     None => pc.text_with_bounds(&text, x, y, font_size, color_f32, merged),
                 }
             }
+            // A widget's GLYPH (a dropdown's arrow, a spinbox's −/+, a menu
+            // mark): drawn by name through the host's `RenderTarget::icon`,
+            // since an image id means nothing to a flat host. Until this arm
+            // every widget glyph vanished from a flat host — the toolkit drew
+            // its symbols as text before 2026-10-05, and this replay dropped
+            // images. An image that is not a bundled glyph is still dropped.
+            Prim::Image { image, rect, alpha } => {
+                if let Some((name, _, tint)) = crate::icon_source(image) {
+                    let [r, g, b] = tint.unwrap_or([255, 255, 255]);
+                    let color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, alpha];
+                    if let Some(c) = item.clip {
+                        pc.push_clip_rect(c.x, c.y, c.width, c.height);
+                    }
+                    pc.icon(&name, rect, color);
+                    if item.clip.is_some() {
+                        pc.pop_clip_rect();
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -6607,6 +6626,33 @@ mod tests {
         fn text_with_bounds(&mut self, content: &str, x: f32, y: f32, _size: f32, _color: [f32; 4], bounds: Option<[f32; 4]>) {
             self.bounded.push((content.to_string(), x, y, bounds));
         }
+    }
+
+    /// A widget's glyph reaches a flat host: `render_widget` hands the
+    /// dropdown's arrow to the host's `RenderTarget::icon` by name. It used
+    /// to drop every image, so after the toolkit's symbols became glyphs a
+    /// flat host showed a dropdown with no arrow. Skipped where the icon set
+    /// is not checked out (no glyph uploads, so there is nothing to name).
+    #[test]
+    fn a_widget_glyph_reaches_a_flat_host() {
+        if !std::path::Path::new(&crate::icons_dir()).join("chevron-down.svg").is_file() {
+            eprintln!("skipped: no icon set");
+            return;
+        }
+        #[derive(Default)]
+        struct Icons(Vec<String>);
+        impl RenderTarget for Icons {
+            fn rect(&mut self, _: [f32; 4], _: f32, _: f32, _: f32, _: f32) {}
+            fn text(&mut self, _: &str, _: f32, _: f32, _: f32, _: [f32; 4]) {}
+            fn icon(&mut self, name: &str, _: crate::scene::layout::Rect, _: [f32; 4]) {
+                self.0.push(name.to_string());
+            }
+        }
+        let mut pc = Icons::default();
+        let mut ctx = crate::context::UiContext::new();
+        let mut dd = crate::widget::Dropdown::new(vec!["One".to_string(), "Two".to_string()], 0);
+        render_widget(&mut pc, &mut dd, 10.0, 10.0, 160.0, 24.0, &mut ctx);
+        assert!(pc.0.iter().any(|n| n == "chevron-down"), "the arrow reached the host: {:?}", pc.0);
     }
 
     /// Everything a section places horizontally — text, button rows, widgets,
