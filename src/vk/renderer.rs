@@ -283,6 +283,12 @@ pub struct VkRenderer {
     snapshot_image: vk::Image,
     snapshot_view: vk::ImageView,
     snapshot_allocation: Option<Allocation>,
+    /// Whether a frame has needed the blur snapshot; until one has, it is
+    /// not allocated (`sync_snapshot_target`).
+    snapshot_wanted: bool,
+    /// Ask for the surface's minimum image count rather than one more
+    /// (`set_minimal_swapchain`).
+    minimal_swapchain: bool,
     backdrop_sampler: vk::Sampler,
     window_info: AllocatedBuffer,
     /// The bevel-profile generation `window_info` was last written with —
@@ -1010,6 +1016,8 @@ impl VkRenderer {
             snapshot_image: vk::Image::null(),
             snapshot_view: vk::ImageView::null(),
             snapshot_allocation: None,
+            snapshot_wanted: false,
+            minimal_swapchain: false,
             backdrop_sampler,
             window_info,
             profile_gen: 0,
@@ -1126,7 +1134,10 @@ impl VkRenderer {
                 }
             };
 
-            let mut image_count = caps.min_image_count + 1;
+            // One more than the minimum, so acquiring never waits on the
+            // compositor to release one — except where the caller asked for
+            // the minimum (`set_minimal_swapchain`).
+            let mut image_count = caps.min_image_count + u32::from(!self.minimal_swapchain);
             if caps.max_image_count > 0 {
                 image_count = image_count.min(caps.max_image_count);
             }
@@ -1429,8 +1440,34 @@ impl VkRenderer {
                 self.scene.backdrop_image,
             );
         }
-        // The blur snapshot target tracks the surface size alongside the
-        // backdrop (same format so cmd_copy_image from the swapchain is legal).
+        let image_infos = [vk::DescriptorImageInfo::default()
+            .image_view(self.scene.backdrop_view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        unsafe {
+            self.core.device.update_descriptor_sets(
+                &[vk::WriteDescriptorSet::default()
+                    .dst_set(self.descriptor_set)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                    .image_info(&image_infos)],
+                &[],
+            );
+        }
+        if self.snapshot_wanted {
+            self.sync_snapshot_target();
+        }
+    }
+
+    /// (Re)create the blur snapshot at the surface size and point its
+    /// descriptor set at it. Only for a renderer that has drawn a blur plate
+    /// needing one (`snapshot_wanted`): most windows frost only their root
+    /// plate, which reads the zeroed backdrop instead (`first_frost_exempt`),
+    /// and the grid draws no frost at all — and the snapshot is a whole
+    /// surface, ~16 MiB for a 2560x1600 window and ~240 MiB for the grid's
+    /// patch. The device must not be using the snapshot set (idle, or the set
+    /// never bound because the snapshot never existed).
+    fn sync_snapshot_target(&mut self) {
+        // Same format as the swapchain, so cmd_copy_image from it is legal.
         unsafe {
             let device = &self.core.device;
             if self.snapshot_view != vk::ImageView::null() {
@@ -1505,26 +1542,16 @@ impl VkRenderer {
             self.core.command_pool,
             self.snapshot_image,
         );
-        let image_infos = [vk::DescriptorImageInfo::default()
-            .image_view(self.scene.backdrop_view)
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
         let snapshot_infos = [vk::DescriptorImageInfo::default()
             .image_view(self.snapshot_view)
             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
         unsafe {
             self.core.device.update_descriptor_sets(
-                &[
-                    vk::WriteDescriptorSet::default()
-                        .dst_set(self.descriptor_set)
-                        .dst_binding(0)
-                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                        .image_info(&image_infos),
-                    vk::WriteDescriptorSet::default()
-                        .dst_set(self.descriptor_set_snapshot)
-                        .dst_binding(0)
-                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                        .image_info(&snapshot_infos),
-                ],
+                &[vk::WriteDescriptorSet::default()
+                    .dst_set(self.descriptor_set_snapshot)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                    .image_info(&snapshot_infos)],
                 &[],
             );
         }
@@ -1556,6 +1583,18 @@ impl VkRenderer {
     pub fn stage_scene(&mut self, scissor: (u32, u32, u32, u32), draws: Vec<SceneDraw>) {
         self.want_scene_targets();
         self.scene.stage(scissor, draws);
+    }
+
+    /// Use the surface's minimum swapchain image count instead of one more.
+    /// For a surface that redraws rarely and is large — the desktop grid's
+    /// patch is ~240 MiB an image on a HiDPI panel — where the spare image
+    /// costs more than an occasional wait on the compositor. Takes effect at
+    /// the next swapchain rebuild.
+    pub fn set_minimal_swapchain(&mut self) {
+        if !self.minimal_swapchain {
+            self.minimal_swapchain = true;
+            self.swapchain_dirty = true;
+        }
     }
 
     /// Grow the backdrop and depth targets to the surface the first time a
@@ -1889,6 +1928,21 @@ impl VkRenderer {
             self.core.device
                 .wait_for_fences(&[in_flight], true, u64::MAX)
                 .expect("Fence wait failed");
+
+            // The first frame with a blur plate that will copy the frame so
+            // far allocates the snapshot it copies into. Decided the way the
+            // record below decides, except that a scene ever staged counts as
+            // a backdrop (it may become valid while recording), which only
+            // ever errs toward allocating.
+            if !self.snapshot_wanted {
+                let assume_backdrop = self.scene.wanted || self.scene.backdrop_valid;
+                let exempt =
+                    first_frost_exempt(frame2d.batches, frame2d.images, frame2d.clear_color, assume_backdrop);
+                if frame2d.batches.iter().enumerate().any(|(i, b)| b.blur_behind && Some(i) != exempt) {
+                    self.snapshot_wanted = true;
+                    self.sync_snapshot_target();
+                }
+            }
 
             if present_debug() {
                 eprintln!("[vk] frame {} acquire...", self.present_debug_count);

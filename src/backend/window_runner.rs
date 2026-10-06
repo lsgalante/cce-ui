@@ -249,7 +249,11 @@ impl<A: Application> EngineState<A> {
 
         let load_system_fonts = self.inner.as_ref().map_or(false, |a| a.load_system_fonts());
         // Corner radius 0: runner apps tessellate their own rounded corners.
-        let renderer = unsafe { VkRenderer::try_new(display_ptr, surface_ptr, pw, ph, 0.0) }?;
+        let mut renderer = unsafe { VkRenderer::try_new(display_ptr, surface_ptr, pw, ph, 0.0) }?;
+        if self.inner.as_ref().is_some_and(|a| a.grid()) {
+            // Redrawn only per patch, and a patch is several screens of pixels.
+            renderer.set_minimal_swapchain();
+        }
         self.font_system = Some(if load_system_fonts {
             crate::create_font_system_with_system_fonts()
         } else {
