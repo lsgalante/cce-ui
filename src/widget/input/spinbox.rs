@@ -485,9 +485,21 @@ impl Paint for Spinbox {
         // that field; the text it belongs to was not, so a long value ran
         // under the buttons and out of the control.
         let field = Some([g.x, g.y, g.text_end, g.y + g.h]);
-        ctx.text_with(self.value_text(), g.x + crate::layout::CONTROL_TEXT_INSET, crate::layout::align_text_y(g.y, g.h, 14.0, 0.0), 14.0, text_color, None, field);
+        let value_y = crate::layout::align_text_y(g.y, g.h, 14.0, 0.0);
+        ctx.text_with(self.value_text(), g.x + crate::layout::CONTROL_TEXT_INSET, value_y, 14.0, text_color, None, field);
         if let Some(ref unit) = self.unit {
-            ctx.text_with(unit.clone(), g.x + crate::layout::CONTROL_TEXT_INSET + 36.0, crate::layout::align_text_y(g.y, g.h, 11.0, 0.0), 11.0, [0x73, 0x73, 0x7a], None, field);
+            // The unit follows the value at a word space, measured off the
+            // value's own shaped width (the caret's offsets, see
+            // `prepare_text`). It stood at a fixed 36px, which left "5" and
+            // its "s" a gap apart and would have run a wide value into it.
+            // It shares the value's line top rather than being centred on its
+            // own: the renderer centres each glyph run in a box one font size
+            // tall, so the smaller unit, centred separately, sat ~2px below
+            // the value's baseline. From one top, the two baselines meet.
+            let value_w = self.caret_offset(self.value_text().chars().count());
+            const UNIT_GAP: f32 = 4.0;
+            let ux = g.x + crate::layout::CONTROL_TEXT_INSET + value_w + UNIT_GAP;
+            ctx.text_with(unit.clone(), ux, value_y, 11.0, [0x73, 0x73, 0x7a], None, field);
         }
         if g.btn_w > 0.0 {
             let dec_center_x = g.dec_c;
