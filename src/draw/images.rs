@@ -60,6 +60,16 @@ pub enum Pending {
 pub type Region = (u32, u32, u32, u32);
 
 static PENDING: Mutex<Vec<Pending>> = Mutex::new(Vec::new());
+/// Ids whose pixels were replaced in place ([`update_pixels`],
+/// [`update_pixel_regions`]) since the last frame was built: a frame that
+/// draws one of them has changed there even though its display list did not.
+static UPDATED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// The ids [`update_pixels`] and [`update_pixel_regions`] touched since the
+/// last call — the frame builder's, for its damage.
+pub(crate) fn take_updated_ids() -> Vec<u32> {
+    std::mem::take(&mut *UPDATED.lock().unwrap())
+}
 static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 /// A fresh image id from the process-wide counter, for a renderer that
@@ -122,6 +132,7 @@ fn queue_upload(pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat, m
 pub fn update_pixels(id: u32, pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat) {
     assert_eq!(pixels.len(), (width * height * 4) as usize, "8888 size mismatch");
     PENDING.lock().unwrap().push(Pending::Update { id, pixels, width, height, format });
+    UPDATED.lock().unwrap().push(id);
 }
 
 /// Replace only the given rectangles of `id`, keeping the rest of what it
@@ -161,6 +172,7 @@ pub fn update_pixel_regions(
         return;
     }
     PENDING.lock().unwrap().push(Pending::UpdateRegions { id, pixels, width, height, format, regions });
+    UPDATED.lock().unwrap().push(id);
 }
 
 /// A pixel buffer to fill, reusing one the renderer has finished with when

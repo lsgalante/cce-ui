@@ -264,6 +264,209 @@ pub fn build_frame<A: Application>(
     }
 }
 
+/// What a presented frame drew, kept so the next frame can be diffed against
+/// it ([`derive_damage`]). One per window; physical px throughout.
+#[derive(Default)]
+pub struct FrameRecord {
+    prev: Option<FrameSig>,
+}
+
+/// A box as (x0, y0, x1, y1), physical px.
+type PxBox = (i32, i32, i32, i32);
+
+struct FrameSig {
+    physical: (u32, u32),
+    clear: [u32; 4],
+    features: u64,
+    batches: Vec<(u64, Option<PxBox>)>,
+    texts: Vec<(u64, Option<PxBox>)>,
+    images: Vec<(u64, Option<PxBox>, u32)>,
+    overlay: (u64, Option<PxBox>),
+}
+
+fn hash_of(f: impl FnOnce(&mut std::collections::hash_map::DefaultHasher)) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    f(&mut h);
+    h.finish()
+}
+
+fn union_box(a: Option<PxBox>, b: Option<PxBox>) -> Option<PxBox> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some((a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3))),
+        (a, b) => a.or(b),
+    }
+}
+
+fn clip_box(b: Option<PxBox>, clip: Option<(u32, u32, u32, u32)>) -> Option<PxBox> {
+    let b = b?;
+    let Some((cx, cy, cw, ch)) = clip else { return Some(b) };
+    let c = (cx as i32, cy as i32, (cx + cw) as i32, (cy + ch) as i32);
+    let r = (b.0.max(c.0), b.1.max(c.1), b.2.min(c.2), b.3.min(c.3));
+    (r.0 < r.2 && r.1 < r.3).then_some(r)
+}
+
+fn verts_box(verts: &[Vertex], (pw, ph): (u32, u32)) -> Option<PxBox> {
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for v in verts {
+        let px = (v.position[0] + 1.0) * 0.5 * pw as f32;
+        let py = (1.0 - v.position[1]) * 0.5 * ph as f32;
+        x0 = x0.min(px);
+        y0 = y0.min(py);
+        x1 = x1.max(px);
+        y1 = y1.max(py);
+    }
+    (x0 <= x1).then(|| ((x0.floor() as i32) - 2, (y0.floor() as i32) - 2, (x1.ceil() as i32) + 2, (y1.ceil() as i32) + 2))
+}
+
+impl FrameSig {
+    fn of(frame: &BuiltFrame, texts: &[DlText]) -> Self {
+        use std::hash::Hash;
+        let physical = frame.physical;
+        let batches = frame
+            .batches
+            .iter()
+            .map(|b| {
+                let verts = frame.verts.get(b.start as usize..b.end as usize).unwrap_or(&[]);
+                let key = hash_of(|h| {
+                    bytemuck::cast_slice::<Vertex, u8>(verts).hash(h);
+                    b.scissor.hash(h);
+                    b.clip_rrect.map(|c| c.map(f32::to_bits)).hash(h);
+                    b.blur_behind.hash(h);
+                    if let Some(p) = &b.plate {
+                        format!("{p:?}").hash(h);
+                    }
+                });
+                (key, clip_box(verts_box(verts, physical), b.scissor))
+            })
+            .collect();
+        let s = frame.scale;
+        let texts = texts
+            .iter()
+            .map(|t| {
+                let m = t.buffer.metrics();
+                let (mut w, mut bottom) = (0.0f32, 0.0f32);
+                let key = hash_of(|h| {
+                    for line in &t.buffer.lines {
+                        line.text().hash(h);
+                    }
+                    for run in t.buffer.layout_runs() {
+                        w = w.max(run.line_w);
+                        bottom = bottom.max(run.line_top + run.line_height);
+                    }
+                    (t.x.to_bits(), t.y.to_bits(), t.color.0, m.font_size.to_bits()).hash(h);
+                    t.bounds.map(|b| b.map(f32::to_bits)).hash(h);
+                    t.clip_circle.map(|c| c.map(f32::to_bits)).hash(h);
+                    t.clip_rrect.map(|c| c.map(f32::to_bits)).hash(h);
+                });
+                // Generous: a glyph can overhang its advance box, and the
+                // run's top is not the ink's.
+                let pad = m.font_size.max(m.line_height);
+                let (x, y) = (t.x * s, t.y * s);
+                let b = (
+                    (x - pad).floor() as i32,
+                    (y - pad - m.line_height).floor() as i32,
+                    (x + w + pad).ceil() as i32,
+                    (y + bottom + pad).ceil() as i32,
+                );
+                (key, Some(b))
+            })
+            .collect();
+        let images = frame
+            .images
+            .iter()
+            .map(|q| {
+                let key = hash_of(|h| {
+                    (q.image, q.rect.0.to_bits(), q.rect.1.to_bits(), q.rect.2.to_bits(), q.rect.3.to_bits()).hash(h);
+                    (q.alpha.to_bits(), q.z_before, q.clip).hash(h);
+                });
+                let r = q.rect;
+                let b = Some((r.0.floor() as i32 - 1, r.1.floor() as i32 - 1, (r.0 + r.2).ceil() as i32 + 1, (r.1 + r.3).ceil() as i32 + 1));
+                (key, clip_box(b, q.clip), q.image)
+            })
+            .collect();
+        let overlay = (
+            hash_of(|h| bytemuck::cast_slice::<Vertex, u8>(&frame.overlay_verts).hash(h)),
+            verts_box(&frame.overlay_verts, physical),
+        );
+        FrameSig {
+            physical,
+            clear: frame.clear_color.map(f32::to_bits),
+            features: hash_of(|h| frame.plate_features.iter().for_each(|f| f.map(f32::to_bits).hash(h))),
+            batches,
+            texts,
+            images,
+            overlay,
+        }
+    }
+}
+
+/// The boxes that differ between two runs of (key, box), old and new: the
+/// common prefix and suffix are unchanged, and everything between them —
+/// inserted, removed or altered — is damage, where it was AND where it is.
+fn diff_runs<T>(old: &[T], new: &[T], key: impl Fn(&T) -> u64, bx: impl Fn(&T) -> Option<PxBox>) -> Option<PxBox> {
+    let pre = old.iter().zip(new).take_while(|(a, b)| key(a) == key(b)).count();
+    let suf = old[pre..].iter().rev().zip(new[pre..].iter().rev()).take_while(|(a, b)| key(a) == key(b)).count();
+    let mut d = None;
+    for x in &old[pre..old.len() - suf] {
+        d = union_box(d, bx(x).or(Some((i32::MIN / 2, i32::MIN / 2, i32::MAX / 2, i32::MAX / 2))));
+    }
+    for x in &new[pre..new.len() - suf] {
+        d = union_box(d, bx(x).or(Some((i32::MIN / 2, i32::MIN / 2, i32::MAX / 2, i32::MAX / 2))));
+    }
+    d
+}
+
+/// Damage the runner works out for itself, for an app that does not report
+/// its own (`Application::take_damage`): what this frame drew that the last
+/// presented one did not, by diffing the tessellated batches, the text and
+/// the images. The renderer repaints only that (growing it around frosted
+/// plates) and reports only it to the compositor. Until 2026-10-06 every such
+/// frame was a full repaint — a one-button hover change repainted and
+/// recomposited the whole window.
+///
+/// Conservative: anything it cannot see a frame's difference in makes the
+/// frame full — a new size, scale or clear colour, changed plate carves, the
+/// first frame, an app that stages its own text, an image whose pixels were
+/// replaced in place is damaged where it is drawn. `CCE_UI_FULL_DAMAGE=1`
+/// turns it off.
+pub fn derive_damage(frame: &mut BuiltFrame, record: &mut FrameRecord, texts: &[DlText], damage_owed: bool) {
+    static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let off = *OFF.get_or_init(|| std::env::var_os("CCE_UI_FULL_DAMAGE").is_some());
+    let updated = crate::draw::images::take_updated_ids();
+    let sig = FrameSig::of(frame, texts);
+    let prev = record.prev.replace(sig);
+    if off || damage_owed || frame.damage.is_some() || !frame.dl_text {
+        return;
+    }
+    let (Some(prev), Some(cur)) = (prev, record.prev.as_ref()) else { return };
+    if prev.physical != cur.physical || prev.clear != cur.clear || prev.features != cur.features {
+        return;
+    }
+    let mut d = diff_runs(&prev.batches, &cur.batches, |b| b.0, |b| b.1);
+    d = union_box(d, diff_runs(&prev.texts, &cur.texts, |t| t.0, |t| t.1));
+    d = union_box(d, diff_runs(&prev.images, &cur.images, |i| i.0, |i| i.1));
+    if prev.overlay.0 != cur.overlay.0 {
+        d = union_box(d, union_box(prev.overlay.1, cur.overlay.1));
+    }
+    for (_, b, id) in &cur.images {
+        if updated.contains(id) {
+            d = union_box(d, *b);
+        }
+    }
+    let (pw, ph) = cur.physical;
+    let (x0, y0, x1, y1) = d.unwrap_or((0, 0, 1, 1));
+    let (x0, y0) = (x0.clamp(0, pw as i32), y0.clamp(0, ph as i32));
+    let (x1, y1) = (x1.clamp(x0, pw as i32), y1.clamp(y0, ph as i32));
+    if x1 - x0 >= pw as i32 && y1 - y0 >= ph as i32 {
+        return;
+    }
+    frame.damage = Some((x0 as u32, y0 as u32, (x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32));
+    if crate::vk::present_debug() {
+        eprintln!("[vk] derived damage {}x{}+{}+{} of {pw}x{ph}", x1 - x0, y1 - y0, x0, y0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! The builder with no window and no GPU: a mock app, an empty font
@@ -362,5 +565,38 @@ mod tests {
         // And the frame lends the renderer exactly what it built.
         let f2 = f.frame2d();
         assert_eq!((f2.clear_color, f2.damage), (f.clear_color, f.damage));
+    }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+
+    fn k(v: &[(u64, i32)]) -> Vec<(u64, Option<PxBox>)> {
+        v.iter().map(|&(key, x)| (key, Some((x, 0, x + 10, 10)))).collect()
+    }
+
+    /// Unchanged runs are no damage; a changed, inserted or removed item is
+    /// damaged where it was and where it is, and nothing beyond the common
+    /// prefix and suffix is.
+    #[test]
+    fn diff_runs_takes_the_middle() {
+        let (a, b) = (k(&[(1, 0), (2, 20), (3, 40)]), k(&[(1, 0), (2, 20), (3, 40)]));
+        assert_eq!(diff_runs(&a, &b, |x| x.0, |x| x.1), None);
+        let changed = k(&[(1, 0), (9, 25), (3, 40)]);
+        assert_eq!(diff_runs(&a, &changed, |x| x.0, |x| x.1), Some((20, 0, 35, 10)));
+        let inserted = k(&[(1, 0), (7, 60), (2, 20), (3, 40)]);
+        assert_eq!(diff_runs(&a, &inserted, |x| x.0, |x| x.1), Some((60, 0, 70, 10)));
+        let removed = k(&[(1, 0), (3, 40)]);
+        assert_eq!(diff_runs(&a, &removed, |x| x.0, |x| x.1), Some((20, 0, 30, 10)));
+    }
+
+    /// An item with no box (nothing to bound it by) damages everything.
+    #[test]
+    fn an_unbounded_change_is_everything() {
+        let a = vec![(1u64, None)];
+        let b = vec![(2u64, None)];
+        let d = diff_runs(&a, &b, |x: &(u64, Option<PxBox>)| x.0, |x| x.1).unwrap();
+        assert!(d.0 < -1_000_000 && d.2 > 1_000_000);
     }
 }

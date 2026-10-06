@@ -483,6 +483,32 @@ its modules exited, the launcher's backoff grew while nobody was logged in, and 
 StatusNotifierWatcher came back seconds after the next login — Dropbox, starting into the
 gap, reported no tray.
 
+### The runner works out each frame's damage (`backend::frame::derive_damage`, 2026-10-06)
+
+An app that does not report its own damage (`take_damage`, which only cce-grid does) no
+longer repaints its whole window per frame: the Wayland shell diffs the tessellated
+batches (vertex bytes, scissor, clip, plate push, blur flag), the display-list text (line
+text, position, colour, size, clips) and the image quads against the last built frame,
+and damages what changed — where it was and where it is, over the common prefix and
+suffix. Ids whose pixels `update_pixels`/`update_pixel_regions` replaced are damaged where
+drawn. It gives up (full frame) on a new size, scale or clear colour, changed plate
+carves, a frame owed after a skipped present, an app that stages its own text
+(`display_list_text` false), and a 3D backdrop. `CCE_UI_FULL_DAMAGE=1` turns it off;
+`CCE_PRESENT_DEBUG` logs each derived rect.
+
+A frosted (blur-behind) batch used to force every frame full. Now the renderer grows the
+partial region instead: a frosted plate the region touches is repainted whole plus its
+blur's reach (`BLUR_REACH_PX`), until nothing more is touched — its blur reads a snapshot
+that is only right inside the region. The first-drawn frosted batch over a transparent
+clear with no scene (the root plate, frosted in every themed app) samples the zeroed
+backdrop instead of a snapshot (`first_frost_exempt`): the same pixels, no copy, and no
+dependence on what lies outside the region. `write_window_info` marks every image stale.
+
+Checked by pixel A/B in a scale-2 shadow, full repaint forced vs derived, the window shot
+after each step: the demo (hover grid, then focus + typing), cce-gallery and the settings
+app's Notifications page matched exactly; differences on its System and Power pages were
+live data (uptime, temperatures, a different saved plan per shadow home).
+
 ### A layer app can have no surface while it is empty (`Application::wants_surface`, 2026-10-05)
 
 A layer-shell app that is usually empty — the notifier, between notifications — returns

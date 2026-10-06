@@ -144,6 +144,9 @@ pub struct EngineState<A: Application> {
     /// A frame took the app's damage (`Application::take_damage`) and was
     /// not presented: the next presented frame is a full one.
     pub damage_owed: bool,
+    /// The last built frame, for the damage the runner derives
+    /// (`backend::frame::derive_damage`).
+    pub frame_record: crate::backend::frame::FrameRecord,
     pub frame_callback_pending: bool,
     /// When the pending frame callback was armed — the starvation fallback's
     /// clock (see the render gate in `run`).
@@ -456,7 +459,8 @@ impl<A: Application> EngineState<A> {
         }
         
         // The frame itself, built with no window system in it (`backend::frame`).
-        let frame = build_frame(
+        let owed = self.damage_owed;
+        let mut frame = build_frame(
             self.inner.as_mut().unwrap(),
             self.font_system.as_mut().unwrap(),
             LogicalSize::new(logical_w, logical_h),
@@ -464,6 +468,7 @@ impl<A: Application> EngineState<A> {
             &mut self.damage_owed,
             &mut self.dl_text_items,
         );
+        crate::backend::frame::derive_damage(&mut frame, &mut self.frame_record, &self.dl_text_items, owed);
 
         // Upload the frame's glyphs. An app without display-list text owns
         // the renderer's text state itself (it stages via stage_renderer
@@ -2053,6 +2058,7 @@ fn run_session<'l, A: Application>(
         exit: false,
         redraw: false,
         damage_owed: true,
+        frame_record: Default::default(),
         frame_callback_pending: false,
         frame_callback_armed_at: None,
         keepalive_pending: false,
