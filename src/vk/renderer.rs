@@ -435,28 +435,28 @@ pub(crate) fn compile_wgsl(source: &str) -> Vec<u32> {
     naga::back::spv::write_vec(&module, &info, &options, None).expect("SPIR-V write failed")
 }
 
-/// Cached SPIR-V for the always-compiled UI shaders. The daemon-style
-/// consumers (cce-cloud) build a renderer per popup; naga compilation is pure,
-/// so compile each shader once per process.
-pub(crate) fn shader2d_spirv() -> &'static [u32] {
-    static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::SHADER2D))
+/// SPIR-V for the renderer's fixed shaders, compiled from their WGSL by
+/// `build.rs` and embedded. naga used to compile them in every process that
+/// built a renderer, 20-60 ms of each app's launch (nearly all shader2d).
+/// Only the byte-to-word conversion runs here, once per process.
+macro_rules! precompiled_spirv {
+    ($name:ident, $file:literal) => {
+        pub(crate) fn $name() -> &'static [u32] {
+            static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
+            SPIRV.get_or_init(|| {
+                include_bytes!(concat!(env!("OUT_DIR"), "/", $file))
+                    .chunks_exact(4)
+                    .map(|w| u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+                    .collect()
+            })
+        }
+    };
 }
 
-pub(crate) fn glyph_spirv() -> &'static [u32] {
-    static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::GLYPH))
-}
-
-pub(crate) fn scene3d_spirv() -> &'static [u32] {
-    static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::SCENE3D))
-}
-
-pub(crate) fn scene3d_image_spirv() -> &'static [u32] {
-    static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
-    SPIRV.get_or_init(|| compile_wgsl(crate::draw::shaders::SCENE3D_IMAGE))
-}
+precompiled_spirv!(shader2d_spirv, "shader2d.spv");
+precompiled_spirv!(glyph_spirv, "glyph.spv");
+precompiled_spirv!(scene3d_spirv, "scene3d.spv");
+precompiled_spirv!(scene3d_image_spirv, "scene3d_image.spv");
 
 /// Like [`compile_wgsl`], but with naga's RAY_QUERY capability and SPIR-V 1.4
 /// (required by SPV_KHR_ray_query). Only used on devices where the ray-query
@@ -2541,6 +2541,25 @@ mod tests {
     ///
     /// Reads the struct out of the shader source rather than duplicating its
     /// shape here, so it measures the thing it is guarding.
+    /// build.rs compiles the fixed shaders with its own copy of
+    /// `compile_wgsl`'s options. If the two drift, the embedded SPIR-V is no
+    /// longer what this crate means by the shader; compare word for word.
+    #[test]
+    fn precompiled_spirv_matches_runtime_compile() {
+        let cases: [(&str, &str, fn() -> &'static [u32]); 4] = [
+            ("shader2d", crate::draw::shaders::SHADER2D, super::shader2d_spirv),
+            ("glyph", crate::draw::shaders::GLYPH, super::glyph_spirv),
+            ("scene3d", crate::draw::shaders::SCENE3D, super::scene3d_spirv),
+            ("scene3d_image", crate::draw::shaders::SCENE3D_IMAGE, super::scene3d_image_spirv),
+        ];
+        for (name, source, precompiled) in cases {
+            assert!(
+                super::compile_wgsl(source) == precompiled(),
+                "{name}: build.rs output differs from compile_wgsl"
+            );
+        }
+    }
+
     #[test]
     fn window_info_layout_matches_the_uniform_size() {
         let src = crate::draw::shaders::SHADER2D;

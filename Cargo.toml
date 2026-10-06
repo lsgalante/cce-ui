@@ -224,3 +224,9 @@ crate-type = ["cdylib"]
 [[example]]
 name = "demo_web"
 crate-type = ["cdylib"]
+
+[build-dependencies]
+# build.rs compiles the fixed WGSL shaders to SPIR-V once, instead of in every
+# process that builds a renderer. Same version as the runtime dependency above,
+# which still compiles the shaders made at run time.
+naga = { version = "24", features = ["wgsl-in", "spv-out"] }
