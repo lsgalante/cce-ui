@@ -30,6 +30,12 @@ pub const IDLE_DISPATCH: Duration = Duration::from_millis(1000);
 /// commit), while a continuously committing surface is serviced in one frame
 /// (~16ms). A short warm-down keeps interactive sequences (hover, typing,
 /// scrolling) in the healthy continuous regime; idle still idles.
+///
+/// A warm-down step need not draw: the Wayland shell commits a frame callback
+/// with no buffer (`EngineState::keepalive_commit`). Until 2026-10-05 it
+/// re-rendered the whole frame and presented it with full damage — about 12
+/// identical frames after every hover or keystroke, each re-blurred by the
+/// compositor.
 pub const WARM_DOWN: Duration = Duration::from_millis(200);
 
 /// Upper bound on an idle sleep. The loop is woken early by any event the
@@ -89,7 +95,8 @@ pub trait Shell {
     fn configured(&self) -> bool;
 
     /// Build and present a frame. `fresh` is a frame something asked for;
-    /// otherwise it is a warm-down re-render (see [`WARM_DOWN`]).
+    /// otherwise it is a warm-down step (see [`WARM_DOWN`]): nothing changed,
+    /// so a shell that can keep its pacing without drawing should.
     fn present(&mut self, fresh: bool);
 }
 

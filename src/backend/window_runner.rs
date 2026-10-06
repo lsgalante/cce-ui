@@ -142,6 +142,11 @@ pub struct EngineState<A: Application> {
     /// When the pending frame callback was armed — the starvation fallback's
     /// clock (see the render gate in `run`).
     pub frame_callback_armed_at: Option<std::time::Instant>,
+    /// A warm-down commit's frame callback is outstanding (see
+    /// [`EngineState::keepalive_commit`]). Separate from
+    /// `frame_callback_pending` on purpose: a genuine redraw never waits on it.
+    pub keepalive_pending: bool,
+    pub keepalive_armed_at: Option<std::time::Instant>,
     /// Consecutive renders skipped by the extent gate (pending swapchain size
     /// != the size the current logical size and scale call for). Normally 0 or
     /// 1; a persistent count means no frame is presenting and deserves a warn.
@@ -673,8 +678,15 @@ impl<A: Application> Shell for EngineState<A> {
 
     fn present(&mut self, fresh: bool) {
         if !fresh {
-            // A warm-down re-render: the window alone.
-            self.render();
+            // A warm-down step: the window alone, and nothing drawn — the
+            // pixels have not changed. An occluded surface gets no callbacks;
+            // past 250 ms stop waiting for one, as the starvation fallback does
+            // for a real frame.
+            let waiting = self.keepalive_pending
+                && self.keepalive_armed_at.is_some_and(|t| t.elapsed().as_millis() < 250);
+            if !waiting {
+                self.keepalive_commit();
+            }
             return;
         }
         // A menu handed over from the window commits first, so
@@ -686,6 +698,48 @@ impl<A: Application> Shell for EngineState<A> {
         self.render();
         if !lead {
             self.render_menu_popup();
+        }
+    }
+}
+
+impl<A: Application> EngineState<A> {
+    /// One warm-down step: a frame callback and a commit with no buffer, so
+    /// the compositor keeps servicing this surface's callbacks at vsync
+    /// (sparse commits were measured getting theirs 22-128 ms late) while
+    /// nothing is drawn, uploaded or re-composited. wlroots schedules an
+    /// output frame for a commit that asks for a callback, so it arrives
+    /// without any damage.
+    fn keepalive_commit(&mut self) {
+        let Some(ref surface) = self.surface else { return };
+        let _callback = surface.frame(&self.qh, KeepAlive);
+        surface.commit();
+        self.keepalive_pending = true;
+        self.keepalive_armed_at = Some(std::time::Instant::now());
+        if crate::vk::present_debug() {
+            eprintln!("[vk] t={} armed keepalive callback", debug_clock_ms());
+        }
+    }
+}
+
+/// User data of a warm-down frame callback ([`EngineState::keepalive_commit`]),
+/// which clears `keepalive_pending` rather than `frame_callback_pending`.
+pub struct KeepAlive;
+
+impl<A: Application> wayland_client::Dispatch<wl_callback::WlCallback, KeepAlive> for EngineState<A> {
+    fn event(
+        state: &mut Self,
+        _proxy: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        _data: &KeepAlive,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event {
+            state.keepalive_pending = false;
+            if crate::vk::present_debug() {
+                let waited = state.keepalive_armed_at.map(|a| a.elapsed().as_millis()).unwrap_or(0);
+                eprintln!("[vk] t={} keepalive-done (waited {}ms)", debug_clock_ms(), waited);
+            }
         }
     }
 }
@@ -1895,6 +1949,8 @@ fn run_session<'l, A: Application>(
         damage_owed: true,
         frame_callback_pending: false,
         frame_callback_armed_at: None,
+        keepalive_pending: false,
+        keepalive_armed_at: None,
         extent_gate_skips: 0,
         first_configure_received: false,
         driver: Driver::new(),
