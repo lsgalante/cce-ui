@@ -3324,6 +3324,16 @@ pub fn scrollbar_width() -> f32 {
     *SCROLLBAR_WIDTH.read().unwrap()
 }
 
+/// The thickness of a CENTRED scrollbar — one that rides the centre line of
+/// what it scrolls, over the content and behind the host's plate until a
+/// scroll raises it (the params pane, the spreadsheet, a sink-behind
+/// `ScrollRegion`, the designer's dialog). [`scrollbar_width`] widened by
+/// 1.6: over rows rather than in a lane of its own, the stock width reads
+/// too slim.
+pub fn centred_scrollbar_width() -> f32 {
+    scrollbar_width() * 1.6
+}
+
 pub fn set_scrollbar_width(width: f32) {
     if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
         *lock = width;

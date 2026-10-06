@@ -178,7 +178,6 @@ pub struct TreeList {
     pub clicked_item: Option<TreeElement>,
     pub right_clicked_section: Option<String>,
     pub last_scroll_y: f32,
-    pub scrollbar_activity_timer: f32,
     /// Lights the recess rim (`paint` has no UiContext, so this mirrors focus).
     /// Driven by FocusIn/FocusOut by default; an app whose inline editors float
     /// over the tree (cce-data-editor) overrides it per input event with its own
@@ -196,6 +195,9 @@ impl TreeList {
     pub fn new() -> Adapted<TreeList> {
         let mut scroll_box = ScrollBox::new();
         scroll_box.show_background = false;
+        // The DE's scrollbar: down the tree's centre line, behind its plate
+        // until a scroll raises it (`paint`).
+        scroll_box.sink_behind = true;
         Adapted::new(TreeList {
             base: Widget::new(),
             scroll_box,
@@ -214,7 +216,6 @@ impl TreeList {
             clicked_item: None,
             right_clicked_section: None,
             last_scroll_y: 0.0,
-            scrollbar_activity_timer: 0.0,
             focused: false,
             deleted_key_path: None,
             edit_box: TextBox::new(String::new()).with_multiline(false).with_draw_bg_border(true),
@@ -758,6 +759,11 @@ impl Paint for TreeList {
             c
         };
 
+        // 0. The scrollbar's idle copy, BEFORE the plate: sunk behind it, it
+        // shows dimly through the translucent fill and takes no press. The
+        // fore copy fades in over the rows (below) while a scroll holds it.
+        self.scroll_box.paint_scrollbar_pills(pc, 1.0);
+
         // 1. Draw container border and background. A true fill + border ring
         // (not the legacy full-rect border punched out by the background quad,
         // which read as a whole-pane border_color wash once the background
@@ -794,31 +800,6 @@ impl Paint for TreeList {
         quads.push((list_left + 180.0, y + offset_y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
         quads.push((list_left + 235.0, y + offset_y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
 
-        // Helper to collect scrollbar quads
-        let get_scrollbar_quads = || {
-            let mut sb_quads = Vec::new();
-            let scroll_quads = self.scroll_box.extra_quads();
-            if scroll_quads.len() > 1 {
-                for q in &scroll_quads[1..] {
-                    sb_quads.push((q.0, q.1, q.2, q.3, 0.0, q.4, (false, false, false, false)));
-                }
-            }
-            sb_quads
-        };
-
-        let show_on_top = self.scrollbar_activity_timer > 0.0;
-        let relief_scrollbar = crate::layout::control_relief();
-
-        // If NOT on top, draw scrollbar first (behind items). Relief style
-        // emits prims directly — they land before the quads flush below, so
-        // the ordering matches the flat path.
-        if !show_on_top {
-            if relief_scrollbar {
-                self.scroll_box.paint_scrollbar_relief(pc);
-            } else {
-                quads.extend(get_scrollbar_quads());
-            }
-        }
 
         // 2. Draw items (row backgrounds, separator lines, color previews)
         let list_left = self.scroll_box.base.x;
@@ -940,20 +921,12 @@ impl Paint for TreeList {
             }
         }
 
-        // If on top (scroll activity), the scrollbar draws after the rows —
-        // the relief prims are emitted after the quads flush below.
-        if show_on_top && !relief_scrollbar {
-            quads.extend(get_scrollbar_quads());
-        }
         for (qx, qy, qw, qh, qr, qc, qcorners) in quads {
             if qr > 0.1 {
                 pc.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, qcorners, qc);
             } else {
                 pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
             }
-        }
-        if show_on_top && relief_scrollbar {
-            self.scroll_box.paint_scrollbar_relief(pc);
         }
 
         // Recessed well like a text box or list: the tree floor sits below the
@@ -970,6 +943,10 @@ impl Paint for TreeList {
                 pc.recess(well, radii, depth);
             }
         }
+
+        // The scrollbar's fore copy, over the rows and the well's wall, at
+        // the activity's fade.
+        self.scroll_box.paint_scrollbar_pills(pc, self.scroll_box.scrollbar_fade());
 
         // Row/header labels with the legacy header/list viewport bounds.
         let font = Some(crate::layout::tree_font());
@@ -1209,13 +1186,11 @@ impl Input for TreeList {
         if self.scroll_box.tick(dt, ui) {
             changed = true;
         }
+        // A scroll the tree made itself (following the selection) raises the
+        // bar as a wheel would.
         if (self.scroll_box.scroll_y - self.last_scroll_y).abs() > 0.01 {
             self.last_scroll_y = self.scroll_box.scroll_y;
-            self.scrollbar_activity_timer = 1.0;
-            changed = true;
-        }
-        if self.scrollbar_activity_timer > 0.0 {
-            self.scrollbar_activity_timer = (self.scrollbar_activity_timer - dt).max(0.0);
+            self.scroll_box.notify_scrolled();
             changed = true;
         }
         changed

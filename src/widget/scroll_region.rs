@@ -164,14 +164,22 @@ pub struct ScrollRegion {
     /// sit directly on the window plate (the scrollbar still draws).
     pub draw_frame: bool,
     /// Gap between the vertical bar's right edge and the region's right edge.
-    /// The default 4.0 hugs a framed list's border; page-level bars floating
-    /// over a window plate use [`crate::layout::scrollbar_inset`] for the
-    /// designer's stood-off look.
+    /// The default 4.0 hugs a framed list's border. Edge bars only: a
+    /// [`Self::sink_behind`] region's bars ride the centre lines and ignore it.
     pub edge_inset: f32,
     /// Opt-in raise/sink behavior ([`ScrollbarActivity`]): the bar idles sunk
     /// (host draws it behind its plate via [`Self::push_scrollbar_prims`]) and
     /// is non-interactive until a scroll raises it. Off (the default), the bar
-    /// is always drawn and always grabbable — existing hosts unchanged.
+    /// is always drawn and always grabbable at the right/bottom edge.
+    ///
+    /// **A sink-behind bar rides the CENTRE line of what it scrolls** (since
+    /// 2026-10-06): the vertical bar down the region's middle, the horizontal
+    /// one across the viewport's, crossing there when both scroll — over the
+    /// rows, reserving no lane, [`crate::layout::centred_scrollbar_width`]
+    /// thick. It is the DE's one scrollbar design (the params pane, the
+    /// spreadsheet, the designer's dialog): sunk it is behind the plate and a
+    /// press on its lane is a press on the row under it, so the middle of
+    /// the list costs nothing until a scroll raises the bar there.
     pub sink_behind: bool,
     activity: ScrollbarActivity,
     /// The smooth-scroll driver behind `scroll_x`/`scroll_y`: wheel notches
@@ -346,9 +354,16 @@ impl ScrollRegion {
     }
 
     /// Scrollbar geometry (`ScrollBox::extra_quads`): (sb_x, track_y, sb_w, track_h, thumb_y, thumb_h).
+    /// Centred on the region's width for a [`Self::sink_behind`] region, at the
+    /// right edge (less [`Self::edge_inset`]) otherwise.
     fn scrollbar_geom(&self) -> (f32, f32, f32, f32, f32, f32) {
-        let sb_w = crate::layout::scrollbar_width();
-        let sb_x = self.x + self.w - sb_w - self.edge_inset;
+        let (sb_x, sb_w) = if self.sink_behind {
+            let sb_w = crate::layout::centred_scrollbar_width();
+            (self.x + (self.w - sb_w) * 0.5, sb_w)
+        } else {
+            let sb_w = crate::layout::scrollbar_width();
+            (self.x + self.w - sb_w - self.edge_inset, sb_w)
+        };
         let track_h = self.viewport_h - 8.0;
         let track_y = self.viewport_y + 4.0;
         let visible_ratio = self.viewport_h / self.content_h.max(1.0);
@@ -376,13 +391,19 @@ impl ScrollRegion {
     }
 
     /// Bottom scrollbar geometry, mirroring [`Self::scrollbar_geom`] with the
-    /// axes swapped: (track_x, sb_y, track_w, sb_h, thumb_x, thumb_w). The
+    /// axes swapped: (track_x, sb_y, track_w, sb_h, thumb_x, thumb_w). An edge
     /// track stops short of the vertical bar's strip so the pills never
-    /// overlap in the corner.
+    /// overlap in the corner; a centred one runs the full width across the
+    /// viewport's middle and crosses the vertical bar there.
     fn h_scrollbar_geom(&self) -> (f32, f32, f32, f32, f32, f32) {
-        let sb_h = crate::layout::scrollbar_width();
-        let sb_y = self.y + self.h - sb_h - 4.0;
-        let right_reserve = if self.content_h > self.viewport_h { sb_h + 8.0 } else { 0.0 };
+        let (sb_y, sb_h, right_reserve) = if self.sink_behind {
+            let sb_h = crate::layout::centred_scrollbar_width();
+            (self.viewport_y + (self.viewport_h - sb_h) * 0.5, sb_h, 0.0)
+        } else {
+            let sb_h = crate::layout::scrollbar_width();
+            let reserve = if self.content_h > self.viewport_h { sb_h + 8.0 } else { 0.0 };
+            (self.y + self.h - sb_h - 4.0, sb_h, reserve)
+        };
         let track_x = self.x + 4.0;
         let track_w = self.w - 8.0 - right_reserve;
         let visible_ratio = self.w / self.content_w.max(1.0);
@@ -634,6 +655,12 @@ impl ScrollRegion {
 
     /// The legacy frame, single-drawn: 1px rounded border (focus/hover tinted, from
     /// `List::solid_border`), inset rounded bg, then the scrollbar track and thumb ON TOP.
+    ///
+    /// A [`Self::sink_behind`] region draws no FORE copy here: the host draws
+    /// its rows after this call, and a fore bar drawn before them would sit
+    /// under them. Call [`Self::push_scrollbar_fore`] once the rows are down.
+    /// A framed sink region draws its behind copy here, under the bg fill; a
+    /// frameless one leaves it to the host, under the host's plate.
     pub fn push_prims(&self, pc: &mut dyn crate::layout::RenderTarget) {
         if self.draw_frame {
             let radius = crate::layout::list_corner_radius();
@@ -646,11 +673,13 @@ impl ScrollRegion {
             };
             let all = (true, true, true, true);
             pc.rect_with_radius_corners(border_color, self.x, self.y, self.w, self.h, radius, all);
-            // A sunk sink-behind bar draws here, UNDER the translucent bg fill
-            // (list_bg_color's alpha is 0.3): it shows through dimly, sunk into
-            // the list plate — the designer parameter-pane look, self-contained
-            // for framed regions.
-            if self.sink_behind && !self.activity.raised() {
+            // A sink-behind bar's idle copy draws here, UNDER the translucent
+            // bg fill (list_bg_color's alpha is 0.3): it shows through dimly,
+            // sunk into the list plate — the designer parameter-pane look,
+            // self-contained for framed regions. Always, raised or not: the
+            // fore copy fades in OVER it, so dropping it at the latch would
+            // blink the bar out under a fore copy still at a low alpha.
+            if self.sink_behind {
                 self.push_scrollbar_prims(pc);
             }
             pc.rect_with_radius_corners(
@@ -663,23 +692,29 @@ impl ScrollRegion {
                 all,
             );
         }
-        // Raised (or plain always-on): the bar rides on top. A FRAMELESS
-        // sink-behind region draws no sunk layer here — its rows sit directly
-        // on the host's plate, so the host owns the under-plate emission via
-        // `push_scrollbar_prims`.
-        // The fore copy fades rather than flips, and keeps drawing all the way
-        // out — gating this on `scrollbar_raised` would cut the fade off at the
-        // latch. The tuple path below is deliberately left on the hard flip:
-        // its hosts have no frosted plate for a sunk bar to show through.
-        let fade = self.scrollbar_fade();
-        if fade > 0.001 {
-            self.push_scrollbar_prims_alpha(pc, fade);
+        // A plain region's bar rides on top, always. A sink-behind region's
+        // fore copy is the host's to draw after its rows
+        // (`push_scrollbar_fore`); a FRAMELESS one draws no idle copy here
+        // either — its rows sit directly on the host's plate, so the host
+        // owns the under-plate emission via `push_scrollbar_prims`.
+        if !self.sink_behind {
+            self.push_scrollbar_prims(pc);
+        }
+    }
+
+    /// A sink-behind region's FORE copy, at the activity's fade: draw it
+    /// after the rows. It fades rather than flips and keeps drawing all the
+    /// way out — gating it on `scrollbar_raised` would cut the fade off at
+    /// the latch. Nothing for a plain region, whose bar `push_prims` drew.
+    pub fn push_scrollbar_fore(&self, pc: &mut dyn crate::layout::RenderTarget) {
+        if self.sink_behind {
+            self.push_scrollbar_prims_alpha(pc, self.activity.fade());
         }
     }
 
     /// The pill scrollbars alone (track + thumb, both axes), drawn wherever the
-    /// host calls it. A sink-behind host emits this twice a frame at most:
-    /// under its plate while the bar is sunk, over the content while raised.
+    /// host calls it — a frameless sink-behind host draws its idle copy with
+    /// this, every frame, BEFORE its plate.
     pub fn push_scrollbar_prims(&self, pc: &mut dyn crate::layout::RenderTarget) {
         self.push_scrollbar_prims_alpha(pc, 1.0);
     }
@@ -697,22 +732,31 @@ impl ScrollRegion {
             c[3] *= a;
             c
         };
-        if self.content_h > self.viewport_h {
-            // Track and thumb are pills — half-width radius (the designer look).
-            let (sb_x, track_y, sb_w, track_h, thumb_y, thumb_h) = self.scrollbar_geom();
-            let all = (true, true, true, true);
-            pc.rect_with_radius_corners(dim(crate::color::scrollbar_track_color()), sb_x, track_y, sb_w, track_h, sb_w.min(track_h) * 0.5, all);
-            pc.rect_with_radius_corners(dim(crate::color::scrollbar_thumb_color()), sb_x, thumb_y, sb_w, thumb_h, sb_w.min(thumb_h) * 0.5, all);
+        // Track and thumb are pills — half-width radius (the designer look).
+        // Both tracks before either thumb, so where centred bars cross the
+        // horizontal track does not cover the vertical thumb.
+        let all = (true, true, true, true);
+        let track = dim(crate::color::scrollbar_track_color());
+        let thumb = dim(crate::color::scrollbar_thumb_color());
+        let v = (self.content_h > self.viewport_h).then(|| self.scrollbar_geom());
+        let h = self.h_scroll_active().then(|| self.h_scrollbar_geom());
+        if let Some((sb_x, track_y, sb_w, track_h, _, _)) = v {
+            pc.rect_with_radius_corners(track, sb_x, track_y, sb_w, track_h, sb_w.min(track_h) * 0.5, all);
         }
-        if self.h_scroll_active() {
-            let (track_x, sb_y, track_w, sb_h, thumb_x, thumb_w) = self.h_scrollbar_geom();
-            let all = (true, true, true, true);
-            pc.rect_with_radius_corners(dim(crate::color::scrollbar_track_color()), track_x, sb_y, track_w, sb_h, sb_h.min(track_w) * 0.5, all);
-            pc.rect_with_radius_corners(dim(crate::color::scrollbar_thumb_color()), thumb_x, sb_y, thumb_w, sb_h, sb_h.min(thumb_w) * 0.5, all);
+        if let Some((track_x, sb_y, track_w, sb_h, _, _)) = h {
+            pc.rect_with_radius_corners(track, track_x, sb_y, track_w, sb_h, sb_h.min(track_w) * 0.5, all);
+        }
+        if let Some((sb_x, _, sb_w, _, thumb_y, thumb_h)) = v {
+            pc.rect_with_radius_corners(thumb, sb_x, thumb_y, sb_w, thumb_h, sb_w.min(thumb_h) * 0.5, all);
+        }
+        if let Some((_, sb_y, _, sb_h, thumb_x, thumb_w)) = h {
+            pc.rect_with_radius_corners(thumb, thumb_x, sb_y, thumb_w, sb_h, sb_h.min(thumb_w) * 0.5, all);
         }
     }
 
-    /// Flat background fill for hosts on the tuple pipeline. The scrollbar is
+    /// Flat background fill for hosts on the tuple pipeline. Flat squares on a
+    /// hard flip, the vertical bar only: a sink-behind host wants the prim
+    /// path (pills, both axes, the fade), and every one in the DE is on it. The scrollbar is
     /// split into [`Self::push_scrollbar_quads`] so the host can emit it AFTER
     /// the rows — drawn together, the rows paint over the thumb and it peeks
     /// through the inter-row gaps as dotted segments.
@@ -785,6 +829,11 @@ mod tests {
         let mut r = ScrollRegion::new(40.0, 4.0);
         r.set_rect(10.0, 20.0, 200.0, 100.0);
         r
+    }
+
+    /// The left edge of a sink-behind [`region`]'s centred vertical bar.
+    fn centred_bar_x() -> f32 {
+        10.0 + (200.0 - crate::layout::centred_scrollbar_width()) * 0.5
     }
 
     /// Run the glide out (a no-op with smoothing off in the test host's config).
@@ -926,7 +975,7 @@ mod tests {
         r.update_bounds(10, 20.0, 100.0);
         assert!(!r.scrollbar_raised());
         // Sunk: a press on the bar strip falls through (the plate occludes it).
-        let sb_x = 10.0 + 200.0 - crate::layout::scrollbar_width() - 4.0;
+        let sb_x = centred_bar_x();
         assert!(!r.press(sb_x + 1.0, 50.0));
         assert!(!r.dragging);
         // A wheel scroll raises it in the same frame…
@@ -950,7 +999,7 @@ mod tests {
     fn hover_sustains_but_never_raises() {
         let mut r = region().with_sink_behind(true);
         r.update_bounds(10, 20.0, 100.0);
-        let sb_x = 10.0 + 200.0 - crate::layout::scrollbar_width() - 4.0;
+        let sb_x = centred_bar_x();
         // Hovering the sunk bar's strip does not raise it.
         r.cursor_moved(sb_x + 1.0, 50.0);
         assert!(!r.tick(0.016));
@@ -998,6 +1047,88 @@ mod tests {
         plain.push_quads(&mut under);
         plain.push_scrollbar_quads(&mut over);
         assert_eq!((under.len(), over.len()), (1, 2));
+    }
+
+    /// A sink-behind region's bars ride the centre lines and cross there:
+    /// the vertical bar down the region's middle, the horizontal one across
+    /// the viewport's, the horizontal track running the full width rather
+    /// than stopping short of a corner. Sunk, a press on either lane is a
+    /// press on the rows; raised, it is the bar's.
+    #[test]
+    fn sink_behind_bars_cross_at_the_centre() {
+        let mut r = region().with_sink_behind(true).with_edge_inset(30.0);
+        r.update_bounds(10, 20.0, 100.0);
+        r.set_content_w(500.0);
+        let (sb_x, _, sb_w, _, _, _) = r.scrollbar_geom();
+        assert!((sb_x + sb_w * 0.5 - (10.0 + 100.0)).abs() < 0.01, "vertical bar on the centre line, edge_inset ignored");
+        assert_eq!(sb_w, crate::layout::centred_scrollbar_width());
+        let (track_x, sb_y, track_w, sb_h, _, _) = r.h_scrollbar_geom();
+        assert!((sb_y + sb_h * 0.5 - (20.0 + 50.0)).abs() < 0.01, "horizontal bar on the viewport's centre line");
+        assert_eq!((track_x, track_w), (14.0, 192.0), "the horizontal track crosses, reserving no corner");
+
+        // Sunk: the middle of the list is the rows'.
+        assert!(!r.press(110.0, 50.0));
+        assert!(!r.press(40.0, 70.0));
+        assert!(!r.dragging);
+        // Raised by a scroll, the cross takes the press.
+        r.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
+        assert!(r.press(110.0, 40.0));
+        assert!(r.release());
+        assert!(r.press(40.0, 70.0));
+        assert!(r.release());
+
+        // A plain region keeps its edge bars.
+        let mut plain = region();
+        plain.update_bounds(10, 20.0, 100.0);
+        let (sb_x, _, sb_w, _, _, _) = plain.scrollbar_geom();
+        assert_eq!(sb_x + sb_w, 10.0 + 200.0 - 4.0);
+    }
+
+    /// Records the alpha of every rect a paint emits.
+    #[derive(Default)]
+    struct Alphas(Vec<f32>);
+    impl crate::layout::RenderTarget for Alphas {
+        fn rect(&mut self, color: [f32; 4], _x: f32, _y: f32, _w: f32, _h: f32) {
+            self.0.push(color[3]);
+        }
+        fn text(&mut self, _: &str, _: f32, _: f32, _: f32, _: [f32; 4]) {}
+    }
+
+    /// A sink-behind region's `push_prims` draws the frame and the idle copy
+    /// under its bg, never the fore copy, which would land under the rows the
+    /// host draws next; `push_scrollbar_fore` draws that, at the fade, and
+    /// nothing while the bar is sunk. A plain region's bar is still in
+    /// `push_prims`, and its fore call is quiet.
+    #[test]
+    fn the_fore_copy_is_drawn_after_the_rows() {
+        let mut r = region().with_sink_behind(true);
+        r.update_bounds(10, 20.0, 100.0);
+        let mut prims = Alphas::default();
+        r.push_prims(&mut prims);
+        // border, idle track + thumb, bg — and no fore copy.
+        assert_eq!(prims.0.len(), 4);
+        let mut fore = Alphas::default();
+        r.push_scrollbar_fore(&mut fore);
+        assert!(fore.0.is_empty(), "sunk: no fore copy");
+        r.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
+        r.tick(SCROLL_FADE_SECS * 0.5);
+        let mut prims = Alphas::default();
+        r.push_prims(&mut prims);
+        assert_eq!(prims.0.len(), 4, "raised, the idle copy still lies under the bg");
+        let mut fore = Alphas::default();
+        r.push_scrollbar_fore(&mut fore);
+        assert_eq!(fore.0.len(), 2);
+        let track = crate::color::scrollbar_track_color()[3];
+        assert!(fore.0[0] < track, "half faded in: {} of {}", fore.0[0], track);
+
+        let mut plain = region();
+        plain.update_bounds(10, 20.0, 100.0);
+        let mut prims = Alphas::default();
+        plain.push_prims(&mut prims);
+        assert_eq!(prims.0.len(), 4, "border, bg, track, thumb");
+        let mut fore = Alphas::default();
+        plain.push_scrollbar_fore(&mut fore);
+        assert!(fore.0.is_empty());
     }
 
     #[test]

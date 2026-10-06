@@ -914,6 +914,13 @@ impl ParametersBg {
         self.activity.raised()
     }
 
+    /// How far the bar's FORE copy has faded in, 0..=1: the host draws the
+    /// idle copy before the plate every frame and the fore copy after the
+    /// rows at this alpha, so the raise and the sink are a fade, not a flip.
+    pub fn scrollbar_fade(&self) -> f32 {
+        self.activity.fade()
+    }
+
     /// Re-latch the shared hysteresis with this pane's inputs, returning whether it changed.
     fn recompute_scrollbar_raised(&mut self) -> bool {
         let visible = self.scrollbar_visible();

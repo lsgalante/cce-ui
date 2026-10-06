@@ -2218,3 +2218,53 @@ plate is the host's, before the plate, through `paint_scrollbars(rect,
 ctx, 1.0)` (`scrollbars_shown` says whether there is one) — the plate is
 the host's too. The vertical bar owns the middle of the cross for a drag.
 `the_scrollbars_cross_at_the_body_and_sink_until_scrolled` is the test.
+
+### Every scrollbar rides a centre line, behind the plate
+
+The rule the spreadsheet's cross follows is the DE's one scrollbar design
+(2026-10-06), and every scrolling list and pane in the toolkit offers it:
+
+- **It rides the CENTRE line of what it scrolls** — the vertical bar down
+  the middle of the width, the horizontal one across the middle of the
+  viewport — so with both they cross there. Over the content, reserving no
+  lane. `layout::centred_scrollbar_width()` thick (`scrollbar_width` × 1.6:
+  over rows the stock width reads too slim), pills in the shared track and
+  thumb colours.
+- **It idles BEHIND the host's translucent plate** and takes no press
+  there: a press on its lane is a press on the row under it.
+- **A scroll raises it in front with a fade** (`ScrollbarActivity`): a
+  wheel, a key, a glide or coast in motion, a host's own scroll
+  (`notify_scrolled`), a thumb drag. A pointer over a RAISED bar holds it
+  up; hover never raises a sunk one. With nothing holding it for
+  `SCROLL_ACTIVE_HOLD` it sinks, fading out over `SCROLL_FADE_SECS`.
+- **Two copies, the host's and the widget's.** The idle copy is drawn at
+  full alpha BEFORE the plate, every frame — raised or not, since the fore
+  copy fades in over it and dropping it at the latch would blink the bar.
+  The fore copy is drawn after the content at the activity's `fade()`.
+
+Who draws what:
+
+| Widget | Opt in | Idle copy (before the plate) | Fore copy (after the content) |
+|---|---|---|---|
+| `Spreadsheet` | always | host: `paint_scrollbars(rect, ctx, 1.0)` | the widget's own paint |
+| `ParametersBg` | always | host: `scrollbar_quads()` as pills | host: the same at `scrollbar_fade()` |
+| `ScrollRegion` | `with_sink_behind(true)` | framed: `push_prims`, under its bg; frameless: host, `push_scrollbar_prims` | host: `push_scrollbar_fore` |
+| `ScrollBox` | `sink_behind = true` | host: `paint_scrollbar_pills(pc, 1.0)` | host: `paint_scrollbar_pills(pc, scrollbar_fade())` |
+| `TreeList` | always (its `ScrollBox`) | the widget, under its own plate | the widget, over the rows and the well's wall |
+
+For `ScrollRegion` and `ScrollBox`, sinking IS centring: a region or box
+that does not opt in keeps its always-on bar at the right/bottom edge
+(`edge_inset` applies to those only), and a sink-behind one ignores it.
+A sink-behind `ScrollRegion`'s `push_prims` no longer draws the fore copy,
+which would land under the rows a host draws after it. The tuple path
+(`push_quads` / `push_scrollbar_quads`) is flat squares on a hard flip,
+vertical only; every sink-behind host is on the prim path. The relief
+scrollbar (`paint_relief_scrollbar`, carved groove and bevelled thumb)
+is for edge bars only: shader-lit relief does not fade with a vertex
+alpha. Tests: `sink_behind_bars_cross_at_the_centre`,
+`the_fore_copy_is_drawn_after_the_rows`,
+`a_sink_behind_bar_rides_the_centre_and_sinks_until_scrolled`.
+
+**Not on it, deliberately:** a multi-line `TextBox`'s position indicator
+stays at the right edge, always shown and non-interactive — an editor
+keeps its place marker (the user's call, 2026-10-06).

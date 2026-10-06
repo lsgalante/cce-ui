@@ -206,10 +206,10 @@ impl Spreadsheet {
         })
     }
 
-    /// A bar's thickness — the DE `scrollbar_width` widened, as the params
-    /// pane's bar is, since it sits over cells rather than in a lane.
+    /// A bar's thickness — the DE's centred width, as the params pane's bar
+    /// is, since it sits over cells rather than in a lane.
     fn bar_w() -> f32 {
-        crate::layout::scrollbar_width() * 1.6
+        crate::layout::centred_scrollbar_width()
     }
 
     /// A thumb's length on a track `track` long showing `ratio` of the content.

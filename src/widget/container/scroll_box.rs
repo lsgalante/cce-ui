@@ -67,6 +67,14 @@ pub struct ScrollBox {
     pub show_background: bool,
     pub scrollbar_dragging: bool,
     pub drag_offset_y: f32,
+    /// Opt-in: the bar rides the box's CENTRE line and idles behind the
+    /// host's plate, raised in front by a scroll ([`ScrollbarActivity`]) —
+    /// the DE's one scrollbar design, as a sink-behind `ScrollRegion` has it.
+    /// The host draws the idle copy before its plate and the fore copy after
+    /// its content, both through [`Self::paint_scrollbar_pills`]. Off, the
+    /// bar hugs the right edge and is always grabbable, as it always was.
+    pub sink_behind: bool,
+    activity: crate::widget::ScrollbarActivity,
     /// Smooth-scroll driver behind `scroll_y` (see `ScrollRegion::motion`).
     motion: crate::widget::scroll_motion::ScrollMotion,
 }
@@ -85,8 +93,90 @@ impl ScrollBox {
             show_background: true,
             scrollbar_dragging: false,
             drag_offset_y: 0.0,
+            sink_behind: false,
+            activity: crate::widget::ScrollbarActivity::new(),
             motion: crate::widget::scroll_motion::ScrollMotion::new(),
         }
+    }
+
+    /// The bar's geometry, `(sb_x, track_y, sb_w, track_h, thumb_y,
+    /// thumb_h)`, or `None` while the content fits — the one source for the
+    /// paint, the hit test, the press and the drag. Centred on the box's
+    /// width at [`crate::layout::centred_scrollbar_width`] for a
+    /// [`Self::sink_behind`] box, at the right edge otherwise.
+    fn bar_geom(&self) -> Option<(f32, f32, f32, f32, f32, f32)> {
+        if self.content_h <= self.viewport_h {
+            return None;
+        }
+        let (sb_x, sb_w) = if self.sink_behind {
+            let sb_w = crate::layout::centred_scrollbar_width();
+            (self.base.x + (self.base.w - sb_w) * 0.5, sb_w)
+        } else {
+            let sb_w = crate::layout::scrollbar_width();
+            (self.base.x + self.base.w - sb_w - 4.0, sb_w)
+        };
+        let track_h = self.viewport_h - 8.0;
+        let track_y = self.viewport_y + 4.0;
+        let visible_ratio = self.viewport_h / self.content_h;
+        let thumb_h = if track_h <= 20.0 { track_h } else { (track_h * visible_ratio).clamp(20.0, track_h) };
+        let max_scroll = (self.content_h - self.viewport_h).max(0.0);
+        let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
+        let thumb_y = track_y + scroll_ratio * (track_h - thumb_h);
+        Some((sb_x, track_y, sb_w, track_h, thumb_y, thumb_h))
+    }
+
+    /// Move the thumb so its grab point is at `py`, returning whether the
+    /// offset moved.
+    fn drag_thumb_to(&mut self, py: f32) -> bool {
+        let Some((_, track_y, _, track_h, _, thumb_h)) = self.bar_geom() else { return false };
+        let max_scroll = (self.content_h - self.viewport_h).max(0.0);
+        let target = py - self.drag_offset_y;
+        let ratio = if track_h - thumb_h > 0.0 { ((target - track_y) / (track_h - thumb_h)).clamp(0.0, 1.0) } else { 0.0 };
+        let old = self.scroll_y;
+        self.scroll_y = ratio * max_scroll;
+        (self.scroll_y - old).abs() > 0.01
+    }
+
+    /// Whether the bar is raised in front of the host's plate — the latch,
+    /// which gates input. Always true for a box that does not sink.
+    pub fn scrollbar_raised(&self) -> bool {
+        !self.sink_behind || self.activity.raised()
+    }
+
+    /// How far the fore copy has faded in, 0..=1. Always 1 for a box that
+    /// does not sink.
+    pub fn scrollbar_fade(&self) -> f32 {
+        if self.sink_behind { self.activity.fade() } else { 1.0 }
+    }
+
+    /// The host moved `scroll_y` itself (a scroll to the selection): raise a
+    /// sink-behind bar as a wheel would.
+    pub fn notify_scrolled(&mut self) {
+        if self.sink_behind {
+            self.activity.bump();
+            self.activity.recompute(self.content_h > self.viewport_h, self.scrollbar_dragging);
+        }
+    }
+
+    /// The bar as flat pills in the track and thumb colours, scaled to
+    /// `alpha` — what a sink-behind host draws twice: the idle copy at 1
+    /// BEFORE its plate, and the fore copy at [`Self::scrollbar_fade`]
+    /// after its content. (The relief bar is not used for a sinking one:
+    /// shader-lit relief does not fade with a vertex alpha.)
+    pub fn paint_scrollbar_pills(&self, pc: &mut crate::scene::paint::PaintCtx, alpha: f32) {
+        let a = alpha.clamp(0.0, 1.0);
+        let Some((sb_x, track_y, sb_w, track_h, thumb_y, thumb_h)) = self.bar_geom() else { return };
+        if a <= 0.001 {
+            return;
+        }
+        let dim = |mut c: [f32; 4]| {
+            c[3] *= a;
+            c
+        };
+        use crate::scene::layout::Rect;
+        let all = (true, true, true, true);
+        pc.rounded_rect(Rect { x: sb_x, y: track_y, width: sb_w, height: track_h }, sb_w.min(track_h) * 0.5, all, dim(crate::color::scrollbar_track_color()));
+        pc.rounded_rect(Rect { x: sb_x, y: thumb_y, width: sb_w, height: thumb_h }, sb_w.min(thumb_h) * 0.5, all, dim(crate::color::scrollbar_thumb_color()));
     }
 
     pub fn update_bounds(&mut self, content_h: f32, viewport_y: f32, viewport_h: f32) {
@@ -109,17 +199,16 @@ impl ScrollBox {
         self.motion.is_animating()
     }
 
+    /// Whether `(px, py)` is on the bar's strip (±4px slop). A sunk bar is
+    /// behind the host's plate and is never hit: a press on its lane is a
+    /// press on the content under it.
     pub fn hit_test_scrollbar(&self, px: f32, py: f32) -> bool {
-        if self.content_h <= self.viewport_h {
+        if !self.scrollbar_raised() {
             return false;
         }
-        let sb_w = crate::layout::scrollbar_width();
-        let sb_x = self.base.x + self.base.w - sb_w - 4.0;
-        let sb_track_h = self.viewport_h - 8.0;
-        let sb_track_y = self.viewport_y + 4.0;
-
-        px >= sb_x - 4.0 && px <= sb_x + sb_w + 4.0
-            && py >= sb_track_y && py <= sb_track_y + sb_track_h
+        self.bar_geom().is_some_and(|(sb_x, track_y, sb_w, track_h, _, _)| {
+            px >= sb_x - 4.0 && px <= sb_x + sb_w + 4.0 && py >= track_y && py <= track_y + track_h
+        })
     }
 
     /// Screen y for an item at `virtual_y`, or `None` when it doesn't
@@ -178,32 +267,14 @@ impl ScrollBox {
                 if self.hit_test_scrollbar(px, py) {
                     self.claim_focus(ctx);
                     self.scrollbar_dragging = true;
-                    
-                    let sb_track_h = self.viewport_h - 8.0;
-                    let sb_track_y = self.viewport_y + 4.0;
-                    let visible_ratio = self.viewport_h / self.content_h;
-                    let thumb_h = if sb_track_h <= 20.0 {
-                        sb_track_h
-                    } else {
-                        (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-                    };
-                    let max_scroll = (self.content_h - self.viewport_h).max(0.0);
-                    let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
-                    let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
-                    
+                    let (_, _, _, _, thumb_y, thumb_h) = self.bar_geom().expect("a hit bar has geometry");
                     let click_offset = py - thumb_y;
                     if click_offset >= 0.0 && click_offset <= thumb_h {
                         self.drag_offset_y = click_offset;
                     } else {
                         // Clicked outside the thumb: jump thumb center to py
                         self.drag_offset_y = thumb_h / 2.0;
-                        let target_thumb_y = py - self.drag_offset_y;
-                        let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
-                            ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                        self.scroll_y = new_scroll_ratio * max_scroll;
+                        self.drag_thumb_to(py);
                     }
                     return true;
                 } else {
@@ -213,7 +284,7 @@ impl ScrollBox {
                     self.claim_focus(ctx);
                 }
             } else if state == ElementState::Released {
-                self.scrollbar_dragging = false;
+                self.end_thumb_drag();
             }
         }
         false
@@ -235,30 +306,19 @@ impl ScrollBox {
         if !self.scrollbar_dragging {
             return false;
         }
-        let sb_track_h = self.viewport_h - 8.0;
-        let sb_track_y = self.viewport_y + 4.0;
-        let visible_ratio = self.viewport_h / self.content_h;
-        let thumb_h = if sb_track_h <= 20.0 {
-            sb_track_h
-        } else {
-            (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-        };
-        let max_scroll = (self.content_h - self.viewport_h).max(0.0);
-        
-        let target_thumb_y = py - self.drag_offset_y;
-        let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
-            ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        
-        let old_scroll = self.scroll_y;
-        self.scroll_y = new_scroll_ratio * max_scroll;
-        (self.scroll_y - old_scroll).abs() > 0.01
+        self.drag_thumb_to(py)
     }
 
     pub fn drag_end(&mut self) {
-        self.scrollbar_dragging = false;
+        self.end_thumb_drag();
+    }
+
+    /// A thumb drag let go: a sink-behind bar lingers for the hold window
+    /// rather than sinking the instant the button lifts.
+    fn end_thumb_drag(&mut self) {
+        if std::mem::take(&mut self.scrollbar_dragging) && self.sink_behind {
+            self.activity.bump();
+        }
     }
 
     /// The legacy `WidgetHost` default `cursor_moved` entry (cce-test-interface's panel copy
@@ -278,29 +338,13 @@ impl ScrollBox {
 
     pub fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let mut changed = false;
-        if self.scrollbar_dragging {
-            let sb_track_h = self.viewport_h - 8.0;
-            let sb_track_y = self.viewport_y + 4.0;
-            let visible_ratio = self.viewport_h / self.content_h;
-            let thumb_h = if sb_track_h <= 20.0 {
-                sb_track_h
-            } else {
-                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-            };
-            let max_scroll = (self.content_h - self.viewport_h).max(0.0);
-            
-            let target_thumb_y = py - self.drag_offset_y;
-            let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
-                ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            
-            let old_scroll = self.scroll_y;
-            self.scroll_y = new_scroll_ratio * max_scroll;
-            if (self.scroll_y - old_scroll).abs() > 0.01 {
-                changed = true;
-            }
+        if self.scrollbar_dragging && self.drag_thumb_to(py) {
+            changed = true;
+        }
+        if self.sink_behind {
+            // Gated on the latch: a sunk bar reports no hover, so hover only
+            // ever holds up a bar a scroll raised.
+            self.activity.set_hover(self.hit_test_scrollbar(px, py));
         }
 
         let was = self.base.hovered;
@@ -318,7 +362,18 @@ impl ScrollBox {
         self.motion.reconcile(0.0, self.scroll_y);
         let moved = self.motion.tick(dt, Bounds::max(0.0), self.bounds_y());
         self.scroll_y = self.motion.y.pos();
-        moved || self.motion.is_animating()
+        let animating = self.motion.is_animating();
+        if !self.sink_behind {
+            return moved || animating;
+        }
+        // A glide or coast in motion holds the bar up as the scroll that
+        // began it did; the hold keeps frames coming until the sink renders.
+        if moved {
+            self.activity.bump();
+        }
+        let holding = self.activity.holding();
+        let flipped = self.activity.tick(dt, self.content_h > self.viewport_h, self.scrollbar_dragging);
+        moved || animating || flipped || holding
     }
 
     pub fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
@@ -326,6 +381,9 @@ impl ScrollBox {
             self.motion.reconcile(0.0, self.scroll_y);
             let changed = self.motion.apply(delta, (LINE_PX, LINE_PX), Bounds::max(0.0), self.bounds_y());
             self.scroll_y = self.motion.y.pos();
+            if changed {
+                self.notify_scrolled();
+            }
             changed
         } else {
             false
@@ -343,26 +401,8 @@ impl ScrollBox {
 
 
         // Scrollbar
-        if self.content_h > self.viewport_h {
-            let sb_w = crate::layout::scrollbar_width();
-            let sb_x = self.base.x + self.base.w - sb_w - 4.0;
-            let sb_track_h = self.viewport_h - 8.0;
-            let sb_track_y = self.viewport_y + 4.0;
-
-            // Track
-            quads.push((sb_x, sb_track_y, sb_w, sb_track_h, crate::color::scrollbar_track_color()));
-
-            // Thumb
-            let visible_ratio = self.viewport_h / self.content_h;
-            let thumb_h = if sb_track_h <= 20.0 {
-                sb_track_h
-            } else {
-                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-            };
-            let max_scroll = (self.content_h - self.viewport_h).max(0.0);
-            let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
-            let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
-
+        if let Some((sb_x, track_y, sb_w, track_h, thumb_y, thumb_h)) = self.bar_geom() {
+            quads.push((sb_x, track_y, sb_w, track_h, crate::color::scrollbar_track_color()));
             quads.push((sb_x, thumb_y, sb_w, thumb_h, crate::color::scrollbar_thumb_color()));
         }
 
@@ -387,6 +427,14 @@ impl ScrollBox {
     }
 
     pub fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        let moved = self.keyboard_scroll(event, ctx);
+        if moved {
+            self.notify_scrolled();
+        }
+        moved
+    }
+
+    fn keyboard_scroll(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
         // Focus never lands on the box itself (post-6av it is not an `WidgetHost`), and its id is
         // never a tree ancestor of the focused widget — like the legacy address walk, this
         // gate only ever passes via the hover check below.
@@ -471,6 +519,61 @@ unsafe impl Sync for ScrollBox {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sink-behind box's bar rides the centre line, takes no press while
+    /// sunk (the content under its lane does), is raised by a wheel and held
+    /// by a pointer over it, and sinks once nothing holds it; the fore copy
+    /// fades rather than flips. A plain box keeps its edge bar.
+    #[test]
+    fn a_sink_behind_bar_rides_the_centre_and_sinks_until_scrolled() {
+        let mut ui = UiContext::new();
+        let mut sb = ScrollBox::new();
+        sb.sink_behind = true;
+        sb.set_rect(10.0, 20.0, 200.0, 100.0);
+        sb.update_bounds(400.0, 20.0, 100.0);
+        let (sb_x, _, sb_w, _, _, _) = sb.bar_geom().unwrap();
+        assert!((sb_x + sb_w * 0.5 - 110.0).abs() < 0.01, "on the centre line");
+        assert_eq!(sb_w, crate::layout::centred_scrollbar_width());
+
+        // Sunk: the lane is the content's.
+        assert!(!sb.scrollbar_raised());
+        assert!(!sb.hit_test_scrollbar(110.0, 60.0));
+        assert!(!sb.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 60.0, &mut ui));
+        assert!(!sb.scrollbar_dragging);
+        // Hover never raises a sunk bar.
+        sb.on_cursor_moved(110.0, 60.0, &mut ui);
+        sb.tick(0.016, &mut ui);
+        assert!(!sb.scrollbar_raised());
+
+        // A wheel raises it; the fore copy fades in.
+        assert!(sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 60.0, &mut ui));
+        assert!(sb.scrollbar_raised());
+        assert!(sb.tick(0.05, &mut ui));
+        assert!(sb.scrollbar_fade() > 0.0 && sb.scrollbar_fade() < 1.0, "fading in: {}", sb.scrollbar_fade());
+        for _ in 0..1000 {
+            if !sb.is_animating() { break; }
+            sb.tick(1.0 / 60.0, &mut ui);
+        }
+        // Raised, the bar takes the press; a pointer over it holds it up.
+        assert!(sb.hit_test_scrollbar(110.0, 60.0));
+        sb.on_cursor_moved(110.0, 60.0, &mut ui);
+        sb.tick(1.0, &mut ui);
+        assert!(sb.scrollbar_raised(), "held by the pointer");
+        sb.on_cursor_moved(40.0, 60.0, &mut ui);
+        sb.tick(0.016, &mut ui);
+        assert!(!sb.scrollbar_raised(), "unheld, it sinks");
+        for _ in 0..30 {
+            sb.tick(0.016, &mut ui);
+        }
+        assert_eq!(sb.scrollbar_fade(), 0.0);
+
+        let mut plain = ScrollBox::new();
+        plain.set_rect(10.0, 20.0, 200.0, 100.0);
+        plain.update_bounds(400.0, 20.0, 100.0);
+        let (sb_x, _, sb_w, _, _, _) = plain.bar_geom().unwrap();
+        assert_eq!(sb_x + sb_w, 10.0 + 200.0 - 4.0, "a plain box keeps its edge bar");
+        assert!(plain.scrollbar_raised() && plain.hit_test_scrollbar(sb_x + 1.0, 60.0));
+    }
 
     #[test]
     fn test_scroll_box_bounds_scrolling() {
