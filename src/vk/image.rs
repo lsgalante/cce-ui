@@ -40,8 +40,8 @@ use gpu_allocator::MemoryLocation;
 use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 use crate::draw::images::{image_table_built, retire_buffer, take_pending, Pending};
 pub use crate::draw::images::{
-    free_image, recycle_buffer, renderer_epoch, update_pixels, upload_pixels, upload_rgba,
-    upload_rgba_mipmapped, ImageQuad, PixelFormat,
+    free_image, recycle_buffer, renderer_epoch, update_pixel_regions, update_pixels,
+    upload_pixels, upload_rgba, upload_rgba_mipmapped, ImageQuad, PixelFormat, Region,
 };
 
 impl PixelFormat {
@@ -396,6 +396,22 @@ impl ImageStage {
                     }
                     retire_buffer(pixels);
                 }
+                Pending::UpdateRegions { id, pixels, width, height, format, regions } => {
+                    // Only into the picture these regions were cut from. A
+                    // fresh image here would be blank outside them, so a
+                    // mismatch writes nothing; see `update_pixel_regions`.
+                    let matches = self.images.get(&id).is_some_and(|gpu| {
+                        gpu.width == width && gpu.height == height && gpu.format == format
+                    });
+                    if matches {
+                        self.write_regions(
+                            device, allocator, queue, command_pool, id, &pixels, &regions,
+                        );
+                    } else {
+                        log::debug!("image {id}: region update for a {width}x{height} image it no longer matches, dropped");
+                    }
+                    retire_buffer(pixels);
+                }
                 Pending::Free { id } => self.destroy_image(device, allocator, id),
             }
         }
@@ -683,9 +699,48 @@ impl ImageStage {
         id: u32,
         pixels: &[u8],
     ) {
+        let Some(&GpuImage { width, height, .. }) = self.images.get(&id) else {
+            return;
+        };
+        self.write_regions(device, allocator, queue, command_pool, id, pixels, &[(0, 0, width, height)]);
+    }
+
+    /// [`Self::write_into`] for part of the image: each region's texels,
+    /// packed one after another in `pixels`, copied into place in one
+    /// submission. Everything outside the regions keeps what it held.
+    #[allow(clippy::too_many_arguments)]
+    fn write_regions(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        queue: vk::Queue,
+        command_pool: vk::CommandPool,
+        id: u32,
+        pixels: &[u8],
+        regions: &[Region],
+    ) {
         let Some(&GpuImage { image, width, height, mip_levels, .. }) = self.images.get(&id) else {
             return;
         };
+        let mut offset = 0u64;
+        let copies: Vec<vk::BufferImageCopy> = regions
+            .iter()
+            .map(|&(x, y, w, h)| {
+                let copy = vk::BufferImageCopy::default()
+                    .buffer_offset(offset)
+                    .buffer_row_length(w)
+                    .buffer_image_height(h)
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .layer_count(1),
+                    )
+                    .image_offset(vk::Offset3D { x: x as i32, y: y as i32, z: 0 })
+                    .image_extent(vk::Extent3D { width: w, height: h, depth: 1 });
+                offset += (w * h * 4) as u64;
+                copy
+            })
+            .collect();
         unsafe {
             let staging_buffer = {
                 let staging = self.staging_for(device, allocator, pixels.len());
@@ -713,9 +768,9 @@ impl ImageStage {
                 )
                 .unwrap();
             // Unlike a fresh upload this image holds a picture already, and
-            // it is in the layout the shader reads. Every byte is about to be
-            // overwritten, so its old contents need not be preserved — but
-            // the layout transition still has to be spelled out both ways.
+            // it is in the layout the shader reads. Transitioning *from* that
+            // layout (not UNDEFINED) keeps the contents, which a region
+            // update depends on: everything outside its regions must survive.
             device.cmd_pipeline_barrier(
                 cmd,
                 vk::PipelineStageFlags::FRAGMENT_SHADER,
@@ -738,15 +793,7 @@ impl ImageStage {
                 staging_buffer,
                 image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &[vk::BufferImageCopy::default()
-                    .buffer_row_length(width)
-                    .buffer_image_height(height)
-                    .image_subresource(
-                        vk::ImageSubresourceLayers::default()
-                            .aspect_mask(vk::ImageAspectFlags::COLOR)
-                            .layer_count(1),
-                    )
-                    .image_extent(vk::Extent3D { width, height, depth: 1 })],
+                &copies,
             );
             record_levels(device, cmd, image, width, height, mip_levels);
             device.end_command_buffer(cmd).unwrap();

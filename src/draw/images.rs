@@ -42,8 +42,22 @@ pub enum Pending {
     /// Replace the contents of an image that already exists, keeping its
     /// id, its `VkImage` and its descriptor set.
     Update { id: u32, pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat },
+    /// Replace only `regions` of an image that already exists; see
+    /// [`update_pixel_regions`]. `width`, `height` and `format` are the whole
+    /// image's, and an image that no longer matches them is left alone.
+    UpdateRegions {
+        id: u32,
+        pixels: Vec<u8>,
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+        regions: Vec<Region>,
+    },
     Free { id: u32 },
 }
+
+/// A rectangle of an image in texels: `(x, y, width, height)`.
+pub type Region = (u32, u32, u32, u32);
 
 static PENDING: Mutex<Vec<Pending>> = Mutex::new(Vec::new());
 static NEXT_ID: AtomicU32 = AtomicU32::new(1);
@@ -108,6 +122,45 @@ fn queue_upload(pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat, m
 pub fn update_pixels(id: u32, pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat) {
     assert_eq!(pixels.len(), (width * height * 4) as usize, "8888 size mismatch");
     PENDING.lock().unwrap().push(Pending::Update { id, pixels, width, height, format });
+}
+
+/// Replace only the given rectangles of `id`, keeping the rest of what it
+/// holds.
+///
+/// For a streaming caller that knows what changed between two frames — a
+/// page whose engine reports damage. Copying and transferring a scrollbar's
+/// strip instead of the whole picture is the point: at 3840x2400 a full
+/// frame is 35 MB, and the strip a fraction of a percent of it.
+///
+/// `pixels` holds each region's texels tightly packed (`width * 4` bytes a
+/// row, no padding), one region after another in `regions` order. `width`,
+/// `height` and `format` describe the **whole** image and must match the one
+/// `id` names when the queue is drained. If they do not — the image was
+/// never uploaded, was resized, or belongs to a renderer that has since been
+/// replaced — nothing is written: the caller has lost track of what the
+/// image holds and must send the whole picture with [`update_pixels`]. That
+/// is the caller's contract, since only it knows what the rest of the image
+/// should be.
+pub fn update_pixel_regions(
+    id: u32,
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+    format: PixelFormat,
+    regions: Vec<Region>,
+) {
+    let mut bytes = 0usize;
+    for &(x, y, w, h) in &regions {
+        assert!(w > 0 && h > 0, "empty region");
+        assert!(x + w <= width && y + h <= height, "region outside the image");
+        bytes += (w * h * 4) as usize;
+    }
+    assert_eq!(pixels.len(), bytes, "8888 region size mismatch");
+    if regions.is_empty() {
+        retire_buffer(pixels);
+        return;
+    }
+    PENDING.lock().unwrap().push(Pending::UpdateRegions { id, pixels, width, height, format, regions });
 }
 
 /// A pixel buffer to fill, reusing one the renderer has finished with when

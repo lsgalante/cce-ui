@@ -44,7 +44,7 @@ use web_sys::{
     GpuRenderPassColorAttachment, GpuRenderPassDescriptor, GpuRenderPassEncoder, GpuRenderPipeline,
     GpuRenderPipelineDescriptor, GpuSampler, GpuSamplerBindingLayout, GpuSamplerBindingType,
     GpuSamplerDescriptor, GpuShaderModuleDescriptor, GpuStoreOp, GpuTexelCopyBufferInfo,
-    GpuTexelCopyBufferLayout, GpuTexelCopyTextureInfo, GpuTexture, GpuTextureBindingLayout,
+    GpuOrigin3dDict, GpuTexelCopyBufferLayout, GpuTexelCopyTextureInfo, GpuTexture, GpuTextureBindingLayout,
     GpuTextureDescriptor, GpuTextureFormat, GpuTextureSampleType, GpuTextureView,
     GpuTextureViewDescriptor, GpuTextureViewDimension, GpuVertexAttribute, GpuVertexBufferLayout,
     GpuVertexFormat, GpuVertexState, HtmlCanvasElement,
@@ -284,6 +284,25 @@ fn write_texture(queue: &GpuQueue, texture: &GpuTexture, pixels: &[u8], w: u32, 
         &layout,
         &extent(w, h),
     )
+}
+
+/// [`write_texture`] for one rectangle of `texture`, at `(x, y)`: `pixels`
+/// holds just that rectangle, tightly packed.
+fn write_texture_region(
+    queue: &GpuQueue,
+    texture: &GpuTexture,
+    pixels: &[u8],
+    (x, y, w, h): (u32, u32, u32, u32),
+) -> Result<(), JsValue> {
+    let layout = GpuTexelCopyBufferLayout::new();
+    layout.set_bytes_per_row(w * 4);
+    layout.set_rows_per_image(h);
+    let origin = GpuOrigin3dDict::new();
+    origin.set_x(x);
+    origin.set_y(y);
+    let target = GpuTexelCopyTextureInfo::new(texture);
+    target.set_origin_gpu_origin_3d_dict(&origin);
+    queue.write_texture_with_u8_slice_and_gpu_extent_3d_dict(&target, pixels, &layout, &extent(w, h))
 }
 
 /// A two-entry (texture, sampler) bind group for the glyph shader.
@@ -569,6 +588,23 @@ impl WebRenderer {
                     }
                     let img = &self.images[&id];
                     write_texture(&self.queue, &img.texture, &pixels, width, height)?;
+                    retire_buffer(pixels);
+                }
+                Pending::UpdateRegions { id, pixels, width, height, format, regions } => {
+                    // Only into the picture the regions were cut from; see
+                    // `update_pixel_regions` for why a mismatch writes nothing.
+                    if let Some(img) = self
+                        .images
+                        .get(&id)
+                        .filter(|img| img.width == width && img.height == height && img.format == format)
+                    {
+                        let mut offset = 0usize;
+                        for &region in &regions {
+                            let len = (region.2 * region.3 * 4) as usize;
+                            write_texture_region(&self.queue, &img.texture, &pixels[offset..offset + len], region)?;
+                            offset += len;
+                        }
+                    }
                     retire_buffer(pixels);
                 }
                 Pending::Free { id } => {

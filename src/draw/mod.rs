@@ -19,8 +19,8 @@ pub mod scene;
 pub mod shaders;
 
 pub use images::{
-    free_image, recycle_buffer, renderer_epoch, update_pixels, upload_pixels, upload_rgba,
-    upload_rgba_mipmapped, ImageQuad, PixelFormat,
+    free_image, recycle_buffer, renderer_epoch, update_pixel_regions, update_pixels,
+    upload_pixels, upload_rgba, upload_rgba_mipmapped, ImageQuad, PixelFormat, Region,
 };
 
 /// One scissored draw range of a 2D frame. `scissor` is (x, y, w, h) in
