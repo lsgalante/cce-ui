@@ -1801,6 +1801,10 @@ falls back to, and never built from primitives. Apps hold to the same rule.
   or `circle-outline` at its left and the label without it. The text stays the
   row's identity, so hosts that match their own labels still match. A page
   row's `›` and the back band's `‹` are `chevron-right` / `chevron-left`.
+  **A `Dropdown` list honours the same marks** (`mark_column`): a marked
+  option draws its glyph in a column every row then keeps, and the closed
+  trigger shows its value without the mark — so a "View" menu-button marks
+  its switches as a menu does (`a_marked_option_draws_its_glyph`).
 - **The menu popup has images now.** Its renderer used to pass none
   (`images: &[]`). It keeps its OWN copies (`menu_icon_ids`): a glyph painted
   by the window renderer's id is looked up with `icon_source` and uploaded

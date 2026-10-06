@@ -53,6 +53,10 @@ fn monospace_cell_width(font_family: &str, font_size: f32) -> f32 {
 /// The side of a trigger's arrow, the `chevron-down` glyph: the size the
 /// "▼" it replaced drew at in the 10px face it was set in.
 pub(crate) const ARROW_SIDE: f32 = 8.0;
+/// The side of a list row's mark glyph, and the gap after it (see
+/// [`Dropdown::mark_column`]).
+const MARK_SIDE: f32 = 11.0;
+const MARK_GAP: f32 = 6.0;
 /// The arrow's colour: the grey the "▼" was drawn in (raw sRGB, as a text
 /// colour is).
 const ARROW_COLOR: [f32; 4] = [0x83 as f32 / 255.0, 0x83 as f32 / 255.0, 0x8a as f32 / 255.0, 1.0];
@@ -309,13 +313,27 @@ impl Dropdown {
     /// `display_width` (collapsed display text) so the two can't drift.
     const LABEL_INSET: f32 = 38.0;
 
+    /// The width the list keeps for MARKS: an option whose text begins with
+    /// `context_menu::MARK_CHECK` ("✓ "), `MARK_ON` ("● ") or `MARK_OFF`
+    /// ("○ ") is drawn with the check / circle / circle-outline glyph in a
+    /// column at its left and its text after it — the context menu's
+    /// convention, so a "View" menu-button can mark its switches as a menu
+    /// does. When any option is marked every row keeps the column, so the
+    /// labels line up; otherwise the list is as it was.
+    fn mark_column(&self) -> f32 {
+        let marked = self.options.iter().any(|o| crate::widget::context_menu::split_mark(o).0.is_some());
+        if marked { MARK_SIDE + MARK_GAP } else { 0.0 }
+    }
+
     pub fn content_width(&self) -> f32 {
         let font_setting = crate::layout::control_label_font_detached();
         let (font_family, font_size_opt) = crate::layout::parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(12.0);
         let mut max_w = 0.0f32;
+        let marks = self.mark_column();
         for opt in &self.options {
-            let opt_w = text_advance(opt, &font_family, font_size) + Self::LABEL_INSET;
+            let (_, label) = crate::widget::context_menu::split_mark(opt);
+            let opt_w = marks + text_advance(label, &font_family, font_size) + Self::LABEL_INSET;
             if opt_w > max_w {
                 max_w = opt_w;
             }
@@ -329,7 +347,8 @@ impl Dropdown {
         if let Some(ref custom_text) = self.custom_display_text {
             custom_text.clone()
         } else {
-            self.options.get(self.selected).cloned().unwrap_or_default()
+            let opt = self.options.get(self.selected).map(String::as_str).unwrap_or_default();
+            crate::widget::context_menu::split_mark(opt).1.to_string()
         }
     }
 
@@ -781,7 +800,10 @@ impl Dropdown {
         let selected_text = if let Some(ref custom_text) = self.custom_display_text {
             custom_text.clone()
         } else {
-            self.options.get(self.selected).cloned().unwrap_or_default()
+            // A marked option (see `MARK_SIDE`) shows on the trigger without
+            // its mark: the mark is the list's, not the value's.
+            let opt = self.options.get(self.selected).map(String::as_str).unwrap_or_default();
+            crate::widget::context_menu::split_mark(opt).1.to_string()
         };
 
         let (font_family, font_size) = crate::layout::control_label_font_detached_parsed();
@@ -1164,6 +1186,7 @@ impl Paint for Dropdown {
             }
         }
 
+        let marks = self.mark_column();
         for (idx, opt) in self.options.iter().enumerate() {
             let row_top = rows_y + idx as f32 * Self::ROW_H;
             let iy = crate::layout::align_text_y(row_top, Self::ROW_H, 12.0, 0.0);
@@ -1197,7 +1220,14 @@ impl Paint for Dropdown {
             // labels, and the unified box's traveling edge clips identically.
             let bounds = Some([ux, uy, ux + uw, uy + uh]);
             let font = crate::layout::control_label_font_detached();
-            pc.text_with_font_and_bounds(opt, rx + 8.0, iy, 12.0, color_f32, &font, bounds);
+            let (mark, label) = crate::widget::context_menu::split_mark(opt);
+            if let Some(name) = mark {
+                let g = Rect { x: rx + 8.0, y: row_top + 0.5 * (Self::ROW_H - MARK_SIDE), width: MARK_SIDE, height: MARK_SIDE };
+                pc.push_clip_rect(ux, uy, uw, uh);
+                pc.icon(name, g, color_f32);
+                pc.pop_clip_rect();
+            }
+            pc.text_with_font_and_bounds(label, rx + 8.0 + marks, iy, 12.0, color_f32, &font, bounds);
         }
     }
 }
@@ -1679,6 +1709,56 @@ mod tests {
         ];
         assert_eq!(first_char.color, expected_color);
         assert_ne!(last_char.color, expected_color); // color has shifted towards background
+    }
+
+    /// A list whose options carry the context menu's marks draws them as
+    /// glyphs in a column at the left, the labels after it and lined up, and
+    /// the trigger shows its value without the mark — the convention a
+    /// "View" menu-button marks its switches by. Skipped without the icon set.
+    #[test]
+    fn a_marked_option_draws_its_glyph() {
+        if !std::path::Path::new(&crate::icons_dir()).join("check.svg").is_file() {
+            eprintln!("skipped: no icon set");
+            return;
+        }
+        #[derive(Default)]
+        struct Rec {
+            icons: Vec<(String, f32)>,
+            texts: Vec<(String, f32)>,
+        }
+        impl crate::layout::RenderTarget for Rec {
+            fn rect(&mut self, _: [f32; 4], _: f32, _: f32, _: f32, _: f32) {}
+            fn text(&mut self, t: &str, x: f32, _: f32, _: f32, _: [f32; 4]) {
+                self.texts.push((t.to_string(), x));
+            }
+            fn text_with_font_and_bounds(&mut self, t: &str, x: f32, _: f32, _: f32, _: [f32; 4], _: &str, _: Option<[f32; 4]>) {
+                self.texts.push((t.to_string(), x));
+            }
+            fn icon(&mut self, name: &str, r: Rect, _: [f32; 4]) {
+                self.icons.push((name.to_string(), r.x));
+            }
+        }
+        let opts = vec!["✓ Show Grid".to_string(), "Control Panel".to_string(), "○ Opacity 50%".to_string()];
+        let mut dd = Dropdown::new(opts, 0).with_custom_display_text("View");
+        let rect = Rect { x: 10.0, y: 10.0, width: 200.0, height: 24.0 };
+        {
+            let d = dd.inner_mut();
+            d.open = true;
+            d.anim_snap = 1.0;
+        }
+        let mut rec = Rec::default();
+        crate::widget::Paint::draw_popover(dd.inner(), rect, &mut rec);
+        // The trigger band redrawn over the list keeps its arrow; the rest
+        // are the rows' marks.
+        rec.icons.retain(|(n, _)| n != "chevron-down");
+        let names: Vec<&str> = rec.icons.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["check", "circle-outline"]);
+        let x_of = |t: &str| rec.texts.iter().find(|(s, _)| s == t).map(|(_, x)| *x).unwrap_or_else(|| panic!("{t:?} not drawn: {:?}", rec.texts));
+        assert_eq!(x_of("Show Grid"), x_of("Control Panel"), "an unmarked row keeps the mark column");
+        assert!(x_of("Show Grid") > rec.icons[0].1, "the label stands after its mark");
+        assert!(rec.texts.iter().all(|(t, _)| !t.contains(['✓', '○', '●'])), "no mark drawn as text: {:?}", rec.texts);
+        let plain = Dropdown::new(vec!["✓ On".to_string(), "Off".to_string()], 0);
+        assert_eq!(plain.inner().display_text(), "On", "the trigger shows the value without its mark");
     }
 
     /// A trigger that carries nothing but its arrow (the textpick picker)
