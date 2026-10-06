@@ -79,6 +79,20 @@ struct GpuImage {
 }
 
 const MAX_IMAGES: u32 = 256;
+/// Most staging one upload run holds; uploads queued back to back past it
+/// go up as a further run. Keeps a burst of photographs from asking for a
+/// staging buffer the size of all of them at once.
+const RUN_STAGING_BYTES: usize = 64 << 20;
+
+/// One image of an upload run (`ImageStage::upload_run`).
+struct RunItem<'a> {
+    id: u32,
+    pixels: &'a [u8],
+    width: u32,
+    height: u32,
+    format: PixelFormat,
+    mips: bool,
+}
 /// Idle frames before the staging buffer is handed back — about two seconds
 /// at 60 Hz. Long enough that a burst of uploads reuses one buffer, short
 /// enough that a big one-shot upload does not hold its memory.
@@ -365,14 +379,40 @@ impl ImageStage {
             return;
         }
         self.staging_idle = 0;
-        for item in pending {
+        let mut items = pending.into_iter().peekable();
+        while let Some(item) = items.next() {
             match item {
                 Pending::Upload { id, pixels, width, height, format, mips } => {
-                    self.upload(
-                        device, allocator, queue, command_pool, id, &pixels, width, height, format,
-                        mips,
-                    );
-                    retire_buffer(pixels);
+                    // The uploads queued back to back go up together: one
+                    // command buffer, one submit, one wait (`upload_run`).
+                    let mut bytes = pixels.len();
+                    let mut owned = vec![(id, pixels, width, height, format, mips)];
+                    while let Some(Pending::Upload { pixels, .. }) = items.peek() {
+                        if bytes + pixels.len() > RUN_STAGING_BYTES {
+                            break;
+                        }
+                        bytes += pixels.len();
+                        let Some(Pending::Upload { id, pixels, width, height, format, mips }) = items.next() else {
+                            unreachable!()
+                        };
+                        owned.push((id, pixels, width, height, format, mips));
+                    }
+                    let run: Vec<RunItem<'_>> = owned
+                        .iter()
+                        .map(|(id, pixels, width, height, format, mips)| RunItem {
+                            id: *id,
+                            pixels,
+                            width: *width,
+                            height: *height,
+                            format: *format,
+                            mips: *mips,
+                        })
+                        .collect();
+                    self.upload_run(device, allocator, queue, command_pool, &run);
+                    drop(run);
+                    for (_, pixels, ..) in owned {
+                        retire_buffer(pixels);
+                    }
                 }
                 Pending::Update { id, pixels, width, height, format } => {
                     // Same picture, new contents: copy into the image that is
@@ -412,7 +452,15 @@ impl ImageStage {
                     }
                     retire_buffer(pixels);
                 }
-                Pending::Free { id } => self.destroy_image(device, allocator, id),
+                Pending::Free { id } => {
+                    // Frees queued together share one idle wait.
+                    let mut ids = vec![id];
+                    while let Some(Pending::Free { .. }) = items.peek() {
+                        let Some(Pending::Free { id }) = items.next() else { unreachable!() };
+                        ids.push(id);
+                    }
+                    self.destroy_images(device, allocator, &ids);
+                }
             }
         }
     }
@@ -422,15 +470,29 @@ impl ImageStage {
     /// any more: a streaming caller updates in place and never gets here until
     /// it is finished with the image for good.
     fn destroy_image(&mut self, device: &ash::Device, allocator: &mut Allocator, id: u32) {
-        let Some(mut gpu) = self.images.remove(&id) else { return };
+        self.destroy_images(device, allocator, &[id]);
+    }
+
+    /// Tear several images down behind ONE idle wait. Until 2026-10-06 each
+    /// free waited on its own, so leaving a folder of thumbnails ran a
+    /// device-idle per thumbnail.
+    fn destroy_images(&mut self, device: &ash::Device, allocator: &mut Allocator, ids: &[u32]) {
+        let gone: Vec<GpuImage> = ids.iter().filter_map(|id| self.images.remove(id)).collect();
+        if gone.is_empty() {
+            return;
+        }
         unsafe {
             let _ = device.device_wait_idle();
-            device.destroy_image_view(gpu.view, None);
-            device.destroy_image(gpu.image, None);
-            let _ = device.free_descriptor_sets(self.descriptor_pool, &[gpu.descriptor_set]);
         }
-        if let Some(a) = gpu.allocation.take() {
-            let _ = allocator.free(a);
+        for mut gpu in gone {
+            unsafe {
+                device.destroy_image_view(gpu.view, None);
+                device.destroy_image(gpu.image, None);
+                let _ = device.free_descriptor_sets(self.descriptor_pool, &[gpu.descriptor_set]);
+            }
+            if let Some(a) = gpu.allocation.take() {
+                let _ = allocator.free(a);
+            }
         }
     }
 
@@ -497,10 +559,98 @@ impl ImageStage {
         format: PixelFormat,
         mips: bool,
     ) {
-        if self.images.len() as u32 >= MAX_IMAGES {
-            log::error!("image registry full ({MAX_IMAGES}); dropping upload {id}");
+        let one = [RunItem { id, pixels, width, height, format, mips }];
+        self.upload_run(device, allocator, queue, command_pool, &one);
+    }
+
+    /// Upload a run of images in one submission: every image's pixels
+    /// staged side by side in the shared staging buffer, every copy (and mip
+    /// chain) recorded into one command buffer, one submit, one wait. Until
+    /// 2026-10-06 each image was its own submit followed by a queue wait:
+    /// 200 thumbnails took ~70 ms of round trips in one frame.
+    fn upload_run(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        queue: vk::Queue,
+        command_pool: vk::CommandPool,
+        run: &[RunItem<'_>],
+    ) {
+        // Room in the registry, in order; what does not fit is dropped as before.
+        let room = (MAX_IMAGES as usize).saturating_sub(self.images.len());
+        for item in run.iter().skip(room) {
+            log::error!("image registry full ({MAX_IMAGES}); dropping upload {}", item.id);
+        }
+        let run = &run[..run.len().min(room)];
+        if run.is_empty() {
             return;
         }
+        // Each image's pixels at its own offset, 16-byte aligned (a copy's
+        // buffer offset must be a multiple of the texel size).
+        let mut offsets = Vec::with_capacity(run.len());
+        let mut total = 0usize;
+        for item in run {
+            offsets.push(total);
+            total += item.pixels.len().next_multiple_of(16);
+        }
+        let staging_buffer = {
+            let staging = self.staging_for(device, allocator, total);
+            let mapped = staging.allocation.as_mut().unwrap().mapped_slice_mut().unwrap();
+            for (item, &at) in run.iter().zip(&offsets) {
+                mapped[at..at + item.pixels.len()].copy_from_slice(&item.pixels);
+            }
+            staging.buffer
+        };
+        unsafe {
+            let cmd = device
+                .allocate_command_buffers(
+                    &vk::CommandBufferAllocateInfo::default()
+                        .command_pool(command_pool)
+                        .level(vk::CommandBufferLevel::PRIMARY)
+                        .command_buffer_count(1),
+                )
+                .expect("Failed to allocate upload command buffer")[0];
+            device
+                .begin_command_buffer(
+                    cmd,
+                    &vk::CommandBufferBeginInfo::default()
+                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                )
+                .unwrap();
+            for (item, &at) in run.iter().zip(&offsets) {
+                self.record_upload(
+                    device, allocator, cmd, staging_buffer, at as vk::DeviceSize, item.id, item.width,
+                    item.height, item.format, item.mips,
+                );
+            }
+            device.end_command_buffer(cmd).unwrap();
+            let cmds = [cmd];
+            device
+                .queue_submit(queue, &[vk::SubmitInfo::default().command_buffers(&cmds)], vk::Fence::null())
+                .expect("Image upload submit failed");
+            device.queue_wait_idle(queue).expect("Image upload wait failed");
+            device.free_command_buffers(command_pool, &cmds);
+        }
+    }
+
+    /// Create one image and record its upload from `staging_buffer` at
+    /// `offset` into `cmd` (`upload_run` submits it). The view and the
+    /// descriptor set are made here too; nothing reads them before the run's
+    /// wait returns.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn record_upload(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        cmd: vk::CommandBuffer,
+        staging_buffer: vk::Buffer,
+        offset: vk::DeviceSize,
+        id: u32,
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+        mips: bool,
+    ) {
         let mip_levels =
             if mips && self.mips_supported { mip_level_count(width, height) } else { 1 };
         // Each level is blitted from the one above it, so a mipmapped image
@@ -554,32 +704,10 @@ impl ImageStage {
                 .bind_image_memory(image, allocation.memory(), allocation.offset())
                 .expect("Failed to bind user image memory");
 
-            let staging_buffer = {
-                let staging = self.staging_for(device, allocator, pixels.len());
-                staging.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..pixels.len()]
-                    .copy_from_slice(pixels);
-                staging.buffer
-            };
-
             let range = vk::ImageSubresourceRange::default()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
                 .level_count(mip_levels)
                 .layer_count(1);
-            let cmd = device
-                .allocate_command_buffers(
-                    &vk::CommandBufferAllocateInfo::default()
-                        .command_pool(command_pool)
-                        .level(vk::CommandBufferLevel::PRIMARY)
-                        .command_buffer_count(1),
-                )
-                .expect("Failed to allocate upload command buffer")[0];
-            device
-                .begin_command_buffer(
-                    cmd,
-                    &vk::CommandBufferBeginInfo::default()
-                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-                )
-                .unwrap();
             device.cmd_pipeline_barrier(
                 cmd,
                 vk::PipelineStageFlags::TOP_OF_PIPE,
@@ -603,6 +731,7 @@ impl ImageStage {
                 image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[vk::BufferImageCopy::default()
+                    .buffer_offset(offset)
                     .buffer_row_length(width)
                     .buffer_image_height(height)
                     .image_subresource(
@@ -613,13 +742,6 @@ impl ImageStage {
                     .image_extent(vk::Extent3D { width, height, depth: 1 })],
             );
             record_levels(device, cmd, image, width, height, mip_levels);
-            device.end_command_buffer(cmd).unwrap();
-            let cmds = [cmd];
-            device
-                .queue_submit(queue, &[vk::SubmitInfo::default().command_buffers(&cmds)], vk::Fence::null())
-                .expect("Image upload submit failed");
-            device.queue_wait_idle(queue).expect("Image upload wait failed");
-            device.free_command_buffers(command_pool, &cmds);
 
             let view = device
                 .create_image_view(
