@@ -536,7 +536,8 @@ impl<A: Application> EngineState<A> {
         let Some(ti) = self.text_input.clone() else { return };
         // Forced mode: the surface is the compositor's scale-1 space.
         let surface_scale = crate::scale::forced_scale().unwrap_or(1.0);
-        match self.text_input_state.plan(crate::ime::caret(), surface_scale, reset) {
+        let pressed = crate::ime::take_press();
+        match self.text_input_state.plan(crate::ime::caret(), surface_scale, reset, pressed) {
             Send::Nothing => {}
             Send::Enable { rect: [x, y, w, h], reset } => {
                 if reset {

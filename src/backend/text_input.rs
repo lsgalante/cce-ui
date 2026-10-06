@@ -27,6 +27,16 @@
 //!   "enabled" turns the next enable into a plain commit the compositor
 //!   ignores.
 //!
+//! - A press re-announces a field that survives it (`ime::note_press`):
+//!   the next plan that still has a caret commits it again, unchanged, as a
+//!   `Move` to the same rectangle. The compositor raises its on-screen
+//!   keyboard on an enable or commit that follows a touch, and a field that
+//!   was already open (a focused terminal, a text box still editing after the
+//!   board was dismissed) would otherwise send nothing when tapped again. A
+//!   press that ends the editing disables instead, so tapping away never
+//!   flashes the board; a mouse click re-commits too, and the compositor
+//!   ignores it, since no finger armed the board.
+//!
 //! The pure part — what a batch does, and what state to send — is
 //! [`Batch::apply_order`] and [`TextInput::plan`], tested with no
 //! compositor.
@@ -103,15 +113,16 @@ impl TextInput {
     /// What the state should become, given the editing widget's caret
     /// (`ime::caret`, in the app's logical px), the surface's px per
     /// logical px, and whether a widget asked for its composition to be
-    /// cancelled. Records the new state as sent.
-    pub fn plan(&mut self, caret: Option<[f32; 4]>, surface_scale: f32, reset: bool) -> Send {
+    /// cancelled, and whether a press landed since the last plan (an open
+    /// field is then committed again). Records the new state as sent.
+    pub fn plan(&mut self, caret: Option<[f32; 4]>, surface_scale: f32, reset: bool, pressed: bool) -> Send {
         let rect = caret.map(|[x, y, w, h]| {
             let s = surface_scale;
             [(x * s).round() as i32, (y * s).round() as i32, ((w * s).round() as i32).max(1), ((h * s).round() as i32).max(1)]
         });
         let send = match (self.entered, rect) {
             (true, Some(rect)) if !self.enabled || reset => Send::Enable { rect, reset: self.enabled && reset },
-            (true, Some(rect)) if self.sent_rect != Some(rect) => Send::Move { rect },
+            (true, Some(rect)) if self.sent_rect != Some(rect) || pressed => Send::Move { rect },
             (true, Some(_)) => Send::Nothing,
             (true, None) if self.enabled => Send::Disable,
             _ => Send::Nothing,
@@ -197,23 +208,23 @@ mod tests {
         let mut ti = TextInput::default();
         let caret = Some([10.0, 20.0, 1.5, 16.0]);
         // Editing, but not yet entered: nothing to say.
-        assert_eq!(ti.plan(caret, 1.0, false), Send::Nothing);
+        assert_eq!(ti.plan(caret, 1.0, false, false), Send::Nothing);
         ti.enter();
-        assert_eq!(ti.plan(caret, 1.0, false), Send::Enable { rect: [10, 20, 2, 16], reset: false });
-        assert_eq!(ti.plan(caret, 1.0, false), Send::Nothing);
+        assert_eq!(ti.plan(caret, 1.0, false, false), Send::Enable { rect: [10, 20, 2, 16], reset: false });
+        assert_eq!(ti.plan(caret, 1.0, false, false), Send::Nothing);
         // The caret moves; at a forced scale of 2 the surface is twice the app.
-        assert_eq!(ti.plan(Some([30.0, 20.0, 1.5, 16.0]), 2.0, false), Send::Move { rect: [60, 40, 3, 32] });
+        assert_eq!(ti.plan(Some([30.0, 20.0, 1.5, 16.0]), 2.0, false, false), Send::Move { rect: [60, 40, 3, 32] });
         // A widget dropped its composition: disable and enable again.
-        assert_eq!(ti.plan(Some([30.0, 20.0, 1.5, 16.0]), 2.0, true), Send::Enable { rect: [60, 40, 3, 32], reset: true });
+        assert_eq!(ti.plan(Some([30.0, 20.0, 1.5, 16.0]), 2.0, true, false), Send::Enable { rect: [60, 40, 3, 32], reset: true });
         // Nothing editing.
-        assert_eq!(ti.plan(None, 1.0, false), Send::Disable);
-        assert_eq!(ti.plan(None, 1.0, false), Send::Nothing);
+        assert_eq!(ti.plan(None, 1.0, false, false), Send::Disable);
+        assert_eq!(ti.plan(None, 1.0, false, false), Send::Nothing);
         assert_eq!(ti.commits, 5, "enable, move, disable + enable, disable");
         // The focus leaves; editing again enables nothing until it is back.
         assert!(!ti.leave(), "nothing enabled, nothing owed");
-        assert_eq!(ti.plan(caret, 1.0, false), Send::Nothing);
+        assert_eq!(ti.plan(caret, 1.0, false, false), Send::Nothing);
         ti.enter();
-        assert!(matches!(ti.plan(caret, 1.0, false), Send::Enable { reset: false, .. }));
+        assert!(matches!(ti.plan(caret, 1.0, false, false), Send::Enable { reset: false, .. }));
     }
 
     #[test]
@@ -221,17 +232,31 @@ mod tests {
         let mut ti = TextInput::default();
         let caret = Some([10.0, 20.0, 1.5, 16.0]);
         ti.enter();
-        ti.plan(caret, 1.0, false);
+        ti.plan(caret, 1.0, false, false);
         assert!(ti.leave(), "wlroots keeps the enabled state across a leave");
         assert_eq!(ti.commits, 2, "the enable, then the disable");
         ti.enter();
-        assert_eq!(ti.plan(caret, 1.0, false), Send::Enable { rect: [10, 20, 2, 16], reset: false });
+        assert_eq!(ti.plan(caret, 1.0, false, false), Send::Enable { rect: [10, 20, 2, 16], reset: false });
+    }
+
+    #[test]
+    fn a_press_on_an_open_field_commits_it_again() {
+        let mut ti = TextInput::default();
+        let caret = Some([10.0, 20.0, 1.5, 16.0]);
+        ti.enter();
+        ti.plan(caret, 1.0, false, false);
+        assert_eq!(ti.plan(caret, 1.0, false, true), Send::Move { rect: [10, 20, 2, 16] }, "unchanged, announced again");
+        assert_eq!(ti.plan(caret, 1.0, false, false), Send::Nothing);
+        // A press that ends the editing only disables.
+        assert_eq!(ti.plan(None, 1.0, false, true), Send::Disable);
+        // A press with nothing editing says nothing.
+        assert_eq!(ti.plan(None, 1.0, false, true), Send::Nothing);
     }
 
     #[test]
     fn a_reset_with_nothing_enabled_is_an_ordinary_enable() {
         let mut ti = TextInput::default();
         ti.enter();
-        assert_eq!(ti.plan(Some([0.0, 0.0, 1.0, 10.0]), 1.0, true), Send::Enable { rect: [0, 0, 1, 10], reset: false });
+        assert_eq!(ti.plan(Some([0.0, 0.0, 1.0, 10.0]), 1.0, true, false), Send::Enable { rect: [0, 0, 1, 10], reset: false });
     }
 }

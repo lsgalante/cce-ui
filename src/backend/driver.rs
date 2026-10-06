@@ -375,6 +375,11 @@ impl Driver {
         if btn == MouseButton::Left {
             close_popovers_missed_by(t.app, lx, ly);
         }
+        // A field still open after the press is announced again, so the
+        // frame must be built (`ime::note_press`).
+        if crate::ime::note_press() {
+            *t.redraw = true;
+        }
 
         let mut rebuild = false;
         let msg = t.app.handle_mouse_input(btn, ElementState::Pressed, pos, &mut rebuild);
@@ -448,6 +453,11 @@ impl Driver {
                     // Outside-press close for open popovers, as the pointer's
                     // press does before the app's own dispatch.
                     close_popovers_missed_by(t.app, x, y);
+                    // A tapped field that stays open is announced again,
+                    // so the on-screen keyboard can follow the tap.
+                    if crate::ime::note_press() {
+                        rebuild = true;
+                    }
                     let pos = LogicalPosition::new(x, y);
                     msg = t.app.handle_mouse_input(MouseButton::Left, ElementState::Pressed, pos, &mut rebuild);
                 }

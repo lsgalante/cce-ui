@@ -1915,6 +1915,28 @@ and `leave` disables an enabled text input: wlroots keeps the enabled state
 across a leave, and a stale "enabled" turns the next enable into a plain
 commit the compositor ignores.
 
+Three things learned taking it to the apps (2026-10-05):
+
+- **A press re-announces an open field.** The compositor reacts only to an
+  enable or a commit right after a touch, and a field already open (a focused
+  terminal claims from the moment it maps; a text box still editing) sends
+  neither when tapped again. So the driver marks a pointer or touch press
+  (`ime::note_press`) and the next plan that still has a caret commits once
+  more, unchanged (`TextInput::plan`'s `pressed`); a press that ends the
+  editing disables instead, so tapping away never flashes the board. A mouse
+  click re-commits too and the compositor ignores it (no finger armed it).
+- **An app that replays cached geometry must replay the claim.** A host that
+  paints its widgets only in a `rebuild_layout` (cce-system-interface,
+  cce-files) claims on rebuild frames alone, and the first replayed frame
+  disables the field: in a shadow the board was already gone two seconds
+  after the tap. Run the rebuild under `text_input::capture` and claim what
+  it returns on every frame.
+- **A widget drawn from its host's aggregates never claims.** `ParametersBg`
+  paints its hosted text boxes, spinboxes, sliders, colours and vectors from
+  its own views, not through their `paint`, so none of their claims ran in
+  the designer; the pane claims for the row being typed into
+  (`claim_typing`), from `paint_ui` as well as `paint`.
+
 ### A host may name the phase; a test may pin the settings (2026-09-30)
 
 The phase a wheel event belongs to (`Finger`, `FingerEnd`, `Wheel`) is a

@@ -73,6 +73,8 @@ struct State {
     caret: Option<[f32; 4]>,
     reported: Option<[f32; 4]>,
     reset: bool,
+    /// A press landed since the shell last asked ([`note_press`]).
+    pressed: bool,
 }
 
 thread_local! {
@@ -134,6 +136,32 @@ pub fn request_reset() {
     STATE.with(|s| s.borrow_mut().reset = true);
 }
 
+/// What this frame has reported so far, replaced by `caret`. For
+/// `text_input::capture`, which reads what one painting reported.
+pub(crate) fn swap_reported(caret: Option<[f32; 4]>) -> Option<[f32; 4]> {
+    STATE.with(|s| std::mem::replace(&mut s.borrow_mut().reported, caret))
+}
+
+/// A pointer or touch press reached the window. A field that is still
+/// editing in the next frame is announced to the shell again
+/// ([`take_press`]): the compositor raises its on-screen keyboard on an
+/// announcement that follows a touch, and a field that was already open —
+/// a focused terminal, a text box still editing — would otherwise say
+/// nothing new when tapped. True when a field is editing, so the caller
+/// builds that frame.
+pub fn note_press() -> bool {
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        s.pressed = true;
+        s.caret.is_some()
+    })
+}
+
+/// Whether a press landed since the last call. A shell's.
+pub fn take_press() -> bool {
+    STATE.with(|s| std::mem::replace(&mut s.borrow_mut().pressed, false))
+}
+
 /// Whether a reset was asked for since the last call. A shell's.
 pub fn take_reset() -> bool {
     STATE.with(|s| std::mem::replace(&mut s.borrow_mut().reset, false))
@@ -177,6 +205,20 @@ mod tests {
         begin_frame();
         end_frame();
         assert_eq!(caret(), None, "a frame with nothing editing");
+    }
+
+    #[test]
+    fn a_press_wants_a_frame_only_while_a_field_is_editing() {
+        begin_frame();
+        end_frame();
+        assert!(!note_press(), "nothing editing: no frame owed");
+        assert!(take_press(), "but the press is still noted");
+        assert!(!take_press(), "once");
+        begin_frame();
+        report_caret(1.0, 2.0, 3.0, 4.0);
+        end_frame();
+        assert!(note_press());
+        assert!(take_press());
     }
 
     #[test]

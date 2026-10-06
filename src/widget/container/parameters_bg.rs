@@ -232,6 +232,43 @@ impl ParametersBg {
         self.focused_param.is_some() && self.code_editor.is_some()
     }
 
+    /// The row open for typing, if any: a code row, or a hosted text box,
+    /// spinbox, slider readout, colour or vector field that is editing. (A
+    /// choice row holds `focused_param` while its list is open; that is not
+    /// typing.)
+    fn typing_row(&self) -> Option<usize> {
+        let i = self.focused_param?;
+        if self.code_editor.is_some() {
+            return Some(i);
+        }
+        fn at<T>(v: &[Option<T>], i: usize) -> Option<&T> {
+            v.get(i).and_then(Option::as_ref)
+        }
+        let typing = at(&self.texts, i).is_some_and(|t| t.editing)
+            || at(&self.spinboxes, i).is_some_and(|t| t.editing)
+            || at(&self.sliders, i).is_some_and(|t| t.editing)
+            || at(&self.colors, i).is_some_and(|t| t.editing)
+            || at(&self.float3s, i).is_some_and(|t| t.editing_idx().is_some());
+        typing.then_some(i)
+    }
+
+    /// Say a field is open for typing (`crate::text_input`): at its row, or
+    /// the pane when the row is not laid out. The hosted fields are drawn
+    /// from this pane's aggregates, never through their own paint, so their
+    /// own claims never run — the pane makes it for them.
+    fn claim_typing(&self, ctx: &PaintCtx) {
+        if let Some(i) = self.typing_row() {
+            let (x, y, w, h) = self
+                .get_param_rects()
+                .get(i)
+                .copied()
+                .filter(|r| r.3 > 0.0)
+                .unwrap_or((self.rect.x, self.rect.y, self.rect.width, self.rect.height));
+            let (ox, oy) = ctx.offset();
+            crate::text_input::claim(x + ox, y + oy, w, h);
+        }
+    }
+
     /// The clipboard, selection and history actions over the code editor:
     /// what the runner's undo / redo chords and the context menu's rows
     /// reach through [`Input::context_action`], and what the editor's own
@@ -2085,6 +2122,7 @@ impl Paint for ParametersBg {
         if !self.visible {
             return;
         }
+        self.claim_typing(ctx);
         self.paint_row_floors(ctx);
         for (qx, qy, qw, qh, qr, qc, corners) in self.rounded_quads(ui) {
             ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
@@ -2137,11 +2175,7 @@ impl Paint for ParametersBg {
     /// runs): the flat subset plus the scrollbar, kept for direct callers only. The background
     /// plate stays out — see [`color`](Paint::color).
     fn paint(&self, _rect: Rect, ctx: &mut PaintCtx) {
-        // A code row open for typing (its fields claim for themselves).
-        if self.code_editing() {
-            let (ox, oy) = ctx.offset();
-            crate::text_input::claim(self.rect.x + ox, self.rect.y + oy, self.rect.width, self.rect.height);
-        }
+        self.claim_typing(ctx);
         for (qx, qy, qw, qh, qc) in self.plain_quads() {
             ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
         }
