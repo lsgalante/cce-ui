@@ -8,7 +8,8 @@
 //! a prelit fill, a fill carrying a wire overlay (the depth-biased fill and
 //! the line pipeline, wires tinted), a see-through translucent fill and the
 //! wires riding it, an image standing in the scene before the translucent
-//! draw, a light the host sets, and a frosted plate over the pane whose
+//! draw, an INSTANCED draw (one white cube drawn for a row of coloured
+//! instances), a light the host sets, and a frosted plate over the pane whose
 //! blur samples the backdrop the scene left.
 
 use cce_ui::engine::{
@@ -50,6 +51,9 @@ struct Meshes {
     sphere_wires: MeshId,
     glass: MeshId,
     glass_wires: MeshId,
+    /// A small white cube, and the row of instances it is drawn for.
+    marker: MeshId,
+    marker_instances: MeshId,
 }
 
 fn r(x: f32, y: f32, w: f32, h: f32) -> Rect {
@@ -219,8 +223,16 @@ impl<const TRACE: bool> Application for Probe3d<TRACE> {
         let glass_c = Vec3::new(1.5, 0.1, 1.2);
         let glass = stage.create_mesh(&cuboid(glass_c, Vec3::splat(0.55), [[0.3, 0.7, 0.9]; 6]));
         let glass_wires = stage.create_mesh(&cuboid_edges(glass_c, Vec3::splat(0.55), [0.9, 0.95, 1.0]));
+        let marker = stage.create_mesh(&cuboid(Vec3::ZERO, Vec3::splat(0.12), [[1.0; 3]; 6]));
+        let row: Vec<Vertex3D> = (0..8)
+            .map(|i| {
+                let t = i as f32 / 7.0;
+                v(Vec3::new(-2.4 + 0.55 * i as f32, -0.58, 1.9), [0.9 - 0.6 * t, 0.4 + 0.4 * t, 0.3 + 0.6 * t])
+            })
+            .collect();
+        let marker_instances = stage.create_mesh(&row);
         stage.set_scene_light([0.6, 0.7, 0.4]);
-        self.meshes = Some(Meshes { background, cube, prelit, sphere, sphere_wires, glass, glass_wires });
+        self.meshes = Some(Meshes { background, cube, prelit, sphere, sphere_wires, glass, glass_wires, marker, marker_instances });
         if TRACE {
             let (tris, mats) = traced_scene();
             stage.set_rt_scene_with_image(&tris, &mats, Some(RtImage { image: self.image, corners: IMAGE_CORNERS, opacity: 0.9 }));
@@ -252,11 +264,13 @@ impl<const TRACE: bool> Application for Probe3d<TRACE> {
             wire_base_width: 0.0,
             prelit: false,
             see_through: false,
+            instances: None,
         };
         let draws = vec![
             draw(m.background),
             SceneDraw { prelit: true, ..draw(m.prelit) },
             draw(m.cube),
+            SceneDraw { instances: Some(m.marker_instances), ..draw(m.marker) },
             SceneDraw { wire_base_width: 1.0, ..draw(m.sphere) },
             SceneDraw { wireframe: true, wire_tint: [1.0, 1.0, 1.0, 0.6], ..draw(m.sphere_wires) },
             SceneDraw { see_through: true, opacity: 0.45, ..draw(m.glass) },
@@ -268,7 +282,7 @@ impl<const TRACE: bool> Application for Probe3d<TRACE> {
             corners: IMAGE_CORNERS,
             mvp,
             opacity: 0.9,
-            before: 5,
+            before: 6,
         }]);
         false
     }

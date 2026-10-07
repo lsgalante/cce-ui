@@ -27,13 +27,13 @@ use web_sys::{
     GpuCullMode, GpuDepthStencilState, GpuDevice, GpuFragmentState, GpuFrontFace, GpuLoadOp, GpuPipelineLayoutDescriptor,
     GpuPrimitiveState, GpuPrimitiveTopology, GpuQueue, GpuRenderPassColorAttachment, GpuRenderPassDepthStencilAttachment,
     GpuRenderPassDescriptor, GpuRenderPipeline, GpuRenderPipelineDescriptor, GpuStoreOp, GpuTexture, GpuTextureFormat,
-    GpuTextureView, GpuVertexAttribute, GpuVertexBufferLayout, GpuVertexFormat, GpuVertexState,
+    GpuTextureView, GpuVertexAttribute, GpuVertexBufferLayout, GpuVertexFormat, GpuVertexState, GpuVertexStepMode,
 };
 
 use super::renderer::{alpha_blending, shader_module, texture, whole_view, Growable};
 use crate::draw::scene::{
     image_quads_3d, scene_uniforms, wire_base_bias, ImageVertex3D, MeshId, SceneDraw, SceneImage, SceneUniforms, Vertex3D,
-    DEFAULT_SCENE_LIGHT,
+    DEFAULT_SCENE_LIGHT, UNIT_INSTANCE,
 };
 use crate::draw::shaders::{SCENE3D, SCENE3D_IMAGE};
 
@@ -74,6 +74,10 @@ pub(crate) struct WebScene {
     uniforms: Growable,
     uniform_group: GpuBindGroup,
     image_verts: Growable,
+    /// The one instance a draw without instances is drawn with
+    /// ([`UNIT_INSTANCE`]), in slot 1 in place of an instance mesh; written
+    /// at every record, being 24 bytes and `new` having no queue.
+    unit_instance: Growable,
     meshes: Vec<Mesh>,
     staged: Option<Staged>,
     pub(crate) light: [f32; 3],
@@ -112,8 +116,18 @@ impl WebScene {
             GpuVertexAttribute::new(GpuVertexFormat::Float32x3, 0, 0),
             GpuVertexAttribute::new(GpuVertexFormat::Float32x3, 12, 1),
         ];
-        let mesh_buffers =
-            [js_sys::JsOption::wrap(GpuVertexBufferLayout::new(std::mem::size_of::<Vertex3D>() as u32, &mesh_attrs))];
+        // Slot 1: the instances a mesh is drawn for (`SceneDraw::instances`),
+        // `Vertex3D`s read as an offset and a colour multiplier.
+        let instance_attrs = [
+            GpuVertexAttribute::new(GpuVertexFormat::Float32x3, 0, 2),
+            GpuVertexAttribute::new(GpuVertexFormat::Float32x3, 12, 3),
+        ];
+        let instance_layout = GpuVertexBufferLayout::new(std::mem::size_of::<Vertex3D>() as u32, &instance_attrs);
+        instance_layout.set_step_mode(GpuVertexStepMode::Instance);
+        let mesh_buffers = [
+            js_sys::JsOption::wrap(GpuVertexBufferLayout::new(std::mem::size_of::<Vertex3D>() as u32, &mesh_attrs)),
+            js_sys::JsOption::wrap(instance_layout),
+        ];
         let target = GpuColorTargetState::new(format);
         target.set_blend(&alpha_blending());
         let targets = [js_sys::JsOption::wrap(target)];
@@ -177,6 +191,7 @@ impl WebScene {
         let uniforms = Growable::new(device, STRIDE * 16, buffer_usage::UNIFORM, "scene-uniforms")?;
         let uniform_group = uniform_group(device, &uniform_layout, &uniforms);
         let image_verts = Growable::new(device, 1024, buffer_usage::VERTEX, "scene-image-quads")?;
+        let unit_instance = Growable::new(device, 64, buffer_usage::VERTEX, "scene-unit-instance")?;
         let l = glam::Vec3::from_array(DEFAULT_SCENE_LIGHT).normalize().to_array();
         Ok(Self {
             format,
@@ -187,6 +202,7 @@ impl WebScene {
             uniforms,
             uniform_group,
             image_verts,
+            unit_instance,
             meshes: Vec::new(),
             staged: None,
             light: l,
@@ -278,6 +294,7 @@ impl WebScene {
         let quad_bytes: &[u8] = bytemuck::cast_slice(&quads);
         self.image_verts.ensure(device, quad_bytes.len() as u32)?;
         self.image_verts.write(queue, quad_bytes)?;
+        self.unit_instance.write(queue, bytemuck::bytes_of(&UNIT_INSTANCE))?;
 
         let color = GpuRenderPassColorAttachment::new_with_gpu_texture_view(GpuLoadOp::Clear, GpuStoreOp::Store, &target.view);
         color.set_clear_value(&[0.0, 0.0, 0.0, 0.0].map(js_sys::Number::from));
@@ -321,6 +338,18 @@ impl WebScene {
             if mesh.count == 0 {
                 continue;
             }
+            // What it is drawn for: an instance mesh, or the one unit
+            // instance that leaves it as it is.
+            let (instances, instance_count) = match draw.instances {
+                Some(id) => match self.meshes.get(id.0) {
+                    Some(m) => (&m.buffer.buffer, m.count),
+                    None => continue,
+                },
+                None => (&self.unit_instance.buffer, 1),
+            };
+            if instance_count == 0 {
+                continue;
+            }
             let pipeline = if draw.wireframe {
                 &self.lines[draw.see_through as usize]
             } else {
@@ -329,7 +358,8 @@ impl WebScene {
             pass.set_pipeline(pipeline);
             pass.set_bind_group_with_u32_slice_and_u32_and_dynamic_offsets_data_length(0, Some(&self.uniform_group), &offset(i), 0, 1)?;
             pass.set_vertex_buffer_with_u32(0, Some(&mesh.buffer.buffer), 0);
-            pass.draw(mesh.count);
+            pass.set_vertex_buffer_with_u32(1, Some(instances), 0);
+            pass.draw_with_instance_count(mesh.count, instance_count);
         }
         draw_images(staged.draws.len())?;
         pass.end();

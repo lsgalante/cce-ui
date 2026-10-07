@@ -13,6 +13,8 @@
 //! backdrop, staged through the same trait.
 
 /// Layout-identical to the app's `geometry::Vertex3D` (bytemuck-castable at cutover).
+/// Also the layout of an INSTANCE (`SceneDraw::instances`): an offset and a
+/// colour.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex3D {
@@ -71,6 +73,16 @@ pub struct SceneDraw {
     /// then order-dependent: the host should submit the triangles back to
     /// front for the current eye. False for an ordinary fill.
     pub see_through: bool,
+    /// Draw `mesh` once per vertex of this mesh — INSTANCED. An instance is
+    /// a [`Vertex3D`] read as where to put the mesh and what colour to give
+    /// it: its position is added to every vertex of `mesh` and its colour
+    /// multiplies theirs, so a white mesh takes each instance's colour. A
+    /// thousand markers are then one small mesh and a thousand instances,
+    /// where they were a thousand copies of the mesh's vertices uploaded
+    /// whole whenever one moved. An instance mesh with no vertices draws
+    /// nothing; `None` draws `mesh` once, as it is (the renderer binds one
+    /// instance at the origin in white, which changes no vertex).
+    pub instances: Option<MeshId>,
 }
 
 /// A user image standing in the 3D scene: a textured quad, unlit, depth
@@ -103,6 +115,11 @@ pub(crate) struct ImageVertex3D {
     position: [f32; 3],
     uv: [f32; 2],
 }
+
+/// The instance a draw without instances is drawn with: at the origin, in
+/// white, which leaves every vertex as it is (`x + 0.0` and `c * 1.0` are
+/// exact).
+pub(crate) const UNIT_INSTANCE: Vertex3D = Vertex3D { position: [0.0; 3], color: [1.0; 3] };
 
 /// `scene3d.wgsl`'s uniform block (`scene3d_image.wgsl` reads its head).
 #[repr(C)]

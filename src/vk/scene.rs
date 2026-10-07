@@ -17,7 +17,7 @@ use gpu_allocator::MemoryLocation;
 use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 
 pub use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
-use crate::draw::scene::{image_quads_3d, scene_uniforms, wire_base_bias, ImageVertex3D, SceneUniforms, DEFAULT_SCENE_LIGHT};
+use crate::draw::scene::{image_quads_3d, scene_uniforms, wire_base_bias, ImageVertex3D, SceneUniforms, DEFAULT_SCENE_LIGHT, UNIT_INSTANCE};
 
 const UNIFORM_SIZE: vk::DeviceSize = std::mem::size_of::<SceneUniforms>() as vk::DeviceSize;
 
@@ -77,6 +77,9 @@ pub(crate) struct SceneStage {
     framebuffer: vk::Framebuffer,
 
     meshes: Vec<Mesh>,
+    /// The one instance a draw without instances is drawn with
+    /// ([`UNIT_INSTANCE`]), bound in binding 1 in place of an instance mesh.
+    unit_instance: AllocatedBuffer,
     frames: Vec<SceneFrame>,
     staged: Option<StagedScene>,
     /// True once the backdrop holds rendered content worth copying to screen.
@@ -204,10 +207,19 @@ impl SceneStage {
                     .module(shader_module)
                     .name(c"fs_main"),
             ];
-            let vertex_bindings = [vk::VertexInputBindingDescription::default()
-                .binding(0)
-                .stride(std::mem::size_of::<Vertex3D>() as u32)
-                .input_rate(vk::VertexInputRate::VERTEX)];
+            // Binding 0 the mesh's vertices, binding 1 the instances it is
+            // drawn for (`SceneDraw::instances`), both `Vertex3D`s: the
+            // instance's position is the offset, its colour the multiplier.
+            let vertex_bindings = [
+                vk::VertexInputBindingDescription::default()
+                    .binding(0)
+                    .stride(std::mem::size_of::<Vertex3D>() as u32)
+                    .input_rate(vk::VertexInputRate::VERTEX),
+                vk::VertexInputBindingDescription::default()
+                    .binding(1)
+                    .stride(std::mem::size_of::<Vertex3D>() as u32)
+                    .input_rate(vk::VertexInputRate::INSTANCE),
+            ];
             let vertex_attributes = [
                 vk::VertexInputAttributeDescription::default()
                     .location(0)
@@ -217,6 +229,16 @@ impl SceneStage {
                 vk::VertexInputAttributeDescription::default()
                     .location(1)
                     .binding(0)
+                    .format(vk::Format::R32G32B32_SFLOAT)
+                    .offset(12),
+                vk::VertexInputAttributeDescription::default()
+                    .location(2)
+                    .binding(1)
+                    .format(vk::Format::R32G32B32_SFLOAT)
+                    .offset(0),
+                vk::VertexInputAttributeDescription::default()
+                    .location(3)
+                    .binding(1)
                     .format(vk::Format::R32G32B32_SFLOAT)
                     .offset(12),
             ];
@@ -523,6 +545,15 @@ impl SceneStage {
             for frame in &frames {
                 Self::write_descriptor(device, frame);
             }
+            let mut unit_instance = create_cpu_buffer(
+                device,
+                allocator,
+                64,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                "scene-unit-instance",
+            );
+            let unit: &[u8] = bytemuck::bytes_of(&UNIT_INSTANCE);
+            unit_instance.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..unit.len()].copy_from_slice(unit);
 
             let mut stage = SceneStage {
                 render_pass,
@@ -550,6 +581,7 @@ impl SceneStage {
                 depth_allocation: None,
                 framebuffer: vk::Framebuffer::null(),
                 meshes: Vec::new(),
+                unit_instance,
                 frames,
                 staged: None,
                 backdrop_valid: false,
@@ -995,6 +1027,18 @@ impl SceneStage {
                 if mesh.count == 0 {
                     continue;
                 }
+                // What it is drawn for: an instance mesh, or the one unit
+                // instance that leaves it as it is.
+                let (instance_buffer, instance_count) = match draw.instances {
+                    Some(id) => {
+                        let instances = &self.meshes[id.0];
+                        (instances.buffer.buffer, instances.count)
+                    }
+                    None => (self.unit_instance.buffer, 1),
+                };
+                if instance_count == 0 {
+                    continue;
+                }
                 let wanted = if draw.wireframe && draw.see_through {
                     self.wireframe_see_through_pipeline
                 } else if draw.wireframe {
@@ -1028,8 +1072,8 @@ impl SceneStage {
                     &[frame.descriptor_set],
                     &[(self.uniform_stride as u32) * i as u32],
                 );
-                device.cmd_bind_vertex_buffers(cmd, 0, &[mesh.buffer.buffer], &[0]);
-                device.cmd_draw(cmd, mesh.count, 1, 0, 0);
+                device.cmd_bind_vertex_buffers(cmd, 0, &[mesh.buffer.buffer, instance_buffer], &[0, 0]);
+                device.cmd_draw(cmd, mesh.count, instance_count, 0, 0);
             }
             draw_images(staged.draws.len(), &mut bound);
             device.cmd_end_render_pass(cmd);
@@ -1051,6 +1095,8 @@ impl SceneStage {
                 let mut buffer = std::mem::replace(&mut mesh.buffer, AllocatedBuffer::null());
                 destroy_cpu_buffer(device, allocator, &mut buffer);
             }
+            let mut unit = std::mem::replace(&mut self.unit_instance, AllocatedBuffer::null());
+            destroy_cpu_buffer(device, allocator, &mut unit);
             device.destroy_descriptor_pool(self.descriptor_pool, None);
             device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
             if let Some(p) = self.wireframe_pipeline.take() {

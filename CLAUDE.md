@@ -202,6 +202,24 @@ image in the scene before the translucent draw, a host light, frost over the pan
 195 px differ by more than 8 levels, all on 1 px wires (where along its length a line
 steps a row is the rasterizer's), everything else within 2.
 
+**A scene draw can be instanced** (since 2026-10-06, `SceneDraw::instances`). A draw
+naming an instance mesh draws its `mesh` once per vertex of that mesh: an instance is a
+`Vertex3D` read as an offset added to every vertex and a colour multiplying theirs, so a
+white mesh takes each instance's colour. `scene3d.wgsl`'s vertex stage takes the instance
+at locations 2 and 3, and every mesh pipeline on both renderers has a second, per-instance
+vertex binding. A draw with `instances: None` is drawn for ONE instance at the origin in
+white (`draw::scene::UNIT_INSTANCE`, a 24-byte buffer each stage keeps), which leaves its
+vertices bit for bit as they were (`x + 0.0`, `c * 1.0`), so nothing that does not ask
+for instancing changed; the pipelines and their count are the same. An instance mesh with
+no vertices draws nothing. It exists for the designer's point markers, which were a
+240-vertex sphere copied to every point and uploaded whole each frame of a playing
+simulation — 46 MB at ten thousand points, where instanced they are 240 KB. The probe has
+a row of instanced cubes, and Vulkan draws it (2026-10-06, a shadow); the WebGPU half
+(`web/scene.rs`: the instance buffer layout with `GpuVertexStepMode::Instance`, slot 1,
+`draw_with_instance_count`) was written alongside and NOT built — this machine's
+toolchain has no wasm32 target — so `scripts/web-probe/probe3d` is the first thing to run
+on one that has.
+
 **And so does the path tracer** (since 2026-10-05). `Stage3D` carries the tracer's half
 too — `set_rt_scene` / `set_rt_scene_with_image`, `set_rt_environment`,
 `set_rt_background`, `stage_rt`, `rt_accumulating` — and what it traces from moved to

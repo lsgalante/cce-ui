@@ -64,21 +64,28 @@ struct VertexOutput {
     @location(2) lit: f32,
 };
 
+// The vertex, and the instance it is drawn for (`SceneDraw::instances`):
+// the instance's offset is added to the vertex and its colour multiplies the
+// vertex's. A draw without instances is drawn for one at the origin in white,
+// which changes nothing.
 @vertex
 fn vs_main(
     @location(0) position: vec3f,
     @location(1) color: vec3f,
+    @location(2) instance_offset: vec3f,
+    @location(3) instance_color: vec3f,
 ) -> VertexOutput {
     var out: VertexOutput;
+    let placed = position + instance_offset;
     if (abs(position.z - 9.99) < 0.01) {
         out.position = vec4f(position.xy, 0.9999, 1.0);
         out.lit = 0.0;
     } else {
-        out.position = uniforms.mvp * vec4f(position, 1.0);
+        out.position = uniforms.mvp * vec4f(placed, 1.0);
         out.lit = 1.0;
     }
-    out.color = color;
-    out.world = position;
+    out.color = color * instance_color;
+    out.world = placed;
     return out;
 }
 
