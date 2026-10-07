@@ -506,7 +506,7 @@ impl<'a> Layouter<'a> {
 
     #[allow(clippy::too_many_arguments)]
     fn text(&mut self, text: &str, x: f32, y: f32, size: f32, color: [f32; 4], bold: bool, italic: bool) {
-        let attrs = TextAttrs { italic, weight: bold.then_some(700) };
+        let attrs = TextAttrs { italic, weight: bold.then_some(700), ..Default::default() };
         let font = self.theme.body_font.clone();
         self.out.draws.push(Draw::Text { text: text.to_string(), x, y, size, color, font, attrs });
     }
@@ -669,7 +669,7 @@ impl<'a> Layouter<'a> {
         Look {
             size,
             font: if code { self.theme.mono_font.clone() } else { self.theme.body_font.clone() },
-            attrs: TextAttrs { italic: s.italic, weight: (s.bold || base.bold).then_some(700) },
+            attrs: TextAttrs { italic: s.italic, weight: (s.bold || base.bold).then_some(700), ..Default::default() },
             color,
             bg: if code {
                 Some(CODE_BG)

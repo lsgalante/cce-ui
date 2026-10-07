@@ -957,12 +957,19 @@ pub struct TextLayout {
 
 /// Optional shaping attributes for a [`Prim::Text`] — the subset a widget can request beyond
 /// family + size. `weight` is the OpenType weight (400 regular, 700 bold); `None` leaves the
-/// family default. Kept toolkit-plain (no cosmic-text types) like the rest of the scene layer;
-/// the backend maps them onto `cosmic_text::Style`/`Weight` at shape time.
+/// family default. `stretch` is the OpenType width class (`usWidthClass`, 1 ultra-condensed
+/// … 5 normal … 9 ultra-expanded); `None` is normal width — what picks a family's Narrow or
+/// Condensed cut over its normal-width sibling at the same weight. Kept toolkit-plain (no
+/// cosmic-text types) like the rest of the scene layer; the backend maps them onto
+/// `cosmic_text::Style`/`Weight`/`Stretch` at shape time.
+///
+/// Build one with `..Default::default()` after the fields you set, so a field added here
+/// does not break every literal in the sibling crates.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct TextAttrs {
     pub italic: bool,
     pub weight: Option<u16>,
+    pub stretch: Option<u16>,
 }
 
 /// A primitive plus the scissor rect it must be clipped to (`None` = unclipped), an

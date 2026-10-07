@@ -163,6 +163,23 @@ thread_local! {
     > = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
+/// The `cosmic_text::Stretch` for an OpenType width class (1–9, clamped; see
+/// [`TextAttrs::stretch`](crate::scene::paint::TextAttrs::stretch)).
+fn stretch_from_width_class(class: u16) -> cosmic_text::Stretch {
+    use cosmic_text::Stretch::*;
+    match class {
+        0 | 1 => UltraCondensed,
+        2 => ExtraCondensed,
+        3 => Condensed,
+        4 => SemiCondensed,
+        5 => Normal,
+        6 => SemiExpanded,
+        7 => Expanded,
+        8 => ExtraExpanded,
+        _ => UltraExpanded,
+    }
+}
+
 /// `attrs` moved onto the nearest face its named family actually has.
 ///
 /// cosmic-text 0.12 takes a face of the requested family only when its style
@@ -374,6 +391,9 @@ pub(crate) fn shared_text_buffer(
     }
     if let Some(w) = text_attrs.weight {
         attrs = attrs.weight(cosmic_text::Weight(w));
+    }
+    if let Some(s) = text_attrs.stretch {
+        attrs = attrs.stretch(stretch_from_width_class(s));
     }
     let attrs = snap_to_family_face(fs, attrs);
     let shaping = shaping_for(fs, text, &family);

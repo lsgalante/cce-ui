@@ -162,7 +162,7 @@ pub fn layout_line(text: &str, line: &preview::Line, active: bool, width: f32, t
         let mono = look.mono || look.code;
         let size = if look.code && !look.mono { (base * 0.92).round() } else { base };
         let font = if mono { th.mono_font.clone() } else { th.body_font.clone() };
-        (font, size, TextAttrs { italic: look.italic, weight: (look.bold || heading).then_some(700) })
+        (font, size, TextAttrs { italic: look.italic, weight: (look.bold || heading).then_some(700), ..Default::default() })
     };
 
     // Where content starts, and the decorations of a hidden prefix.
