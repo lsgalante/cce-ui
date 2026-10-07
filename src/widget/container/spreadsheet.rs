@@ -80,6 +80,36 @@ impl SheetColumn {
         }
     }
 
+    /// The widest cell, in characters, as [`Self::cell`] writes it — worked
+    /// out from the values without writing them: a whole number's widest is
+    /// its least or its greatest, a float's too (the sign and the integer
+    /// digits are what vary; the decimals are fixed), plus `NaN` / `inf` /
+    /// `-inf` where those occur. 0 for an empty column.
+    pub fn max_chars(&self) -> usize {
+        match self {
+            SheetColumn::Text(v) => v.iter().map(|c| c.chars().count()).max().unwrap_or(0),
+            SheetColumn::Int(v) => match (v.iter().min(), v.iter().max()) {
+                (Some(lo), Some(hi)) => lo.to_string().len().max(hi.to_string().len()),
+                _ => 0,
+            },
+            SheetColumn::Float { values, decimals } => {
+                let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+                let mut odd = 0;
+                for &x in values {
+                    if x.is_finite() {
+                        lo = lo.min(x);
+                        hi = hi.max(x);
+                    } else {
+                        odd = odd.max(if x == f32::NEG_INFINITY { 4 } else { 3 });
+                    }
+                }
+                let w = |x: f32| format!("{:.*}", decimals, x).len();
+                let finite = if lo <= hi { w(lo).max(w(hi)) } else { 0 };
+                finite.max(odd)
+            }
+        }
+    }
+
     /// The order of rows `a` and `b` by this column: by value for numbers
     /// (a NaN is equal to anything, so it keeps its place), by
     /// `Spreadsheet::cmp_cells` for text.
@@ -105,10 +135,15 @@ const ROW_H: f32 = 24.0;
 const TRACK_INSET: f32 = 4.0;
 /// How far either side of a bar a press or the pointer still counts as on it.
 const BAR_SLOP: f32 = 4.0;
-/// Columns never squeeze below this: when they don't fit, the pane scrolls
-/// horizontally instead. Sized for a 4-decimal value / a short header plus its
-/// sort mark in the 12px mono label font, with the cell padding on both sides.
-const MIN_COL_W: f32 = 76.0;
+/// A column's width beyond its text: the 8 px a label stands in from the
+/// column's left edge, and the 4 px gutter it is clamped short of the divider
+/// by, with room to spare.
+const CELL_PAD: f32 = 16.0;
+/// Room after a header's name for the sort glyph, in characters — kept
+/// whether or not the column is sorted, so sorting moves no column.
+const SORT_MARK_CHARS: usize = 2;
+/// The narrowest a column is, in characters, so a header is a target.
+const MIN_COL_CHARS: usize = 3;
 
 pub struct Spreadsheet {
     hovered: bool,
@@ -126,6 +161,9 @@ pub struct Spreadsheet {
     /// Header cell the pointer is over — hover tint, like the Processes page's
     /// sortable headers.
     header_hover_col: Option<usize>,
+    /// Each column's width in characters: its header with room for the
+    /// sort glyph, or its widest cell, whichever is wider (`set_columns`).
+    col_chars: Vec<usize>,
     scroll_y: f32,
     dragging_scrollbar: bool,
     drag_offset_y: f32,
@@ -194,6 +232,7 @@ impl Spreadsheet {
             order: Vec::new(),
             sort: None,
             header_hover_col: None,
+            col_chars: Vec::new(),
             scroll_y: 0.0,
             dragging_scrollbar: false,
             drag_offset_y: 0.0,
@@ -240,17 +279,36 @@ impl Spreadsheet {
         })
     }
 
-    /// One column's width: an even share of the pane, floored at [`MIN_COL_W`] —
-    /// past the floor the content overflows into the horizontal scroll.
-    fn col_w(&self, rect: Rect) -> f32 {
-        let n = self.headers.len().max(1) as f32;
-        (rect.width / n).max(MIN_COL_W)
+    /// One character's width in the label font, which is monospace.
+    fn char_w() -> f32 {
+        let fam = crate::layout::control_label_font();
+        (crate::widget::display::measure_text_width("0123456789", &fam, 12.0) / 10.0).max(1.0)
+    }
+
+    /// The columns' edges from the table's left, `n + 1` of them: each
+    /// column is as wide as its content (`col_chars`) — its header and sort
+    /// glyph, or its widest cell — and no wider. The table does not stretch
+    /// to the pane: what is left of a wide pane is left empty, and a table
+    /// wider than the pane scrolls. (Until 2026-10-07 every column was an
+    /// even share of the pane, floored at 76 px, so a point index or a
+    /// group's 0 and 1 took as much room as a four-decimal float.)
+    fn col_edges(&self) -> Vec<f32> {
+        let cw = Self::char_w();
+        let mut edges = Vec::with_capacity(self.headers.len() + 1);
+        let mut x = 0.0;
+        edges.push(x);
+        for i in 0..self.headers.len() {
+            let chars = self.col_chars.get(i).copied().unwrap_or(0).max(MIN_COL_CHARS);
+            x += chars as f32 * cw + CELL_PAD;
+            edges.push(x);
+        }
+        edges
     }
 
     /// Horizontal counterpart of [`geom`]: present only when the column run is
     /// wider than the pane.
     fn hgeom(&self, rect: Rect) -> Option<HScrollGeom> {
-        let content_w = self.col_w(rect) * self.headers.len() as f32;
+        let content_w = self.col_edges().last().copied().unwrap_or(0.0);
         let visible_w = rect.width;
         if visible_w <= 0.0 || content_w <= visible_w {
             return None;
@@ -384,12 +442,9 @@ impl Spreadsheet {
         if px < rect.x || px > rect.x + rect.width || py < rect.y || py >= rect.y + HEADER_H {
             return None;
         }
-        let n = self.headers.len();
-        let col = ((px - rect.x + self.hscroll(rect)) / self.col_w(rect)) as usize;
-        if col >= n {
-            return None;
-        }
-        Some(col)
+        let at = px - rect.x + self.hscroll(rect);
+        let edges = self.col_edges();
+        (0..self.headers.len()).find(|&c| at >= edges[c] && at < edges[c + 1])
     }
 
     /// Scroll to where a thumb dragged to `thumb_x` puts the columns.
@@ -586,11 +641,12 @@ impl Paint for Spreadsheet {
 
         // Vertical column dividers, at scrolled column edges, kept inside the pane.
         let hscroll = self.hscroll(rect);
+        // The last edge too: the table stops short of a wide pane, and the
+        // line says where.
+        let edges = self.col_edges();
         if h > 0.0 && !self.headers.is_empty() {
-            let n_cols = self.headers.len();
-            let cw = self.col_w(rect);
-            for i in 1..n_cols {
-                let dx = x + cw * i as f32 - hscroll;
+            for &edge in &edges[1..] {
+                let dx = x + edge - hscroll;
                 if dx <= x || dx >= x + w {
                     continue;
                 }
@@ -608,18 +664,16 @@ impl Paint for Spreadsheet {
             return;
         }
         let n_cols = self.headers.len();
-        let col_w = self.col_w(rect);
         // Scrolled column origin; columns fully outside the pane skip.
         let xoff = x - hscroll;
         let col_visible = |col: usize| -> bool {
-            let cx0 = xoff + col_w * col as f32;
-            cx0 + col_w > x && cx0 < x + w
+            xoff + edges[col + 1] > x && xoff + edges[col] < x + w
         };
-        if let Some(hc) = self.header_hover_col {
+        if let Some(hc) = self.header_hover_col.filter(|&hc| hc < n_cols) {
             // Subtle hover tint on the clickable header cell (the Processes-page
             // sortable-header convention), clamped to the pane.
-            let hx0 = (xoff + col_w * hc as f32).max(x);
-            let hx1 = (xoff + col_w * (hc + 1) as f32).min(x + w);
+            let hx0 = (xoff + edges[hc]).max(x);
+            let hx1 = (xoff + edges[hc + 1]).min(x + w);
             if hx1 > hx0 {
                 ctx.quad(Rect { x: hx0, y, width: hx1 - hx0, height: HEADER_H }, [1.0, 1.0, 1.0, 0.05]);
             }
@@ -629,8 +683,8 @@ impl Paint for Spreadsheet {
         // running under its neighbor, and half-scrolled edge columns stop at
         // the plate instead of bleeding past it.
         let col_bounds = |col: usize, top: f32, height: f32| -> Option<[f32; 4]> {
-            let x0 = (xoff + col_w * col as f32).max(x);
-            let x1 = (xoff + col_w * (col + 1) as f32 - 4.0).min(x + w);
+            let x0 = (xoff + edges[col]).max(x);
+            let x1 = (xoff + edges[col + 1] - 4.0).min(x + w);
             if x1 <= x0 {
                 return None;
             }
@@ -643,11 +697,11 @@ impl Paint for Spreadsheet {
         // worth of budget the mark would REPLACE the content (a 19px column
         // fits one glyph — a bare "…" says less than a clipped digit), so
         // very narrow columns keep the raw string and let the clamp cut it.
-        let fam = crate::layout::control_label_font();
-        let char_w =
-            (crate::widget::display::measure_text_width("0123456789", &fam, 12.0) / 10.0).max(1.0);
-        let budget = ((col_w - 12.0) / char_w).floor() as usize;
-        let fit = move |s: String| -> String {
+        let char_w = Self::char_w();
+        // Columns fit their content, so the budget is met but for a
+        // fallback font's drift.
+        let budget_of = |col: usize| (((edges[col + 1] - edges[col]) - 12.0) / char_w).floor() as usize;
+        let fit = |s: String, budget: usize| -> String {
             if budget < 3 || s.chars().count() <= budget {
                 return s;
             }
@@ -659,7 +713,8 @@ impl Paint for Spreadsheet {
             if !col_visible(i) {
                 continue;
             }
-            let cx = xoff + col_w * i as f32 + 8.0;
+            let cx = xoff + edges[i] + 8.0;
+            let budget = budget_of(i);
             match self.sort {
                 Some((col, ascending)) if col == i => {
                     // The sorted column: its name, then the `chevron-up` or
@@ -680,7 +735,7 @@ impl Paint for Spreadsheet {
                     let r = Rect { x: tx, y: y + 0.5 * (HEADER_H - SIDE), width: SIDE, height: SIDE };
                     ctx.icon(if ascending { "chevron-up" } else { "chevron-down" }, r, [1.0, 1.0, 1.0, 1.0]);
                 }
-                _ => ctx.text_with(fit(header.clone()), cx, y + 6.0, 12.0, [0xdd, 0xdd, 0xee], None, col_bounds(i, y, HEADER_H)),
+                _ => ctx.text_with(fit(header.clone(), budget), cx, y + 6.0, 12.0, [0xdd, 0xdd, 0xee], None, col_bounds(i, y, HEADER_H)),
             }
         }
         // A row half scrolled under the header or off the bottom draws its
@@ -699,8 +754,8 @@ impl Paint for Spreadsheet {
                 if !col_visible(col_idx) {
                     continue;
                 }
-                let cx = xoff + col_w * col_idx as f32 + 8.0;
-                ctx.text_with(fit(column.cell(src)), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc], None, col_bounds(col_idx, top, bottom - top));
+                let cx = xoff + edges[col_idx] + 8.0;
+                ctx.text_with(fit(column.cell(src), budget_of(col_idx)), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc], None, col_bounds(col_idx, top, bottom - top));
             }
         }
     }
@@ -933,6 +988,16 @@ impl Input for Spreadsheet {
 impl Spreadsheet {
     /// Take a table: its headers, its columns and how many rows they hold.
     fn set_columns(&mut self, headers: Vec<String>, columns: Vec<SheetColumn>, rows: usize) {
+        // Each column's width, from its header and its values: a refill
+        // is a scan of the values it already copies.
+        self.col_chars = headers
+            .iter()
+            .enumerate()
+            .map(|(i, h)| {
+                let cells = columns.get(i).map_or(0, SheetColumn::max_chars);
+                (h.chars().count() + SORT_MARK_CHARS).max(cells)
+            })
+            .collect();
         self.headers = headers;
         self.columns = columns;
         self.row_count = rows;
@@ -1051,19 +1116,57 @@ mod tests {
         assert!(cell("r5").is_none(), "a row wholly out of the body draws nothing");
     }
 
-    /// Columns floor at MIN_COL_W instead of squeezing: past the floor the run
-    /// overflows into the horizontal scroll, and within it there is none.
+    /// Each column is as wide as its content — its header with room for the
+    /// sort glyph, or its widest cell — and not a share of the pane: a
+    /// narrow table leaves the rest of a wide pane empty, a wide one scrolls.
     #[test]
-    fn columns_floor_at_min_width_and_overflow_scrolls() {
+    fn columns_fit_their_content_and_overflow_scrolls() {
         let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
-        let s = wide(6);
-        assert_eq!((*s).col_w(rect), MIN_COL_W);
-        let g = (*s).hgeom(rect).expect("6 floored columns overflow a 200px pane");
-        assert!((g.max_scroll - (6.0 * MIN_COL_W - 200.0)).abs() < 0.01);
+        let cw = Spreadsheet::char_w();
+        let mut s = Spreadsheet::new();
+        s.set_visible(true);
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0);
+        SpreadsheetController::set_spreadsheet_columns(
+            &mut *s,
+            vec!["#".into(), "a_long_header_name".into(), "x".into()],
+            vec![
+                SheetColumn::Int((0..1000).collect()),
+                SheetColumn::Int(vec![0, 1]),
+                SheetColumn::Float { values: vec![-1.5, 12.25], decimals: 4 },
+            ],
+        );
+        let edges = (*s).col_edges();
+        let w = |c: usize| edges[c + 1] - edges[c];
+        // "999" is three; "#" and its sort room three too.
+        assert!((w(0) - (3.0 * cw + CELL_PAD)).abs() < 0.01);
+        // The header, not the 0 and 1, sizes the second.
+        assert!((w(1) - ((18 + SORT_MARK_CHARS) as f32 * cw + CELL_PAD)).abs() < 0.01);
+        // "-1.5000" and "12.2500" are seven.
+        assert!((w(2) - (7.0 * cw + CELL_PAD)).abs() < 0.01);
+        let g = (*s).hgeom(rect).expect("a run wider than 200 px scrolls");
+        assert!((g.max_scroll - (edges[3] - 200.0)).abs() < 0.01);
 
         let fits = wide(2);
-        assert!((*fits).hgeom(rect).is_none(), "2 columns share the pane, no h-scroll");
-        assert_eq!((*fits).col_w(rect), 100.0, "fitting columns still split the width evenly");
+        assert!((*fits).hgeom(rect).is_none(), "2 short columns fit, no h-scroll");
+        assert!(*(*fits).col_edges().last().unwrap() < 200.0, "and do not stretch to the pane");
+    }
+
+    /// A column's widest cell, from its values: a whole number's least or
+    /// greatest, a float's sign and integer digits plus its decimals, and
+    /// the non-finite spellings.
+    #[test]
+    fn a_columns_widest_cell_is_worked_out_from_its_values() {
+        assert_eq!(SheetColumn::Int(vec![-12, 5, 300]).max_chars(), 3);
+        assert_eq!(SheetColumn::Int(vec![-1200, 5]).max_chars(), 5);
+        assert_eq!(SheetColumn::Float { values: vec![0.5, -0.25], decimals: 4 }.max_chars(), 7);
+        assert_eq!(SheetColumn::Float { values: vec![0.5, f32::NEG_INFINITY], decimals: 1 }.max_chars(), 4);
+        assert_eq!(SheetColumn::Float { values: vec![f32::NAN], decimals: 4 }.max_chars(), 3);
+        assert_eq!(SheetColumn::Text(vec!["ab".into(), "abcd".into()]).max_chars(), 4);
+        assert_eq!(SheetColumn::Int(vec![]).max_chars(), 0);
+        for col in [SheetColumn::Int(vec![-7, 42]), SheetColumn::Float { values: vec![-3.25, 120.0], decimals: 3 }] {
+            let written = (0..col.len()).map(|r| col.cell(r).chars().count()).max().unwrap();
+            assert_eq!(col.max_chars(), written, "as `cell` writes them");
+        }
     }
 
     /// The sort hit-test must look up columns through the scrolled origin, or
@@ -1073,7 +1176,7 @@ mod tests {
         let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
         let mut s = wide(6);
         assert_eq!((*s).header_col_at(10.0, 5.0, rect), Some(0));
-        (*s).scroll_x = MIN_COL_W;
+        (*s).scroll_x = (*s).col_edges()[1];
         assert_eq!((*s).header_col_at(10.0, 5.0, rect), Some(1));
     }
 
@@ -1199,6 +1302,13 @@ mod tests {
         assert!(!s.keyboard_input(&end, &mut ctx), "hidden widget ignores keys");
     }
 
+    /// The middle of column `c`'s header — columns are as wide as their
+    /// content, so a press is placed by the edges, not by a share of the pane.
+    fn mid(s: &Adapted<Spreadsheet>, c: usize) -> f32 {
+        let e = s.inner().col_edges();
+        (e[c] + e[c + 1]) * 0.5
+    }
+
     fn header_click(x: f32) -> Event {
         Event::MouseButton {
             button: MouseButton::Left,
@@ -1227,23 +1337,23 @@ mod tests {
         SpreadsheetController::set_spreadsheet_data(&mut *s, vec!["n".into(), "s".into()], rows);
         assert_eq!(s.inner().order, vec![0, 1, 2], "unsorted = natural order");
 
-        // Column 0 spans x 0..100. Click 1: ascending, numeric.
-        assert!(s.handle_event(&header_click(50.0), &mut ctx));
+        // Click 1 on column 0: ascending, numeric.
+        assert!(s.handle_event(&header_click(mid(&s, 0)), &mut ctx));
         assert_eq!(s.inner().sort, Some((0, true)));
         assert_eq!(s.inner().order, vec![2, 1, 0], "2 < 9 < 10 numerically");
 
         // Click 2: descending.
-        assert!(s.handle_event(&header_click(50.0), &mut ctx));
+        assert!(s.handle_event(&header_click(mid(&s, 0)), &mut ctx));
         assert_eq!(s.inner().sort, Some((0, false)));
         assert_eq!(s.inner().order, vec![0, 1, 2]);
 
         // Click 3: back to natural order.
-        assert!(s.handle_event(&header_click(50.0), &mut ctx));
+        assert!(s.handle_event(&header_click(mid(&s, 0)), &mut ctx));
         assert_eq!(s.inner().sort, None);
         assert_eq!(s.inner().order, vec![0, 1, 2]);
 
         // Column 1 (lexicographic), then a body click changes nothing.
-        assert!(s.handle_event(&header_click(150.0), &mut ctx));
+        assert!(s.handle_event(&header_click(mid(&s, 1)), &mut ctx));
         assert_eq!(s.inner().order, vec![2, 0, 1], "a < b < c");
         let body = Event::MouseButton {
             button: MouseButton::Left,
@@ -1336,7 +1446,7 @@ mod tests {
             vec!["2".to_string(), "a".to_string()],
         ];
         SpreadsheetController::set_spreadsheet_data(&mut *t, vec!["n".into(), "s".into()], rows.clone());
-        t.handle_event(&header_click(50.0), &mut ctx); // ascending: 2, 9, 10 = rows 2, 1, 0
+        t.handle_event(&header_click(mid(&t, 0)), &mut ctx); // ascending: 2, 9, 10 = rows 2, 1, 0
         t.handle_event(&body_click(row_y(0)), &mut ctx);
         assert_eq!(t.inner().selected_rows(), vec![2], "the first row shown is the data's third");
         WidgetHost::set_modifiers(&mut t, false, true, false);
@@ -1478,13 +1588,13 @@ mod tests {
         assert!(!shown.contains(&"999".to_string()), "a row off screen is not written");
 
         // Sorted by x, ascending: the least value first, by value.
-        assert!(s.handle_event(&header_click(150.0), &mut ctx));
+        assert!(s.handle_event(&header_click(mid(&s, 1)), &mut ctx));
         let order = s.inner().order.clone();
         let x = |r: usize| ((r * 7919) % n) as f32 * 0.5 - 3.25;
         assert!(order.windows(2).all(|w| x(w[0]) <= x(w[1])));
         // And by i, descending (two more clicks on the first header).
-        assert!(s.handle_event(&header_click(50.0), &mut ctx));
-        assert!(s.handle_event(&header_click(50.0), &mut ctx));
+        assert!(s.handle_event(&header_click(mid(&s, 0)), &mut ctx));
+        assert!(s.handle_event(&header_click(mid(&s, 0)), &mut ctx));
         assert_eq!(s.inner().order[0], n - 1, "999 sorts after 99 and 100");
         assert_eq!(SheetColumn::Float { values: vec![1.0 / 3.0], decimals: 2 }.cell(0), "0.33");
         assert_eq!(SheetColumn::Int(vec![-4]).cell(0), "-4");
@@ -1504,7 +1614,7 @@ mod tests {
             vec!["a".into(), "b".into()],
             vec![vec!["1".into(), "x".into()], vec!["2".into(), "y".into()]],
         );
-        assert!(s.handle_event(&header_click(150.0), &mut ctx)); // sort col 1 asc
+        assert!(s.handle_event(&header_click(mid(&s, 1)), &mut ctx)); // sort col 1 asc
 
         // A refresh with new rows keeps the sort and re-derives the order.
         SpreadsheetController::set_spreadsheet_data(

@@ -2301,6 +2301,24 @@ that shows thirty. A float cell is `format!("{:.*}", decimals, value)`, the
 string a host formatting it itself would have written.
 `a_column_table_is_written_as_painted_and_sorts_by_value` is the test.
 
+### A spreadsheet's columns are as wide as their content
+
+Each column of a `Spreadsheet` (since 2026-10-07) is as wide as its header
+with room for the sort glyph (`SORT_MARK_CHARS`, kept whether or not the
+column is sorted, so a sort moves nothing) or its widest cell, whichever is
+wider, plus `CELL_PAD` — at least `MIN_COL_CHARS` characters. The widths are
+counted in characters when the table is set (`set_columns`), from the values
+rather than from written text (`SheetColumn::max_chars`: a whole number's
+least or greatest, a float's sign and integer digits and its decimals, the
+non-finite spellings), and made pixels by the label font's character width,
+the font being monospace (`col_edges`). The table does not stretch: what is
+left of a wide pane is empty, a line marking where the last column ends; a
+table wider than the pane scrolls as before. Until then every column was an
+even share of the pane, floored at 76 px, so a point index or a 0/1 column
+was as wide as a four-decimal float. A host whose header is its widest cell
+saves the most by keeping headers short. `columns_fit_their_content_and_overflow_scrolls`
+and `a_columns_widest_cell_is_worked_out_from_its_values` are the tests.
+
 ### A spreadsheet's rows can be selected
 
 `Spreadsheet` keeps a selection of rows (since 2026-09-29): a press on a
