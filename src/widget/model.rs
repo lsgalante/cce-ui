@@ -370,7 +370,8 @@ impl EventCtx<'_> {
     /// `on_event`, not after it. No-op outside a routed path (no ctx or no self pointer).
     pub fn open_context_menu(&mut self, px: f32, py: f32) {
         if let (Some(ptr), Some(ui)) = (self.self_ptr, self.ui.as_deref_mut()) {
-            ui.handle_right_click(ptr, px, py);
+            // SAFETY: `self_ptr` is the routed widget's own adapter, live for the event.
+            unsafe { ui.handle_right_click(ptr, px, py) };
         }
     }
 
@@ -902,26 +903,6 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         }
     }
 
-    /// Register + link a child under this widget (off `WidgetHost` in 6bd batch 4; dyn callers
-    /// went to `focus::link_parent_child`/tree ops).
-    pub fn add_child(&mut self, child: *mut (dyn WidgetHost + 'static), ctx: &mut UiContext) {
-        // The old WidgetHost default's tree link…
-        let c_id = unsafe { (*child).base().id() };
-        let p_id = self.base.id();
-        let self_ptr = self.as_ptr();
-        ctx.register_widget(p_id, self_ptr);
-        ctx.register_widget(c_id, child);
-        ctx.tree.link(p_id, c_id);
-        // …plus, for containers, the legacy container extra: parent the child back (Layer,
-        // Switcher) — the symmetric tree link the child's own set_parent used to make.
-        if Layout::has_container_children(&self.inner) {
-            let self_ptr = self.as_ptr_mut();
-            ctx.register_widget(self.base.id(), self_ptr);
-            ctx.register_widget(c_id, child);
-            ctx.tree.set_parent(c_id, Some(self.base.id()));
-        }
-    }
-
     /// Register + (un)link this widget under a parent (off `WidgetHost` in 6bd batch 4).
     pub fn set_parent(&mut self, parent: Option<*mut (dyn WidgetHost + 'static)>, ctx: &mut UiContext) {
         // Replica of the old WidgetHost default: symmetric tree link.
@@ -929,7 +910,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         if let Some(p_ptr) = parent {
             let p_id = unsafe { (*p_ptr).base().id() };
             ctx.register_widget(p_id, p_ptr);
-            let self_ptr = self.as_ptr();
+            let self_ptr = self.as_ptr_mut();
             ctx.register_widget(id, self_ptr);
             ctx.tree.set_parent(id, Some(p_id));
         } else {
@@ -1640,7 +1621,8 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 ..
             } if Input::opens_context_menu(&self.inner) => {
                 if self.hit_test(*px, *py, ctx) {
-                    ctx.handle_right_click(self_ptr, *px, *py);
+                    // SAFETY: `self_ptr` is this adapter, derived from `&mut self` above.
+                    unsafe { ctx.handle_right_click(self_ptr, *px, *py) };
                     return true;
                 }
                 false

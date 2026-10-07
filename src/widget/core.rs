@@ -1954,6 +1954,50 @@ pub struct Widget {
     pub dirty: bool,
     pub config_file: Option<String>,
     pub config_key: Option<String>,
+    /// Lives exactly as long as this base: the registry holds a watch on it and will
+    /// not hand out the widget's pointer once it is gone. See [`Liveness`].
+    pub(crate) live: Liveness,
+}
+
+/// A token owned by a widget's [`Widget`] base, watched by the [`UiContext`] registry
+/// (`scene::tree::WidgetTree`).
+///
+/// The registry holds raw pointers to widgets the APP owns, so an app that drops a
+/// widget without unregistering it (a rebuilt `Vec` of rows — the case
+/// `UiContext::unregister_widget` warns about) used to leave a dangling pointer that
+/// the next registry sweep dereferenced. The registry now keeps a [`Weak`] to this
+/// token beside each pointer and resolves the pointer only while the token is alive,
+/// so a dropped widget reads back as unregistered instead.
+///
+/// It does NOT catch a widget that was MOVED while registered (a `Vec` that
+/// reallocated, a struct returned by value): the token moves with it, and the stored
+/// pointer still names the old address. Registering from a live borrow just before the
+/// pass that uses it, as every app's rebuild does, is what keeps that case sound until
+/// the registry owns its widgets.
+///
+/// A clone is a different widget at a different address, so it gets a fresh token —
+/// not a share of the original's, which would keep a dropped original "alive".
+///
+/// [`UiContext`]: crate::context::UiContext
+/// [`Weak`]: std::sync::Weak
+#[derive(Debug)]
+pub(crate) struct Liveness(std::sync::Arc<()>);
+
+impl Liveness {
+    pub(crate) fn new() -> Self {
+        Liveness(std::sync::Arc::new(()))
+    }
+
+    /// A watch that reports whether this token still exists.
+    pub(crate) fn watch(&self) -> std::sync::Weak<()> {
+        std::sync::Arc::downgrade(&self.0)
+    }
+}
+
+impl Clone for Liveness {
+    fn clone(&self) -> Self {
+        Liveness::new()
+    }
 }
 
 impl Widget {
@@ -1972,6 +2016,7 @@ impl Widget {
             dirty: true,
             config_file: None,
             config_key: None,
+            live: Liveness::new(),
         }
     }
 
@@ -1990,6 +2035,7 @@ impl Widget {
             dirty: true,
             config_file: None,
             config_key: None,
+            live: Liveness::new(),
         }
     }
 

@@ -1567,6 +1567,26 @@ are GONE from the trait — events route through `handle_event`, and apps drain 
 through the concrete inherent `Adapted<W>` methods. See the RFC's blueprint notes before
 adding anything to this trait.
 
+### The registry holds pointers, and knows when they die
+
+`UiContext`'s tree (`scene::tree::WidgetTree`) does not own its widgets: the app does, and
+registers raw pointers to them. Each widget's `Widget` base carries a `Liveness` token, and every
+entry keeps a watch on it; every accessor (`get_ptr`, `children_ptrs`, `iter_registered`, …)
+resolves a pointer only while its widget exists. A widget dropped without `unregister_widget`
+reads back as absent instead of as freed memory. A clone gets a token of its own.
+
+What it does NOT catch is a widget MOVED while registered (a `Vec` that reallocated, a struct
+returned by value): the token moves with it. Register from a live borrow before the pass that
+reads it, as the apps' rebuilds do. The sound end state is a registry that owns its widgets.
+
+The pointer-taking entry points say so:
+- `WidgetTree::register`, `UiContext::set_focused_ptr`, `show_context_menu` and
+  `handle_right_click` are `unsafe fn`.
+- `register_widget` stays safe only because 105 app call sites use it. New code calls
+  `register_host(&mut w)`.
+
+`a_dropped_widget_is_never_handed_out` and `a_clone_has_a_liveness_of_its_own` are the tests.
+
 **Runtime verification matters here.** Several scene changes are "compiles + tests pass; runtime
 verification pending" per the RFC — the headless tests can't catch paint/event regressions. When
 changing scene wiring, `cargo run` a real client (cce-files, cce-designer, cce-graph,

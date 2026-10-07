@@ -495,19 +495,24 @@ impl UiContext {
         let new_ptr = unsafe {
             std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(w as *mut dyn WidgetHost)
         };
-        self.tree.register(id, new_ptr);
+        // SAFETY: derived from the live borrow we were handed.
+        unsafe { self.tree.register(id, new_ptr) };
         self.set_focused_id(id);
     }
 
-    /// Transitional pointer form (TreeList focuses its adapter via `EventCtx::host_ptr`). The
-    /// pointer must be live at the call — it is only used to derive the id and refresh the
-    /// registry, never stored.
-    pub fn set_focused_ptr(&mut self, new_ptr: *mut (dyn WidgetHost + 'static)) {
+    /// Transitional pointer form (TreeList focuses its adapter via `EventCtx::host_ptr`).
+    ///
+    /// # Safety
+    ///
+    /// `new_ptr` must be null or point to a live widget at the call. It is read to derive the
+    /// id and refresh the registry (see [`WidgetTree::register`](crate::scene::tree::WidgetTree::register)).
+    pub unsafe fn set_focused_ptr(&mut self, new_ptr: *mut (dyn WidgetHost + 'static)) {
         if new_ptr.is_null() {
             return;
         }
+        // SAFETY: the caller's contract.
         let id = unsafe { (*new_ptr).base().id() };
-        self.tree.register(id, new_ptr);
+        unsafe { self.tree.register(id, new_ptr) };
         self.set_focused_id(id);
     }
 
@@ -761,8 +766,27 @@ impl UiContext {
     // walked an empty dummy context (provably inert). Section-level keyboard nav lives
     // app-side (settings' focused_section machinery).
 
+    /// Register a widget the app owns, by reference: the safe form of
+    /// [`register_widget`](Self::register_widget). `ctx.register_host(&mut self.button)`.
+    ///
+    /// The registry keeps a pointer to the widget and resolves it only while the widget has not
+    /// been dropped (see `widget::core::Liveness`); a widget MOVED after registering must be
+    /// registered again before the next pass reads it.
+    pub fn register_host(&mut self, w: &mut (dyn WidgetHost + 'static)) {
+        let id = w.base().id();
+        self.register_widget(id, w as *mut (dyn WidgetHost + 'static));
+    }
+
+    /// Register a widget by raw pointer — the legacy form 105 app call sites still use
+    /// (`ctx.register_widget(id, w.as_ptr_mut())`). Prefer [`register_host`](Self::register_host).
+    ///
+    /// `ptr` must be null or point to a live widget AT THE CALL; it is read here. Taking a raw
+    /// pointer in a safe function is unsound in principle (clippy says so) and is kept only until
+    /// the apps have moved to `register_host`; a pointer derived from a live borrow just before
+    /// the call, which is every call site today, meets the requirement.
     pub fn register_widget(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
-        self.tree.register(id, ptr);
+        // SAFETY: the documented precondition above.
+        unsafe { self.tree.register(id, ptr) };
         // A newcomer may itself have a popover rect, so the coverage memo can no
         // longer be trusted. Pages that re-register a whole list do it before
         // dispatching, so the memo is rebuilt once and then serves every root.
@@ -895,7 +919,8 @@ impl UiContext {
     /// pointer we are handed (the occlusion walks resolve the stored id through the tree).
     pub fn register_popover(&mut self, w: &mut (dyn WidgetHost + 'static)) {
         let id = w.base().id();
-        self.tree.register(id, w as *mut (dyn WidgetHost + 'static));
+        // SAFETY: derived from the live borrow we were handed.
+        unsafe { self.tree.register(id, w as *mut (dyn WidgetHost + 'static)) };
         if !self.active_popovers.contains(&id) {
             self.active_popovers.push(id);
         }
@@ -999,16 +1024,27 @@ impl UiContext {
         crate::widget::context_menu::is_visible()
     }
 
-    pub fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn WidgetHost + 'static)) {
+    /// Open the shared context menu on `target`.
+    ///
+    /// # Safety
+    ///
+    /// `target` must be null or point to a live widget at the call.
+    pub unsafe fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn WidgetHost + 'static)) {
         if target.is_null() {
             return;
         }
+        // SAFETY: the caller's contract.
         let id = unsafe { (*target).base().id() };
-        self.tree.register(id, target);
+        unsafe { self.tree.register(id, target) };
         crate::widget::context_menu::show(x, y, options, header_count, id);
     }
 
-    pub fn handle_right_click(&mut self, target: *mut (dyn WidgetHost + 'static), px: f32, py: f32) {
+    /// Open the shared config context menu for a right-click on `target`.
+    ///
+    /// # Safety
+    ///
+    /// `target` must be null or point to a live widget at the call.
+    pub unsafe fn handle_right_click(&mut self, target: *mut (dyn WidgetHost + 'static), px: f32, py: f32) {
         if target.is_null() {
             return;
         }
@@ -1092,7 +1128,8 @@ impl UiContext {
 
         let scroll_y = crate::widget::hover_animation::get_scroll_offset();
         let adjusted_py = py - scroll_y;
-        self.show_context_menu(px, adjusted_py, options, header_count, target);
+        // SAFETY: the caller's contract, passed on.
+        unsafe { self.show_context_menu(px, adjusted_py, options, header_count, target) };
     }
 
     pub fn hide_context_menu(&mut self) {

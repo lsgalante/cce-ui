@@ -453,7 +453,8 @@ impl TreeList {
         if button == MouseButton::Left && state == ElementState::Pressed && !covered {
             let on_scrollbar = self.scroll_box.hit_test_scrollbar(px, py) || self.scroll_box.scrollbar_dragging;
             if !on_scrollbar && px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
-                if let Some(h) = host { ui.set_focused_ptr(h); }
+                // SAFETY: `host` is this widget's own adapter, live while its event is routed.
+                if let Some(h) = host { unsafe { ui.set_focused_ptr(h) }; }
                 let relative_y = py - list_top + self.scroll_box.scroll_y;
                 let row_idx = (relative_y / self.item_height) as usize;
                 if row_idx < self.items.len() {
@@ -530,7 +531,8 @@ impl TreeList {
 
         if button == MouseButton::Right && state == ElementState::Pressed && !covered {
             if px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
-                if let Some(h) = host { ui.set_focused_ptr(h); }
+                // SAFETY: `host` is this widget's own adapter, live while its event is routed.
+                if let Some(h) = host { unsafe { ui.set_focused_ptr(h) }; }
                 let relative_y = py - list_top + self.scroll_box.scroll_y;
                 let row_idx = (relative_y / self.item_height) as usize;
                 if row_idx < self.items.len() {
@@ -549,7 +551,8 @@ impl TreeList {
                             options.push("Collapse All".to_string());
                             
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
-                            if let Some(h) = host { ui.show_context_menu(px, py - scroll_offset, options, 1, h); }
+                            // SAFETY: as above — our own adapter, live while its event is routed.
+                            if let Some(h) = host { unsafe { ui.show_context_menu(px, py - scroll_offset, options, 1, h) }; }
                             changed = true;
                         }
                         TreeElement::Leaf { original_idx, ref path, ref name, indent, ref val } => {
@@ -569,7 +572,8 @@ impl TreeList {
                                 "Delete".to_string(),
                             ];
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
-                            if let Some(h) = host { ui.show_context_menu(px, py - scroll_offset, options, 1, h); }
+                            // SAFETY: as above — our own adapter, live while its event is routed.
+                            if let Some(h) = host { unsafe { ui.show_context_menu(px, py - scroll_offset, options, 1, h) }; }
                             changed = true;
                         }
                     }
@@ -1176,7 +1180,8 @@ impl Input for TreeList {
                 let eb_id = self.edit_box.base().id();
                 ui.unlink_child(host_id, eb_id);
                 ui.unregister_widget(eb_id);
-                if let Some(h) = host { ui.set_focused_ptr(h); }
+                // SAFETY: `host` is this widget's own adapter, live while its event is routed.
+                if let Some(h) = host { unsafe { ui.set_focused_ptr(h) }; }
                 changed = true;
             }
         }

@@ -22,30 +22,42 @@
 //! apps (paint recursion and event propagation both read `children`). See
 //! `docs/rfc-core-rebuild.md` Phase 1b.
 //!
-//! Nothing here is wired into `UiContext` yet; this is the tested drop-in the swap will use.
+//! `UiContext` keeps its tree here (`UiContext::tree`).
+//!
+//! ## What a pointer here is worth
+//!
+//! The tree does not own its widgets; the app does, and registers raw pointers to them. Each
+//! entry also keeps a watch on the widget's liveness token (`widget::core::Liveness`), and
+//! every accessor resolves a pointer only while that token exists — so a widget dropped
+//! without being unregistered reads back as absent rather than as a pointer to freed memory.
+//! A widget MOVED while registered is not caught (its token moves with it); see `Liveness`.
 
 use std::collections::HashMap;
+use std::sync::Weak;
 
 use crate::scene::arena::{Arena, NodeId};
 use crate::widget::{WidgetHost, WidgetId};
 
-/// One arena node's payload: the widget's stable id plus its live pointer. The pointer is `None`
-/// for a node that has been *linked* into the tree (as a parent/child) but not yet *registered*
-/// with a real widget — mirroring the legacy maps, where a `layout_tree` link can precede the
-/// `widget_registry` entry. (`*mut dyn WidgetHost` is a fat pointer, so `Option` is the natural
-/// "absent" representation — there is no thin null to use as a sentinel.)
-#[derive(Clone, Copy)]
+/// One arena node's payload: the widget's stable id, its pointer, and a watch on the widget's
+/// liveness token. The pointer is `None` for a node that has been *linked* into the tree (as a
+/// parent/child) but not yet *registered* with a real widget — mirroring the legacy maps, where a
+/// `layout_tree` link can precede the `widget_registry` entry. (`*mut dyn WidgetHost` is a fat
+/// pointer, so `Option` is the natural "absent" representation — there is no thin null to use as
+/// a sentinel.) `alive` is `None` exactly when there is no non-null pointer to watch.
+#[derive(Clone)]
 struct Entry {
     id: WidgetId,
     ptr: Option<*mut (dyn WidgetHost + 'static)>,
+    alive: Option<Weak<()>>,
 }
 
-/// Resolve an entry's pointer to a usable, non-null pointer (skipping link-only and null-data
-/// pointers exactly as the legacy `filter_map` over the registry did).
+/// Resolve an entry's pointer to a usable one: non-null (skipping link-only and null-data
+/// pointers exactly as the legacy `filter_map` over the registry did) and naming a widget that
+/// has not been dropped since it was registered.
 #[inline]
 fn live_ptr(entry: &Entry) -> Option<*mut (dyn WidgetHost + 'static)> {
-    match entry.ptr {
-        Some(p) if !p.is_null() => Some(p),
+    match (entry.ptr, &entry.alive) {
+        (Some(p), Some(alive)) if !p.is_null() && alive.strong_count() > 0 => Some(p),
         _ => None,
     }
 }
@@ -85,7 +97,7 @@ impl WidgetTree {
                 return node;
             }
         }
-        let node = self.arena.insert(Entry { id, ptr: None });
+        let node = self.arena.insert(Entry { id, ptr: None, alive: None });
         self.by_id.insert(id, node);
         node
     }
@@ -93,10 +105,20 @@ impl WidgetTree {
     /// Register (or overwrite) the live pointer for `id`. Mirrors `register_widget`'s
     /// insert-overwrite semantics. Registering a `null` pointer is allowed (the node exists but
     /// resolves to `None`), matching the legacy behavior where a link can precede registration.
-    pub fn register(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be null or point to a live widget at the call: it is read once here, to take
+    /// a watch on the widget's liveness token. After the call the tree resolves the pointer only
+    /// while that widget has not been dropped.
+    pub unsafe fn register(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
+        // SAFETY: the caller's contract — null, or a live widget.
+        let alive = unsafe { ptr.as_ref() }.map(|w| w.base().live.watch());
         let node = self.ensure_node(id);
         // `ensure_node` guarantees the node exists.
-        self.arena.value_mut(node).unwrap().ptr = Some(ptr);
+        let entry = self.arena.value_mut(node).unwrap();
+        entry.ptr = Some(ptr);
+        entry.alive = alive;
     }
 
     /// Make `child` a child of `parent` (deduped, reparenting from any previous parent). Mirrors
@@ -258,7 +280,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let (id, ptr) = w.make(1);
         assert_eq!(tree.get_ptr(id), None, "unknown id resolves to None");
-        tree.register(id, ptr);
+        unsafe { tree.register(id, ptr) };
         assert_eq!(tree.get_ptr(id), Some(ptr));
         assert!(tree.is_registered(id));
     }
@@ -270,8 +292,8 @@ mod tests {
         let id = WidgetId(1);
         let (_, p1) = w.make(1);
         let (_, p2) = w.make(2);
-        tree.register(id, p1);
-        tree.register(id, p2); // same id, new pointer
+        unsafe { tree.register(id, p1) };
+        unsafe { tree.register(id, p2) }; // same id, new pointer
         assert_eq!(tree.get_ptr(id), Some(p2));
         assert_eq!(tree.len(), 1, "overwrite must not create a second node");
     }
@@ -282,8 +304,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         let (p, pp) = w.make(1);
         let (c, cp) = w.make(2);
-        tree.register(p, pp);
-        tree.register(c, cp);
+        unsafe { tree.register(p, pp) };
+        unsafe { tree.register(c, cp) };
 
         tree.link(p, c);
         tree.link(p, c); // duplicate link is a no-op
@@ -299,9 +321,9 @@ mod tests {
         let (a, ap) = w.make(1);
         let (b, bp) = w.make(2);
         let (c, cp) = w.make(3);
-        tree.register(a, ap);
-        tree.register(b, bp);
-        tree.register(c, cp);
+        unsafe { tree.register(a, ap) };
+        unsafe { tree.register(b, bp) };
+        unsafe { tree.register(c, cp) };
 
         tree.link(a, c);
         assert_eq!(tree.child_ids(a), vec![c]);
@@ -318,7 +340,7 @@ mod tests {
         let mut w = Widgets::new();
         let mut tree = WidgetTree::new();
         let (p, pp) = w.make(1);
-        tree.register(p, pp);
+        unsafe { tree.register(p, pp) };
         let child = WidgetId(2);
 
         tree.link(p, child); // child not registered yet
@@ -326,7 +348,7 @@ mod tests {
         assert!(tree.children_ptrs(p).is_empty(), "link-only child has no pointer yet");
 
         let (_, cp) = w.make(2);
-        tree.register(child, cp);
+        unsafe { tree.register(child, cp) };
         assert_eq!(tree.children_ptrs(p), vec![cp], "now resolvable");
     }
 
@@ -338,8 +360,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         let (p, pp) = w.make(1);
         let (c, cp) = w.make(2);
-        tree.register(p, pp);
-        tree.register(c, cp);
+        unsafe { tree.register(p, pp) };
+        unsafe { tree.register(c, cp) };
         tree.link(p, c);
 
         tree.set_parent(c, None);
@@ -355,9 +377,9 @@ mod tests {
         let (p, pp) = w.make(1);
         let (c1, c1p) = w.make(2);
         let (c2, c2p) = w.make(3);
-        tree.register(p, pp);
-        tree.register(c1, c1p);
-        tree.register(c2, c2p);
+        unsafe { tree.register(p, pp) };
+        unsafe { tree.register(c1, c1p) };
+        unsafe { tree.register(c2, c2p) };
         tree.link(p, c1);
         tree.link(p, c2);
 
@@ -373,8 +395,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         let (p, pp) = w.make(1);
         let (c, cp) = w.make(2);
-        tree.register(p, pp);
-        tree.register(c, cp);
+        unsafe { tree.register(p, pp) };
+        unsafe { tree.register(c, cp) };
         tree.link(p, c);
 
         tree.clear_all();
@@ -391,8 +413,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         let (p, pp) = w.make(1);
         let (c, cp) = w.make(2);
-        tree.register(p, pp);
-        tree.register(c, cp);
+        unsafe { tree.register(p, pp) };
+        unsafe { tree.register(c, cp) };
         tree.link(p, c);
 
         tree.remove(p); // removes p and its subtree (c)
@@ -406,10 +428,58 @@ mod tests {
         let mut w = Widgets::new();
         let mut tree = WidgetTree::new();
         let (p, pp) = w.make(1);
-        tree.register(p, pp);
+        unsafe { tree.register(p, pp) };
         tree.link(p, WidgetId(99)); // link-only, null pointer
 
         let seen: Vec<WidgetId> = tree.iter_registered().map(|(id, _)| id).collect();
         assert_eq!(seen, vec![p], "link-only (null) node is not yielded");
+    }
+
+    #[test]
+    fn a_dropped_widget_is_never_handed_out() {
+        // The app rebuilt its rows and forgot to unregister the old ones: every accessor must
+        // read the dropped widgets as absent, never as a pointer into freed memory.
+        let mut w = Widgets::new();
+        let mut tree = WidgetTree::new();
+        let (p, pp) = w.make(1);
+        let (c, cp) = w.make(2);
+        unsafe { tree.register(p, pp) };
+        unsafe { tree.register(c, cp) };
+        tree.link(p, c);
+        assert_eq!(tree.children_ptrs(p), vec![cp]);
+
+        w.boxes.remove(1); // drop the child, still registered and linked
+        assert_eq!(tree.get_ptr(c), None);
+        assert!(!tree.is_registered(c));
+        assert!(tree.children_ptrs(p).is_empty());
+        assert_eq!(tree.child_ids(p), vec![c], "the link itself is kept, as for a link-only child");
+        let seen: Vec<WidgetId> = tree.iter_registered().map(|(id, _)| id).collect();
+        assert_eq!(seen, vec![p]);
+
+        w.boxes.clear(); // and the parent
+        assert_eq!(tree.get_ptr(p), None);
+        assert_eq!(tree.parent_ptr(c), None);
+        assert_eq!(tree.iter_registered().count(), 0);
+    }
+
+    #[test]
+    fn a_clone_has_a_liveness_of_its_own() {
+        // A clone shares its original's id (the id cell is copied) but is a different widget:
+        // registering it and dropping the original must leave it resolvable, and a clone must
+        // not keep a dropped original resolvable either.
+        let mut w = Widgets::new();
+        let mut tree = WidgetTree::new();
+        let (id, original) = w.make(1);
+        let copy = Box::new(Marker { base: w.boxes[0].base.clone(), tag: 2 });
+        unsafe { tree.register(id, original) };
+        w.boxes.clear();
+        assert_eq!(tree.get_ptr(id), None, "the clone does not keep the original alive");
+
+        let mut copy = copy;
+        let copy_ptr: *mut (dyn WidgetHost + 'static) = &mut *copy;
+        unsafe { tree.register(id, copy_ptr) };
+        assert_eq!(tree.get_ptr(id), Some(copy_ptr));
+        drop(copy);
+        assert_eq!(tree.get_ptr(id), None);
     }
 }
