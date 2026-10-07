@@ -904,14 +904,13 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     }
 
     /// Register + (un)link this widget under a parent (off `WidgetHost` in 6bd batch 4).
-    pub fn set_parent(&mut self, parent: Option<*mut (dyn WidgetHost + 'static)>, ctx: &mut UiContext) {
+    pub fn set_parent(&mut self, parent: Option<&mut (dyn WidgetHost + 'static)>, ctx: &mut UiContext) {
         // Replica of the old WidgetHost default: symmetric tree link.
         let id = self.base.id();
-        if let Some(p_ptr) = parent {
-            let p_id = unsafe { (*p_ptr).base().id() };
-            ctx.register_widget(p_id, p_ptr);
-            let self_ptr = self.as_ptr_mut();
-            ctx.register_widget(id, self_ptr);
+        if let Some(p) = parent {
+            let p_id = p.base().id();
+            ctx.register_host(p);
+            ctx.register_host(self);
             ctx.tree.set_parent(id, Some(p_id));
         } else {
             ctx.tree.set_parent(id, None);
@@ -1818,9 +1817,12 @@ mod tests {
         let (root_id, root_ptr) = (root.id(), root.as_ptr_mut());
         let (a_id, a_ptr) = (a.id(), a.as_ptr_mut());
         let (b_id, b_ptr) = (b.id(), b.as_ptr_mut());
-        ctx.register_widget(root_id, root_ptr);
-        ctx.register_widget(a_id, a_ptr);
-        ctx.register_widget(b_id, b_ptr);
+        // SAFETY: a test widget, live for the whole test.
+        unsafe { ctx.register_widget(root_id, root_ptr) };
+        // SAFETY: a test widget, live for the whole test.
+        unsafe { ctx.register_widget(a_id, a_ptr) };
+        // SAFETY: a test widget, live for the whole test.
+        unsafe { ctx.register_widget(b_id, b_ptr) };
         ctx.link_ids(root_id, a_id);
         ctx.link_ids(root_id, b_id);
 
@@ -1893,8 +1895,9 @@ mod tests {
         use crate::widget::{ElementState, MouseButton};
         let mut ctx = UiContext::new();
         let mut w = Box::new(Adapted::new(Clicker { clicks: 0, entered: 0, left: 0 }));
-        let (id, ptr) = (w.id(), w.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        let id = w.id();
+        ctx.register_host(&mut *w);
+        let ptr = w.as_ptr_mut();
         unsafe { (*ptr).set_rect(10.0, 10.0, 40.0, 20.0) };
 
         let click_at = |x: f32, y: f32| Event::MouseButton {
@@ -1982,8 +1985,8 @@ mod tests {
 
         let mut ctx = UiContext::new();
         let mut w = Box::new(Adapted::new(Tag));
-        let (id, ptr) = (w.id(), w.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut *w);
+        let ptr = w.as_ptr_mut();
         unsafe { (*ptr).set_rect(10.0, 20.0, 100.0, 30.0) };
 
         let list = paint_tree(&ctx, unsafe { &*ptr });
@@ -2022,8 +2025,8 @@ mod tests {
 
         let mut ctx = UiContext::new();
         let mut w = Box::new(Adapted::new(Tag).with_label("Name"));
-        let (id, ptr) = (w.id(), w.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut *w);
+        let ptr = w.as_ptr_mut();
         unsafe { (*ptr).set_rect(10.0, 20.0, 100.0, 60.0) };
 
         let list = paint_tree(&ctx, unsafe { &*ptr });

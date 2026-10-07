@@ -1822,8 +1822,7 @@ mod tests {
     fn double_click_survives_the_between_press_node_resync() {
         let mut ctx = UiContext::new();
         let mut g = two_nodes();
-        let (id, ptr) = (g.id(), g.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut g);
 
         // First press on node a, then the host re-syncs (same content),
         // then the second press: this is the real event sequence.
@@ -1843,8 +1842,7 @@ mod tests {
     fn presses_on_two_nodes_are_not_a_double_click() {
         let mut ctx = UiContext::new();
         let mut g = two_nodes();
-        let (id, ptr) = (g.id(), g.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut g);
 
         assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
         g.mouse_input(MouseButton::Left, ElementState::Released, 110.0, 120.0, &mut ctx);
@@ -1857,8 +1855,7 @@ mod tests {
     fn node_press_selects_arms_drag_and_commit_snaps_to_grid() {
         let mut ctx = UiContext::new();
         let mut g = two_nodes();
-        let (id, ptr) = (g.id(), g.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut g);
 
         // Node a occupies (100, 100, 80, 40). Press its body (away from ports/toggle).
         assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
@@ -1916,8 +1913,7 @@ mod tests {
             };
             // alpha above beta, beta reading alpha.
             g.set_nodes(&[node("a", "alpha", 0.0, 0.0, ""), node("b", "beta", 0.0, 2.0, "alpha")]);
-            let (id, ptr) = (g.id(), g.as_ptr_mut());
-            ctx.register_widget(id, ptr);
+            ctx.register_host(&mut g);
             // Drag alpha by its middle onto beta's middle.
             assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 140.0, 120.0, &mut ctx));
             g.drag_begin(140.0, 120.0);
@@ -1977,8 +1973,7 @@ mod tests {
             node("b", "beta", 2.0, 0.0, p("alpha")),
             node("c", "gamma", 0.0, 2.0, p("")),
         ]);
-        let (id, ptr) = (g.id(), g.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut g);
 
         // Drag gamma's body onto the wire's horizontal run (cell (1, 0)).
         assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 240.0, &mut ctx));
@@ -2216,8 +2211,7 @@ mod tests {
     fn port_click_starts_and_completes_a_connection() {
         let mut ctx = UiContext::new();
         let mut g = two_nodes();
-        let (id, ptr) = (g.id(), g.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut g);
 
         // Ports float OUTSIDE the node box (port_center): node a's output
         // hangs below the bottom-center of (100,100,80,40), node b's input
@@ -2240,8 +2234,7 @@ mod tests {
     fn every_node_parameter_is_a_wire_into_its_own_port() {
         let mut ctx = UiContext::new();
         let mut g = two_nodes();
-        let (id, ptr) = (g.id(), g.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut g);
         let wire = |n: &str, v: &str| (n.to_string(), v.to_string(), "node".to_string());
         let node = |id: &str, col: f32, row: f32, parameters: Vec<(String, String, String)>, inputs: usize| GraphNode {
             id: id.into(),

@@ -721,8 +721,7 @@ mod tests {
     fn spinbox_button_zones_step_the_value() {
         let mut ctx = UiContext::new();
         let mut sb = Spinbox::new(0, -100, 100, 1);
-        let (id, ptr) = (sb.id(), sb.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut sb);
         WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
 
         // Legacy test: click at (75, 33) lands in the decrement zone.
@@ -743,8 +742,7 @@ mod tests {
         // FocusOut commit resets it to the stale text.
         let mut ctx = UiContext::new();
         let mut sb = Spinbox::new(6, 0, 100, 1);
-        let (id, ptr) = (sb.id(), sb.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut sb);
         WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
         sb.begin_edit(true);
         assert_eq!(sb.edit_buffer, "6");
@@ -764,8 +762,7 @@ mod tests {
         use crate::widget::MouseScrollDelta;
         let mut ctx = UiContext::new();
         let mut sb = Spinbox::new(10, 0, 100, 5);
-        let (id, ptr) = (sb.id(), sb.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut sb);
         WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
 
         // One notch up steps up, one notch down steps down — and the wheel is consumed.

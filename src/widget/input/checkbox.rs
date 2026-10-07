@@ -648,8 +648,8 @@ mod tests {
     fn checkbox_click_toggles_and_polls_like_legacy() {
         let mut ctx = UiContext::new();
         let mut cb = Checkbox::new();
-        let (id, ptr) = (cb.id(), cb.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        let id = cb.id();
+        ctx.register_host(&mut cb);
         WidgetHost::set_rect(&mut cb, 0.0, 0.0, 20.0, 20.0);
 
         assert!(ctx.propagate_event(&click_at(10.0, 10.0), id), "in-rect click consumed");
@@ -766,8 +766,8 @@ mod tests {
     fn toggle_click_glides_the_run_across_its_field() {
         let mut ctx = UiContext::new();
         let mut t = Toggle::new();
-        let (id, ptr) = (t.id(), t.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        let id = t.id();
+        ctx.register_host(&mut t);
         WidgetHost::set_rect(&mut t, 0.0, 0.0, 60.0, 30.0);
 
         let rect = Rect { x: 0.0, y: 0.0, width: 60.0, height: 30.0 };

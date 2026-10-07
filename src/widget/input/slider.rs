@@ -1126,8 +1126,8 @@ fn probe_slider_bridge() {
     fn slider_press_drag_and_wheel() {
         let mut ctx = UiContext::new();
         let mut sl = Slider::new().with_value(0.5);
-        let (id, ptr) = (sl.id(), sl.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        let id = sl.id();
+        ctx.register_host(&mut sl);
         WidgetHost::set_rect(&mut sl, 0.0, 0.0, 100.0, 20.0);
 
         // Press on the track grabs the thumb.
@@ -1161,8 +1161,7 @@ fn probe_slider_bridge() {
         let notch = |min: f32, max: f32, at: f32| -> f32 {
             let mut ctx = UiContext::new();
             let mut sl = Slider::new().with_range(min, max);
-            let (id, ptr) = (sl.id(), sl.as_ptr_mut());
-            ctx.register_widget(id, ptr);
+            ctx.register_host(&mut sl);
             WidgetHost::set_rect(&mut sl, 0.0, 0.0, 200.0, 20.0);
             sl.inner_mut().set_scaled_value(at);
             let before = sl.inner().get_scaled_value();
@@ -1207,8 +1206,7 @@ fn probe_slider_bridge() {
     fn a_slider_hovers_under_the_pointer() {
         let mut ctx = UiContext::new();
         let mut sl = Slider::new();
-        let (id, ptr) = (sl.id(), sl.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut sl);
         WidgetHost::set_rect(&mut sl, 0.0, 0.0, 100.0, 20.0);
         assert!(!sl.inner().hovered());
         assert!(sl.on_cursor_moved(50.0, 10.0, &mut ctx), "entering is a change");

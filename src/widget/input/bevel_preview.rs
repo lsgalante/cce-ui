@@ -202,8 +202,8 @@ mod tests {
     fn click_reports_once() {
         let mut ctx = UiContext::new();
         let mut p = BevelPreview::new();
-        let (id, ptr) = (p.id(), p.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        let id = p.id();
+        ctx.register_host(&mut p);
         WidgetHost::set_rect(&mut p, 0.0, 0.0, 125.0, 26.0);
         let ev = Event::MouseButton {
             button: MouseButton::Left,

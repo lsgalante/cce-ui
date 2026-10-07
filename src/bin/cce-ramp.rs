@@ -189,11 +189,9 @@ impl Application for RampPopup {
     fn display_list(&mut self, size: LogicalSize, scale: f64) -> Option<DisplayList> {
         if !self.registered {
             self.registered = true;
-            let w = self.ramp.as_ptr_mut();
-            let id = self.ramp.id();
-            self.ui_context.register_widget(id, w);
-            self.ui_context.register_widget(self.save_button.id(), self.save_button.as_ptr_mut());
-            self.ui_context.register_widget(self.cancel_button.id(), self.cancel_button.as_ptr_mut());
+            self.ui_context.register_host(&mut self.ramp);
+            self.ui_context.register_host(&mut self.save_button);
+            self.ui_context.register_host(&mut self.cancel_button);
         }
 
         let size_changed = self.width != size.width as u32

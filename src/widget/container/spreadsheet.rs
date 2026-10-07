@@ -1225,8 +1225,7 @@ mod tests {
     fn horizontal_wheel_integrates_and_decays_through_tick() {
         let mut ctx = UiContext::new();
         let mut s = wide(6);
-        let (id, ptr) = (s.id(), s.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut s);
 
         let wheel = Event::MouseWheel {
             delta: MouseScrollDelta::LineDelta(-2.0, 0.0),
@@ -1250,7 +1249,8 @@ mod tests {
         // A pane whose columns fit ignores horizontal wheels.
         let mut fits = wide(2);
         let (fid, fptr) = (fits.id(), fits.as_ptr_mut());
-        ctx.register_widget(fid, fptr);
+        // SAFETY: a test widget, live for the whole test.
+        unsafe { ctx.register_widget(fid, fptr) };
         assert!(!fits.handle_event(&wheel, &mut ctx), "no overflow, wheel passes through");
     }
 
@@ -1258,8 +1258,7 @@ mod tests {
     fn wheel_velocity_integrates_and_decays_through_tick() {
         let mut ctx = UiContext::new();
         let mut s = filled(50);
-        let (id, ptr) = (s.id(), s.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut s);
 
         // A wheel over the body feeds velocity (negated delta, the ScrollRegion
         // convention: a negative line delta scrolls the view down)…
@@ -1289,8 +1288,7 @@ mod tests {
     fn scrollbar_drag_and_keys_move_the_scroll() {
         let mut ctx = UiContext::new();
         let mut s = filled(50);
-        let (id, ptr) = (s.id(), s.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut s);
         let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
 
         // content 1200, viewport 100 -> overflowing, so the host may drag it.
@@ -1365,8 +1363,7 @@ mod tests {
         let mut s = Spreadsheet::new();
         s.set_visible(true);
         WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0);
-        let (id, ptr) = (s.id(), s.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut s);
         // Numeric strings out of lexicographic order: "10" must sort after "9".
         let rows = vec![
             vec!["10".to_string(), "b".to_string()],
@@ -1425,8 +1422,7 @@ mod tests {
     fn rows_select_alone_toggled_and_in_runs() {
         let mut ctx = UiContext::new();
         let mut s = filled(50);
-        let (id, ptr) = (s.id(), s.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut s);
         // Rows are 24 tall under a 24 header: row k spans 24 + 24k.
         let row_y = |k: usize| 24.0 + 24.0 * k as f32 + 12.0;
 
@@ -1477,8 +1473,7 @@ mod tests {
         let mut t = Spreadsheet::new();
         t.set_visible(true);
         WidgetHost::set_rect(&mut t, 0.0, 0.0, 200.0, 124.0);
-        let (id, ptr) = (t.id(), t.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut t);
         let rows = vec![
             vec!["10".to_string(), "b".to_string()],
             vec!["9".to_string(), "c".to_string()],
@@ -1511,8 +1506,7 @@ mod tests {
         s.set_visible(true);
         let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
         WidgetHost::set_rect(&mut s, rect.x, rect.y, rect.width, rect.height);
-        let (id, ptr) = (s.id(), s.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut s);
         let headers: Vec<String> = (0..6).map(|i| format!("c{i}")).collect();
         let rows: Vec<Vec<String>> = (0..50).map(|r| (0..6).map(|c| format!("{r}.{c}")).collect()).collect();
         SpreadsheetController::set_spreadsheet_data(&mut *s, headers, rows);
@@ -1648,8 +1642,7 @@ mod tests {
         let mut s = Spreadsheet::new();
         s.set_visible(true);
         WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0);
-        let (id, ptr) = (s.id(), s.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut s);
         let n = 1000;
         SpreadsheetController::set_spreadsheet_columns(
             &mut *s,
@@ -1696,8 +1689,7 @@ mod tests {
         let mut s = Spreadsheet::new();
         s.set_visible(true);
         WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0);
-        let (id, ptr) = (s.id(), s.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut s);
         SpreadsheetController::set_spreadsheet_data(
             &mut *s,
             vec!["a".into(), "b".into()],

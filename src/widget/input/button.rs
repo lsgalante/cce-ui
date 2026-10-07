@@ -757,8 +757,7 @@ mod tests {
         use crate::scene::paint::Prim;
         let mut ctx = UiContext::new();
         let mut b = Button::new(0.0, 0.0, 0.0, 0.0).with_label("Load Images");
-        let (id, ptr) = (b.id(), b.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut b);
         let size = b.intrinsic_size().unwrap();
         WidgetHost::set_rect(&mut b, 10.0, 20.0, size.width, size.height);
 
@@ -818,8 +817,8 @@ mod tests {
         let mut b = Button::new(10.0, 10.0, 80.0, 24.0)
             .with_label("Go")
             .on_click(move || { fired2.fetch_add(1, std::sync::atomic::Ordering::SeqCst); });
-        let (id, ptr) = (b.id(), b.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        let id = b.id();
+        ctx.register_host(&mut b);
 
         // Press in, release in -> click.
         assert!(ctx.propagate_event(&press(20.0, 20.0), id));

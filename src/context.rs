@@ -774,18 +774,19 @@ impl UiContext {
     /// registered again before the next pass reads it.
     pub fn register_host(&mut self, w: &mut (dyn WidgetHost + 'static)) {
         let id = w.base().id();
-        self.register_widget(id, w as *mut (dyn WidgetHost + 'static));
+        // SAFETY: derived from the live borrow we were handed.
+        unsafe { self.register_widget(id, w as *mut (dyn WidgetHost + 'static)) };
     }
 
-    /// Register a widget by raw pointer — the legacy form 105 app call sites still use
-    /// (`ctx.register_widget(id, w.as_ptr_mut())`). Prefer [`register_host`](Self::register_host).
+    /// Register a widget by raw pointer. Prefer [`register_host`](Self::register_host), which
+    /// takes a reference; this form is for the toolkit's own pointer-routed paths.
     ///
-    /// `ptr` must be null or point to a live widget AT THE CALL; it is read here. Taking a raw
-    /// pointer in a safe function is unsound in principle (clippy says so) and is kept only until
-    /// the apps have moved to `register_host`; a pointer derived from a live borrow just before
-    /// the call, which is every call site today, meets the requirement.
-    pub fn register_widget(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
-        // SAFETY: the documented precondition above.
+    /// # Safety
+    ///
+    /// `ptr` must be null or point to a live widget at the call; it is read here (see
+    /// [`WidgetTree::register`](crate::scene::tree::WidgetTree::register)).
+    pub unsafe fn register_widget(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
+        // SAFETY: the caller's contract.
         unsafe { self.tree.register(id, ptr) };
         // A newcomer may itself have a popover rect, so the coverage memo can no
         // longer be trusted. Pages that re-register a whole list do it before
@@ -1281,7 +1282,8 @@ mod tests {
         WidgetHost::set_rect(&mut slider, 0.0, 0.0, 200.0, 30.0);
         let ptr = slider.as_ptr_mut();
         let id = slider.base().id();
-        ctx.register_widget(id, ptr);
+        // SAFETY: a test widget, live for the whole test.
+        unsafe { ctx.register_widget(id, ptr) };
 
         let press = Event::MouseButton {
             button: MouseButton::Left,
@@ -1329,13 +1331,14 @@ mod tests {
     fn multi_root_press_dispatch_keeps_the_drag_target() {
         let mut ctx = UiContext::new();
         let mut slider = crate::widget::Slider::new().with_value(0.5);
-        let (id, ptr) = (slider.id(), slider.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        let id = slider.id();
+        ctx.register_host(&mut slider);
         slider.set_rect(0.0, 0.0, 200.0, 30.0);
         let mut other = Block { base: Widget::new_rect(300.0, 300.0, 50.0, 50.0) };
         let other_ptr = &mut other as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
         let other_id = other.base.id();
-        ctx.register_widget(other_id, other_ptr);
+        // SAFETY: a test widget, live for the whole test.
+        unsafe { ctx.register_widget(other_id, other_ptr) };
 
         let press = Event::MouseButton {
             button: MouseButton::Left,
@@ -1394,7 +1397,8 @@ mod tests {
         let mut ctx = UiContext::new();
         let mut w = Block { base: Widget::new_rect(10.0, 10.0, 50.0, 50.0) };
         let ptr = &mut w as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
-        ctx.register_widget(w.base.id(), ptr);
+        // SAFETY: a test widget, live for the whole test.
+        unsafe { ctx.register_widget(w.base.id(), ptr) };
         ctx.rebuild_spatial_grid();
 
         assert!(ctx.drag_allowed_at(200.0, 200.0), "empty surface is draggable");
@@ -1423,7 +1427,8 @@ mod focus_step_tests {
         for w in [&mut b as &mut dyn WidgetHost, &mut a, &mut t] {
             let (id, ptr) = (w.base().id(), w as *mut dyn WidgetHost);
             let ptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(ptr) };
-            ctx.register_widget(id, ptr);
+            // SAFETY: a test widget, live for the whole test.
+            unsafe { ctx.register_widget(id, ptr) };
         }
         let (ia, ib, it) = (a.id(), b.id(), t.id());
 
@@ -1450,7 +1455,8 @@ mod focus_step_tests {
         let mut g = crate::widget::Group::new(vec![ia, it]);
         let (gid, gptr) = (g.base().id(), &mut g as *mut dyn WidgetHost);
         let gptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(gptr) };
-        ctx.register_widget(gid, gptr);
+        // SAFETY: a test widget, live for the whole test.
+        unsafe { ctx.register_widget(gid, gptr) };
         assert_eq!(ctx.focus_clusters(), vec![vec![ia, it], vec![ib]]);
         ctx.set_focused_id(ia);
         assert!(ctx.focus_step(false));
@@ -1468,7 +1474,8 @@ mod focus_step_tests {
         WidgetHost::set_rect(&mut parked, -1000.0, -1000.0, 1.0, 1.0);
         let (pid, pptr) = (parked.base().id(), &mut parked as *mut dyn WidgetHost);
         let pptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(pptr) };
-        ctx.register_widget(pid, pptr);
+        // SAFETY: a test widget, live for the whole test.
+        unsafe { ctx.register_widget(pid, pptr) };
         for _ in 0..4 {
             ctx.focus_step(false);
             assert!(!ctx.is_focused_id(pid), "the parked plate never takes focus");

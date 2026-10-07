@@ -488,9 +488,8 @@ impl TreeList {
                         self.edit_box.cursor_idx = self.edit_box.text.chars().count();
                         self.edit_box.select_anchor = Some(0);
                         
-                        let eb_ptr = self.edit_box.as_ptr_mut();
                         let eb_id = self.edit_box.base().id();
-                        ui.register_widget(eb_id, eb_ptr);
+                        ui.register_host(&mut self.edit_box);
                         ui.link_ids(host_id, eb_id);
                         
                         ui.set_focused(&mut self.edit_box);
@@ -697,22 +696,14 @@ impl Layout for TreeList {
         // opened, and the wheel died the same way). Registration alone keeps the ids
         // resolvable for focus, coverage, and the spatial grid.
         let _ = host_id;
-        let sb_ptr = self.search_box.as_ptr_mut();
-        let sb_id = self.search_box.base().id();
-        ctx.register_widget(sb_id, sb_ptr);
+        ctx.register_host(&mut self.search_box);
 
-        let btn_ptr = self.add_key_btn.as_ptr_mut();
-        let btn_id = self.add_key_btn.base().id();
-        ctx.register_widget(btn_id, btn_ptr);
+        ctx.register_host(&mut self.add_key_btn);
 
-        let pop_ptr = self.add_key_popover_box.as_ptr_mut();
-        let pop_id = self.add_key_popover_box.base().id();
-        ctx.register_widget(pop_id, pop_ptr);
+        ctx.register_host(&mut self.add_key_popover_box);
 
         if self.editing_key_idx.is_some() {
-            let eb_ptr = self.edit_box.as_ptr_mut();
-            let eb_id = self.edit_box.base().id();
-            ctx.register_widget(eb_id, eb_ptr);
+            ctx.register_host(&mut self.edit_box);
         }
     }
 }
@@ -1433,7 +1424,7 @@ mod tests {
         let mut tree_list = TreeList::new();
         tree_list.set_rect(10.0, 52.0, 380.0, 500.0);
 
-        ctx.register_widget(tree_list.base().id(), tree_list.as_ptr_mut());
+        ctx.register_host(&mut tree_list);
         ctx.tick(0.016);
         ctx.clear_dirty();
 
@@ -1447,7 +1438,7 @@ mod tests {
         let mut ctx = UiContext::new();
         let mut tree_list = TreeList::new();
 
-        ctx.register_widget(tree_list.base().id(), tree_list.as_ptr_mut());
+        ctx.register_host(&mut tree_list);
         ctx.rebuild_spatial_grid();
 
         let list_top = 52.0;

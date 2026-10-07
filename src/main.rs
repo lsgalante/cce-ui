@@ -95,16 +95,18 @@ impl DemoApp {
 
     /// The widget roots as pointers, for the one genuinely pointer-consuming path left:
     /// registration (the registry stores them). The paint walk takes shared borrows.
-    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 7] {
-        [
-            self.button.as_ptr_mut(),
-            self.toggle.as_ptr_mut(),
-            self.slider.as_ptr_mut(),
-            self.name_box.as_ptr_mut(),
-            self.theme_dropdown.as_ptr_mut(),
-            self.image_contain.as_ptr_mut(),
-            self.image_stretch.as_ptr_mut(),
-        ]
+    /// Register every dispatch root by reference: the registry keeps a pointer to each
+    /// and resolves it only while the widget lives, so register once `self` is at its
+    /// final address (see `display_list`).
+    fn register_roots(&mut self) {
+        let ctx = &mut self.ui_context;
+        ctx.register_host(&mut self.button);
+        ctx.register_host(&mut self.toggle);
+        ctx.register_host(&mut self.slider);
+        ctx.register_host(&mut self.name_box);
+        ctx.register_host(&mut self.theme_dropdown);
+        ctx.register_host(&mut self.image_contain);
+        ctx.register_host(&mut self.image_stretch);
     }
 
     /// `take_*` plumbing: translate widget changes into app state. Runs after any routed
@@ -231,13 +233,7 @@ impl Application for DemoApp {
         // `self` sits at its final address — hence here, not in `new()`.
         if !self.widgets_registered {
             self.widgets_registered = true;
-            let self_ptr = self as *mut Self;
-            unsafe {
-                for w in (*self_ptr).roots() {
-                    let id = (*w).base().id();
-                    self.ui_context.register_widget(id, w);
-                }
-            }
+            self.register_roots();
         }
 
         let size_changed = self.width != size.width as u32

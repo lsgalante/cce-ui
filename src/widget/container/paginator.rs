@@ -161,8 +161,7 @@ impl Layout for Paginator {
     }
 
     fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
-        let menu_ptr = self.sidebar_menu.as_ptr_mut();
-        ctx.register_widget(self.sidebar_menu.id(), menu_ptr);
+        ctx.register_host(&mut self.sidebar_menu);
         ctx.link_ids(host_id, self.sidebar_menu.id());
     }
 }
@@ -293,8 +292,7 @@ mod tests {
     fn sidebar_click_switches_page_and_drains_menu_click() {
         let mut ctx = UiContext::new();
         let mut p = paginator();
-        let (id, ptr) = (p.id(), p.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut p);
 
         // Click the second tab (the strip commits selection on release): the selection moves
         // and menu_click reports (1, 0) once.
@@ -316,8 +314,7 @@ mod tests {
     fn plain_quads_split_like_legacy_and_registration_heals_on_tick() {
         let mut ctx = UiContext::new();
         let mut p = paginator();
-        let (id, ptr) = (p.id(), p.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut p);
 
         // Legacy split: `extra_quads` is the children's chrome only; the sidebar background
         // (a rounded rect) lives in `all_rounded_quads` alone (layout-interface draws its

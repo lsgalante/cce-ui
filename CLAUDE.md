@@ -1580,10 +1580,15 @@ returned by value): the token moves with it. Register from a live borrow before 
 reads it, as the apps' rebuilds do. The sound end state is a registry that owns its widgets.
 
 The pointer-taking entry points say so:
-- `WidgetTree::register`, `UiContext::set_focused_ptr`, `show_context_menu` and
-  `handle_right_click` are `unsafe fn`.
-- `register_widget` stays safe only because 105 app call sites use it. New code calls
-  `register_host(&mut w)`.
+- `WidgetTree::register`, `UiContext::register_widget`, `set_focused_ptr`,
+  `show_context_menu` and `handle_right_click` are `unsafe fn`.
+- `Adapted::set_parent` takes its parent by reference.
+- **Register a widget with `register_host(&mut w)`.** Every app moved to it, and so did
+  the toolkit's own paths that hold a borrow (`render_widget`, the paginator, the tree list).
+- `register_widget` remains for the paths that only have a pointer: `link_parent_child`,
+  whose trait objects are not `'static`, and tests that exercise raw pointers.
+- The demo's `register_roots` is the pattern to copy. The `roots()` helpers that returned
+  `[*mut dyn WidgetHost; N]` for a registration loop are gone.
 
 `a_dropped_widget_is_never_handed_out` and `a_clone_has_a_liveness_of_its_own` are the tests.
 

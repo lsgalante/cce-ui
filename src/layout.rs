@@ -4220,10 +4220,7 @@ impl RenderTarget for PopoverCollector {
 
 
 pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
-    let id = Some(w.base().id());
-    if let Some(w_id) = id {
-        ctx.register_widget(w_id, w as *mut T as *mut (dyn WidgetHost + 'static));
-    }
+    ctx.register_host(w);
     // The flat-host contract, the same block `set_rect` takes: `(x, y)` is the top of
     // the detached label and `wh` the block height, label strip included. `layout`
     // takes the CONTENT origin and height, so step down by the strip.

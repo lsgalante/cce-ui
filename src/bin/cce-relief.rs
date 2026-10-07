@@ -1065,28 +1065,30 @@ impl BevelPopup {
         ]
     }
 
-    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 19] {
-        [
-            self.profile_dropdown.as_ptr_mut(),
-            self.edge_dropdown.as_ptr_mut(),
-            self.wall.shoulder.as_ptr_mut(),
-            self.wall.base.as_ptr_mut(),
-            self.wall.bias.as_ptr_mut(),
-            self.edge.shoulder.as_ptr_mut(),
-            self.edge.base.as_ptr_mut(),
-            self.edge.bias.as_ptr_mut(),
-            self.depth_slider.as_ptr_mut(),
-            self.width_slider.as_ptr_mut(),
-            self.height_slider.as_ptr_mut(),
-            self.spec_slider.as_ptr_mut(),
-            self.shine_slider.as_ptr_mut(),
-            self.curv_slider.as_ptr_mut(),
-            self.comp_slider.as_ptr_mut(),
-            self.refr_slider.as_ptr_mut(),
-            self.radius_slider.as_ptr_mut(),
-            self.save_button.as_ptr_mut(),
-            self.cancel_button.as_ptr_mut(),
-        ]
+    /// Register every dispatch root by reference: the registry keeps a pointer to each
+    /// and resolves it only while the widget lives, so register once `self` is at its
+    /// final address (see `display_list`).
+    fn register_roots(&mut self) {
+        let ctx = &mut self.ui_context;
+        ctx.register_host(&mut self.profile_dropdown);
+        ctx.register_host(&mut self.edge_dropdown);
+        ctx.register_host(&mut self.wall.shoulder);
+        ctx.register_host(&mut self.wall.base);
+        ctx.register_host(&mut self.wall.bias);
+        ctx.register_host(&mut self.edge.shoulder);
+        ctx.register_host(&mut self.edge.base);
+        ctx.register_host(&mut self.edge.bias);
+        ctx.register_host(&mut self.depth_slider);
+        ctx.register_host(&mut self.width_slider);
+        ctx.register_host(&mut self.height_slider);
+        ctx.register_host(&mut self.spec_slider);
+        ctx.register_host(&mut self.shine_slider);
+        ctx.register_host(&mut self.curv_slider);
+        ctx.register_host(&mut self.comp_slider);
+        ctx.register_host(&mut self.refr_slider);
+        ctx.register_host(&mut self.radius_slider);
+        ctx.register_host(&mut self.save_button);
+        ctx.register_host(&mut self.cancel_button);
     }
 
     /// The pane rung's bound material name, when config binds one — the
@@ -1744,13 +1746,7 @@ impl Application for BevelPopup {
     fn display_list(&mut self, size: LogicalSize, scale: f64) -> Option<DisplayList> {
         if !self.registered {
             self.registered = true;
-            let self_ptr = self as *mut Self;
-            unsafe {
-                for w in (*self_ptr).roots() {
-                    let id = (*w).base().id();
-                    self.ui_context.register_widget(id, w);
-                }
-            }
+            self.register_roots();
         }
 
         let size_changed = self.width != size.width as u32

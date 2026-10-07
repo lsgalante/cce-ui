@@ -77,8 +77,11 @@ pub mod focus {
             std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(child as *mut dyn WidgetHost)
         };
         let (p_id, c_id) = (parent.base().id(), child.base().id());
-        ctx.register_widget(p_id, parent_ptr);
-        ctx.register_widget(c_id, child_ptr);
+        // SAFETY: both derived from the live borrows we were handed.
+        unsafe {
+            ctx.register_widget(p_id, parent_ptr);
+            ctx.register_widget(c_id, child_ptr);
+        }
         // The old add_child + set_parent pair, as the tree ops they always were.
         ctx.tree.link(p_id, c_id);
         ctx.tree.set_parent(c_id, Some(p_id));

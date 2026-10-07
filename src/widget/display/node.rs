@@ -262,8 +262,7 @@ mod tests {
     fn toggle_click_flips_geom_and_press_starts_drag() {
         let mut ctx = UiContext::new();
         let mut node = Node::new(100.0, 100.0, 120.0, 40.0, "geo1");
-        let (id, ptr) = (node.id(), node.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut node);
 
         // Toggle zone: (100+120-30, 100+11) => 18x18 at (190, 111).
         assert!(node.mouse_input(MouseButton::Left, ElementState::Pressed, 195.0, 115.0, &mut ctx));

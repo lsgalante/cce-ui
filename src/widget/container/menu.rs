@@ -1219,8 +1219,7 @@ mod tests {
     fn menu_open_click_and_controller_roundtrip() {
         let mut ctx = UiContext::new();
         let mut mb = bar();
-        let (id, ptr) = (mb.id(), mb.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut mb);
         WidgetHost::set_rect(&mut mb, 0.0, 0.0, 400.0, 24.0);
 
         // Click the "File" strip button (the strip commits selection on release): the dropdown
@@ -1247,8 +1246,7 @@ mod tests {
     fn hidden_menubar_reports_no_menu_and_rejects_hits() {
         let mut ctx = UiContext::new();
         let mut mb = bar();
-        let (id, ptr) = (mb.id(), mb.as_ptr_mut());
-        ctx.register_widget(id, ptr);
+        ctx.register_host(&mut mb);
         WidgetHost::set_rect(&mut mb, 0.0, 0.0, 400.0, 24.0);
 
         WidgetHost::set_visible(&mut mb, false);

@@ -319,7 +319,8 @@ mod tests {
     fn register(ctx: &mut UiContext, w: &mut dyn WidgetHost) -> WidgetId {
         let id = w.base().id();
         let ptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(w as *mut dyn WidgetHost) };
-        ctx.register_widget(id, ptr);
+        // SAFETY: a test widget, live for the whole test.
+        unsafe { ctx.register_widget(id, ptr) };
         id
     }
 
