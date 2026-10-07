@@ -580,6 +580,19 @@ impl TextBox {
         }
     }
 
+    /// The selection as it may go to the clipboard: never a password box's.
+    /// Every copy and cut goes through here -- Ctrl+C / Ctrl+X, the context
+    /// menu's rows, [`copy_selection`](Self::copy_selection) and
+    /// [`cut_selection`](Self::cut_selection) -- because each of them used to
+    /// put a password on the clipboard in plain text, readable by any client,
+    /// from the login greeter's and the polkit dialog's boxes alike.
+    fn clipboard_text(&self, state: &TextEditorState) -> Option<String> {
+        if self.is_password {
+            return None;
+        }
+        state.selected_text()
+    }
+
     pub fn copy_selection(&self) {
         let state = TextEditorState {
             buffer: self.edit_buffer.clone(),
@@ -587,12 +600,17 @@ impl TextBox {
             select_anchor: self.select_anchor,
             all_selected: self.all_selected,
         };
-        if let Some(text) = state.selected_text() {
+        if let Some(text) = self.clipboard_text(&state) {
             clipboard::copy_to_clipboard(&text);
         }
     }
 
+    /// Cut the selection to the clipboard. A password box's selection can
+    /// not go there (`clipboard_text`), so it is left in place, not deleted.
     pub fn cut_selection(&mut self) -> bool {
+        if self.is_password {
+            return false;
+        }
         let before = self.snapshot();
         let mut state = TextEditorState {
             buffer: std::mem::take(&mut self.edit_buffer),
@@ -1050,13 +1068,15 @@ impl TextBox {
                 true
             }
             Key::Character(ref ch_str) if control && (ch_str == "c" || ch_str == "C") => {
-                if let Some(text) = state.selected_text() {
+                if let Some(text) = self.clipboard_text(&state) {
                     clipboard::copy_to_clipboard(&text);
                 }
                 true
             }
+            // A password box's selection stays put: it can not be cut to the
+            // clipboard, and deleting it alone would not be a cut.
             Key::Character(ref ch_str) if control && (ch_str == "x" || ch_str == "X") => {
-                if let Some(text) = state.selected_text() {
+                if let Some(text) = self.clipboard_text(&state) {
                     clipboard::copy_to_clipboard(&text);
                     state.insert_text("");
                 }
@@ -2610,5 +2630,60 @@ mod tests {
         let configured = crate::layout::textbox_multiline_border_width();
         assert_eq!(tb_single.border_width(), 1.0);
         assert_eq!(tb_multi.border_width(), configured);
+    }
+    /// A password box never hands its text to the clipboard -- not from a
+    /// selection, not by Ctrl+X, not through the menu -- and its menu offers
+    /// no Cut or Copy. Its Ctrl+X leaves the text in place.
+    #[test]
+    fn a_password_box_never_copies_or_cuts() {
+        let mut dummy = crate::context::UiContext::new();
+        let mut tb = TextBox::new(String::new()).with_password(true);
+        tb.set_rect(10.0, 10.0, 200.0, 30.0);
+        tb.focus();
+        tb.edit_buffer = "hunter2".to_string();
+        tb.cursor_idx = 7;
+        tb.select_all();
+        let state = TextEditorState {
+            buffer: tb.edit_buffer.clone(),
+            cursor_idx: tb.cursor_idx,
+            select_anchor: tb.select_anchor,
+            all_selected: tb.all_selected,
+        };
+        assert_eq!(state.selected_text().as_deref(), Some("hunter2"), "the selection is there");
+        assert_eq!(tb.clipboard_text(&state), None, "but never for the clipboard");
+
+        let ctrl_x = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Character("x".to_string()),
+            text: None,
+            repeat: false,
+            ctrl: true,
+            shift: false,
+            alt: false,
+        };
+        tb.keyboard_input(&ctrl_x, &mut dummy);
+        assert_eq!(tb.edit_buffer, "hunter2", "Ctrl+X cuts nothing");
+        assert!(!WidgetHost::context_action(&mut tb, crate::widget::ContextAction::Cut));
+        assert_eq!(tb.edit_buffer, "hunter2", "nor does the menu's Cut");
+
+        dummy.hide_context_menu();
+        assert!(tb.mouse_input(MouseButton::Right, ElementState::Pressed, 50.0, 20.0, &mut dummy));
+        let opts = crate::widget::context_menu::options();
+        assert!(!opts.iter().any(|o| o == "Cut" || o == "Copy"), "no Cut / Copy rows: {opts:?}");
+        assert!(opts.iter().any(|o| o == "Paste"), "Paste stays: {opts:?}");
+        dummy.hide_context_menu();
+    }
+
+    /// The gate is the password flag alone: an ordinary box's selection goes.
+    #[test]
+    fn an_ordinary_box_selection_is_clipboard_text() {
+        let tb = TextBox::new("hello".to_string());
+        let state = TextEditorState {
+            buffer: "hello".to_string(),
+            cursor_idx: 5,
+            select_anchor: Some(0),
+            all_selected: false,
+        };
+        assert_eq!(tb.clipboard_text(&state).as_deref(), Some("hello"));
     }
 }

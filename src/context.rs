@@ -1050,7 +1050,18 @@ impl UiContext {
         }
 
         if name == "TextBox" {
-            options.extend(vec!["Cut".to_string(), "Copy".to_string(), "Paste".to_string(), "Select All".to_string()]);
+            // A password box has no Cut or Copy: its text never goes to the
+            // clipboard (`TextBox::clipboard_text`).
+            let is_password = unsafe {
+                (*target)
+                    .as_any()
+                    .downcast_ref::<crate::widget::input::TextBox>()
+                    .is_some_and(|tb| tb.is_password)
+            };
+            if !is_password {
+                options.extend(vec!["Cut".to_string(), "Copy".to_string()]);
+            }
+            options.extend(vec!["Paste".to_string(), "Select All".to_string()]);
             let is_search = unsafe {
                 if let Some(tb) = (*target).as_any().downcast_ref::<crate::widget::input::TextBox>() {
                     tb.placeholder.as_deref() == Some("Search...")
