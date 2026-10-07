@@ -1275,6 +1275,20 @@ What this buys, and where the code is heading:
   vertex from outside the display list falls to the no-recipe branch.
   `examples/frost_pair.rs` is the visual test: three recipes in one window, run in a
   shadow, measured in the RFC's step-3 note.
+- **The kernel reads a mip chain, or thin detail bands** (since 2026-10-06). The 7x7
+  taps stand a whole stride apart (5.5 physical px by default), and at level 0 a tap
+  reads only the texel or two it lands between: a hairline, a well's edge or a glyph
+  behind the plate was picked up whole by the taps that hit it and missed by the rest,
+  seven faint copies a stride apart — horizontal bands under an open dropdown over the
+  params rows, measured as an 8–16-level sawtooth down a column that is now a smooth
+  ramp. The blur snapshot carries `snapshot_levels` mips (at most
+  `SNAPSHOT_LEVELS_MAX`, 7), rebuilt by linear blits after every frame-so-far copy
+  (`snapshot_mip_chain`), the sampler filters between levels, and `resolve_blur`
+  reads level `log2(stride)`, so each tap is the average of its stride-sized cell.
+  That adds about 3% to the blur's sigma. The clean samples (a clear plate, the rim)
+  stay at level 0, and the scene backdrop keeps one level — only the zeroed-backdrop
+  exempt plate reads it, and it holds nothing. A surface format that cannot be
+  blitted with a linear filter gets one level and the old look.
 - **Named materials in config** (RFC step 4): `style.surface.material { <name> { color;
   frost …; finish … } }` and a binding per rung — `plate material="…"`, `plate { root
   material="…" }`, `style.control.material` — resolved by `MaterialDef::resolve` over
