@@ -2266,6 +2266,21 @@ what the pane asks. A scroll keeps its own full-precision copy too
 sends a pixel at a time, a quarter of a degree, which on a short vector
 is less than the rows can hold.
 
+### A spreadsheet is columns of values, written as they are painted
+
+`Spreadsheet` holds its table as COLUMNS (since 2026-10-07, `SheetColumn`:
+`Text`, `Int`, or `Float` to a number of decimals) and writes a cell's text
+only when it paints the cell. `SpreadsheetController::set_spreadsheet_columns`
+takes them; `set_spreadsheet_data` (rows of strings) still works, its cells
+becoming text columns. A sort compares the values — numbers by number, text
+as before (numerically where both cells parse) — instead of parsing every
+cell twice a comparison. It exists for a host that refills the table every
+frame: the designer did so during a simulation's playback with every cell of
+every row formatted into a `String`, ten thousand rows of them for a pane
+that shows thirty. A float cell is `format!("{:.*}", decimals, value)`, the
+string a host formatting it itself would have written.
+`a_column_table_is_written_as_painted_and_sorts_by_value` is the test.
+
 ### A spreadsheet's rows can be selected
 
 `Spreadsheet` keeps a selection of rows (since 2026-09-29): a press on a

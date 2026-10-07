@@ -14,7 +14,7 @@ pub use content_bg::ContentBg;
 pub use parameters_bg::ParametersBg;
 pub use menu::MenuBar;
 pub use breadcrumb::Breadcrumb;
-pub use spreadsheet::Spreadsheet;
+pub use spreadsheet::{SheetColumn, Spreadsheet};
 pub use scroll_box::ScrollBox;
 pub use paginator::Paginator;
 pub use treelist::{TreeList, TreeElement};

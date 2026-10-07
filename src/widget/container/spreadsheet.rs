@@ -18,6 +18,15 @@
 //! draw, before the plate, through [`Spreadsheet::paint_scrollbars`] — the plate is the
 //! host's too.
 //!
+//! **The table is COLUMNS of values, formatted as they are painted** (since 2026-10-07,
+//! [`SheetColumn`], [`SpreadsheetController::set_spreadsheet_columns`]). A host that
+//! refills the table every frame — the designer's, during a simulation's playback — used
+//! to format every cell of every row into a `String` for a pane that shows thirty rows:
+//! at ten thousand points that was most of what the table cost a frame. A column of
+//! numbers is now the numbers, the cells on screen are written when painted, and a sort
+//! compares the numbers rather than parsing their text. `set_spreadsheet_data` (rows of
+//! strings) still works: its cells become text columns.
+//!
 //! The `PARAM_BG` background is NOT emitted here: the designer's render path draws every
 //! widget's background itself from `color()` + `corner_style()` (`push_widget_vertices`), and
 //! `PARAM_BG` is translucent — emitting it again would double-blend. This widget's own
@@ -31,6 +40,64 @@ use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton, MouseScrollDelta,
     NamedKey, Paint, ScrollbarActivity, SpreadsheetController,
 };
+
+/// One column of a [`Spreadsheet`], as its values: the widget writes the
+/// cells it paints, so a column of a hundred thousand numbers costs a copy
+/// of them, not a hundred thousand strings.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SheetColumn {
+    /// Cells as given. Sorted numerically where both cells parse as numbers,
+    /// as text otherwise.
+    Text(Vec<String>),
+    /// Whole numbers.
+    Int(Vec<i64>),
+    /// Numbers written to `decimals` places (`format!("{:.*}")`).
+    Float { values: Vec<f32>, decimals: usize },
+}
+
+impl SheetColumn {
+    /// How many cells the column has.
+    pub fn len(&self) -> usize {
+        match self {
+            SheetColumn::Text(v) => v.len(),
+            SheetColumn::Int(v) => v.len(),
+            SheetColumn::Float { values, .. } => values.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Row `row`'s cell as it is shown; empty past the column's end.
+    pub fn cell(&self, row: usize) -> String {
+        match self {
+            SheetColumn::Text(v) => v.get(row).cloned().unwrap_or_default(),
+            SheetColumn::Int(v) => v.get(row).map(|n| n.to_string()).unwrap_or_default(),
+            SheetColumn::Float { values, decimals } => {
+                values.get(row).map(|x| format!("{:.*}", decimals, x)).unwrap_or_default()
+            }
+        }
+    }
+
+    /// The order of rows `a` and `b` by this column: by value for numbers
+    /// (a NaN is equal to anything, so it keeps its place), by
+    /// `Spreadsheet::cmp_cells` for text.
+    fn cmp_rows(&self, a: usize, b: usize) -> std::cmp::Ordering {
+        use std::cmp::Ordering::Equal;
+        match self {
+            SheetColumn::Text(v) => Spreadsheet::cmp_cells(
+                v.get(a).map(String::as_str).unwrap_or(""),
+                v.get(b).map(String::as_str).unwrap_or(""),
+            ),
+            SheetColumn::Int(v) => v.get(a).cmp(&v.get(b)),
+            SheetColumn::Float { values, .. } => match (values.get(a), values.get(b)) {
+                (Some(x), Some(y)) => x.partial_cmp(y).unwrap_or(Equal),
+                (x, y) => x.is_some().cmp(&y.is_some()),
+            },
+        }
+    }
+}
 
 const HEADER_H: f32 = 24.0;
 const ROW_H: f32 = 24.0;
@@ -46,10 +113,12 @@ const MIN_COL_W: f32 = 76.0;
 pub struct Spreadsheet {
     hovered: bool,
     headers: Vec<String>,
-    rows: Vec<Vec<String>>,
-    /// Display order into `rows` — the identity permutation unless `sort` is set.
+    /// The table, a column a header ([`SheetColumn`]); `row_count` rows.
+    columns: Vec<SheetColumn>,
+    row_count: usize,
+    /// Display order into the rows — the identity permutation unless `sort` is set.
     /// Rebuilt by `apply_sort` at both mutation sites (header click, data refresh),
-    /// so `order.len() == rows.len()` always holds.
+    /// so `order.len() == row_count` always holds.
     order: Vec<usize>,
     /// Active sort: `(column, ascending)`. A header click cycles
     /// ascending → descending → natural order (matching the source data).
@@ -120,7 +189,8 @@ impl Spreadsheet {
         let mut s = Adapted::new(Spreadsheet {
             hovered: false,
             headers: Vec::new(),
-            rows: Vec::new(),
+            columns: Vec::new(),
+            row_count: 0,
             order: Vec::new(),
             sort: None,
             header_hover_col: None,
@@ -144,7 +214,7 @@ impl Spreadsheet {
     }
 
     fn geom(&self, rect: Rect) -> Option<ScrollGeom> {
-        let content_h = self.rows.len() as f32 * ROW_H;
+        let content_h = self.row_count as f32 * ROW_H;
         let visible_h = (rect.height - HEADER_H).max(0.0);
         if visible_h <= 0.0 || content_h <= visible_h {
             return None;
@@ -349,14 +419,14 @@ impl Spreadsheet {
                 self.sort = None;
             }
         }
-        self.order = (0..self.rows.len()).collect();
+        self.order = (0..self.row_count).collect();
         if let Some((col, ascending)) = self.sort {
-            let rows = &self.rows;
-            let cell = |r: usize| rows[r].get(col).map(String::as_str).unwrap_or("");
-            self.order.sort_by(|&a, &b| {
-                let ord = Self::cmp_cells(cell(a), cell(b));
-                if ascending { ord } else { ord.reverse() }
-            });
+            if let Some(column) = self.columns.get(col) {
+                self.order.sort_by(|&a, &b| {
+                    let ord = column.cmp_rows(a, b);
+                    if ascending { ord } else { ord.reverse() }
+                });
+            }
         }
     }
 
@@ -486,7 +556,7 @@ impl Paint for Spreadsheet {
             let [r, g, b, _] = colors::highlight_primary_color();
             [r, g, b, 0.28]
         };
-        for i in 0..self.rows.len() {
+        for i in 0..self.row_count {
             let ry = y + HEADER_H + i as f32 * ROW_H - scroll;
             if ry + ROW_H <= body_top || ry >= body_bottom {
                 continue;
@@ -624,12 +694,13 @@ impl Paint for Spreadsheet {
             if bottom <= top {
                 continue;
             }
-            for (col_idx, val) in self.rows[src].iter().enumerate().take(n_cols) {
+            // Written here, for the cells on screen only (`SheetColumn`).
+            for (col_idx, column) in self.columns.iter().enumerate().take(n_cols) {
                 if !col_visible(col_idx) {
                     continue;
                 }
                 let cx = xoff + col_w * col_idx as f32 + 8.0;
-                ctx.text_with(fit(val.clone()), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc], None, col_bounds(col_idx, top, bottom - top));
+                ctx.text_with(fit(column.cell(src)), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc], None, col_bounds(col_idx, top, bottom - top));
             }
         }
     }
@@ -859,10 +930,12 @@ impl Input for Spreadsheet {
 
 }
 
-impl SpreadsheetController for Spreadsheet {
-    fn set_spreadsheet_data(&mut self, headers: Vec<String>, rows: Vec<Vec<String>>) {
+impl Spreadsheet {
+    /// Take a table: its headers, its columns and how many rows they hold.
+    fn set_columns(&mut self, headers: Vec<String>, columns: Vec<SheetColumn>, rows: usize) {
         self.headers = headers;
-        self.rows = rows;
+        self.columns = columns;
+        self.row_count = rows;
         // Re-derive the display order so an active sort survives a data refresh
         // (the designer re-sets the whole table on selection/param changes).
         self.apply_sort();
@@ -873,7 +946,7 @@ impl SpreadsheetController for Spreadsheet {
         // the designer re-sets the table on every frame of a playback, and
         // the rows selected are still the elements they were. What a
         // shorter table no longer has goes.
-        let n = self.rows.len();
+        let n = self.row_count;
         let kept = self.selected.len();
         self.selected.retain(|&r| r < n);
         if self.selected.len() != kept {
@@ -883,13 +956,33 @@ impl SpreadsheetController for Spreadsheet {
             self.anchor = None;
         }
     }
+}
+
+impl SpreadsheetController for Spreadsheet {
+    fn set_spreadsheet_data(&mut self, headers: Vec<String>, rows: Vec<Vec<String>>) {
+        // Rows of text become text columns, a cell a row; a short row's
+        // missing cells are empty.
+        let width = headers.len();
+        let mut columns: Vec<Vec<String>> = (0..width).map(|_| Vec::with_capacity(rows.len())).collect();
+        for row in &rows {
+            for (c, column) in columns.iter_mut().enumerate() {
+                column.push(row.get(c).cloned().unwrap_or_default());
+            }
+        }
+        self.set_columns(headers, columns.into_iter().map(SheetColumn::Text).collect(), rows.len());
+    }
+
+    fn set_spreadsheet_columns(&mut self, headers: Vec<String>, columns: Vec<SheetColumn>) {
+        let rows = columns.iter().map(SheetColumn::len).max().unwrap_or(0);
+        self.set_columns(headers, columns, rows);
+    }
 
     fn selected_rows(&self) -> Vec<usize> {
         self.selected.iter().copied().collect()
     }
 
     fn set_selected_rows(&mut self, rows: &[usize]) {
-        let n = self.rows.len();
+        let n = self.row_count;
         let next: std::collections::BTreeSet<usize> = rows.iter().copied().filter(|&r| r < n).collect();
         if next != self.selected {
             self.selected = next;
@@ -1343,6 +1436,59 @@ mod tests {
             Input::tick(&mut *s.inner_mut(), 0.016, rect);
         }
         assert_eq!(pills(&s), 4, "two tracks and two thumbs");
+    }
+
+    /// A table of columns: the cells on screen are written as they are
+    /// painted — to a float column's decimals, an integer as one — and only
+    /// those; a sort compares the values, so 10 sorts after 9 without a
+    /// cell being parsed, and an integer column likewise.
+    #[test]
+    fn a_column_table_is_written_as_painted_and_sorts_by_value() {
+        let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
+        let mut ctx = UiContext::new();
+        let mut s = Spreadsheet::new();
+        s.set_visible(true);
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0);
+        let (id, ptr) = (s.id(), s.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        let n = 1000;
+        SpreadsheetController::set_spreadsheet_columns(
+            &mut *s,
+            vec!["i".into(), "x".into()],
+            vec![
+                SheetColumn::Int((0..n as i64).collect()),
+                SheetColumn::Float { values: (0..n).map(|r| ((r * 7919) % n) as f32 * 0.5 - 3.25).collect(), decimals: 4 },
+            ],
+        );
+        assert_eq!(s.inner().row_count, n);
+        let texts = |s: &Adapted<Spreadsheet>| -> Vec<String> {
+            let mut pc = crate::scene::paint::PaintCtx::new();
+            Paint::paint(&**s, rect, &mut pc);
+            pc.finish()
+                .items
+                .iter()
+                .filter_map(|item| match &item.prim {
+                    crate::scene::paint::Prim::Text { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let shown = texts(&s);
+        assert!(shown.contains(&"0".to_string()) && shown.contains(&"-3.2500".to_string()), "{shown:?}");
+        assert!(!shown.contains(&"999".to_string()), "a row off screen is not written");
+
+        // Sorted by x, ascending: the least value first, by value.
+        assert!(s.handle_event(&header_click(150.0), &mut ctx));
+        let order = s.inner().order.clone();
+        let x = |r: usize| ((r * 7919) % n) as f32 * 0.5 - 3.25;
+        assert!(order.windows(2).all(|w| x(w[0]) <= x(w[1])));
+        // And by i, descending (two more clicks on the first header).
+        assert!(s.handle_event(&header_click(50.0), &mut ctx));
+        assert!(s.handle_event(&header_click(50.0), &mut ctx));
+        assert_eq!(s.inner().order[0], n - 1, "999 sorts after 99 and 100");
+        assert_eq!(SheetColumn::Float { values: vec![1.0 / 3.0], decimals: 2 }.cell(0), "0.33");
+        assert_eq!(SheetColumn::Int(vec![-4]).cell(0), "-4");
+        assert_eq!(SheetColumn::Int(vec![]).cell(3), "", "past the end is empty");
     }
 
     #[test]

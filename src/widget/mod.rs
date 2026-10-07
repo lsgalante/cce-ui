@@ -651,7 +651,7 @@ pub use self::container::{
     ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     ContentBg, ParametersBg,
-    ScrollBox, MenuBar, Spreadsheet, Breadcrumb,
+    ScrollBox, MenuBar, SheetColumn, Spreadsheet, Breadcrumb,
     Paginator, TreeList, TreeElement
 };
 pub use self::display::{
@@ -772,6 +772,14 @@ pub trait GraphController {
 
 pub trait SpreadsheetController {
     fn set_spreadsheet_data(&mut self, headers: Vec<String>, rows: Vec<Vec<String>>);
+    /// The table as columns of values ([`SheetColumn`]), a column a header:
+    /// the cells are written as they are painted, so a refill costs a copy
+    /// of the values. Rows of text, by default.
+    fn set_spreadsheet_columns(&mut self, headers: Vec<String>, columns: Vec<SheetColumn>) {
+        let n = columns.iter().map(SheetColumn::len).max().unwrap_or(0);
+        let rows = (0..n).map(|r| columns.iter().map(|c| c.cell(r)).collect()).collect();
+        self.set_spreadsheet_data(headers, rows);
+    }
     /// The selected rows, as indices into the rows last set, ascending.
     fn selected_rows(&self) -> Vec<usize> {
         Vec::new()
