@@ -1037,28 +1037,25 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         // uses (a TreeList's rows, a Breadcrumb's segments) or does not declare. A
         // widget with no `widget_font` used to fall back to the engine's sans default
         // here, so half the gallery's labels were in a different face.
+        //
+        // `text_bounds` clips the widget's content text only. The detached label sits
+        // in the strip above the content, so a widget clipping its content to its own
+        // rect (Graph) clipped its label away, and one clipping to the inside of its
+        // relief (TextBox's well floor) could not do so at all while the label shared
+        // the clip — TextBox widened it to the whole block, and its text ran over its
+        // wall. (The legacy scroll-ancestor clamp ended here too: always a no-op since
+        // Phase 6av — ScrollBox, the last scroll ancestor type, never appeared as a
+        // tree parent.)
         let base_font = Some(crate::layout::control_label_font_detached());
-        let mut fonted: Vec<(TextLabel, Option<String>)> = Vec::new();
+        let bounds = Paint::text_bounds(&self.inner, self.content_rect());
+        let mut out: Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> = Vec::new();
         if self.visible() {
-            fonted.extend(painted.into_iter().map(|l| (l, prim_font.clone())));
+            out.extend(painted.into_iter().map(|l| (l, prim_font.clone(), bounds)));
             if !Layout::inline_label(&self.inner) {
-                fonted.extend(self.base_label_fallback().into_iter().map(|l| (l, base_font.clone())));
+                out.extend(self.base_label_fallback().into_iter().map(|l| (l, base_font.clone(), None)));
             }
         }
-
-        if let Some(bounds) = Paint::text_bounds(&self.inner, self.content_rect()) {
-            return fonted
-                .into_iter()
-                .map(|(l, font)| (l, font, Some(bounds)))
-                .collect();
-        }
-
-        // The legacy scroll-ancestor clamp ended here: always a no-op since Phase 6av —
-        // ScrollBox (the last scroll ancestor type) never appeared as a tree parent.
-        fonted
-            .into_iter()
-            .map(|(l, font)| (l, font, None::<[f32; 4]>))
-            .collect::<Vec<_>>()
+        out
     }
 
     /// The base-label text of a *detached*-label widget — a replica of the legacy default
@@ -2020,6 +2017,42 @@ mod tests {
         assert_eq!(texts[0].0, "hi");
         assert_eq!(texts[0].1.as_deref(), Some("Mono:12"), "widget_font attached");
         assert_eq!(texts[0].2, Some([10.0, 20.0, 110.0, 50.0]), "text_bounds attached");
+    }
+
+    /// `text_bounds` clips the content text only: the detached label sits in the
+    /// strip above the content rect, so the content's clip would cut it away.
+    #[test]
+    fn text_bounds_leave_the_detached_label_unclipped() {
+        struct Tag;
+        impl Layout for Tag {}
+        impl Paint for Tag {
+            fn color(&self) -> [f32; 4] {
+                [0.0; 4]
+            }
+            fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+                ctx.text("hi", rect.x + 2.0, rect.y + 2.0, 12.0, [1, 2, 3]);
+            }
+            fn text_bounds(&self, rect: Rect) -> Option<[f32; 4]> {
+                Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height])
+            }
+        }
+        impl Input for Tag {}
+
+        let mut ctx = UiContext::new();
+        let mut w = Box::new(Adapted::new(Tag).with_label("Name"));
+        let (id, ptr) = (w.id(), w.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        unsafe { (*ptr).set_rect(10.0, 20.0, 100.0, 60.0) };
+
+        let list = paint_tree(&ctx, unsafe { &*ptr });
+        let bounds_of = |want: &str| {
+            list.items.iter().find_map(|it| match &it.prim {
+                Prim::Text { text, bounds, .. } if text == want => Some(*bounds),
+                _ => None,
+            })
+        };
+        assert!(matches!(bounds_of("hi"), Some(Some(_))), "content text is clipped");
+        assert_eq!(bounds_of("Name"), Some(None), "the label is not");
     }
 
 }

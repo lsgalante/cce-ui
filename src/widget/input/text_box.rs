@@ -254,7 +254,8 @@ impl TextBox {
     }
 
     fn map_x_to_idx(&self, click_x: f32) -> usize {
-        let relative_x = click_x - (self.rect.x + 8.0) + self.scroll_x;
+        let pad = self.pad();
+        let relative_x = click_x - (self.rect.x + pad) + self.scroll_x;
         if self.glyph_positions.is_empty() {
             let char_width = self.char_width();
             return ((relative_x / char_width).round() as isize)
@@ -488,6 +489,37 @@ impl TextBox {
         } else {
             1.0
         }
+    }
+
+    /// The inset from the box's edge to its text — the caret, selection,
+    /// hit-testing, wrap and scroll range all measure from it. 8px, or the
+    /// well's floor when the relief wall reaches further in: the wall is
+    /// `bevel_width` deep once the box is tall enough (`well`'s 20% cap), so a
+    /// fixed 8px sat a multiline box's text on its wall.
+    fn pad(&self) -> f32 {
+        8.0f32.max(self.wall_inset())
+    }
+
+    /// How far in from the box's edge its relief wall ends (the outline's own
+    /// inset from the carve plus the wall's depth); zero with no relief.
+    fn wall_inset(&self) -> f32 {
+        self.well().map_or(0.0, |f| f.rect.x - self.rect.x + f.depth)
+    }
+
+    /// The value text's clip, `[x1, y1, x2, y2]`, from the content rect (the
+    /// box below its label strip): the well's floor, so scrolled text slides
+    /// under the relief wall rather than over it. Only a multiline box is
+    /// clipped in y: a single line is centred, never scrolls vertically, and a
+    /// short box's floor is shallower than its line.
+    fn text_clip(&self, content: Rect) -> [f32; 4] {
+        let inset = self.wall_inset();
+        let inset_y = if self.multiline { inset } else { 0.0 };
+        [
+            content.x + inset,
+            content.y + inset_y,
+            content.x + content.width - inset,
+            content.y + content.height - inset_y,
+        ]
     }
 
     pub fn set_placeholder(&mut self, placeholder: &str) {
@@ -726,10 +758,11 @@ impl TextBox {
     }
 
     pub fn clamp_scroll(&mut self) {
+        let pad = self.pad();
         let char_width = self.char_width();
         let line_height = self.line_height();
         let max_chars = if self.line_wrap_enabled() {
-            (((self.rect.width - 16.0) / char_width).floor() as usize).max(1)
+            (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1)
         } else {
             999999
         };
@@ -742,7 +775,7 @@ impl TextBox {
 
         if self.multiline {
             let content_h = lines.len() as f32 * line_height;
-            let max_scroll = (content_h - (self.rect.height - 16.0)).max(0.0);
+            let max_scroll = (content_h - (self.rect.height - 2.0 * pad)).max(0.0);
             self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
         } else {
             self.scroll_y = 0.0;
@@ -750,7 +783,7 @@ impl TextBox {
 
         if !self.line_wrap_enabled() {
             let content_w = self.content_width(&lines);
-            let max_scroll_x = (content_w - (self.rect.width - 16.0)).max(0.0);
+            let max_scroll_x = (content_w - (self.rect.width - 2.0 * pad)).max(0.0);
             self.scroll_x = self.scroll_x.clamp(0.0, max_scroll_x);
         } else {
             self.scroll_x = 0.0;
@@ -758,10 +791,11 @@ impl TextBox {
     }
 
     pub fn scroll_to_cursor(&mut self) {
+        let pad = self.pad();
         let char_width = self.char_width();
         let line_height = self.line_height();
         let max_chars = if self.line_wrap_enabled() {
-            (((self.rect.width - 16.0) / char_width).floor() as usize).max(1)
+            (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1)
         } else {
             999999
         };
@@ -781,11 +815,11 @@ impl TextBox {
         let (line_idx, col_idx) = index_map[cursor_idx];
 
         let top = self.label_top();
-        let viewport_w = self.rect.width - 16.0;
-        let viewport_h = self.rect.height - top - 16.0;
+        let viewport_w = self.rect.width - 2.0 * pad;
+        let viewport_h = self.rect.height - top - 2.0 * pad;
 
         if self.multiline {
-            let line_y = top + 8.0 + (line_idx as f32 * line_height);
+            let line_y = top + pad + (line_idx as f32 * line_height);
             if line_y < self.scroll_y + 10.0 {
                 self.scroll_y = (line_y - 20.0).max(0.0);
             } else if line_y + line_height > self.scroll_y + viewport_h - 10.0 {
@@ -914,18 +948,19 @@ impl TextBox {
     /// Map a press/drag position to a buffer index — the shared body of the legacy
     /// `mouse_input` press arm and `drag_update`.
     fn position_to_idx(&self, px: f32, py: f32) -> usize {
+        let pad = self.pad();
         let char_width = self.char_width();
         let top = self.label_top();
         if self.multiline {
             let line_height = self.line_height();
             let max_chars = if self.line_wrap_enabled() {
-                (((self.rect.width - 16.0) / char_width).floor() as usize).max(1)
+                (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1)
             } else {
                 999999
             };
             let (lines, index_map) = self.wrap_text(max_chars);
-            let click_line = (((py - (self.rect.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
-            let rel_x = px - (self.rect.x + 8.0) + self.scroll_x;
+            let click_line = (((py - (self.rect.y + top + pad) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
+            let rel_x = px - (self.rect.x + pad) + self.scroll_x;
             let click_col = self.line_x_to_col(click_line.min(lines.len() - 1), rel_x);
             self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
         } else {
@@ -952,6 +987,7 @@ impl TextBox {
 
     /// Port of the legacy `keyboard_input` body.
     fn handle_key(&mut self, event: &KeyEvent) -> bool {
+        let pad = self.pad();
         if !self.editing || self.disabled { return false; }
         if event.state != ElementState::Pressed { return false; }
         // While an input method composes, its keys are its own: a shell does
@@ -1004,7 +1040,7 @@ impl TextBox {
                 }
                 if self.multiline {
                     let char_width = self.char_width();
-                    let max_chars = (((self.rect.width - 16.0) / char_width).floor() as usize).max(1);
+                    let max_chars = (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1);
                     let (lines, index_map) = self.wrap_text(max_chars);
                     let (cursor_l, cursor_c) = index_map[state.cursor_idx.min(index_map.len() - 1)];
                     if cursor_l > 0 {
@@ -1029,7 +1065,7 @@ impl TextBox {
                 }
                 if self.multiline {
                     let char_width = self.char_width();
-                    let max_chars = (((self.rect.width - 16.0) / char_width).floor() as usize).max(1);
+                    let max_chars = (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1);
                     let (lines, index_map) = self.wrap_text(max_chars);
                     let (cursor_l, cursor_c) = index_map[state.cursor_idx.min(index_map.len() - 1)];
                     if cursor_l < lines.len() - 1 {
@@ -1147,12 +1183,13 @@ impl TextBox {
 
     /// Port of the legacy `mouse_wheel` body (scroll the multiline/no-wrap viewports).
     fn handle_wheel(&mut self, delta: &MouseScrollDelta) -> bool {
+        let pad = self.pad();
         if self.disabled { return false; }
         let char_width = self.char_width();
         let line_height = self.line_height();
 
         let max_chars = if self.line_wrap_enabled() {
-            (((self.rect.width - 16.0) / char_width).floor() as usize).max(1)
+            (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1)
         } else {
             999999
         };
@@ -1168,7 +1205,7 @@ impl TextBox {
         let mut max_scroll_y = 0.0;
         if self.multiline {
             let content_h = lines.len() as f32 * line_height;
-            max_scroll_y = (content_h - (self.rect.height - 16.0)).max(0.0);
+            max_scroll_y = (content_h - (self.rect.height - 2.0 * pad)).max(0.0);
             dy_px = match *delta {
                 MouseScrollDelta::LineDelta(_, dy) => -dy * line_height * 2.0,
                 MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
@@ -1179,7 +1216,7 @@ impl TextBox {
         let mut max_scroll_x = 0.0;
         if !self.line_wrap_enabled() {
             let content_w = self.content_width(&lines);
-            max_scroll_x = (content_w - (self.rect.width - 16.0)).max(0.0);
+            max_scroll_x = (content_w - (self.rect.width - 2.0 * pad)).max(0.0);
             let natural = crate::layout::touchpad_natural_scroll();
             let scroll_amt_x = match *delta {
                 MouseScrollDelta::LineDelta(dx, dy) => {
@@ -1227,6 +1264,7 @@ impl TextBox {
     /// the caret, as quads. Returns the caret's rect while editing (unclipped,
     /// in the box's coordinates), which the painter reports to the input method.
     fn selection_quads(&self, x: f32, w: f32, out: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) -> Option<[f32; 4]> {
+        let pad = self.pad();
         if !(self.editing || self.select_anchor.is_some()) {
             return None;
         }
@@ -1247,7 +1285,7 @@ impl TextBox {
 
         if self.multiline {
             let max_chars = if self.line_wrap_enabled() {
-                (((w - 16.0) / char_width).floor() as usize).max(1)
+                (((w - 2.0 * pad) / char_width).floor() as usize).max(1)
             } else {
                 999999
             };
@@ -1277,13 +1315,13 @@ impl TextBox {
                         }
                     }
                     if let (Some(sc), Some(ec)) = (line_start_col, line_end_col) {
-                        let highlight_x = x + 8.0 + self.line_col_x(line_idx, sc) - self.scroll_x;
+                        let highlight_x = x + pad + self.line_col_x(line_idx, sc) - self.scroll_x;
                         let highlight_w = self.line_col_x(line_idx, ec + 1) - self.line_col_x(line_idx, sc);
-                        let highlight_y = self.rect.y + top + 8.0 + (line_idx as f32 * line_height) - self.scroll_y;
+                        let highlight_y = self.rect.y + top + pad + (line_idx as f32 * line_height) - self.scroll_y;
                         let clipped_y = highlight_y.max(view_top);
                         let clipped_bottom = (highlight_y + line_height).min(view_bottom);
-                        let h_left = highlight_x.max(x + 8.0);
-                        let h_right = (highlight_x + highlight_w).min(x + w - 8.0);
+                        let h_left = highlight_x.max(x + pad);
+                        let h_right = (highlight_x + highlight_w).min(x + w - pad);
                         if h_left < h_right && clipped_y < clipped_bottom {
                             out.push((h_left, clipped_y, h_right - h_left, clipped_bottom - clipped_y, highlight_color));
                         }
@@ -1301,11 +1339,11 @@ impl TextBox {
                         .filter_map(|i| index_map.get(i).filter(|p| p.0 == line_idx).map(|p| p.1))
                         .collect();
                     if let (Some(&a), Some(&b)) = (cols.iter().min(), cols.iter().max()) {
-                        let ux = x + 8.0 + self.line_col_x(line_idx, a) - self.scroll_x;
+                        let ux = x + pad + self.line_col_x(line_idx, a) - self.scroll_x;
                         let uw = self.line_col_x(line_idx, b + 1) - self.line_col_x(line_idx, a);
-                        let uy = self.rect.y + top + 8.0 + ((line_idx + 1) as f32 * line_height) - 2.0 - self.scroll_y;
-                        let left = ux.max(x + 8.0);
-                        let right = (ux + uw).min(x + w - 8.0);
+                        let uy = self.rect.y + top + pad + ((line_idx + 1) as f32 * line_height) - 2.0 - self.scroll_y;
+                        let left = ux.max(x + pad);
+                        let right = (ux + uw).min(x + w - pad);
                         if left < right && uy >= view_top && uy + 1.5 <= view_bottom {
                             out.push((left, uy, right - left, 1.5, cursor_color));
                         }
@@ -1316,12 +1354,12 @@ impl TextBox {
             if self.editing {
                 let caret_h = self.font_size * 1.15;
                 let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
-                let cursor_x = x + 8.0 + self.line_col_x(cursor_l, cursor_c) - self.scroll_x;
-                let cursor_y = self.rect.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0 - self.scroll_y;
+                let cursor_x = x + pad + self.line_col_x(cursor_l, cursor_c) - self.scroll_x;
+                let cursor_y = self.rect.y + top + pad + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0 - self.scroll_y;
                 caret = Some([cursor_x, cursor_y, 1.5, caret_h]);
                 let clipped_y = cursor_y.max(view_top);
                 let clipped_bottom = (cursor_y + caret_h).min(view_bottom);
-                if cursor_x >= x + 8.0 && cursor_x <= x + w - 8.0 {
+                if cursor_x >= x + pad && cursor_x <= x + w - pad {
                     if clipped_y < clipped_bottom {
                         out.push((cursor_x, clipped_y, 1.5, clipped_bottom - clipped_y, cursor_color));
                     }
@@ -1332,9 +1370,9 @@ impl TextBox {
             if start != end {
                 let h_left_offset = self.glyph_positions.get(start).copied().unwrap_or_else(|| start as f32 * char_width);
                 let h_right_offset = self.glyph_positions.get(end).copied().unwrap_or_else(|| end as f32 * char_width);
-                let highlight_x = x + 8.0 + h_left_offset - self.scroll_x;
-                let h_left = highlight_x.max(x + 8.0);
-                let h_right = (x + 8.0 + h_right_offset - self.scroll_x).min(x + w - 8.0);
+                let highlight_x = x + pad + h_left_offset - self.scroll_x;
+                let h_left = highlight_x.max(x + pad);
+                let h_right = (x + pad + h_right_offset - self.scroll_x).min(x + w - pad);
                 if h_left < h_right {
                     out.push((
                         h_left,
@@ -1348,8 +1386,8 @@ impl TextBox {
 
             if let Some((cs, cl)) = self.composing {
                 let at = |i: usize| self.glyph_positions.get(i).copied().unwrap_or(i as f32 * char_width);
-                let left = (x + 8.0 + at(cs) - self.scroll_x).max(x + 8.0);
-                let right = (x + 8.0 + at(cs + cl) - self.scroll_x).min(x + w - 8.0);
+                let left = (x + pad + at(cs) - self.scroll_x).max(x + pad);
+                let right = (x + pad + at(cs + cl) - self.scroll_x).min(x + w - pad);
                 if left < right {
                     let text_y = crate::layout::align_text_y(self.rect.y, self.rect.height, self.font_size, top);
                     out.push((left, text_y + self.font_size + 1.0, right - left, 1.5, cursor_color));
@@ -1362,11 +1400,11 @@ impl TextBox {
                 } else {
                     self.cursor_x_offset
                 };
-                let cursor_x = x + 8.0 + offset - self.scroll_x;
+                let cursor_x = x + pad + offset - self.scroll_x;
                 let text_y = crate::layout::align_text_y(self.rect.y, self.rect.height, self.font_size, top);
                 let cursor_y = text_y + (self.font_size - caret_h) / 2.0;
                 caret = Some([cursor_x, cursor_y, 1.5, caret_h]);
-                if cursor_x >= x + 8.0 && cursor_x <= x + w - 8.0 {
+                if cursor_x >= x + pad && cursor_x <= x + w - pad {
                     out.push((cursor_x, cursor_y, 1.5, caret_h, cursor_color));
                 }
             }
@@ -1377,6 +1415,7 @@ impl TextBox {
     /// The value/placeholder text lines — the legacy `text_labels` body minus the control
     /// label (the adapter's base-label machinery draws that).
     fn value_labels(&self) -> Vec<TextLabel> {
+        let pad = self.pad();
         let mut labels = Vec::new();
         let top = self.label_top();
         let mut val_text = if self.editing {
@@ -1416,7 +1455,7 @@ impl TextBox {
             let char_width = self.char_width();
             let line_height = self.line_height();
             let max_chars = if self.line_wrap_enabled() {
-                (((w - 16.0) / char_width).floor() as usize).max(1)
+                (((w - 2.0 * pad) / char_width).floor() as usize).max(1)
             } else {
                 999999
             };
@@ -1446,8 +1485,8 @@ impl TextBox {
             for (line_idx, line_text) in lines_to_draw.iter().enumerate() {
                 labels.push(TextLabel {
                     text: line_text.clone(),
-                    x: x + 8.0 - self.scroll_x,
-                    y: self.rect.y + top + 8.0 + (line_idx as f32 * line_height) + (line_height - self.font_size) / 2.0 - self.scroll_y,
+                    x: x + pad - self.scroll_x,
+                    y: self.rect.y + top + pad + (line_idx as f32 * line_height) + (line_height - self.font_size) / 2.0 - self.scroll_y,
                     font_size: self.font_size,
                     color: label_color,
                 });
@@ -1455,7 +1494,7 @@ impl TextBox {
         } else {
             labels.push(TextLabel {
                 text: display_text,
-                x: x + 8.0 - self.scroll_x,
+                x: x + pad - self.scroll_x,
                 y: crate::layout::align_text_y(self.rect.y, self.rect.height, self.font_size, top),
                 font_size: self.font_size,
                 color: label_color,
@@ -1648,16 +1687,13 @@ impl Paint for TextBox {
     }
 
     fn text_bounds(&self, rect: Rect) -> Option<[f32; 4]> {
-        // Legacy bounded-text getters clipped to the full block rect.
-        let top = self.label_top();
-        let base_y = rect.y - top;
-        let base_h = rect.height + top;
-        Some([rect.x, base_y, rect.x + rect.width, base_y + base_h])
+        Some(self.text_clip(rect))
     }
 
     /// The legacy `prepare_text`: sync font family/size with the live config defaults, then
     /// shape the display text and record per-glyph advances (`map_x_to_idx` reads them).
     fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
+        let pad = self.pad();
         // The input method's composition, shown before the buffer is shaped.
         self.sync_preedit();
         let (style_family, style_size) = crate::layout::control_label_font_detached_parsed();
@@ -1703,7 +1739,7 @@ impl Paint for TextBox {
         // paint time.
         let wrap = self.multiline.then(|| {
             if self.line_wrap_enabled() {
-                (((self.rect.width - 16.0) / self.char_width()).floor() as usize).max(1)
+                (((self.rect.width - 2.0 * pad) / self.char_width()).floor() as usize).max(1)
             } else {
                 999999
             }
@@ -1730,6 +1766,7 @@ impl Paint for TextBox {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let pad = self.pad();
         let top = self.label_top();
         let base_y = rect.y - top;
         let base_h = rect.height + top;
@@ -1822,12 +1859,12 @@ impl Paint for TextBox {
             // Relief scrollbar for overflowing multiline content — the shared
             // groove + raised-pill painter (the TreeList treatment), persistent
             // rather than activity-faded: an editor keeps its position
-            // indicator. Content height mirrors clamp_scroll's math (8px pad
+            // indicator. Content height mirrors clamp_scroll's math (`pad`
             // top and bottom), so the thumb tracks the scroll range exactly.
             if self.multiline {
                 let line_height = self.line_height();
                 let max_chars = if self.line_wrap_enabled() {
-                    (((self.rect.width - 16.0) / self.char_width()).floor() as usize).max(1)
+                    (((self.rect.width - 2.0 * pad) / self.char_width()).floor() as usize).max(1)
                 } else {
                     999999
                 };
@@ -1835,7 +1872,7 @@ impl Paint for TextBox {
                 crate::widget::container::scroll_box::paint_relief_scrollbar(
                     ctx,
                     Rect { x, y: self.rect.y + top, width: w, height: visual_h },
-                    content_h + 16.0,
+                    content_h + 2.0 * pad,
                     self.scroll_y,
                 );
             }
@@ -1843,13 +1880,9 @@ impl Paint for TextBox {
 
         // The content is whatever has been typed, so a line longer than the
         // well is routine rather than exceptional; the well scrolls, but
-        // nothing stopped the glyphs drawing outside it.
-        let well = Some([
-            self.rect.x,
-            self.rect.y,
-            self.rect.x + self.rect.width,
-            self.rect.y + self.rect.height,
-        ]);
+        // nothing stopped the glyphs drawing outside it. (The adapter's label
+        // bridge swaps this for `text_bounds` — the same clip.)
+        let well = Some(self.text_clip(Rect { x: self.rect.x, y: self.rect.y + top, width: self.rect.width, height: visual_h }));
         let font = self.value_font();
         for tl in self.value_labels() {
             ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font.clone(), well);
@@ -2630,6 +2663,23 @@ mod tests {
         let configured = crate::layout::textbox_multiline_border_width();
         assert_eq!(tb_single.border_width(), 1.0);
         assert_eq!(tb_multi.border_width(), configured);
+    }
+    /// A tall recessed box's wall is the full `bevel_width`, deeper than the
+    /// old fixed 8px inset: its text starts on the well's floor, past the
+    /// wall, not on it (cce-fonts' preview box drew its sample over its relief).
+    #[test]
+    fn tall_box_text_starts_past_its_relief_wall() {
+        let _dummy = crate::context::UiContext::new();
+        let mut tb = TextBox::new("The quick brown fox".to_string())
+            .with_multiline(true)
+            .with_recessed(true);
+        tb.set_rect(10.0, 10.0, 400.0, 180.0);
+        let field = tb.well().expect("a recessed box with rounded corners carves a well");
+        let floor_x = field.rect.x + field.depth;
+        let floor_y = field.rect.y + field.depth;
+        let first = &tb.value_labels()[0];
+        assert!(first.x >= floor_x, "text x {} is on the wall (floor at {})", first.x, floor_x);
+        assert!(first.y >= floor_y, "text y {} is on the wall (floor at {})", first.y, floor_y);
     }
     /// A password box never hands its text to the clipboard -- not from a
     /// selection, not by Ctrl+X, not through the menu -- and its menu offers
