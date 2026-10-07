@@ -155,6 +155,74 @@ fn family_is_monospaced(fs: &FontSystem, name: &str) -> bool {
     })
 }
 
+thread_local! {
+    /// Family name → the (style, stretch, weight) of every face fontdb holds
+    /// under that name, resolved once per family for [`snap_to_family_face`].
+    static FAMILY_FACES_CACHE: std::cell::RefCell<
+        std::collections::HashMap<String, Vec<(cosmic_text::Style, cosmic_text::Stretch, u16)>>,
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// `attrs` moved onto the nearest face its named family actually has.
+///
+/// cosmic-text 0.12 takes a face of the requested family only when its style
+/// and stretch equal the request (`Attrs::matches`) AND its weight does too
+/// (`font_weight_diff == 0` in `FontFallbackIter`); anything else falls
+/// through to the fallback families. So a family with no face at the asked
+/// weight rendered in some other font entirely: a Thin-only cut at weight
+/// 280 asked for at 400, a pixel font that only ships Medium, a
+/// Condensed-only family asked for at normal width — the font picker's
+/// preview showed the fallback sans for each. Matching here instead follows
+/// CSS font matching's order — stretch, then style, then weight — so a named
+/// family always renders as itself, in its closest face. A request the
+/// family can meet exactly, a generic family, or a name fontdb does not know
+/// passes through untouched.
+fn snap_to_family_face<'a>(fs: &FontSystem, attrs: Attrs<'a>) -> Attrs<'a> {
+    use cosmic_text::{Stretch, Style};
+    let cosmic_text::Family::Name(name) = attrs.family else { return attrs };
+    let faces = FAMILY_FACES_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                fs.db()
+                    .faces()
+                    .filter(|face| face.families.iter().any(|(f, _)| f == name))
+                    .map(|face| (face.style, face.stretch, face.weight.0))
+                    .collect()
+            })
+            .clone()
+    });
+    let want = (attrs.style, attrs.stretch, attrs.weight.0);
+    if faces.is_empty() || faces.contains(&want) {
+        return attrs;
+    }
+    let stretch_rank = |s: Stretch| {
+        let (w, f) = (attrs.stretch.to_number() as i32, s.to_number() as i32);
+        // Narrower-first below normal width, wider-first above it (CSS).
+        let toward = if w <= 5 { f < w } else { f > w };
+        ((w - f).abs() * 2 + if toward || f == w { 0 } else { 1 }) as u32
+    };
+    let style_rank = |s: Style| match (attrs.style, s) {
+        (a, b) if a == b => 0u32,
+        (Style::Italic, Style::Oblique) | (Style::Oblique, Style::Italic) => 1,
+        _ => 2,
+    };
+    let weight_rank = |w: u16| {
+        let want = attrs.weight.0;
+        // Ties go lighter for a light-to-regular request, heavier above it.
+        let off_side = if want <= 450 { w > want } else { w < want };
+        (want.abs_diff(w) as u32) * 2 + off_side as u32
+    };
+    let Some(&(style, stretch, weight)) = faces
+        .iter()
+        .min_by_key(|(st, sr, w)| (stretch_rank(*sr), style_rank(*st), weight_rank(*w)))
+    else {
+        return attrs;
+    };
+    attrs.style(style).stretch(stretch).weight(cosmic_text::Weight(weight))
+}
+
 /// The shaping mode for one text run: ASCII-only text in a MONOSPACED face
 /// shapes `Basic`, everything else `Advanced`.
 ///
@@ -307,6 +375,7 @@ pub(crate) fn shared_text_buffer(
     if let Some(w) = text_attrs.weight {
         attrs = attrs.weight(cosmic_text::Weight(w));
     }
+    let attrs = snap_to_family_face(fs, attrs);
     let shaping = shaping_for(fs, text, &family);
     buf.set_text(fs, text, attrs, shaping);
     buf.shape_until_scroll(fs, true);

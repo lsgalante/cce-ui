@@ -50,6 +50,7 @@ struct PrepKey {
     password: bool,
     font_size_bits: u32,
     font: Option<String>,
+    attrs: crate::scene::paint::TextAttrs,
     scale_bits: u32,
     vertical: bool,
     /// `Some(max chars per line)` for a multiline box.
@@ -123,6 +124,10 @@ pub struct TextBox {
     pub text_color: Option<[u8; 3]>,
     pub font_size: f32,
     pub font_family: String,
+    /// Italic / weight the value text is drawn AND measured with (see
+    /// `value_font`) — default for every box but one showing a particular
+    /// face of `font_family`.
+    pub font_attrs: crate::scene::paint::TextAttrs,
     pub placeholder: Option<String>,
     pub editor_state: TextEditorState,
     /// Edit history for the current editing session (cleared by
@@ -216,6 +221,7 @@ impl TextBox {
             text_color: None,
             font_size: style_size,
             font_family: style_family.clone(),
+            font_attrs: crate::scene::paint::TextAttrs::default(),
             placeholder: None,
             editor_state,
             history: History::new(),
@@ -323,7 +329,7 @@ impl TextBox {
     fn shape_columns(&mut self, fs: &mut cosmic_text::FontSystem, key: &PrepKey) {
         let scale = f32::from_bits(key.scale_bits);
         let font_fam = key.font.as_deref();
-        let attrs = crate::scene::paint::TextAttrs::default();
+        let attrs = key.attrs;
         let shared = crate::backend::text::shared_text_buffer;
 
         let render_text = if key.password {
@@ -1613,6 +1619,10 @@ impl Paint for TextBox {
         }
     }
 
+    fn text_attrs(&self) -> crate::scene::paint::TextAttrs {
+        self.font_attrs
+    }
+
     fn sync_label(&mut self, label: &str) {
         self.label = Some(label.to_string());
     }
@@ -1660,7 +1670,7 @@ impl Paint for TextBox {
             "MMMMMMMM",
             self.font_size,
             font_fam.as_deref(),
-            crate::scene::paint::TextAttrs::default(),
+            self.font_attrs,
         );
         self.shaped_char_advance = probe
             .layout_runs()
@@ -1685,6 +1695,7 @@ impl Paint for TextBox {
             password: self.is_password,
             font_size_bits: self.font_size.to_bits(),
             font: font_fam.clone(),
+            attrs: self.font_attrs,
             scale_bits: scale.to_bits(),
             vertical: crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed),
             wrap,

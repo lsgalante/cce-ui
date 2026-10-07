@@ -219,6 +219,14 @@ pub trait Paint {
         self.widget_font()
     }
 
+    /// Shaping attributes (italic / weight) for the same content text
+    /// [`text_font`](Paint::text_font) names — a TextBox showing a specific
+    /// face of its family (the font picker's preview of a Bold or Thin cut).
+    /// The detached base label never takes them.
+    fn text_attrs(&self) -> crate::scene::paint::TextAttrs {
+        crate::scene::paint::TextAttrs::default()
+    }
+
     /// Receive the control label set on the wrapper via [`Adapted::with_label`] (and legacy
     /// `Control::set_label` paths). Widgets that paint their label themselves (inline-label
     /// widgets) store it here; the default discards it, leaving label drawing to the adapter's
@@ -1374,13 +1382,19 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
             }
             return;
         }
-        let labels = if Paint::serves_legacy_labels(&self.inner) {
-            Paint::legacy_labels_with_font_and_bounds(&self.inner, self.content_rect(), ui)
+        // `own_labels_from_painted` lists the content labels first (all of them
+        // while visible), then the base label: the first `content` take the
+        // widget's `text_attrs`.
+        let (labels, content) = if Paint::serves_legacy_labels(&self.inner) {
+            (Paint::legacy_labels_with_font_and_bounds(&self.inner, self.content_rect(), ui), 0)
         } else {
-            self.own_labels_from_painted(ui, painted_text, Paint::text_font(&self.inner))
+            let content = if self.visible() { painted_text.len() } else { 0 };
+            (self.own_labels_from_painted(ui, painted_text, Paint::text_font(&self.inner)), content)
         };
-        for (tl, font, bounds) in labels {
-            ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
+        let attrs = Paint::text_attrs(&self.inner);
+        for (i, (tl, font, bounds)) in labels.into_iter().enumerate() {
+            let attrs = if i < content { attrs } else { crate::scene::paint::TextAttrs::default() };
+            ctx.text_attrs(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds, attrs);
         }
     }
 
