@@ -929,6 +929,28 @@ the process can reach an X display (`DISPLAY=:0` and `XAUTHORITY=$HOME/.Xauthori
 fell back to the Intel device SILENTLY. It says so on stderr now (below, "Debug
 environment variables"); `grep -c nvidia /proc/<pid>/maps` is the check from outside.
 
+### A plate can be turned inside out: `Prim::Frame` (since 2026-10-06)
+
+`PaintCtx::frame(rect, hole, hole_radii, material, depth)` is a Bevel whose face is
+everything in `rect` OUTSIDE `hole`, its rolled edge running round the hole and falling
+INTO it. A corner of the hole is therefore an inside corner of the plate — a **cove**,
+rounded at the hole's radius in the DE's corner family — which no box prim can draw: box
+radii round only convex corners, and `ConcaveFillet` shades with the carve WALL profile,
+not a plate's roll, so a fillet beside a Bevel edge changes profile at the join.
+
+- **The shader is the plate branch, unchanged** (`MODE_FRAME` = 17): the hole's SDF is
+  negated (`gd = -gd0`), so the depth into the face is the distance outside the box and
+  the outward gradient points into the hole, and everything after is `MODE_PLATE`'s —
+  roll, crest, frost, focus tint and CSG carves.
+- **It is a carve host over `rect`**, like a Bevel: carves inside it group into its draw
+  (the feature offset is rebased for mode 17 as for 1 and 14). Its own outer edges are
+  NOT rolled — lay them past the window or under something.
+- **The legacy banded path fills only below the hole**, square: it has no inside-out SDF.
+
+The first consumer is the designer's playbar, a shelf of the window's bottom edge whose
+top meets each side lip in a cove. `a_frame_is_an_inside_out_plate_that_hosts_its_carves`
+is the test.
+
 ### A row can lead to a page, and a side swipe turns it (since 2026-10-02)
 
 `context_menu::set_row_page(idx)`, called after `show` like `set_row_slider`, makes a

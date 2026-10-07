@@ -158,6 +158,7 @@ const MODE_LATTICE: i32 = 13;     // periodic well field: nearest-cell carve, on
 const MODE_UNION: i32 = 14;       // union of feature boxes carved/raised as one wall
 const MODE_GROUT: i32 = 15;       // flat colour outside a periodic field of rounded cells
 const MODE_FIELD: i32 = 16;       // sunken well ending in a flush run: one outline (Prim::Field)
+const MODE_FRAME: i32 = 17;       // MODE_PLATE inside out: the face is OUTSIDE the box (Prim::Frame)
 // Fillet modes rejoin the shared free-carve path as their flat equivalents.
 const FILLET_TO_STEP: i32 = 4;    // 6 -> RECESS, 7 -> BOSS
 
@@ -636,11 +637,17 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         );
     }
 
-    let gd = rr_sdf_grad(frag, rrect_clip.p_rect, rrect_clip.p_radii);
+    // MODE_FRAME is MODE_PLATE turned inside out: the box is the plate's
+    // HOLE, so the field is negated — the distance outside the box is the
+    // depth into the face, and the outward gradient points into the hole.
+    // Everything after is the plate's own branch: the roll falls into the
+    // hole, and a corner of the hole is a cove in the face.
+    let gd0 = rr_sdf_grad(frag, rrect_clip.p_rect, rrect_clip.p_radii);
+    let gd = select(gd0, -gd0, mode == MODE_FRAME);
     let d = -gd.z; // positive inside the plate, in px
     let t = max(rrect_clip.p_light.w, 0.001);
 
-    if (mode == MODE_PLATE) {
+    if (mode == MODE_PLATE || mode == MODE_FRAME) {
         let aa = clamp(d + 0.5, 0.0, 1.0); // 1px silhouette anti-aliasing
         if (aa <= 0.0) {
             discard;

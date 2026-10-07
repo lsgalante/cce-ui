@@ -1327,7 +1327,7 @@ fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
         P::Arc { .. } => "Arc", P::ArcShaded { .. } => "ArcShaded",
         P::Vector { .. } => "Vector", P::Circle { .. } => "Circle",
         P::Sphere { .. } => "Sphere", P::Droplet { .. } => "Droplet",
-        P::DropletScrim { .. } => "DropletScrim",
+        P::DropletScrim { .. } => "DropletScrim", P::Frame { .. } => "Frame",
         P::ConcaveFillet { .. } => "ConcaveFillet",
         P::Groove { .. } => "Groove", P::Lattice { .. } => "Lattice", P::Grout { .. } => "Grout", P::Fill { .. } => "Fill",
         P::CarveUnion { .. } => "CarveUnion", P::Glow { .. } => "Glow",
@@ -1483,6 +1483,7 @@ pub fn tessellate_display_list(
         ) || matches!(
             &item.prim,
             crate::scene::paint::Prim::Bevel { material, .. }
+            | crate::scene::paint::Prim::Frame { material, .. }
             | crate::scene::paint::Prim::Plate { material, .. }
             | crate::scene::paint::Prim::Droplet { material, .. }
                 if material.fill(PlateRole::Nested)[3] < 0.0
@@ -1613,6 +1614,23 @@ pub fn tessellate_display_list(
                 // convention. Neutral white keeps w = 0 (a no-op multiply).
                 let full = if *tint == [1.0, 1.0, 1.0] { 0.0 } else { 1.0 };
                 p.specular_tint = [tint[0], tint[1], tint[2], full];
+                plate = Some(p);
+                made_plate = Some(*rect);
+            }
+            Prim::Frame { rect, hole, hole_radii, material, depth } if shader_plates => {
+                // The Bevel branch turned inside out (shader MODE_FRAME): the
+                // cover quad is the face's bound, the SDF box is the HOLE,
+                // and the shader reads the distance outside it as the
+                // plate's depth. Nominal corner radii, as a Bevel's. A carve
+                // host over `rect`, like any filled plate.
+                let color = material.fill(PlateRole::Nested);
+                let mat = material.finish.to_array();
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, color));
+                let mut p = plate_push_raised(hole, *hole_radii, *depth, scale, plate_light, mat, false, None);
+                let [fz, fw] = material.frost.pack(scale);
+                p.host[2] = fz;
+                p.host[3] = fw;
+                p.mode = 17.0; // MODE_FRAME
                 plate = Some(p);
                 made_plate = Some(*rect);
             }
@@ -1927,6 +1945,17 @@ pub fn tessellate_display_list(
                 };
                 push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, corners, sw, sh, color, no, None, &mut verts);
                 push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, *depth, sw, sh, color, no, &mut verts);
+            }
+            // The legacy banded path has no inside-out SDF: the face square,
+            // and only below the hole, so the coves' rows are left to what
+            // is beneath (A/B comparison path only).
+            Prim::Frame { rect, hole, material, .. } => {
+                let color = material.fill(PlateRole::Nested);
+                let y0 = rect.y.max(hole.y + hole.height);
+                let y1 = rect.y + rect.height;
+                if y1 > y0 {
+                    verts.extend(quad_vertices(rect.x, y0, rect.width, y1 - y0, sw, sh, color));
+                }
             }
             Prim::Plate { rect, radii, material, depth, .. } => {
                 let color = material.fill(PlateRole::Nested);
@@ -3053,5 +3082,35 @@ mod near_roll_fallback_tests {
             near_roll_fallback_reason(&carve, 6.0, &HOST, ROLL, &[occluder], true),
             Some("the feature budget is full")
         );
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use crate::scene::layout::Rect;
+    use crate::scene::paint::PaintCtx;
+
+    /// A frame is a plate turned inside out: its batch carries the HOLE as
+    /// the SDF box, in mode 17, its cover quad is the face's bound, and it
+    /// hosts the carves inside that bound as a Bevel does.
+    #[test]
+    fn a_frame_is_an_inside_out_plate_that_hosts_its_carves() {
+        if !crate::layout::bevel_shader() {
+            eprintln!("skipping: the shader plates are off in this configuration");
+            return;
+        }
+        let (w, h, scale) = (400.0f32, 200.0f32, 1.0f32);
+        let face = Rect { x: -10.0, y: 100.0, width: 420.0, height: 110.0 };
+        let hole = Rect { x: 0.0, y: -100.0, width: 400.0, height: 224.0 };
+        let mut pc = PaintCtx::new();
+        let material = crate::scene::Material::opaque([0.3, 0.3, 0.35, 1.0]);
+        pc.frame(face, hole, (0.0, 0.0, 20.0, 20.0), &material, 8.0);
+        pc.recess(Rect { x: 40.0, y: 150.0, width: 30.0, height: 20.0 }, (4.0, 4.0, 4.0, 4.0), 3.0);
+        let dl = pc.finish();
+        let (_, batches, _, features) = super::tessellate_display_list(&dl, w, h, scale);
+        let plate = batches.iter().find_map(|b| b.plate.filter(|p| p.mode == 17.0)).expect("a mode-17 batch");
+        assert_eq!(plate.rect, [200.0, 12.0, 200.0, 112.0], "the SDF box is the hole");
+        assert_eq!(plate.radii[2], 20.0, "the hole's bottom corners are the coves");
+        assert_eq!(features.len(), 1, "the carve inside the face groups into the frame");
     }
 }

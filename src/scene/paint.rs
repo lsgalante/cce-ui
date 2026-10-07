@@ -626,6 +626,18 @@ pub enum Prim {
     /// tint, so the relief still reads. Shader-plates path only; the legacy
     /// banded tessellation ignores it.
     Bevel { rect: Rect, radii: Radii, material: Material, depth: f32, tint: [f32; 3] },
+    /// A [`Prim::Bevel`] turned inside out: the plate's face is everything in
+    /// `rect` OUTSIDE `hole`, and its rolled edge runs round the hole's
+    /// outline, falling INTO the hole. So a corner of the hole is an inside
+    /// corner of the plate — a cove, rounded at the hole's radius in the DE's
+    /// corner family — which a box can only round convex. A band of a
+    /// window's edge with an opening above it (the designer's playbar shelf):
+    /// its top edge and both coves are ONE outline, one profile evaluation,
+    /// with no join to stack two shadings at. `rect` bounds the face (its
+    /// own edges are not rolled — lay them past the window or under
+    /// something), and it is a carve host like a Bevel: carves inside `rect`
+    /// group into it. Shader-plates path; the legacy path fills `rect`.
+    Frame { rect: Rect, hole: Rect, hole_radii: Radii, material: Material, depth: f32 },
     /// A recess carved into whatever is already painted underneath — the inverse of
     /// `Bevel`. Emits ONLY the shaded edges, never a fill, so the surface below shows
     /// through the middle: a relief cut into the root plate rather than a plate laid on
@@ -1283,6 +1295,9 @@ impl PaintCtx {
             Prim::Bevel { rect, radii, material, depth, tint } => {
                 self.bevel_tinted(rect, radii, &material, depth, tint)
             }
+            Prim::Frame { rect, hole, hole_radii, material, depth } => {
+                self.frame(rect, hole, hole_radii, &material, depth)
+            }
             Prim::Recess { rect, radii, depth, edges, tint } => match tint {
                 Some(t) => self.recess_tinted(rect, radii, depth, t),
                 None => self.recess_edges(rect, radii, depth, edges),
@@ -1403,6 +1418,13 @@ impl PaintCtx {
 
     pub fn bevel(&mut self, rect: Rect, radii: Radii, material: &Material, depth: f32) {
         self.bevel_tinted(rect, radii, material, depth, [1.0, 1.0, 1.0]);
+    }
+
+    /// A plate whose face is `rect` outside `hole` — see [`Prim::Frame`].
+    pub fn frame(&mut self, rect: Rect, hole: Rect, hole_radii: Radii, material: &Material, depth: f32) {
+        let rect = self.apply_offset(rect);
+        let hole = self.apply_offset(hole);
+        self.push(Prim::Frame { rect, hole, hole_radii, material: *material, depth });
     }
 
     /// `bevel` with a specular tint — see `Prim::Bevel::tint`.

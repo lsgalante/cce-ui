@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn a_grouped_carve_takes_no_shade_line() {
         let plate = WGSL
-            .split("if (mode == MODE_PLATE) {")
+            .split("if (mode == MODE_PLATE || mode == MODE_FRAME) {")
             .nth(1)
             .and_then(|rest| rest.split("if (mode == MODE_ROLL) {").next())
             .expect("the plate branch");

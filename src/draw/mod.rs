@@ -70,7 +70,7 @@ pub fn batch_push_constants(batch: &Batch2D, clip_shape: f32, feature_base: usiz
         pc[20..24].copy_from_slice(&p.material);
         pc[24..28].copy_from_slice(&p.host);
         pc[28..32].copy_from_slice(&p.specular_tint);
-        if p.mode == 1.0 || p.mode == 14.0 {
+        if p.mode == 1.0 || p.mode == 14.0 || p.mode == 17.0 {
             // Rebase the feature offset onto this frame's UBO slot (a plate's
             // CSG carves, or a union carve's boxes).
             pc[24] += feature_base as f32;
