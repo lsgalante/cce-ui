@@ -88,21 +88,37 @@ impl SheetColumn {
     pub fn max_chars(&self) -> usize {
         match self {
             SheetColumn::Text(v) => v.iter().map(|c| c.chars().count()).max().unwrap_or(0),
-            SheetColumn::Int(v) => match (v.iter().min(), v.iter().max()) {
-                (Some(lo), Some(hi)) => lo.to_string().len().max(hi.to_string().len()),
-                _ => 0,
-            },
+            SheetColumn::Int(v) => {
+                let Some(&first) = v.first() else { return 0 };
+                let (lo, hi) = v.iter().fold((first, first), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+                lo.to_string().len().max(hi.to_string().len())
+            }
             SheetColumn::Float { values, decimals } => {
+                // Plain comparisons, which the compiler vectorizes, where
+                // `f32::min` / `max` carry NaN handling a finite value does
+                // not need: at a million values a refill (the designer's
+                // table at 57k points, every frame of a playback) this pass
+                // was 1.35 ms (until 2026-10-07). A tie between 0 and -0
+                // takes -0, whose `-` is a character wider.
+                // No branch in the loop: a value that is not finite stands
+                // out of the range it does not belong to, and what is
+                // special is OR'd up and settled after.
                 let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
-                let mut odd = 0;
+                let (mut neg_zero, mut nan_or_inf, mut neg_inf) = (false, false, false);
                 for &x in values {
-                    if x.is_finite() {
-                        lo = lo.min(x);
-                        hi = hi.max(x);
-                    } else {
-                        odd = odd.max(if x == f32::NEG_INFINITY { 4 } else { 3 });
-                    }
+                    let finite = x.is_finite();
+                    let a = if finite { x } else { f32::INFINITY };
+                    let b = if finite { x } else { f32::NEG_INFINITY };
+                    lo = if a < lo { a } else { lo };
+                    hi = if b > hi { b } else { hi };
+                    neg_zero |= x == 0.0 && x.is_sign_negative();
+                    nan_or_inf |= !finite && x != f32::NEG_INFINITY;
+                    neg_inf |= x == f32::NEG_INFINITY;
                 }
+                if lo == 0.0 && neg_zero {
+                    lo = -0.0;
+                }
+                let odd = if neg_inf { 4 } else if nan_or_inf { 3 } else { 0 };
                 let w = |x: f32| format!("{:.*}", decimals, x).len();
                 let finite = if lo <= hi { w(lo).max(w(hi)) } else { 0 };
                 finite.max(odd)
@@ -997,13 +1013,29 @@ impl Spreadsheet {
     fn set_columns(&mut self, headers: Vec<String>, columns: Vec<SheetColumn>, rows: usize) {
         // Each column's width, from its header and its values: a refill
         // is a scan of the values it already copies.
+        // The columns' widths are independent, so a large table works
+        // them out a share of columns a thread (since 2026-10-07: at a
+        // million values this pass was most of what a refill cost).
+        let cells: Vec<usize> = {
+            let values: usize = columns.iter().map(SheetColumn::len).sum();
+            let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(columns.len());
+            if values < 200_000 || threads < 2 {
+                columns.iter().map(SheetColumn::max_chars).collect()
+            } else {
+                let per = columns.len().div_ceil(threads);
+                std::thread::scope(|scope| {
+                    let pieces: Vec<_> = columns
+                        .chunks(per)
+                        .map(|share| scope.spawn(move || share.iter().map(SheetColumn::max_chars).collect::<Vec<_>>()))
+                        .collect();
+                    pieces.into_iter().flat_map(|p| p.join().expect("a column's width")).collect()
+                })
+            }
+        };
         self.col_chars = headers
             .iter()
             .enumerate()
-            .map(|(i, h)| {
-                let cells = columns.get(i).map_or(0, SheetColumn::max_chars);
-                (h.chars().count() + SORT_MARK_CHARS).max(cells)
-            })
+            .map(|(i, h)| (h.chars().count() + SORT_MARK_CHARS).max(cells.get(i).copied().unwrap_or(0)))
             .collect();
         self.headers = headers;
         self.columns = columns;
@@ -1553,6 +1585,56 @@ mod tests {
             Input::tick(&mut *s.inner_mut(), 0.016, rect);
         }
         assert_eq!(pills(&s), 4, "two tracks and two thumbs");
+    }
+
+    /// A table large enough to work its columns' widths out on several
+    /// threads gets the widths one thread works out.
+    #[test]
+    fn a_large_tables_widths_are_worked_out_in_parallel_alike() {
+        let n = 60_000;
+        let columns: Vec<SheetColumn> = (0..6)
+            .map(|c| {
+                if c % 2 == 0 {
+                    SheetColumn::Float { values: (0..n).map(|r| ((r * 7919 + c * 13) % 100_003) as f32 * if c == 2 { -0.37 } else { 0.011 }).collect(), decimals: 4 }
+                } else {
+                    SheetColumn::Int((0..n as i64).map(|r| r * (c as i64) - 1000).collect())
+                }
+            })
+            .collect();
+        let headers: Vec<String> = (0..6).map(|c| format!("c{c}")).collect();
+        let want: Vec<usize> = headers.iter().zip(&columns).map(|(h, c)| (h.chars().count() + SORT_MARK_CHARS).max(c.max_chars())).collect();
+        let mut s = Spreadsheet::new();
+        SpreadsheetController::set_spreadsheet_columns(&mut *s, headers, columns);
+        assert_eq!(s.inner().col_chars, want);
+    }
+
+    /// A column's width in characters is its widest cell's, numbers by
+    /// their range: over negatives, positives, values that round to zero
+    /// either side, both zeros, the non-finite spellings, and integers.
+    #[test]
+    fn max_chars_is_the_widest_cell() {
+        let widest = |c: &SheetColumn| (0..c.len()).map(|r| c.cell(r).chars().count()).max().unwrap_or(0);
+        let floats = [
+            vec![0.0, -0.0],
+            vec![-0.0, 0.0],
+            vec![1.5, -0.00001, 2.0],
+            vec![123.456, -9.99996, 0.5],
+            vec![-1234.5, 99999.0, 0.0],
+            vec![f32::NAN, 1.0],
+            vec![f32::NEG_INFINITY, 0.25],
+            vec![f32::INFINITY],
+            vec![],
+        ];
+        for values in floats {
+            for decimals in [0, 2, 4] {
+                let c = SheetColumn::Float { values: values.clone(), decimals };
+                assert_eq!(c.max_chars(), widest(&c), "{values:?} at {decimals}");
+            }
+        }
+        for ints in [vec![], vec![0], vec![-7, 3, 1200], vec![i64::MIN, 5], vec![-1, -100]] {
+            let c = SheetColumn::Int(ints.clone());
+            assert_eq!(c.max_chars(), widest(&c), "{ints:?}");
+        }
     }
 
     /// A table of columns: the cells on screen are written as they are
