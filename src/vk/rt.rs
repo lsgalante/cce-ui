@@ -19,9 +19,9 @@ use gpu_allocator::MemoryLocation;
 use super::renderer::{
     compile_wgsl, compile_wgsl_ray_query, create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer,
 };
-pub use crate::draw::rt::{RtCamera, RtEnvironment, RtImage, RtImagePixels, RtMaterial, RtTriangle};
+pub use crate::draw::rt::{PreparedRtScene, RtCamera, RtEnvironment, RtImage, RtImagePixels, RtMaterial, RtTriangle};
 use crate::draw::rt::{
-    denoise_params, pack_scene, rt_params, DenoiseParams, ParamImage, RtParams, DENOISE_ITERATIONS, MAX_SAMPLES,
+    denoise_params, pack_scene, rt_params, DenoiseParams, PackedScene, ParamImage, RtParams, DENOISE_ITERATIONS, MAX_SAMPLES,
     WORKGROUP,
 };
 
@@ -42,6 +42,27 @@ enum RtTier {
     Compute,
     /// Driver acceleration structures + VK_KHR_ray_query — RT cores.
     RayQuery,
+}
+
+impl RtTier {
+    /// The tier a stage on a device with (`has_ray_query`) or without the
+    /// ray-query stack runs: tier 2 when it can, unless `CCE_VK_RT=compute`
+    /// forces the BVH tier.
+    fn choose(has_ray_query: bool) -> RtTier {
+        let force_compute = std::env::var("CCE_VK_RT").is_ok_and(|v| v == "compute");
+        if has_ray_query && !force_compute {
+            RtTier::RayQuery
+        } else {
+            RtTier::Compute
+        }
+    }
+}
+
+/// Whether a stage made on a device with (`has_ray_query`) or without the
+/// ray-query stack traverses a CPU-built BVH: what `Stage3D::rt_needs_bvh`
+/// answers before the stage exists.
+pub(crate) fn needs_bvh(has_ray_query: bool) -> bool {
+    RtTier::choose(has_ray_query) == RtTier::Compute
 }
 
 /// Tier-2 GPU objects: one BLAS over the triangle buffer, a one-instance
@@ -581,14 +602,9 @@ impl RtStage {
         queue: vk::Queue,
         command_pool: vk::CommandPool,
     ) -> Self {
-        let force_compute = std::env::var("CCE_VK_RT").is_ok_and(|v| v == "compute");
         let denoise_on = !std::env::var("CCE_VK_RT_DENOISE")
             .is_ok_and(|v| v == "off" || v == "0" || v == "false");
-        let tier = if accel_loader.is_some() && !force_compute {
-            RtTier::RayQuery
-        } else {
-            RtTier::Compute
-        };
+        let tier = RtTier::choose(accel_loader.is_some());
         log::info!(
             "RT stage: {} tier",
             match tier {
@@ -873,28 +889,29 @@ impl RtStage {
         }
     }
 
-    /// Replace the scene. Tier 1 builds the BVH on the CPU (reordering a copy
-    /// of the triangles); tier 2 builds driver acceleration structures on the
-    /// given queue instead. Caller must have the device idle.
-    ///
-    /// An image joins the scene as a quad of two triangles under a material
-    /// of its own, marked textured — so both tiers meet it as they meet any
-    /// triangle, and a scene that is an image alone is not an empty one.
-    #[allow(clippy::too_many_arguments)]
+    /// Whether this stage traverses a CPU-built BVH (tier 1) rather than
+    /// building driver acceleration structures (tier 2).
+    pub(crate) fn needs_bvh(&self) -> bool {
+        self.tier == RtTier::Compute
+    }
+
+    /// Replace the scene with one already packed (`draw::rt::pack_scene`,
+    /// whose image quad must be the one `image` describes). Tier 1 uploads
+    /// its BVH, building it here only if it was packed without one; tier 2
+    /// builds driver acceleration structures on the given queue instead,
+    /// ignoring any BVH. Caller must have the device idle.
     pub(crate) fn set_scene(
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
         queue: vk::Queue,
         command_pool: vk::CommandPool,
-        triangles: &[RtTriangle],
-        materials: &[RtMaterial],
+        scene: &PackedScene,
         image: Option<(RtImageSource, [[f32; 3]; 4], f32)>,
     ) {
         if let Some(mut old) = self.image.take().and_then(|i| i.owned) {
             old.destroy(device, allocator);
         }
-        let corners = image.as_ref().map(|(_, corners, _)| *corners);
         self.image = image.map(|(source, corners, opacity)| match source {
             RtImageSource::Shared(id) => {
                 StagedImage { shared: Some(id), owned: None, corners, opacity }
@@ -914,8 +931,11 @@ impl RtStage {
                 opacity,
             },
         });
-        let packed = pack_scene(triangles, materials, corners, self.tier == RtTier::Compute);
-        let (gpu_tris, gpu_mats, nodes) = (packed.tris, packed.materials, packed.nodes);
+        let scene = match self.tier {
+            RtTier::Compute => scene.with_bvh(),
+            RtTier::RayQuery => std::borrow::Cow::Borrowed(scene),
+        };
+        let (gpu_tris, gpu_mats, nodes) = (&scene.tris, &scene.materials, &scene.nodes);
 
         self.destroy_accel(device, allocator);
         for buf in [&mut self.nodes, &mut self.tris, &mut self.materials] {
@@ -949,10 +969,10 @@ impl RtStage {
                     | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
             }
         };
-        self.tris = upload(allocator, bytemuck::cast_slice(&gpu_tris), tri_usage, "rt-tris");
+        self.tris = upload(allocator, bytemuck::cast_slice(gpu_tris), tri_usage, "rt-tris");
         self.materials = upload(
             allocator,
-            bytemuck::cast_slice(&gpu_mats),
+            bytemuck::cast_slice(gpu_mats),
             vk::BufferUsageFlags::STORAGE_BUFFER,
             "rt-materials",
         );
@@ -964,7 +984,7 @@ impl RtStage {
             RtTier::Compute => {
                 self.nodes = upload(
                     allocator,
-                    bytemuck::cast_slice(&nodes),
+                    bytemuck::cast_slice(nodes),
                     vk::BufferUsageFlags::STORAGE_BUFFER,
                     "rt-nodes",
                 );
@@ -1854,6 +1874,12 @@ impl RtOffscreen {
         materials: &[RtMaterial],
         image: Option<RtImagePixels>,
     ) {
+        let packed = pack_scene(
+            triangles.to_vec(),
+            materials,
+            image.as_ref().map(|i| i.corners),
+            self.stage.needs_bvh(),
+        );
         unsafe {
             let _ = self.core.device.device_wait_idle();
         }
@@ -1865,8 +1891,7 @@ impl RtOffscreen {
             self.core.allocator.as_mut().unwrap(),
             queue,
             command_pool,
-            triangles,
-            materials,
+            &packed,
             image.map(|i| {
                 (
                     RtImageSource::Pixels { pixels: i.pixels, width: i.width, height: i.height },

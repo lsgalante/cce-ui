@@ -56,7 +56,7 @@ pub use image::{
 };
 pub use renderer::{Batch2D, Frame2D, PlatePush, VkRenderer, MAX_PLATE_FEATURES};
 pub(crate) use renderer::present_debug;
-pub use rt::{RtCamera, RtEnvironment, RtImage, RtImagePixels, RtMaterial, RtOffscreen, RtTriangle};
+pub use rt::{PreparedRtScene, RtCamera, RtEnvironment, RtImage, RtImagePixels, RtMaterial, RtOffscreen, RtTriangle};
 pub use scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
 pub use text::TextSpan;
 

@@ -21,7 +21,7 @@ use super::core::SurfaceLost;
 use super::image::ImageStage;
 pub use crate::draw::{Batch2D, Frame2D, PlatePush, MAX_PLATE_FEATURES};
 pub(crate) use crate::draw::{batch_push_constants, PUSH_CONSTANT_FLOATS};
-use super::rt::{RtCamera, RtEnvironment, RtImage, RtImageSource, RtMaterial, RtStage, RtTriangle};
+use super::rt::{PreparedRtScene, RtCamera, RtEnvironment, RtImage, RtImageSource, RtMaterial, RtStage, RtTriangle};
 use super::scene::{MeshId, SceneDraw, SceneImage, SceneStage, Vertex3D};
 use super::text::{TextSpan, TextStage};
 
@@ -1787,7 +1787,9 @@ impl VkRenderer {
     /// `inv_mvp` unprojects into). Builds the BVH on the CPU and uploads it;
     /// waits for the GPU to go idle first — scene replacement is rare
     /// (geometry rebuilds), matching `update_mesh`. The first call compiles
-    /// the compute pipeline.
+    /// the compute pipeline. A large scene freezes the caller for the BVH
+    /// build: build a [`PreparedRtScene`] on a worker instead and hand it to
+    /// [`set_rt_scene_prepared`](Self::set_rt_scene_prepared).
     pub fn set_rt_scene(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial]) {
         self.set_rt_scene_with_image(triangles, materials, None);
     }
@@ -1802,6 +1804,16 @@ impl VkRenderer {
         materials: &[RtMaterial],
         image: Option<RtImage>,
     ) {
+        let prepared = PreparedRtScene::new(triangles.to_vec(), materials, image, self.rt_needs_bvh());
+        self.set_rt_scene_prepared(&prepared);
+    }
+
+    /// Replace the path tracer's scene with one prepared off this thread
+    /// ([`PreparedRtScene::new`]): only the upload — buffers written, and
+    /// on the ray-query tier the acceleration structures built on the GPU.
+    /// Waits for the GPU to go idle first, as `set_rt_scene` does. A scene
+    /// prepared without a BVH gets one built here if this renderer needs it.
+    pub fn set_rt_scene_prepared(&mut self, scene: &PreparedRtScene) {
         unsafe {
             let _ = self.core.device.device_wait_idle();
         }
@@ -1824,10 +1836,20 @@ impl VkRenderer {
             allocator,
             core.queue,
             core.command_pool,
-            triangles,
-            materials,
-            image.map(|i| (RtImageSource::Shared(i.image), i.corners, i.opacity)),
+            &scene.packed,
+            scene.image.map(|i| (RtImageSource::Shared(i.image), i.corners, i.opacity)),
         );
+    }
+
+    /// Whether this renderer's tracer traverses a CPU-built BVH (the compute
+    /// tier) rather than building driver acceleration structures (the
+    /// hardware ray-query tier): the `with_bvh` a [`PreparedRtScene`] for it
+    /// wants. Answered before the first scene from the device's features.
+    pub fn rt_needs_bvh(&self) -> bool {
+        match &self.rt {
+            Some(rt) => rt.needs_bvh(),
+            None => crate::vk::rt::needs_bvh(self.core.accel_loader.is_some()),
+        }
     }
 
     /// The direction TOWARD the 3D pass's light, in world space (any
@@ -2742,6 +2764,12 @@ impl crate::draw::scene::Stage3D for VkRenderer {
     }
     fn set_rt_scene_with_image(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial], image: Option<RtImage>) {
         VkRenderer::set_rt_scene_with_image(self, triangles, materials, image)
+    }
+    fn set_rt_scene_prepared(&mut self, scene: &PreparedRtScene) {
+        VkRenderer::set_rt_scene_prepared(self, scene)
+    }
+    fn rt_needs_bvh(&self) -> bool {
+        VkRenderer::rt_needs_bvh(self)
     }
     fn set_rt_environment(&mut self, environment: RtEnvironment) {
         VkRenderer::set_rt_environment(self, environment)

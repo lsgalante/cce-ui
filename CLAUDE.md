@@ -262,6 +262,19 @@ are compared at eight samples: 2026-10-05, Vulkan compute tier (`CCE_VK_RT=compu
 lavapipe vs SwiftShader, the traced pane's mean differs by 0.10 of a level, every pixel
 within 8, 47 channels in the frame past 8 — a few paths that diverged.
 
+**A large traced scene is prepared off the UI thread** (since 2026-10-07).
+`set_rt_scene` builds the BVH where it is called, and an app only has the stage inside
+`stage_3d`, so 5M triangles froze cce-model for 2.3 s. `PreparedRtScene::new(tris, mats,
+image, with_bvh)` is the CPU half — packing into the buffer layouts plus the BVH — and is
+`Send + Sync`, built on a worker; `Stage3D::set_rt_scene_prepared(&scene)` only uploads
+(and keeps it: a reconnect re-uploads the same one). `with_bvh` is `Stage3D::rt_needs_bvh()`,
+asked on the UI thread first: false on the Vulkan ray-query tier, which builds its BLAS on
+the GPU from the packed triangles and ignores a BVH; a scene prepared without one on a
+compute-tier renderer gets it built at upload (`PackedScene::with_bvh`), so a wrong answer
+costs time, never a wrong image. `set_rt_scene` / `set_rt_scene_with_image` are wrappers
+over the two halves. The GPU tests run per tier with `VK_DRIVER_FILES` pinned (Intel =
+compute, NVIDIA = ray-query, NVIDIA + `CCE_VK_RT=compute`); no lavapipe ICD is installed.
+
 **The reference app runs on both, through one input script.** `examples/demo_web.rs` is
 `src/main.rs`'s `DemoApp` (included by `#[path]`, hence `pub(crate)`) in a page;
 `scripts/web-probe/demo <dir>` builds it, serves it with the machine's fonts and replays the

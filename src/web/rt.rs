@@ -34,8 +34,8 @@ use web_sys::{
 
 use super::renderer::{shader_module, texture, whole_view};
 use crate::draw::rt::{
-    denoise_params, pack_scene, rt_params, DenoiseParams, ParamImage, RtCamera, RtEnvironment, RtImage, RtMaterial,
-    RtParams, RtTriangle, DENOISE_ITERATIONS, MAX_SAMPLES, WORKGROUP,
+    denoise_params, rt_params, DenoiseParams, ParamImage, PreparedRtScene, RtCamera, RtEnvironment, RtImage,
+    RtParams, DENOISE_ITERATIONS, MAX_SAMPLES, WORKGROUP,
 };
 use crate::draw::shaders::{rt_bvh_source, RT_DENOISE};
 
@@ -253,16 +253,11 @@ impl WebRt {
         })
     }
 
-    /// Replace the scene: packed and its BVH built on the CPU, uploaded.
-    pub(crate) fn set_scene(
-        &mut self,
-        device: &GpuDevice,
-        queue: &GpuQueue,
-        triangles: &[RtTriangle],
-        materials: &[RtMaterial],
-        image: Option<RtImage>,
-    ) -> Result<(), JsValue> {
-        let packed = pack_scene(triangles, materials, image.map(|i| i.corners), true);
+    /// Replace the scene with one prepared on the CPU, uploaded — its BVH
+    /// built here first if it was prepared without one.
+    pub(crate) fn set_scene(&mut self, device: &GpuDevice, queue: &GpuQueue, scene: &PreparedRtScene) -> Result<(), JsValue> {
+        let packed = scene.packed.with_bvh();
+        let image = scene.image;
         let upload = |bytes: &[u8], label: &str| -> Result<GpuBuffer, JsValue> {
             let b = buffer(device, bytes.len() as u32, buffer_usage::STORAGE | buffer_usage::COPY_DST, label)?;
             if !bytes.is_empty() {

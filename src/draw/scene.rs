@@ -160,7 +160,7 @@ pub(crate) struct SceneUniforms {
 /// it with its INWARD derivative normal, said the right way round.
 pub(crate) const DEFAULT_SCENE_LIGHT: [f32; 3] = [0.55, -0.45, -0.7];
 
-use super::rt::{RtCamera, RtEnvironment, RtImage, RtMaterial, RtTriangle};
+use super::rt::{PreparedRtScene, RtCamera, RtEnvironment, RtImage, RtMaterial, RtTriangle};
 
 /// What an app stages a 3D scene through: the renderer's half of the
 /// pass, the same on every renderer (`vk::VkRenderer`, `web::WebRenderer`).
@@ -182,14 +182,36 @@ pub trait Stage3D {
     fn set_scene_light(&mut self, toward: [f32; 3]);
 
     /// Replace the path tracer's scene (triangles in the space the camera's
-    /// `inv_mvp` unprojects into); the BVH is built on the CPU. Rare: a
+    /// `inv_mvp` unprojects into); the BVH is built on the CPU, here, on the
+    /// UI thread — seconds for millions of triangles, during which the
+    /// window is frozen. Fine for small scenes; a large one is built as a
+    /// [`PreparedRtScene`] on a worker and handed to
+    /// [`set_rt_scene_prepared`](Self::set_rt_scene_prepared). Rare: a
     /// geometry rebuild. Restarts the accumulation.
     fn set_rt_scene(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial]) {
         self.set_rt_scene_with_image(triangles, materials, None);
     }
     /// [`set_rt_scene`](Self::set_rt_scene) with an uploaded image standing
     /// in the scene (the picture the raster pass draws as a `SceneImage`).
-    fn set_rt_scene_with_image(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial], image: Option<RtImage>);
+    fn set_rt_scene_with_image(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial], image: Option<RtImage>) {
+        let prepared = PreparedRtScene::new(triangles.to_vec(), materials, image, self.rt_needs_bvh());
+        self.set_rt_scene_prepared(&prepared);
+    }
+    /// Replace the path tracer's scene with one whose CPU work — packing,
+    /// and the BVH when [`rt_needs_bvh`](Self::rt_needs_bvh) — was done
+    /// ahead, on any thread: this only uploads it. Restarts the
+    /// accumulation. The scene is not consumed; keep it to upload again
+    /// after a reconnect (`Application::init_3d` runs again then).
+    fn set_rt_scene_prepared(&mut self, scene: &PreparedRtScene);
+    /// Whether this renderer's tracer traverses a CPU-built BVH — the
+    /// `with_bvh` to prepare its scenes with. False on the Vulkan
+    /// ray-query tier, which builds its own structure on the GPU from the
+    /// triangles; a scene prepared with a BVH still traces there (the BVH is
+    /// ignored), and one prepared without traces anywhere (the upload builds
+    /// it), so a wrong answer only costs time.
+    fn rt_needs_bvh(&self) -> bool {
+        true
+    }
     /// The traced scene's sky and sun. A change restarts the accumulation.
     fn set_rt_environment(&mut self, environment: RtEnvironment);
     /// What a camera ray that meets nothing shows (linear RGB), or `None`

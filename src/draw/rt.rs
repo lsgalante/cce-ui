@@ -354,12 +354,47 @@ pub(crate) struct DenoiseParams {
 pub(crate) const DENOISE_ITERATIONS: usize = 3; // à-trous steps 1, 2, 4
 
 /// A scene as the tracer's buffers hold it.
+#[derive(Clone)]
 pub(crate) struct PackedScene {
     pub tris: Vec<GpuTriangle>,
     pub materials: Vec<GpuMaterial>,
     /// Empty unless `with_bvh` was asked for (the ray-query tier builds
     /// its own structure).
     pub nodes: Vec<GpuBvhNode>,
+    /// The BVH was built (`nodes` may still be empty: an empty scene).
+    pub has_bvh: bool,
+}
+
+impl PackedScene {
+    /// This scene with its BVH: itself when it has one, else one built
+    /// now over a copy of the triangles — the compute tier handed a scene
+    /// prepared for the ray-query one.
+    pub(crate) fn with_bvh(&self) -> std::borrow::Cow<'_, PackedScene> {
+        if self.has_bvh {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        let xyz = |p: [f32; 4]| [p[0], p[1], p[2]];
+        let mut tris: Vec<RtTriangle> = self
+            .tris
+            .iter()
+            .map(|t| RtTriangle { p0: xyz(t.p0), p1: xyz(t.p1), p2: xyz(t.p2), material: t.p0[3].to_bits() })
+            .collect();
+        let nodes = build_bvh(&mut tris);
+        std::borrow::Cow::Owned(PackedScene {
+            tris: tris.iter().map(gpu_triangle).collect(),
+            materials: self.materials.clone(),
+            nodes,
+            has_bvh: true,
+        })
+    }
+}
+
+fn gpu_triangle(t: &RtTriangle) -> GpuTriangle {
+    GpuTriangle {
+        p0: [t.p0[0], t.p0[1], t.p0[2], f32::from_bits(t.material)],
+        p1: [t.p1[0], t.p1[1], t.p1[2], 0.0],
+        p2: [t.p2[0], t.p2[1], t.p2[2], 0.0],
+    }
 }
 
 /// Lay a scene out for the tracer. An image joins it as a quad of two
@@ -369,26 +404,19 @@ pub(crate) struct PackedScene {
 /// meets it as it meets any triangle, and a scene that is an image alone is
 /// not an empty one. `with_bvh` builds the BVH, reordering the triangles.
 pub(crate) fn pack_scene(
-    triangles: &[RtTriangle],
+    mut tris: Vec<RtTriangle>,
     materials: &[RtMaterial],
     image_corners: Option<[[f32; 3]; 4]>,
     with_bvh: bool,
 ) -> PackedScene {
-    let mut tris: Vec<RtTriangle> = triangles.to_vec();
     let image_material = materials.len().max(1) as u32;
     if let Some([tl, tr, br, bl]) = image_corners {
         tris.push(RtTriangle { p0: tl, p1: bl, p2: tr, material: image_material });
         tris.push(RtTriangle { p0: tr, p1: bl, p2: br, material: image_material });
     }
     let nodes = if with_bvh { build_bvh(&mut tris) } else { Vec::new() };
-    let gpu_tris = tris
-        .iter()
-        .map(|t| GpuTriangle {
-            p0: [t.p0[0], t.p0[1], t.p0[2], f32::from_bits(t.material)],
-            p1: [t.p1[0], t.p1[1], t.p1[2], 0.0],
-            p2: [t.p2[0], t.p2[1], t.p2[2], 0.0],
-        })
-        .collect();
+    let gpu_tris = tris.iter().map(gpu_triangle).collect();
+    drop(tris);
     let mut gpu_mats: Vec<GpuMaterial> = if materials.is_empty() {
         vec![GpuMaterial { albedo: [0.8, 0.8, 0.8, 0.0], emission: [0.0; 4] }]
     } else {
@@ -404,7 +432,64 @@ pub(crate) fn pack_scene(
         // albedo.w marks it textured: the shader takes the colour from the image.
         gpu_mats.push(GpuMaterial { albedo: [1.0, 1.0, 1.0, 1.0], emission: [0.0; 4] });
     }
-    PackedScene { tris: gpu_tris, materials: gpu_mats, nodes }
+    PackedScene { tris: gpu_tris, materials: gpu_mats, nodes, has_bvh: with_bvh }
+}
+
+/// A traced scene with the CPU's share of the work already done: the
+/// triangles packed into the tracer's buffer layouts and, for the compute
+/// tier, the BVH built over them. Building one is plain CPU work with no
+/// renderer in it — seconds for millions of triangles — so an app builds it
+/// on a worker thread and hands it to
+/// [`Stage3D::set_rt_scene_prepared`](crate::draw::scene::Stage3D::set_rt_scene_prepared)
+/// on the UI thread, which only uploads it. `set_rt_scene` does both in
+/// one call, on whatever thread calls it.
+///
+/// It is not consumed by the upload: keep it to upload again into a
+/// renderer rebuilt after a reconnect.
+#[derive(Clone)]
+pub struct PreparedRtScene {
+    pub(crate) packed: PackedScene,
+    pub(crate) image: Option<RtImage>,
+}
+
+impl PreparedRtScene {
+    /// Prepare `triangles` (taken, so millions of them are not copied) and
+    /// `materials`, with `image` standing in the scene as
+    /// `set_rt_scene_with_image` takes it. `with_bvh` builds the BVH: pass
+    /// the renderer's [`Stage3D::rt_needs_bvh`](crate::draw::scene::Stage3D::rt_needs_bvh),
+    /// asked on the UI thread before the work is sent off. A scene prepared
+    /// without one still traces on a renderer that needs it — the upload
+    /// builds it then, on the UI thread, as `set_rt_scene` would.
+    pub fn new(
+        triangles: Vec<RtTriangle>,
+        materials: &[RtMaterial],
+        image: Option<RtImage>,
+        with_bvh: bool,
+    ) -> Self {
+        PreparedRtScene { packed: pack_scene(triangles, materials, image.map(|i| i.corners), with_bvh), image }
+    }
+
+    /// Triangles the tracer holds, an image's quad included.
+    pub fn triangle_count(&self) -> usize {
+        self.packed.tris.len()
+    }
+
+    /// Whether the BVH was built (`with_bvh`).
+    pub fn has_bvh(&self) -> bool {
+        self.packed.has_bvh
+    }
+}
+
+/// A summary: the buffers are megabytes.
+impl std::fmt::Debug for PreparedRtScene {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedRtScene")
+            .field("triangles", &self.packed.tris.len())
+            .field("materials", &self.packed.materials.len())
+            .field("bvh_nodes", &self.packed.has_bvh.then_some(self.packed.nodes.len()))
+            .field("image", &self.image)
+            .finish()
+    }
 }
 
 /// The image a frame traces, as its parameter block describes it: the
@@ -687,5 +772,40 @@ mod tests {
         let (t, hit) = traverse_bvh_cpu(&nodes, &single, [0.0, 0.0, -3.0], [0.0, 0.0, 1.0]);
         assert_eq!(hit, Some(0));
         assert!((t - 3.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_prepared_scene_bvh_built_late_matches_built_early() {
+        // A scene prepared for the ray-query tier and uploaded to the
+        // compute one gets the BVH it would have been prepared with.
+        let tris = random_scene(400, 3);
+        let mats = [RtMaterial { albedo: [0.5; 3], emission: [0.0; 3] }; 5];
+        let image = RtImage {
+            image: 1,
+            corners: [[-1.0, 1.0, 0.0], [1.0, 1.0, 0.0], [1.0, -1.0, 0.0], [-1.0, -1.0, 0.0]],
+            opacity: 1.0,
+        };
+        let early = PreparedRtScene::new(tris.clone(), &mats, Some(image), true);
+        let late = PreparedRtScene::new(tris, &mats, Some(image), false);
+        assert!(early.has_bvh() && !late.has_bvh());
+        assert!(late.packed.nodes.is_empty());
+        assert_eq!(early.triangle_count(), 402, "the image's quad joins the scene");
+        let built = late.packed.with_bvh();
+        assert!(built.has_bvh);
+        let bytes = |s: &PackedScene| {
+            (bytemuck::cast_slice::<_, u8>(&s.tris).to_vec(), bytemuck::cast_slice::<_, u8>(&s.nodes).to_vec())
+        };
+        assert_eq!(bytes(&built), bytes(&early.packed));
+        assert!(matches!(early.packed.with_bvh(), std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_prepared_scene_crosses_threads() {
+        fn send_sync<T: Send + Sync>() {}
+        send_sync::<PreparedRtScene>();
+        let prepared = std::thread::spawn(|| PreparedRtScene::new(random_scene(50, 1), &[], None, true))
+            .join()
+            .unwrap();
+        assert_eq!(prepared.triangle_count(), 50);
     }
 }

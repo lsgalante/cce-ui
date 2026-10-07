@@ -28,7 +28,7 @@ use std::collections::HashMap;
 
 use super::rt::WebRt;
 use super::scene::WebScene;
-use crate::draw::rt::{RtCamera, RtEnvironment, RtImage, RtMaterial, RtTriangle};
+use crate::draw::rt::{PreparedRtScene, RtCamera, RtEnvironment};
 use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Stage3D, Vertex3D};
 
 use wasm_bindgen::{JsCast, JsValue};
@@ -918,7 +918,7 @@ impl Stage3D for WebRenderer {
             self.scene.light = v.normalize().to_array();
         }
     }
-    fn set_rt_scene_with_image(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial], image: Option<RtImage>) {
+    fn set_rt_scene_prepared(&mut self, scene: &PreparedRtScene) {
         if self.rt.is_none() {
             match WebRt::new(&self.device, self.view_format) {
                 Ok(rt) => self.rt = Some(rt),
@@ -929,7 +929,7 @@ impl Stage3D for WebRenderer {
             }
         }
         let rt = self.rt.as_mut().unwrap();
-        if let Err(e) = rt.set_scene(&self.device, &self.queue, triangles, materials, image) {
+        if let Err(e) = rt.set_scene(&self.device, &self.queue, scene) {
             web_sys::console::error_2(&"cce-ui: the traced scene was not uploaded:".into(), &e);
         }
     }
