@@ -350,9 +350,18 @@ impl FrameSig {
                     for line in &t.buffer.lines {
                         line.text().hash(h);
                     }
+                    // The shaped glyphs, not just the string: the same text
+                    // in another face (family, style, weight) is a different
+                    // picture. Hashing the string alone left a font picker's
+                    // preview showing the last face until something else
+                    // damaged the rows it sat in.
                     for run in t.buffer.layout_runs() {
                         w = w.max(run.line_w);
                         bottom = bottom.max(run.line_top + run.line_height);
+                        for g in run.glyphs {
+                            (g.font_id, g.glyph_id, g.cache_key_flags, g.color_opt.map(|c| c.0)).hash(h);
+                            [g.x, g.y, g.w, g.font_size, g.x_offset, g.y_offset].map(f32::to_bits).hash(h);
+                        }
                     }
                     (t.x.to_bits(), t.y.to_bits(), t.color.0, m.font_size.to_bits()).hash(h);
                     t.bounds.map(|b| b.map(f32::to_bits)).hash(h);
@@ -598,5 +607,37 @@ mod damage_tests {
         let b = vec![(2u64, None)];
         let d = diff_runs(&a, &b, |x: &(u64, Option<PxBox>)| x.0, |x| x.1).unwrap();
         assert!(d.0 < -1_000_000 && d.2 > 1_000_000);
+    }
+
+    /// The same string in another face is a changed text item: a font
+    /// picker's preview keeps its text and swaps only the face, and was left
+    /// showing the old one.
+    #[test]
+    fn the_same_text_in_another_face_is_damage() {
+        use crate::scene::paint::TextAttrs;
+        let frame = BuiltFrame {
+            verts: Vec::new(),
+            batches: Vec::new(),
+            overlay_verts: Vec::new(),
+            images: Vec::new(),
+            plate_features: Vec::new(),
+            clear_color: [0.0; 4],
+            damage: None,
+            dl_text: true,
+            overlay_rects: Vec::new(),
+            scale: 1.0,
+            physical: (400, 200),
+        };
+        let key = |attrs: TextAttrs| {
+            let mut fs = crate::geometry_font_system().lock().unwrap();
+            let buffer = crate::backend::text::shared_text_buffer(&mut fs, "The quick brown fox", 14.0, Some("monospace"), attrs);
+            let t = DlText { buffer, x: 10.0, y: 10.0, color: cosmic_text::Color::rgb(255, 255, 255), bounds: None, clip_circle: None, clip_rrect: None };
+            FrameSig::of(&frame, &[t]).texts[0].0
+        };
+        let upright = TextAttrs::default();
+        assert_eq!(key(upright), key(upright), "an unchanged item is no damage");
+        // Italic is a different face or, with none installed, the fake-italic
+        // flag: a different picture either way.
+        assert_ne!(key(upright), key(TextAttrs { italic: true, ..upright }));
     }
 }
