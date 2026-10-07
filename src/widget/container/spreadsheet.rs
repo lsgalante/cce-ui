@@ -305,6 +305,13 @@ impl Spreadsheet {
         edges
     }
 
+    /// How wide the table is: its columns, each as wide as its content. A
+    /// host sizes the pane by it — the designer's plate is as wide as the
+    /// table, up to the room it has (since 2026-10-07).
+    pub fn content_width(&self) -> f32 {
+        self.col_edges().last().copied().unwrap_or(0.0)
+    }
+
     /// Horizontal counterpart of [`geom`]: present only when the column run is
     /// wider than the pane.
     fn hgeom(&self, rect: Rect) -> Option<HScrollGeom> {
