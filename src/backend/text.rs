@@ -119,6 +119,123 @@ fn buffer_cache_put(text: &str, key: &BufferKey<'_>, buffer: Rc<Buffer>, voff: f
     });
 }
 
+/// The family-name prefix of a [`face_family`] alias.
+const FACE_ALIAS_PREFIX: &str = "cce-face:";
+
+/// One [`face_family`] alias: the face at `path`#`index`, named `cce-face:<n>`
+/// for its place `n` in [`FACE_ALIASES`].
+struct FaceAlias {
+    path: std::path::PathBuf,
+    index: u32,
+}
+
+/// Every face alias handed out, in the order they were. Process-wide, and only
+/// ever appended to: each `FontSystem` pushes them into its database in this
+/// order (see [`sync_face_aliases`]), so two databases loaded alike give every
+/// alias the same fontdb ID. They must — the shaped-buffer cache is shared by
+/// every `FontSystem` on the thread, and a buffer the app's measuring system
+/// shaped is rasterized by the engine's with the face IDs it carries.
+static FACE_ALIASES: std::sync::Mutex<Vec<FaceAlias>> = std::sync::Mutex::new(Vec::new());
+
+thread_local! {
+    /// Database address → how many of [`FACE_ALIASES`] it has been synced
+    /// with, and the ID and alias number of the last face pushed — checked
+    /// before it is trusted, since a dropped `FontSystem`'s address can be
+    /// reused by a fresh one.
+    static FACE_ALIASES_SYNCED: std::cell::RefCell<
+        std::collections::HashMap<usize, (usize, Option<(cosmic_text::fontdb::ID, usize)>)>,
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// A family name that resolves to exactly the face at `path`#`index` (the
+/// fontdb face index: non-zero only inside a collection), for a font string or
+/// a [`Prim::Text`](crate::scene::paint::Prim::Text)'s font.
+///
+/// Text names a face by family + style, stretch and weight, so a family with
+/// two faces alike in all three can show only whichever fontdb met first.
+/// They are not rare: BodonianScript's seven numbered cuts and FormP Color
+/// Six's colourways are all Regular 400, and Old Timey Mono's Condensed and
+/// Compressed files claim normal width, so the font picker previewed each of
+/// them as its family's first face. The alias is a family of that one face,
+/// so any attrs land on it.
+///
+/// Repeated calls for the same face return the same name. Every `FontSystem`
+/// the text backend shapes or draws with picks the aliases up by itself; one
+/// whose database lacks the file leaves the alias unresolved, and its text
+/// falls back as an unknown family's would.
+pub fn face_family(path: impl AsRef<std::path::Path>, index: u32) -> String {
+    let path = path.as_ref();
+    let mut aliases = FACE_ALIASES.lock().unwrap_or_else(|e| e.into_inner());
+    let n = match aliases.iter().position(|a| a.path == path && a.index == index) {
+        Some(n) => n,
+        None => {
+            aliases.push(FaceAlias { path: path.to_path_buf(), index });
+            aliases.len() - 1
+        }
+    };
+    format!("{FACE_ALIAS_PREFIX}{n}")
+}
+
+/// Push the [`face_family`] aliases `fs` does not have yet into its database,
+/// in their order. Cheap when there is nothing new: a map lookup and one face
+/// check.
+fn sync_face_aliases(fs: &mut FontSystem) {
+    use cosmic_text::fontdb::{Language, Source};
+    let aliases = FACE_ALIASES.lock().unwrap_or_else(|e| e.into_inner());
+    if aliases.is_empty() {
+        return;
+    }
+    let key = fs.db() as *const cosmic_text::fontdb::Database as usize;
+    let is_alias = |id: cosmic_text::fontdb::ID, n: usize| {
+        let name = format!("{FACE_ALIAS_PREFIX}{n}");
+        fs.db().face(id).is_some_and(|f| f.families.first().is_some_and(|(fam, _)| *fam == name))
+    };
+    let synced = FACE_ALIASES_SYNCED.with(|m| m.borrow().get(&key).copied());
+    let (mut done, mut last) = match synced {
+        Some((done, last)) if last.map_or(done == 0, |(id, n)| is_alias(id, n)) => (done, last),
+        // Unknown (or a reused address): count the aliases already present.
+        _ => {
+            let present: std::collections::HashSet<&str> = fs
+                .db()
+                .faces()
+                .filter_map(|f| f.families.first().map(|(fam, _)| fam.as_str()))
+                .filter(|fam| fam.starts_with(FACE_ALIAS_PREFIX))
+                .collect();
+            let done = (0..aliases.len()).take_while(|n| present.contains(format!("{FACE_ALIAS_PREFIX}{n}").as_str())).count();
+            let last = done.checked_sub(1).and_then(|n| {
+                let name = format!("{FACE_ALIAS_PREFIX}{n}");
+                fs.db().faces().find(|f| f.families.first().is_some_and(|(fam, _)| *fam == name)).map(|f| (f.id, n))
+            });
+            (done, last)
+        }
+    };
+    if done == aliases.len() && synced.is_some() {
+        return;
+    }
+    for (n, alias) in aliases.iter().enumerate().skip(done) {
+        let source = fs
+            .db()
+            .faces()
+            .find(|f| {
+                f.index == alias.index
+                    && matches!(&f.source, Source::File(p) | Source::SharedFile(p, _) if *p == alias.path)
+            })
+            .cloned();
+        if let Some(mut face) = source {
+            let name = format!("{FACE_ALIAS_PREFIX}{n}");
+            face.families = vec![(name.clone(), Language::English_UnitedStates)];
+            fs.db_mut().push_face_info(face);
+            last = fs
+                .db()
+                .faces()
+                .find(|f| f.families.first().is_some_and(|(fam, _)| *fam == name))
+                .map(|f| (f.id, n));
+        }
+        done = n + 1;
+    }
+    FACE_ALIASES_SYNCED.with(|m| m.borrow_mut().insert(key, (done, last)));
+}
+
 fn find_cased_family(fs: &FontSystem, name: &str) -> Option<String> {
     let lower_name = name.to_lowercase();
     for face in fs.db().faces() {
@@ -312,6 +429,8 @@ pub(crate) fn shared_text_buffer(
     if let Some((buf, _)) = buffer_cache_get(text, &key) {
         return buf;
     }
+    // Before any family resolves: a face alias must be in this database first.
+    sync_face_aliases(fs);
 
     let line_height = if is_vertical {
         physical_size * 1.05
@@ -580,6 +699,9 @@ pub struct DlText {
 /// these). Clip = the paint walk's item clip ∩ the prim's own bounds, in
 /// logical space. Shared by the window's frame and the context-menu popup's.
 pub(crate) fn collect_dl_text(fs: &mut FontSystem, dl: &crate::scene::paint::DisplayList, out: &mut Vec<DlText>) {
+    // A cached buffer may have been shaped by another `FontSystem` (the app's
+    // measuring one); the glyph pass rasterizes its face-alias IDs with this one.
+    sync_face_aliases(fs);
     for item in &dl.items {
         if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, alpha, font, bounds, attrs, layout } = &item.prim {
             let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
@@ -812,5 +934,54 @@ mod text_cache_tests {
         assert!(buffer_cache_get("t0", &key(0)).is_some(), "recently used survives");
         assert!(buffer_cache_get("t1", &key(1)).is_none(), "least recently used goes");
         assert!(buffer_cache_get("over", &key(0)).is_some());
+    }
+
+    /// Two copies of one font are one family whose faces are alike in every
+    /// attribute; a [`face_family`] alias reaches each copy, and two systems
+    /// loaded alike give the aliases the same IDs whatever order they shape in.
+    #[test]
+    fn a_face_alias_reaches_its_own_face_of_a_family_of_twins() {
+        use cosmic_text::fontdb::{Database, Source};
+        let src = {
+            let fs = crate::geometry_font_system().lock().unwrap();
+            let found = fs.db().faces().find_map(|f| match &f.source {
+                Source::File(p) | Source::SharedFile(p, _) if f.index == 0 && f.families.len() == 1
+                    && p.extension().is_some_and(|e| e == "ttf") => Some(p.clone()),
+                _ => None,
+            });
+            found.expect("a .ttf in the font set")
+        };
+        let dir = std::env::temp_dir().join(format!("cce-ui-face-alias-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, b) = (dir.join("a.ttf"), dir.join("b.ttf"));
+        std::fs::copy(&src, &a).unwrap();
+        std::fs::copy(&src, &b).unwrap();
+        let system = || {
+            let mut db = Database::new();
+            db.load_font_file(&a).unwrap();
+            db.load_font_file(&b).unwrap();
+            FontSystem::new_with_locale_and_db("en-US".into(), db)
+        };
+        let (mut one, mut two) = (system(), system());
+        let (fam_a, fam_b) = (face_family(&a, 0), face_family(&b, 0));
+        assert_eq!(face_family(&b, 0), fam_b, "one face, one alias");
+        let shaped_from = |fs: &mut FontSystem, family: &str| {
+            let buf = shared_text_buffer(fs, "Alias", 14.0, Some(family), TextAttrs::default());
+            let id = buf.layout_runs().next().unwrap().glyphs[0].font_id;
+            match &fs.db().face(id).unwrap().source {
+                Source::File(p) | Source::SharedFile(p, _) => (id, p.clone()),
+                _ => unreachable!(),
+            }
+        };
+        // Opposite orders, through a cleared cache so each system shapes.
+        BUFFER_CACHE.with(|c| c.borrow_mut().clear());
+        let one_b = shaped_from(&mut one, &fam_b);
+        let one_a = shaped_from(&mut one, &fam_a);
+        BUFFER_CACHE.with(|c| c.borrow_mut().clear());
+        let two_a = shaped_from(&mut two, &fam_a);
+        let two_b = shaped_from(&mut two, &fam_b);
+        assert_eq!((one_a.1.as_path(), one_b.1.as_path()), (a.as_path(), b.as_path()));
+        assert_eq!((one_a.0, one_b.0), (two_a.0, two_b.0), "the same IDs in both systems");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
