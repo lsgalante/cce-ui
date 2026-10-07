@@ -5,6 +5,7 @@
 pub use crate::backend::app::{
     Application, AppSender, LogicalPosition, LogicalSize, RenderContext, Stage3D, WindowAction, WindowSettings,
 };
+pub use crate::draw::lit::{LitDraw, LitLight, LitMaterial, LitMeshId, LitStage3D, LitVertex};
 pub use crate::draw::rt::{PreparedRtScene, RtCamera, RtEnvironment, RtImage, RtMaterial, RtTriangle};
 pub use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
 pub use crate::backend::driver::PressedKey;

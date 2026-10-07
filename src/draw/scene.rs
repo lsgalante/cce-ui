@@ -224,6 +224,13 @@ pub trait Stage3D {
     /// True while another staged frame would still refine the traced image
     /// — the app's cue to keep asking for frames.
     fn rt_accumulating(&self) -> bool;
+
+    /// The lit, textured mesh path (`draw::lit`), when this renderer has
+    /// it: `None` by default, so a renderer without it needs no change and
+    /// a host keeps its flat path. The Vulkan renderer answers `Some`.
+    fn lit(&mut self) -> Option<&mut dyn super::lit::LitStage3D> {
+        None
+    }
 }
 
 /// A staged scene's uniform blocks, in the order its draws use them: one per

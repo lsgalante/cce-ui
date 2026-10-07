@@ -240,6 +240,35 @@ and scaled into place by its mvp, which the old shader shredded and this one dra
 (Vulkan, scale-2 shadow; the WebGPU half shares the shader and `scene_uniforms` and was
 not built — still no wasm32 target here).
 
+**A mesh can be lit and textured** (since 2026-10-07, `draw::lit`). Beside the
+`Vertex3D` path, which is a position and a colour shaded flat or pre-lit by the host,
+the scene pass has a second mesh kind for model files: a `LitVertex` (position,
+normal, uv, colour), drawn by `scene3d_lit.wgsl` with a `LitMaterial` (base colour,
+optional base-colour image id, metallic, roughness) under one `LitLight` (key, fill,
+sky/ground ambient). Lambert plus GGX/Smith/Schlick per light, the hemisphere as the
+diffuse ambient and as what a metal reflects; the diffuse has no 1/pi, the scale
+hosts' baked light always had, so a matte lit draw matches a baked one. It is reached
+through `Stage3D::lit()`, which **defaults to `None`**: the Vulkan renderer answers
+`Some(self)` (`LitStage3D`: `create_lit_mesh`, `update_lit_mesh`, `set_lit_light`,
+`stage_lit`), the WebGPU one does not yet, so it needed no change and a host checks.
+`LitDraw::before` interleaves lit draws with the staged `SceneDraw`s as
+`SceneImage::before` does (a host's background and grid first, wire overlays after).
+What the Vulkan stage does (`vk/scene.rs`): a lit pipeline on the image pipeline's
+layout (set 0 the per-frame dynamic uniforms, set 1 an image's descriptor set), no
+culling (the shader flips a back face's normal), dynamic depth bias for
+`wire_base_width`; lit uniform blocks share the per-frame buffer after the scene's and
+the images', so the slot stride is now the larger of the two blocks (`SLOT_SIZE`, 224
+bytes against the scene block's 128 — nothing that does not use lit draws changes but
+that stride); an untextured draw, or one whose image is not resident, binds a 1x1 white
+image the renderer uploads with the first lit mesh. Textures are ordinary image ids:
+RGBA8 sRGB, so texels reach the shader linear; they die with the renderer (re-upload
+in `init_3d`). The image sampler clamps, so the shader wraps uvs with `fract` and
+samples with the UNWRAPPED uvs' gradients (`textureSampleGrad`), or the wrap would
+pick the smallest mip and draw a seam. cce-model is the consumer. Verified 2026-10-07
+in a scale-2 shadow: a textured globe, a gold metal sphere and a rough red cube, the
+highlights moving with the camera; and `probe3d` drawn pixel-identical before and
+after the change (the flat path untouched).
+
 **And so does the path tracer** (since 2026-10-05). `Stage3D` carries the tracer's half
 too — `set_rt_scene` / `set_rt_scene_with_image`, `set_rt_environment`,
 `set_rt_background`, `stage_rt`, `rt_accumulating` — and what it traces from moved to

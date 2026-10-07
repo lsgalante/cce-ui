@@ -15,7 +15,7 @@
 
 use std::path::Path;
 
-const SHADERS: [&str; 4] = ["shader2d", "glyph", "scene3d", "scene3d_image"];
+const SHADERS: [&str; 5] = ["shader2d", "glyph", "scene3d", "scene3d_image", "scene3d_lit"];
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");

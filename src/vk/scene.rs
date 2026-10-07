@@ -17,9 +17,16 @@ use gpu_allocator::MemoryLocation;
 use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 
 pub use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
+use crate::draw::lit::{lit_uniforms, LitDraw, LitLight, LitMeshId, LitVertex, LIT_UNIFORM_SIZE};
 use crate::draw::scene::{image_quads_3d, scene_uniforms, wire_base_bias, ImageVertex3D, SceneUniforms, DEFAULT_SCENE_LIGHT, UNIT_INSTANCE};
 
 const UNIFORM_SIZE: vk::DeviceSize = std::mem::size_of::<SceneUniforms>() as vk::DeviceSize;
+/// One uniform slot holds either a scene block or a lit one.
+const SLOT_SIZE: vk::DeviceSize = if (LIT_UNIFORM_SIZE as vk::DeviceSize) > UNIFORM_SIZE {
+    LIT_UNIFORM_SIZE as vk::DeviceSize
+} else {
+    UNIFORM_SIZE
+};
 
 struct Mesh {
     buffer: AllocatedBuffer,
@@ -30,6 +37,7 @@ struct StagedScene {
     scissor: (u32, u32, u32, u32),
     draws: Vec<SceneDraw>,
     images: Vec<SceneImage>,
+    lit: Vec<LitDraw>,
 }
 
 struct SceneFrame {
@@ -65,6 +73,17 @@ pub(crate) struct SceneStage {
     image_pipeline_layout: vk::PipelineLayout,
     image_set_layout: vk::DescriptorSetLayout,
     image_shader_module: vk::ShaderModule,
+    /// The `LitDraw` pipeline (`draw::lit`): set 0 the scene's uniforms
+    /// (a lit block in the slot), set 1 the base-colour image's set, as the
+    /// image pipeline has it. No culling: the shader lights a back face by
+    /// its flipped normal.
+    lit_pipeline: vk::Pipeline,
+    lit_shader_module: vk::ShaderModule,
+    lit_meshes: Vec<Mesh>,
+    pub(crate) lit_light: LitLight,
+    /// A 1x1 white image the renderer uploads, bound for an untextured lit
+    /// draw (and one whose texture is not resident): set 1 must be bound.
+    pub(crate) lit_fallback_image: Option<u32>,
 
     format: vk::Format,
     extent: vk::Extent2D,
@@ -500,7 +519,74 @@ impl SceneStage {
                     .expect("Failed to create 3D image pipeline")[0]
             };
 
-            let uniform_stride = UNIFORM_SIZE.next_multiple_of(min_uniform_align.max(1));
+            // The lit pipeline: the fill's pass, blend, depth and dynamic
+            // depth-bias state, the image pipeline's layout, no culling, and
+            // a `LitVertex`.
+            let lit_shader_module = device
+                .create_shader_module(
+                    &vk::ShaderModuleCreateInfo::default().code(super::renderer::scene3d_lit_spirv()),
+                    None,
+                )
+                .expect("Failed to create 3D lit shader module");
+            let lit_pipeline = {
+                let stages = [
+                    vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::VERTEX)
+                        .module(lit_shader_module)
+                        .name(c"vs_main"),
+                    vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::FRAGMENT)
+                        .module(lit_shader_module)
+                        .name(c"fs_main"),
+                ];
+                let vertex_bindings = [vk::VertexInputBindingDescription::default()
+                    .binding(0)
+                    .stride(std::mem::size_of::<LitVertex>() as u32)
+                    .input_rate(vk::VertexInputRate::VERTEX)];
+                let attribute = |location: u32, format: vk::Format, offset: u32| {
+                    vk::VertexInputAttributeDescription::default()
+                        .location(location)
+                        .binding(0)
+                        .format(format)
+                        .offset(offset)
+                };
+                let vertex_attributes = [
+                    attribute(0, vk::Format::R32G32B32_SFLOAT, 0),
+                    attribute(1, vk::Format::R32G32B32_SFLOAT, 12),
+                    attribute(2, vk::Format::R32G32_SFLOAT, 24),
+                    attribute(3, vk::Format::R32G32B32_SFLOAT, 32),
+                ];
+                let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
+                    .vertex_binding_descriptions(&vertex_bindings)
+                    .vertex_attribute_descriptions(&vertex_attributes);
+                let rasterization = vk::PipelineRasterizationStateCreateInfo::default()
+                    .polygon_mode(vk::PolygonMode::FILL)
+                    .cull_mode(vk::CullModeFlags::NONE)
+                    .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+                    .depth_bias_enable(true)
+                    .line_width(1.0);
+                device
+                    .create_graphics_pipelines(
+                        vk::PipelineCache::null(),
+                        &[vk::GraphicsPipelineCreateInfo::default()
+                            .stages(&stages)
+                            .vertex_input_state(&vertex_input)
+                            .input_assembly_state(&input_assembly)
+                            .viewport_state(&viewport_state)
+                            .rasterization_state(&rasterization)
+                            .multisample_state(&multisample)
+                            .depth_stencil_state(&depth_stencil)
+                            .color_blend_state(&color_blend)
+                            .dynamic_state(&dynamic_state)
+                            .layout(image_pipeline_layout)
+                            .render_pass(render_pass)
+                            .subpass(0)],
+                        None,
+                    )
+                    .expect("Failed to create 3D lit pipeline")[0]
+            };
+
+            let uniform_stride = SLOT_SIZE.next_multiple_of(min_uniform_align.max(1));
 
             let pool_sizes = [vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
@@ -571,6 +657,11 @@ impl SceneStage {
                 image_pipeline_layout,
                 image_set_layout,
                 image_shader_module,
+                lit_pipeline,
+                lit_shader_module,
+                lit_meshes: Vec::new(),
+                lit_light: LitLight::default(),
+                lit_fallback_image: None,
                 format,
                 extent: vk::Extent2D { width: 0, height: 0 },
                 backdrop_image: vk::Image::null(),
@@ -854,7 +945,53 @@ impl SceneStage {
     }
 
     pub(crate) fn stage(&mut self, scissor: (u32, u32, u32, u32), draws: Vec<SceneDraw>) {
-        self.staged = Some(StagedScene { scissor, draws, images: Vec::new() });
+        self.staged = Some(StagedScene { scissor, draws, images: Vec::new(), lit: Vec::new() });
+    }
+
+    /// The staged scene's lit draws; nothing when no scene is staged.
+    pub(crate) fn stage_lit(&mut self, draws: Vec<LitDraw>) {
+        if let Some(staged) = &mut self.staged {
+            staged.lit = draws;
+        }
+    }
+
+    pub(crate) fn create_lit_mesh(&mut self, device: &ash::Device, allocator: &mut Allocator, verts: &[LitVertex]) -> LitMeshId {
+        let bytes: &[u8] = bytemuck::cast_slice(verts);
+        let mut buffer = create_cpu_buffer(
+            device,
+            allocator,
+            (bytes.len() as vk::DeviceSize).max(64),
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            "lit-mesh",
+        );
+        if !bytes.is_empty() {
+            buffer.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..bytes.len()].copy_from_slice(bytes);
+        }
+        self.lit_meshes.push(Mesh { buffer, count: verts.len() as u32 });
+        LitMeshId(self.lit_meshes.len() - 1)
+    }
+
+    /// Replace a lit mesh's vertices. Caller must have the device idle, as
+    /// for `update_mesh`.
+    pub(crate) fn update_lit_mesh(&mut self, device: &ash::Device, allocator: &mut Allocator, id: LitMeshId, verts: &[LitVertex]) {
+        let mesh = &mut self.lit_meshes[id.0];
+        let bytes: &[u8] = bytemuck::cast_slice(verts);
+        let needed = bytes.len() as vk::DeviceSize;
+        if needed > mesh.buffer.size {
+            let mut old = std::mem::replace(&mut mesh.buffer, AllocatedBuffer::null());
+            destroy_cpu_buffer(device, allocator, &mut old);
+            mesh.buffer = create_cpu_buffer(
+                device,
+                allocator,
+                needed.next_power_of_two(),
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                "lit-mesh",
+            );
+        }
+        if !bytes.is_empty() {
+            mesh.buffer.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..bytes.len()].copy_from_slice(bytes);
+        }
+        mesh.count = verts.len() as u32;
     }
 
     /// The staged scene's images; nothing when no scene is staged.
@@ -878,8 +1015,8 @@ impl SceneStage {
             return;
         };
         let frame = &mut self.frames[frame_index];
-        // One slot per mesh draw, then one per image.
-        let slots = staged.draws.len() + staged.images.len();
+        // One slot per mesh draw, then one per image, then one per lit draw.
+        let slots = staged.draws.len() + staged.images.len() + staged.lit.len();
         let needed = self.uniform_stride * slots.max(1) as vk::DeviceSize;
         if needed > frame.uniforms.size {
             let mut old = std::mem::replace(&mut frame.uniforms, AllocatedBuffer::null());
@@ -899,6 +1036,11 @@ impl SceneStage {
         for (i, uniforms) in blocks.iter().enumerate() {
             let offset = (self.uniform_stride as usize) * i;
             mapped[offset..offset + UNIFORM_SIZE as usize].copy_from_slice(bytemuck::bytes_of(uniforms));
+        }
+        let lit = lit_uniforms(&staged.lit, &self.lit_light, window_size, corner_radius_px);
+        for (k, uniforms) in lit.iter().enumerate() {
+            let offset = (self.uniform_stride as usize) * (blocks.len() + k);
+            mapped[offset..offset + LIT_UNIFORM_SIZE].copy_from_slice(bytemuck::bytes_of(uniforms));
         }
         frame.draw_count = staged.draws.len() as u32;
 
@@ -1021,7 +1163,54 @@ impl SceneStage {
                     device.cmd_draw(cmd, 6, 1, (j * 6) as u32, 0);
                 }
             };
+            // The lit draws due before mesh draw `at`, likewise.
+            let lit_base = staged.draws.len() + staged.images.len();
+            let fallback = self.lit_fallback_image.and_then(|id| images.descriptor_set(id));
+            let draw_lit = |at: usize, bound: &mut vk::Pipeline| {
+                for (k, lit) in staged.lit.iter().enumerate() {
+                    let due = (lit.before as usize).min(staged.draws.len());
+                    if due != at {
+                        continue;
+                    }
+                    let mesh = &self.lit_meshes[lit.mesh.0];
+                    if mesh.count == 0 {
+                        continue;
+                    }
+                    let set = lit.material.texture.and_then(|id| images.descriptor_set(id)).or(fallback);
+                    let Some(set) = set else { continue };
+                    if *bound != self.lit_pipeline {
+                        device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.lit_pipeline);
+                        *bound = self.lit_pipeline;
+                    }
+                    if lit.wire_base_width > 0.0 {
+                        let w = lit.wire_base_width.clamp(1.0, self.max_line_width);
+                        let (constant, slope) = wire_base_bias(w);
+                        device.cmd_set_depth_bias(cmd, constant, 0.0, slope);
+                    } else {
+                        device.cmd_set_depth_bias(cmd, 0.0, 0.0, 0.0);
+                    }
+                    device.cmd_bind_descriptor_sets(
+                        cmd,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        self.image_pipeline_layout,
+                        0,
+                        &[frame.descriptor_set],
+                        &[(self.uniform_stride as u32) * (lit_base + k) as u32],
+                    );
+                    device.cmd_bind_descriptor_sets(
+                        cmd,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        self.image_pipeline_layout,
+                        1,
+                        &[set],
+                        &[],
+                    );
+                    device.cmd_bind_vertex_buffers(cmd, 0, &[mesh.buffer.buffer], &[0]);
+                    device.cmd_draw(cmd, mesh.count, 1, 0, 0);
+                }
+            };
             for (i, draw) in staged.draws.iter().enumerate() {
+                draw_lit(i, &mut bound);
                 draw_images(i, &mut bound);
                 let mesh = &self.meshes[draw.mesh.0];
                 if mesh.count == 0 {
@@ -1075,6 +1264,7 @@ impl SceneStage {
                 device.cmd_bind_vertex_buffers(cmd, 0, &[mesh.buffer.buffer, instance_buffer], &[0, 0]);
                 device.cmd_draw(cmd, mesh.count, instance_count, 0, 0);
             }
+            draw_lit(staged.draws.len(), &mut bound);
             draw_images(staged.draws.len(), &mut bound);
             device.cmd_end_render_pass(cmd);
         }
@@ -1091,7 +1281,7 @@ impl SceneStage {
                 let mut quads = std::mem::replace(&mut frame.image_verts, AllocatedBuffer::null());
                 destroy_cpu_buffer(device, allocator, &mut quads);
             }
-            for mesh in &mut self.meshes {
+            for mesh in self.meshes.iter_mut().chain(self.lit_meshes.iter_mut()) {
                 let mut buffer = std::mem::replace(&mut mesh.buffer, AllocatedBuffer::null());
                 destroy_cpu_buffer(device, allocator, &mut buffer);
             }
@@ -1102,6 +1292,8 @@ impl SceneStage {
             if let Some(p) = self.wireframe_pipeline.take() {
                 device.destroy_pipeline(p, None);
             }
+            device.destroy_pipeline(self.lit_pipeline, None);
+            device.destroy_shader_module(self.lit_shader_module, None);
             device.destroy_pipeline(self.image_pipeline, None);
             device.destroy_pipeline_layout(self.image_pipeline_layout, None);
             device.destroy_descriptor_set_layout(self.image_set_layout, None);

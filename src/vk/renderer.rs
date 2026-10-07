@@ -529,6 +529,7 @@ precompiled_spirv!(shader2d_spirv, "shader2d.spv");
 precompiled_spirv!(glyph_spirv, "glyph.spv");
 precompiled_spirv!(scene3d_spirv, "scene3d.spv");
 precompiled_spirv!(scene3d_image_spirv, "scene3d_image.spv");
+precompiled_spirv!(scene3d_lit_spirv, "scene3d_lit.spv");
 
 /// Like [`compile_wgsl`], but with naga's RAY_QUERY capability and SPIR-V 1.4
 /// (required by SPV_KHR_ray_query). Only used on devices where the ray-query
@@ -1783,6 +1784,33 @@ impl VkRenderer {
         self.scene.stage_images(images);
     }
 
+    /// Upload a lit mesh (`draw::lit`). The first one also uploads the 1x1
+    /// white image an untextured lit draw binds.
+    pub fn create_lit_mesh(&mut self, verts: &[crate::draw::lit::LitVertex]) -> crate::draw::lit::LitMeshId {
+        if self.scene.lit_fallback_image.is_none() {
+            self.scene.lit_fallback_image = Some(self.upload_rgba_now(&[255, 255, 255, 255], 1, 1));
+        }
+        self.scene.create_lit_mesh(&self.core.device, self.core.allocator.as_mut().unwrap(), verts)
+    }
+
+    /// Replace a lit mesh's vertices; waits for the GPU first, as `update_mesh`.
+    pub fn update_lit_mesh(&mut self, id: crate::draw::lit::LitMeshId, verts: &[crate::draw::lit::LitVertex]) {
+        unsafe {
+            let _ = self.core.device.device_wait_idle();
+        }
+        self.scene.update_lit_mesh(&self.core.device, self.core.allocator.as_mut().unwrap(), id, verts);
+    }
+
+    /// The light lit draws are shaded by.
+    pub fn set_lit_light(&mut self, light: crate::draw::lit::LitLight) {
+        self.scene.lit_light = light;
+    }
+
+    /// This frame's lit draws, after `stage_scene`.
+    pub fn stage_lit(&mut self, draws: Vec<crate::draw::lit::LitDraw>) {
+        self.scene.stage_lit(draws);
+    }
+
     /// Replace the path tracer's scene (triangles in the space the camera's
     /// `inv_mvp` unprojects into). Builds the BVH on the CPU and uploads it;
     /// waits for the GPU to go idle first — scene replacement is rare
@@ -2783,6 +2811,24 @@ impl crate::draw::scene::Stage3D for VkRenderer {
     fn rt_accumulating(&self) -> bool {
         VkRenderer::rt_accumulating(self)
     }
+    fn lit(&mut self) -> Option<&mut dyn crate::draw::lit::LitStage3D> {
+        Some(self)
+    }
+}
+
+impl crate::draw::lit::LitStage3D for VkRenderer {
+    fn create_lit_mesh(&mut self, verts: &[crate::draw::lit::LitVertex]) -> crate::draw::lit::LitMeshId {
+        VkRenderer::create_lit_mesh(self, verts)
+    }
+    fn update_lit_mesh(&mut self, id: crate::draw::lit::LitMeshId, verts: &[crate::draw::lit::LitVertex]) {
+        VkRenderer::update_lit_mesh(self, id, verts)
+    }
+    fn set_lit_light(&mut self, light: crate::draw::lit::LitLight) {
+        VkRenderer::set_lit_light(self, light)
+    }
+    fn stage_lit(&mut self, draws: Vec<crate::draw::lit::LitDraw>) {
+        VkRenderer::stage_lit(self, draws)
+    }
 }
 
 impl Drop for VkRenderer {
@@ -2923,11 +2969,12 @@ mod tests {
     /// longer what this crate means by the shader; compare word for word.
     #[test]
     fn precompiled_spirv_matches_runtime_compile() {
-        let cases: [(&str, &str, fn() -> &'static [u32]); 4] = [
+        let cases: [(&str, &str, fn() -> &'static [u32]); 5] = [
             ("shader2d", crate::draw::shaders::SHADER2D, super::shader2d_spirv),
             ("glyph", crate::draw::shaders::GLYPH, super::glyph_spirv),
             ("scene3d", crate::draw::shaders::SCENE3D, super::scene3d_spirv),
             ("scene3d_image", crate::draw::shaders::SCENE3D_IMAGE, super::scene3d_image_spirv),
+            ("scene3d_lit", crate::draw::shaders::SCENE3D_LIT, super::scene3d_lit_spirv),
         ];
         for (name, source, precompiled) in cases {
             assert!(

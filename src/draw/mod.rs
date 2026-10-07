@@ -14,6 +14,7 @@ use cosmic_text::Buffer as TextBuffer;
 
 pub mod glyphs;
 pub mod images;
+pub mod lit;
 pub mod rt;
 pub mod scene;
 pub mod shaders;
