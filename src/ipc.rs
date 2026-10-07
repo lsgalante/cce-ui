@@ -129,6 +129,14 @@ fn focus_window_at(path: &str, query: &str) -> std::io::Result<()> {
 /// EOF before any byte, the deadline, more than `limit` bytes without a
 /// newline, a read error, or invalid UTF-8. The stream's read timeout is
 /// cleared again on success.
+///
+/// Nothing past the newline is consumed: each chunk is PEEKED first and only
+/// the bytes up to the newline are read, so whatever the client sent after
+/// the line is still on the socket for the caller to read. Until 2026-10-06
+/// the whole chunk was read and the tail truncated away — cce-cloud's
+/// switcher client sends its request line and then the window list down the
+/// same connection, and when both had arrived by the time the daemon read,
+/// the list went with the tail and the switcher opened empty.
 pub fn read_request_line(conn: &UnixStream, limit: usize, deadline: std::time::Duration) -> Option<String> {
     let until = std::time::Instant::now() + deadline;
     let mut buf: Vec<u8> = Vec::new();
@@ -137,16 +145,23 @@ pub fn read_request_line(conn: &UnixStream, limit: usize, deadline: std::time::D
     loop {
         let left = until.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero())?;
         conn.set_read_timeout(Some(left)).ok()?;
-        let n = reader.read(&mut chunk).ok()?;
+        let n = match peek(conn, &mut chunk) {
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return None,
+        };
         if n == 0 {
             if buf.is_empty() {
                 return None;
             }
             break;
         }
-        buf.extend_from_slice(&chunk[..n]);
-        if let Some(end) = buf.iter().position(|&b| b == b'\n') {
-            buf.truncate(end + 1);
+        // Consume through the newline if the peek holds one, else all of it.
+        let take = chunk[..n].iter().position(|&b| b == b'\n').map_or(n, |end| end + 1);
+        // Already queued, so this returns at once with exactly `take` bytes.
+        reader.read_exact(&mut chunk[..take]).ok()?;
+        buf.extend_from_slice(&chunk[..take]);
+        if buf.last() == Some(&b'\n') {
             break;
         }
         if buf.len() > limit {
@@ -157,10 +172,24 @@ pub fn read_request_line(conn: &UnixStream, limit: usize, deadline: std::time::D
     String::from_utf8(buf).ok()
 }
 
+/// `recv(MSG_PEEK)`: what is queued on the socket, left there. Blocks (up to
+/// the read timeout) like `read` when nothing is. `UnixStream::peek` is
+/// still unstable.
+fn peek(conn: &UnixStream, buf: &mut [u8]) -> std::io::Result<usize> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: `buf` is a live, writable slice of `buf.len()` bytes.
+    let n = unsafe { libc::recv(conn.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len(), libc::MSG_PEEK) };
+    if n < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(n as usize)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::read_request_line;
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     use std::time::{Duration, Instant};
 
@@ -169,6 +198,28 @@ mod tests {
         let (mut client, server) = UnixStream::pair().unwrap();
         client.write_all(b"open note\nmore").unwrap();
         assert_eq!(read_request_line(&server, 1024, Duration::from_secs(1)).as_deref(), Some("open note\n"));
+
+        // Only the line is consumed: what the client sent after it in the
+        // same burst (cce-cloud's switcher list) is still there to read.
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client.write_all(b"{\"args\":[]}\nWindow A (a)\nWindow B (b)\n").unwrap();
+        drop(client);
+        assert_eq!(read_request_line(&server, 1024, Duration::from_secs(1)).as_deref(), Some("{\"args\":[]}\n"));
+        let mut rest = String::new();
+        server.read_to_string(&mut rest).unwrap();
+        assert_eq!(rest, "Window A (a)\nWindow B (b)\n");
+
+        // A line longer than one peek, then a tail: read across chunks,
+        // and the tail is still left.
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let long = format!("{}\ntail", "y".repeat(10_000));
+        let writer = std::thread::spawn(move || client.write_all(long.as_bytes()).unwrap());
+        let line = read_request_line(&server, 64 * 1024, Duration::from_secs(1)).unwrap();
+        writer.join().unwrap();
+        assert_eq!(line.len(), 10_001);
+        let mut rest = String::new();
+        server.read_to_string(&mut rest).unwrap();
+        assert_eq!(rest, "tail");
 
         // Silent: given up at the deadline, not held forever.
         let (_quiet, server) = UnixStream::pair().unwrap();
