@@ -57,6 +57,14 @@ scattering of widgets (`text_box`, `slider`, `dropdown`, `treelist`, …). When 
 engine, that module's tests are the fast feedback loop; run `cargo test -p cce-ui scene::` before
 anything else.
 
+**The tests never read the machine's config** (since 2026-10-07). Under `cfg(test)`,
+`config::config_home()` is a per-process directory nobody creates, so `config.kdl`, the per-app
+overrides and `input.kdl` are all absent and every getter answers its default. A test that needs a
+setting loads it from a string (`color::reload_colors`) or pins it on its thread. Before this, six
+heightfield and material tests failed on the desktop, whose `relief edge height` and frost keys
+overrode what they set, and passed elsewhere. Fonts are another matter: `fonts_dir()` still reads
+`~/Dropbox/Fonts` (or `$CCE_FONTS_DIR`), and the text-shaping tests need those faces.
+
 **The library also builds for the browser** (`wasm32-unknown-unknown`, since 2026-10-04):
 `scripts/check-wasm` type-checks it, with and without the optional features. The native
 shell and renderer — `vk`, the Wayland shell (`backend::{window_runner, menu_popup, dnd}`),

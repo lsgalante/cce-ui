@@ -539,7 +539,22 @@ pub fn update_kdl_in_memory_typed(doc: &mut kdl::KdlDocument, key: &str, value: 
 }
 
 /// XDG config base directory: `$XDG_CONFIG_HOME`, else `~/.config`.
+///
+/// Under this crate's own tests it is a per-process directory nobody
+/// creates, so every config read (`config.kdl`, a per-app override,
+/// `input.kdl`) finds no file and the toolkit's defaults are what a test
+/// sees. Until 2026-10-07 the tests read the machine's `~/.config/cce`:
+/// six of them failed on the user's desktop (a `relief edge height` pinned
+/// the plate rise the heightfield tests set; the frost and blur keys moved
+/// the material ones) and passed on a machine without that config. A test
+/// that wants a configuration loads it from a string (`reload_colors`).
+/// Dependents' tests link the non-test build and are unaffected.
 pub fn config_home() -> std::path::PathBuf {
+    #[cfg(test)]
+    {
+        return std::env::temp_dir().join(format!("cce-ui-test-config-{}", std::process::id()));
+    }
+    #[allow(unreachable_code)]
     match std::env::var("XDG_CONFIG_HOME") {
         Ok(x) if !x.is_empty() => std::path::PathBuf::from(x),
         _ => std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config"),
