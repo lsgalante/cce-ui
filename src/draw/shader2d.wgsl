@@ -1227,10 +1227,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 // push block (MODE_PLATE), or are the no-recipe defaults (droplet, raw
 // vertices). A stride of 0 is a CLEAR plate: one clean sample, tinted.
 //
-// The backdrop is sampled at level 0 explicitly: it has one level, so that is
-// the texel an implicit LOD would pick, and this runs under non-uniform control
-// flow (the blur branch), where WebGPU forbids the derivatives an implicit LOD
-// takes.
+// Every sample names its level explicitly: this runs under non-uniform
+// control flow (the blur branch), where WebGPU forbids the derivatives an
+// implicit LOD takes. The kernel's taps read the level that matches their
+// stride; the clean samples (a clear plate, the rim) read level 0.
 fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32, k_in: f32, stride: f32) -> vec4f {
     let tex_size = vec2f(textureDimensions(t_backdrop));
 
@@ -1241,16 +1241,27 @@ fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32, k_in: f3
         var blurred = vec4f(0.0);
         var total_weight = 0.0;
         // 7x7 Gaussian kernel at `stride` px (sigma two taps, reach ±3
-        // taps); the linear sampler between taps papers over the stride.
-        // The panel default is 5.5 px; a 2.5 px stride was technically a
-        // blur but read as plain translucency — fine detail beneath a
-        // frosted menu stayed legible, which is not what frosted glass does.
+        // taps). The panel default is 5.5 px; a 2.5 px stride was
+        // technically a blur but read as plain translucency — fine detail
+        // beneath a frosted menu stayed legible, which is not what frosted
+        // glass does.
+        //
+        // Each tap reads the mip level whose texel is one stride wide, so it
+        // is the AVERAGE of the stride-sized cell it stands in. At level 0 a
+        // tap read the texel or two it landed between, and detail thinner
+        // than the stride — a hairline, a well's edge, a glyph — was picked
+        // up whole by the taps that hit it and missed by those between:
+        // seven faint copies a stride apart, horizontal bands under a menu
+        // over rows. The blur snapshot carries the chain
+        // (`snapshot_mip_chain`); the scene backdrop has one level, which
+        // every level clamps to.
+        let lod = max(log2(stride), 0.0);
         for (var x = -3.0; x <= 3.0; x += 1.0) {
             for (var y = -3.0; y <= 3.0; y += 1.0) {
                 let offset = vec2f(x, y) * stride;
                 let sample_uv = (pos + offset) / tex_size;
                 let weight = exp(-(x*x + y*y) / (2.0 * 2.0 * 2.0));
-                blurred += textureSampleLevel(t_backdrop, s_backdrop, sample_uv, 0.0) * weight;
+                blurred += textureSampleLevel(t_backdrop, s_backdrop, sample_uv, lod) * weight;
                 total_weight += weight;
             }
         }

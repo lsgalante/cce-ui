@@ -286,6 +286,13 @@ pub struct VkRenderer {
     /// Whether a frame has needed the blur snapshot; until one has, it is
     /// not allocated (`sync_snapshot_target`).
     snapshot_wanted: bool,
+    /// The snapshot's mip levels: 1 where the surface format cannot be
+    /// blitted with a linear filter (`blur_mips`), else
+    /// [`snapshot_levels`] of the surface. See `snapshot_mip_chain`.
+    snapshot_levels: u32,
+    /// Whether the surface format can be a blit's source and destination
+    /// and filter linearly — what building the snapshot's mip chain takes.
+    blur_mips: bool,
     /// Ask for the surface's minimum image count rather than one more
     /// (`set_minimal_swapchain`).
     minimal_swapchain: bool,
@@ -542,13 +549,32 @@ pub(crate) fn compile_wgsl_ray_query(source: &str) -> Vec<u32> {
     naga::back::spv::write_vec(&module, &info, &options, None).expect("SPIR-V write failed")
 }
 
-const COLOR_RANGE: vk::ImageSubresourceRange = vk::ImageSubresourceRange {
-    aspect_mask: vk::ImageAspectFlags::COLOR,
-    base_mip_level: 0,
-    level_count: 1,
-    base_array_layer: 0,
-    layer_count: 1,
-};
+const COLOR_RANGE: vk::ImageSubresourceRange = color_levels(0, 1);
+
+/// `count` mip levels of a colour image from `base`.
+const fn color_levels(base: u32, count: u32) -> vk::ImageSubresourceRange {
+    vk::ImageSubresourceRange {
+        aspect_mask: vk::ImageAspectFlags::COLOR,
+        base_mip_level: base,
+        level_count: count,
+        base_array_layer: 0,
+        layer_count: 1,
+    }
+}
+
+/// How many mip levels the blur snapshot carries: enough that the coarsest
+/// texel is as wide as the widest kernel stride a plate asks for (a radius of
+/// 16 px at scale 4 is a 64 px stride, level 6), and no more — the levels
+/// past that would be built every snapshot and never read. See
+/// `snapshot_mip_chain`.
+pub(crate) const SNAPSHOT_LEVELS_MAX: u32 = 7;
+
+/// The levels a snapshot of `extent` can have, at most [`SNAPSHOT_LEVELS_MAX`]:
+/// a level stops halving at one texel.
+pub(crate) fn snapshot_levels(extent: vk::Extent2D) -> u32 {
+    let side = extent.width.max(extent.height).max(1);
+    (32 - side.leading_zeros()).min(SNAPSHOT_LEVELS_MAX)
+}
 
 /// One-time submit: clear a color image and leave it in SHADER_READ_ONLY, so a
 /// freshly created backdrop is always legal to sample.
@@ -558,6 +584,18 @@ pub(crate) fn clear_image_to_shader_read(
     command_pool: vk::CommandPool,
     image: vk::Image,
 ) {
+    clear_image_levels_to_shader_read(device, queue, command_pool, image, 1);
+}
+
+/// [`clear_image_to_shader_read`] over the first `levels` mip levels.
+pub(crate) fn clear_image_levels_to_shader_read(
+    device: &ash::Device,
+    queue: vk::Queue,
+    command_pool: vk::CommandPool,
+    image: vk::Image,
+    levels: u32,
+) {
+    let range = color_levels(0, levels);
     unsafe {
         let cmd = device
             .allocate_command_buffers(
@@ -589,14 +627,14 @@ pub(crate) fn clear_image_to_shader_read(
                 .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .image(image)
-                .subresource_range(COLOR_RANGE)],
+                .subresource_range(range)],
         );
         device.cmd_clear_color_image(
             cmd,
             image,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             &vk::ClearColorValue { float32: [0.0, 0.0, 0.0, 0.0] },
-            &[COLOR_RANGE],
+            &[range],
         );
         device.cmd_pipeline_barrier(
             cmd,
@@ -613,7 +651,7 @@ pub(crate) fn clear_image_to_shader_read(
                 .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .image(image)
-                .subresource_range(COLOR_RANGE)],
+                .subresource_range(range)],
         );
         device.end_command_buffer(cmd).unwrap();
         let cmds = [cmd];
@@ -812,13 +850,17 @@ impl VkRenderer {
         );
         clear_image_to_shader_read(&device, queue, command_pool, scene.backdrop_image);
 
-        // Matches the wgpu backdrop sampler: linear, clamp-to-edge.
+        // Linear, clamp-to-edge, and linear BETWEEN mip levels: the blur
+        // snapshot carries a mip chain and the frost kernel reads it at a
+        // fractional level (shader2d's `resolve_blur`). The scene backdrop has
+        // one level, which every level clamps to.
         let backdrop_sampler = device
             .create_sampler(
                 &vk::SamplerCreateInfo::default()
                     .mag_filter(vk::Filter::LINEAR)
                     .min_filter(vk::Filter::LINEAR)
-                    .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+                    .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+                    .max_lod(vk::LOD_CLAMP_NONE)
                     .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
                     .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
                     .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE),
@@ -982,6 +1024,17 @@ impl VkRenderer {
                 .optimal_tiling_features
                 .contains(needed)
             });
+        let blur_mips = {
+            let needed = vk::FormatFeatureFlags::BLIT_SRC
+                | vk::FormatFeatureFlags::BLIT_DST
+                | vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR;
+            unsafe {
+                core.instance
+                    .get_physical_device_format_properties(core.physical_device, surface_format.format)
+            }
+            .optimal_tiling_features
+            .contains(needed)
+        };
         let image = ImageStage::new(
             &device,
             allocator,
@@ -1017,6 +1070,8 @@ impl VkRenderer {
             snapshot_view: vk::ImageView::null(),
             snapshot_allocation: None,
             snapshot_wanted: false,
+            snapshot_levels: 1,
+            blur_mips,
             minimal_swapchain: false,
             backdrop_sampler,
             window_info,
@@ -1340,7 +1395,8 @@ impl VkRenderer {
                         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                         .image(swapchain_image)
                         .subresource_range(COLOR_RANGE),
-                    // Covers the previous frame's blur reads of the snapshot.
+                    // Covers the previous frame's blur reads of the snapshot,
+                    // every level of it: the whole chain is rewritten.
                     vk::ImageMemoryBarrier::default()
                         .src_access_mask(vk::AccessFlags::SHADER_READ)
                         .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
@@ -1349,7 +1405,7 @@ impl VkRenderer {
                         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                         .image(self.snapshot_image)
-                        .subresource_range(COLOR_RANGE),
+                        .subresource_range(color_levels(0, self.snapshot_levels)),
                 ],
             );
             let subresource = vk::ImageSubresourceLayers::default()
@@ -1370,6 +1426,7 @@ impl VkRenderer {
                         depth: 1,
                     })],
             );
+            self.snapshot_mip_chain(cmd);
             device.cmd_pipeline_barrier(
                 cmd,
                 vk::PipelineStageFlags::TRANSFER,
@@ -1378,15 +1435,6 @@ impl VkRenderer {
                 &[],
                 &[],
                 &[
-                    vk::ImageMemoryBarrier::default()
-                        .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                        .dst_access_mask(vk::AccessFlags::SHADER_READ)
-                        .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-                        .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                        .image(self.snapshot_image)
-                        .subresource_range(COLOR_RANGE),
                     vk::ImageMemoryBarrier::default()
                         .src_access_mask(vk::AccessFlags::TRANSFER_READ)
                         .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
@@ -1410,6 +1458,112 @@ impl VkRenderer {
                 vk::SubpassContents::INLINE,
             );
             device.cmd_set_viewport(cmd, 0, &[flipped_viewport(self.extent)]);
+        }
+    }
+
+    /// Build the snapshot's mip chain from the level 0 just copied in, and
+    /// leave every level SHADER_READ_ONLY. Expects every level in
+    /// TRANSFER_DST, as `snapshot_frame_so_far` leaves them.
+    ///
+    /// The chain is what the frost kernel samples (shader2d's `resolve_blur`):
+    /// its 7x7 taps stand a whole STRIDE apart — 5.5 physical px for the
+    /// panel's default kernel — and a tap at level 0 reads only the texel or
+    /// two it lands between. So anything behind a plate thinner than the
+    /// stride (a hairline, a well's edge, a glyph) was not blurred but picked
+    /// up whole by the taps that hit it and missed by the rest: seven faint
+    /// copies a stride apart, which over a UI's rows read as horizontal
+    /// bands. Read at the level whose texel is as wide as the stride, each tap
+    /// is already the average of the cell around it, and the copies merge
+    /// into one smooth smear. Each level is a linear-filtered blit of the
+    /// one above it, a 2x2 box.
+    fn snapshot_mip_chain(&self, cmd: vk::CommandBuffer) {
+        let device = &self.core.device;
+        let barrier = |level: u32, src: vk::AccessFlags, dst: vk::AccessFlags, old: vk::ImageLayout, new: vk::ImageLayout| {
+            vk::ImageMemoryBarrier::default()
+                .src_access_mask(src)
+                .dst_access_mask(dst)
+                .old_layout(old)
+                .new_layout(new)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(self.snapshot_image)
+                .subresource_range(color_levels(level, 1))
+        };
+        let size = |level: u32| {
+            [
+                (self.extent.width >> level).max(1) as i32,
+                (self.extent.height >> level).max(1) as i32,
+            ]
+        };
+        unsafe {
+            for level in 1..self.snapshot_levels {
+                // The level above is written; read it for the blit.
+                device.cmd_pipeline_barrier(
+                    cmd,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier(
+                        level - 1,
+                        vk::AccessFlags::TRANSFER_WRITE,
+                        vk::AccessFlags::TRANSFER_READ,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    )],
+                );
+                let ([sw, sh], [dw, dh]) = (size(level - 1), size(level));
+                let layers = |mip: u32| {
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .mip_level(mip)
+                        .layer_count(1)
+                };
+                device.cmd_blit_image(
+                    cmd,
+                    self.snapshot_image,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    self.snapshot_image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[vk::ImageBlit::default()
+                        .src_subresource(layers(level - 1))
+                        .src_offsets([vk::Offset3D::default(), vk::Offset3D { x: sw, y: sh, z: 1 }])
+                        .dst_subresource(layers(level))
+                        .dst_offsets([vk::Offset3D::default(), vk::Offset3D { x: dw, y: dh, z: 1 }])],
+                    vk::Filter::LINEAR,
+                );
+            }
+            // Every level sampleable: the ones blitted FROM are in
+            // TRANSFER_SRC, the last (or the only) one still in TRANSFER_DST.
+            let last = self.snapshot_levels - 1;
+            let mut to_read: Vec<vk::ImageMemoryBarrier> = (0..last)
+                .map(|l| {
+                    barrier(
+                        l,
+                        vk::AccessFlags::TRANSFER_READ,
+                        vk::AccessFlags::SHADER_READ,
+                        vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    )
+                })
+                .collect();
+            to_read.push(barrier(
+                last,
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::AccessFlags::SHADER_READ,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            ));
+            device.cmd_pipeline_barrier(
+                cmd,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &to_read,
+            );
         }
     }
 
@@ -1467,6 +1621,8 @@ impl VkRenderer {
     /// patch. The device must not be using the snapshot set (idle, or the set
     /// never bound because the snapshot never existed).
     fn sync_snapshot_target(&mut self) {
+        let levels = if self.blur_mips { snapshot_levels(self.extent) } else { 1 };
+        self.snapshot_levels = levels;
         // Same format as the swapchain, so cmd_copy_image from it is legal.
         unsafe {
             let device = &self.core.device;
@@ -1490,12 +1646,14 @@ impl VkRenderer {
                             height: self.extent.height,
                             depth: 1,
                         })
-                        .mip_levels(1)
+                        .mip_levels(levels)
                         .array_layers(1)
                         .samples(vk::SampleCountFlags::TYPE_1)
                         .tiling(vk::ImageTiling::OPTIMAL)
                         .usage(
-                            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
+                            vk::ImageUsageFlags::SAMPLED
+                                | vk::ImageUsageFlags::TRANSFER_DST
+                                | vk::ImageUsageFlags::TRANSFER_SRC,
                         )
                         .initial_layout(vk::ImageLayout::UNDEFINED),
                     None,
@@ -1527,7 +1685,7 @@ impl VkRenderer {
                         .image(snapshot_image)
                         .view_type(vk::ImageViewType::TYPE_2D)
                         .format(self.surface_format.format)
-                        .subresource_range(COLOR_RANGE),
+                        .subresource_range(color_levels(0, levels)),
                     None,
                 )
                 .expect("Failed to create snapshot view");
@@ -1536,11 +1694,12 @@ impl VkRenderer {
             self.snapshot_allocation = Some(allocation);
         }
         // A fresh snapshot must be legal to sample before its first copy.
-        clear_image_to_shader_read(
+        clear_image_levels_to_shader_read(
             &self.core.device,
             self.core.queue,
             self.core.command_pool,
             self.snapshot_image,
+            levels,
         );
         let snapshot_infos = [vk::DescriptorImageInfo::default()
             .image_view(self.snapshot_view)
@@ -2670,6 +2829,21 @@ mod tests {
     #[test]
     fn shader2d_compiles() {
         assert!(!super::shader2d_spirv().is_empty());
+    }
+
+    /// The blur snapshot halves down to a single texel or to the cap, so a
+    /// tiny surface is not asked for levels it cannot have, and a large one
+    /// does not build levels no stride reads.
+    #[test]
+    fn the_blur_snapshot_has_as_many_levels_as_the_widest_stride_reads() {
+        use super::{snapshot_levels, SNAPSHOT_LEVELS_MAX};
+        let e = |width, height| ash::vk::Extent2D { width, height };
+        assert_eq!(snapshot_levels(e(1, 1)), 1);
+        assert_eq!(snapshot_levels(e(2, 1)), 2);
+        assert_eq!(snapshot_levels(e(40, 7)), 6);
+        assert_eq!(snapshot_levels(e(2560, 1600)), SNAPSHOT_LEVELS_MAX);
+        // The coarsest level's texel covers a 64 px stride.
+        assert_eq!(1 << (SNAPSHOT_LEVELS_MAX - 1), 64);
     }
 
     /// The WebGPU variants validate with no capabilities at all — WebGPU has
