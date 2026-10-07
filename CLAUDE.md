@@ -220,6 +220,18 @@ a row of instanced cubes, and Vulkan draws it (2026-10-06, a shadow); the WebGPU
 toolchain has no wasm32 target — so `scripts/web-probe/probe3d` is the first thing to run
 on one that has.
 
+**A screen-space draw says so** (since 2026-10-07, `SceneDraw::screen_space`). A pane's
+background quad is a mesh whose vertices are NDC corners; the draw sets `screen_space`, the
+uniform block carries it in what was `_pad`, and `scene3d.wgsl` places those vertices at
+their own xy on the far plane, unlit, without the mvp. Until then the signal was IN the
+vertex data: any vertex of any mesh within 0.01 of z = 9.99 became a background corner, so
+real geometry spanning that plane in its own units (cce-model's 25 mm STL sphere; a
+designer Transform at z = 9.99) tore into spikes across the pane. Never key behaviour off
+vertex values again. The probe has a regression for it: a sphere modelled around z = 9.99
+and scaled into place by its mvp, which the old shader shredded and this one draws whole
+(Vulkan, scale-2 shadow; the WebGPU half shares the shader and `scene_uniforms` and was
+not built — still no wasm32 target here).
+
 **And so does the path tracer** (since 2026-10-05). `Stage3D` carries the tracer's half
 too — `set_rt_scene` / `set_rt_scene_with_image`, `set_rt_environment`,
 `set_rt_background`, `stage_rt`, `rt_accumulating` — and what it traces from moved to

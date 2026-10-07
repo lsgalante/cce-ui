@@ -19,6 +19,11 @@ struct Uniforms {
     // smooth shading from vertex normals against the same world light):
     // skip the flat shading below so it is not applied twice.
     prelit: f32,
+    // 1 on a `SceneDraw::screen_space` draw (a pane's background quad): the
+    // vertex's xy are already NDC, so it skips the mvp and sits at the far
+    // plane, unlit. A per-draw flag, never read off the vertex data: the
+    // z = 9.99 sentinel it replaced caught real geometry on that plane.
+    screen_space: f32,
     // xyz: the direction TOWARD the light, in world space
     // (`VkRenderer::set_scene_light`). Unit length.
     light: vec4<f32>,
@@ -58,8 +63,8 @@ fn window_corner_distance(pos: vec2<f32>) -> f32 {
 struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) color: vec3f,
-    // World-space position, for the flat-shading normal; `lit` is 0 on the
-    // screen-space background quad (the z=9.99 sentinel), 1 on scene geometry.
+    // World-space position, for the flat-shading normal; `lit` is 0 on a
+    // screen-space draw (the background quad), 1 on scene geometry.
     @location(1) world: vec3f,
     @location(2) lit: f32,
 };
@@ -77,7 +82,7 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
     let placed = position + instance_offset;
-    if (abs(position.z - 9.99) < 0.01) {
+    if (uniforms.screen_space > 0.5) {
         out.position = vec4f(position.xy, 0.9999, 1.0);
         out.lit = 0.0;
     } else {

@@ -4,13 +4,16 @@
 //! WebGPU one (`probe3d_web`) and the two can be compared pixel for pixel.
 //!
 //! It reaches every path the scene pass has: the screen-space background
-//! quad (the z = 9.99 sentinel), flat-shaded fills (the derivative normal),
+//! quad (`SceneDraw::screen_space`), flat-shaded fills (the derivative normal),
 //! a prelit fill, a fill carrying a wire overlay (the depth-biased fill and
 //! the line pipeline, wires tinted), a see-through translucent fill and the
 //! wires riding it, an image standing in the scene before the translucent
 //! draw, an INSTANCED draw (one white cube drawn for a row of coloured
 //! instances), a light the host sets, and a frosted plate over the pane whose
-//! blur samples the backdrop the scene left.
+//! blur samples the backdrop the scene left. And one regression: a small
+//! sphere modelled in its own units around z = 9.99 and scaled into place,
+//! which the old in-band background sentinel (any vertex within 0.01 of
+//! z = 9.99) tore into spikes across the pane.
 
 use cce_ui::engine::{
     AppSender, Application, LogicalPosition, LogicalSize, MeshId, RtCamera, RtImage, RtMaterial, RtTriangle, SceneDraw,
@@ -43,6 +46,18 @@ pub type Traced = Probe3d<true>;
 /// The image's corners in the scene, as both passes place it.
 const IMAGE_CORNERS: [[f32; 3]; 4] = [[-2.6, 1.6, -1.6], [-0.6, 1.6, -1.6], [-0.6, 0.35, -1.6], [-2.6, 0.35, -1.6]];
 
+/// The far-z sphere, in its own units: centred ON z = 9.99, so its meridians
+/// at longitude 0 and 180 degrees sit exactly on that plane.
+const FAR_Z_CENTER: Vec3 = Vec3::new(0.0, 0.0, 9.99);
+const FAR_Z_RADIUS: f32 = 4.0;
+
+/// Where the far-z sphere's units land in the scene: a tenth of their size,
+/// its centre at (-0.3, -0.3, 1.1), so it reads as a 0.4-radius ball in front
+/// of the big sphere.
+fn far_z_model() -> Mat4 {
+    Mat4::from_translation(Vec3::new(-0.3, -0.3, 1.1)) * Mat4::from_scale(Vec3::splat(0.1)) * Mat4::from_translation(-FAR_Z_CENTER)
+}
+
 struct Meshes {
     background: MeshId,
     cube: MeshId,
@@ -54,6 +69,8 @@ struct Meshes {
     /// A small white cube, and the row of instances it is drawn for.
     marker: MeshId,
     marker_instances: MeshId,
+    /// The sphere spanning z = 9.99 in its own units (`far_z_model`).
+    far_z: MeshId,
 }
 
 fn r(x: f32, y: f32, w: f32, h: f32) -> Rect {
@@ -143,6 +160,9 @@ fn traced_scene() -> (Vec<RtTriangle>, Vec<RtMaterial>) {
     add(cuboid(Vec3::new(-1.6, 0.0, 0.2), Vec3::splat(0.6), [[0.0; 3]; 6]), [0.8, 0.35, 0.25], [0.0; 3]);
     add(sphere(Vec3::new(0.4, 0.3, -0.4), 0.9, 12, 20).0, [0.45, 0.55, 0.75], [0.0; 3]);
     add(cuboid(Vec3::new(1.5, 0.1, 1.2), Vec3::splat(0.55), [[0.0; 3]; 6]), [0.3, 0.7, 0.9], [0.4, 0.9, 1.1]);
+    let model = far_z_model();
+    let far_z = sphere(FAR_Z_CENTER, FAR_Z_RADIUS, 10, 16).0.into_iter().map(|p| v(model.transform_point3(Vec3::from(p.position)), p.color)).collect();
+    add(far_z, [0.9, 0.75, 0.3], [0.0; 3]);
     (tris, mats)
 }
 
@@ -198,7 +218,8 @@ impl<const TRACE: bool> Application for Probe3d<TRACE> {
     }
 
     fn init_3d(&mut self, stage: &mut dyn Stage3D) {
-        let bg = |x: f32, y: f32, c: [f32; 3]| Vertex3D { position: [x, y, 9.99], color: c };
+        // NDC corners: the draw is `screen_space`, so z is ignored.
+        let bg = |x: f32, y: f32, c: [f32; 3]| Vertex3D { position: [x, y, 0.0], color: c };
         let (top, bottom) = ([0.10, 0.12, 0.20], [0.30, 0.26, 0.22]);
         let background = stage.create_mesh(&[
             bg(-1.0, -1.0, bottom),
@@ -217,6 +238,11 @@ impl<const TRACE: bool> Application for Probe3d<TRACE> {
             p.color = [p.color[0] * k, p.color[1] * k, p.color[2] * k];
         }
         let prelit = stage.create_mesh(&prelit_verts);
+        let mut far_z_verts = sphere(FAR_Z_CENTER, FAR_Z_RADIUS, 10, 16).0;
+        for p in &mut far_z_verts {
+            p.color = [0.9, 0.75, 0.3];
+        }
+        let far_z = stage.create_mesh(&far_z_verts);
         let (tris, lines) = sphere(Vec3::new(0.4, 0.3, -0.4), 0.9, 12, 20);
         let sphere = stage.create_mesh(&tris);
         let sphere_wires = stage.create_mesh(&lines);
@@ -232,7 +258,7 @@ impl<const TRACE: bool> Application for Probe3d<TRACE> {
             .collect();
         let marker_instances = stage.create_mesh(&row);
         stage.set_scene_light([0.6, 0.7, 0.4]);
-        self.meshes = Some(Meshes { background, cube, prelit, sphere, sphere_wires, glass, glass_wires, marker, marker_instances });
+        self.meshes = Some(Meshes { background, cube, prelit, sphere, sphere_wires, glass, glass_wires, marker, marker_instances, far_z });
         if TRACE {
             let (tris, mats) = traced_scene();
             stage.set_rt_scene_with_image(&tris, &mats, Some(RtImage { image: self.image, corners: IMAGE_CORNERS, opacity: 0.9 }));
@@ -265,12 +291,15 @@ impl<const TRACE: bool> Application for Probe3d<TRACE> {
             prelit: false,
             see_through: false,
             instances: None,
+            screen_space: false,
         };
+        let far_z_mvp = (Mat4::from_cols_array_2d(&mvp) * far_z_model()).to_cols_array_2d();
         let draws = vec![
-            draw(m.background),
+            SceneDraw { screen_space: true, ..draw(m.background) },
             SceneDraw { prelit: true, ..draw(m.prelit) },
             draw(m.cube),
             SceneDraw { instances: Some(m.marker_instances), ..draw(m.marker) },
+            SceneDraw { mvp: far_z_mvp, ..draw(m.far_z) },
             SceneDraw { wire_base_width: 1.0, ..draw(m.sphere) },
             SceneDraw { wireframe: true, wire_tint: [1.0, 1.0, 1.0, 0.6], ..draw(m.sphere_wires) },
             SceneDraw { see_through: true, opacity: 0.45, ..draw(m.glass) },
@@ -282,7 +311,7 @@ impl<const TRACE: bool> Application for Probe3d<TRACE> {
             corners: IMAGE_CORNERS,
             mvp,
             opacity: 0.9,
-            before: 6,
+            before: 7,
         }]);
         false
     }

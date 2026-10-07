@@ -83,6 +83,17 @@ pub struct SceneDraw {
     /// nothing; `None` draws `mesh` once, as it is (the renderer binds one
     /// instance at the origin in white, which changes no vertex).
     pub instances: Option<MeshId>,
+    /// The mesh is already in clip space: its vertices' x and y are NDC
+    /// (-1..1, y up) and their z is ignored — each is drawn at the far plane
+    /// (depth 0.9999), unlit, without the mvp. What a pane's background quad
+    /// is: two triangles over (-1, -1)..(1, 1), drawn first, behind
+    /// everything. False for an ordinary draw.
+    ///
+    /// This was an in-band signal until 2026-10-07: any vertex of ANY mesh
+    /// within 0.01 of z = 9.99 was taken for a background corner, so real
+    /// geometry spanning that plane in its own units (a 25 mm STL sphere in
+    /// cce-model) had a ring of its points flung across the pane as spikes.
+    pub screen_space: bool,
 }
 
 /// A user image standing in the 3D scene: a textured quad, unlit, depth
@@ -137,7 +148,9 @@ pub(crate) struct SceneUniforms {
     is_wire: f32,
     /// 1.0 on `SceneDraw::prelit` draws: the flat shading is skipped too.
     prelit: f32,
-    _pad: [f32; 1],
+    /// 1.0 on `SceneDraw::screen_space` draws: the vertex stage places the
+    /// vertex at its own xy in NDC, at the far plane, and skips the mvp.
+    screen_space: f32,
     /// xyz: toward the light, world space, unit length; w unused.
     light: [f32; 4],
 }
@@ -202,7 +215,7 @@ pub(crate) fn scene_uniforms(
 ) -> Vec<SceneUniforms> {
     let corner_shape = crate::layout::corner_shape();
     let light = [light[0], light[1], light[2], 0.0];
-    let block = |mvp, wire_tint, opacity, is_wire, prelit| SceneUniforms {
+    let block = |mvp, wire_tint, opacity, is_wire, prelit, screen_space| SceneUniforms {
         mvp,
         window_size,
         window_radius: corner_radius_px,
@@ -211,15 +224,16 @@ pub(crate) fn scene_uniforms(
         opacity,
         is_wire,
         prelit,
-        _pad: [0.0; 1],
+        screen_space,
         light,
     };
+    let flag = |b: bool| if b { 1.0 } else { 0.0 };
     let mut out = Vec::with_capacity(draws.len() + images.len());
     for d in draws {
-        out.push(block(d.mvp, d.wire_tint, d.opacity, if d.wireframe { 1.0 } else { 0.0 }, if d.prelit { 1.0 } else { 0.0 }));
+        out.push(block(d.mvp, d.wire_tint, d.opacity, flag(d.wireframe), flag(d.prelit), flag(d.screen_space)));
     }
     for i in images {
-        out.push(block(i.mvp, [0.0; 4], i.opacity, 0.0, 1.0));
+        out.push(block(i.mvp, [0.0; 4], i.opacity, 0.0, 1.0, 0.0));
     }
     out
 }
@@ -250,4 +264,37 @@ pub(crate) fn image_quads_3d(images: &[SceneImage]) -> Vec<ImageVertex3D> {
 /// convex surface tilts closer — hence the extra pixel of headroom.
 pub(crate) fn wire_base_bias(w: f32) -> (f32, f32) {
     (2.0, 1.5 + w)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn draw(mesh: usize, screen_space: bool) -> SceneDraw {
+        SceneDraw {
+            mesh: MeshId(mesh),
+            mvp: [[0.0; 4]; 4],
+            wireframe: false,
+            wire_tint: [0.0; 4],
+            opacity: 1.0,
+            line_width: 1.0,
+            wire_base_width: 0.0,
+            prelit: false,
+            see_through: false,
+            instances: None,
+            screen_space,
+        }
+    }
+
+    /// Only the draw that asks to be screen-space is: the shader reads the
+    /// flag per draw, never off the vertex data (the old z = 9.99 sentinel).
+    #[test]
+    fn screen_space_is_set_per_draw() {
+        let blocks = scene_uniforms(&[draw(0, true), draw(1, false)], &[], [100.0, 100.0], 0.0, DEFAULT_SCENE_LIGHT);
+        assert_eq!(blocks[0].screen_space, 1.0);
+        assert_eq!(blocks[1].screen_space, 0.0);
+        let shader = include_str!("scene3d.wgsl");
+        assert!(shader.contains("uniforms.screen_space"));
+        assert!(!shader.contains("position.z -"), "no vertex-data sentinel");
+    }
 }

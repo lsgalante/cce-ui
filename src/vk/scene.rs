@@ -1,6 +1,6 @@
 //! 3D scene stage: the ash port of the app's "3D canvas render pass". Draws
-//! Vertex3D meshes (shader_3d.wgsl: mvp transform, z=9.99 background-quad
-//! special case, window-corner discard) into the full-size backdrop image with
+//! Vertex3D meshes (scene3d.wgsl: mvp transform, `SceneDraw::screen_space`
+//! background quads, window-corner discard) into the full-size backdrop image with
 //! a depth buffer, scissored to the viewport pane. The renderer then copies the
 //! backdrop into the swapchain image and draws the UI pass over it — the same
 //! image doubles as the blur-behind source for the 2D shader, replacing
