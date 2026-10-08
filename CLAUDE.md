@@ -212,6 +212,20 @@ image in the scene before the translucent draw, a host light, frost over the pan
 195 px differ by more than 8 levels, all on 1 px wires (where along its length a line
 steps a row is the rasterizer's), everything else within 2.
 
+**A mesh update does not wait for the GPU** (since 2026-10-07,
+`SceneStage::update_mesh` / `update_lit_mesh` through `Mesh::replace`). It
+called `device_wait_idle` first, reasoning that geometry updates are rare;
+a playing simulation updates several meshes every frame, and the wait made
+each frame's upload wait out the previous frame's GPU work. Now the new
+vertices go into another buffer — a spare of the mesh's that no submitted
+frame still reads, or a new one — and the replaced buffer becomes a spare
+tagged with the frames submitted so far (`SceneStage::submitted`, counted
+at each submit). After each frame-slot fence wait, `frame_waited` knows
+which frames have finished, releases spares too small for their mesh and
+keeps two of the rest, so a steady playback allocates nothing. Measured in
+the designer's replay at 57k points: the stage pass of a drawn frame 5.6–6.0 ms
+to 3.6–3.8.
+
 **A scene draw can be instanced** (since 2026-10-06, `SceneDraw::instances`). A draw
 naming an instance mesh draws its `mesh` once per vertex of that mesh: an instance is a
 `Vertex3D` read as an offset added to every vertex and a colour multiplying theirs, so a

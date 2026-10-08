@@ -31,6 +31,77 @@ const SLOT_SIZE: vk::DeviceSize = if (LIT_UNIFORM_SIZE as vk::DeviceSize) > UNIF
 struct Mesh {
     buffer: AllocatedBuffer,
     count: u32,
+    /// Buffers this mesh held before, each tagged with the frames that may
+    /// still read it: every frame submitted before the tag. An update takes
+    /// one no frame still reads in place of waiting for the device to go
+    /// idle ([`Mesh::replace`]).
+    spare: Vec<(AllocatedBuffer, u64)>,
+}
+
+impl Mesh {
+    fn new(buffer: AllocatedBuffer, count: u32) -> Self {
+        Mesh { buffer, count, spare: Vec::new() }
+    }
+
+    /// Put `bytes` (`count` vertices) in place of what the mesh holds,
+    /// without waiting for the GPU. The frames already submitted may still
+    /// read the mesh's buffer, so the bytes go into another — a spare no
+    /// submitted frame still reads (`tag <= complete`) and big enough, or a
+    /// new one — and the buffer they replace becomes a spare tagged `tag`,
+    /// the frames submitted so far. Until 2026-10-07 an update waited for
+    /// the device to go idle, reasoning that geometry updates are rare; a
+    /// playing simulation updates its meshes every frame, and the wait put
+    /// the CPU's work and the GPU's end to end, so a frame took both.
+    fn replace(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        bytes: &[u8],
+        count: u32,
+        (tag, complete): (u64, u64),
+        label: &'static str,
+    ) {
+        let needed = (bytes.len() as vk::DeviceSize).max(64);
+        let free = self.spare.iter().position(|(b, t)| *t <= complete && b.size >= needed);
+        let fresh = match free {
+            Some(i) => self.spare.swap_remove(i).0,
+            None => create_cpu_buffer(device, allocator, needed.next_power_of_two(), vk::BufferUsageFlags::VERTEX_BUFFER, label),
+        };
+        let old = std::mem::replace(&mut self.buffer, fresh);
+        self.spare.push((old, tag));
+        if !bytes.is_empty() {
+            self.buffer.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..bytes.len()].copy_from_slice(bytes);
+        }
+        self.count = count;
+    }
+
+    /// Release the spares no frame still reads that are too small for the
+    /// mesh as it stands, and keep two of the rest: a steady playback reuses
+    /// them and allocates nothing.
+    fn reclaim(&mut self, device: &ash::Device, allocator: &mut Allocator, complete: u64) {
+        let current = self.buffer.size;
+        let mut kept = 0;
+        let mut i = 0;
+        while i < self.spare.len() {
+            let (size, tag) = (self.spare[i].0.size, self.spare[i].1);
+            let free = tag <= complete;
+            if free && (size < current || kept >= 2) {
+                let (mut buffer, _) = self.spare.swap_remove(i);
+                destroy_cpu_buffer(device, allocator, &mut buffer);
+                continue;
+            }
+            kept += free as usize;
+            i += 1;
+        }
+    }
+
+    fn destroy(&mut self, device: &ash::Device, allocator: &mut Allocator) {
+        let mut buffer = std::mem::replace(&mut self.buffer, AllocatedBuffer::null());
+        destroy_cpu_buffer(device, allocator, &mut buffer);
+        for (mut spare, _) in self.spare.drain(..) {
+            destroy_cpu_buffer(device, allocator, &mut spare);
+        }
+    }
 }
 
 struct StagedScene {
@@ -96,6 +167,12 @@ pub(crate) struct SceneStage {
     framebuffer: vk::Framebuffer,
 
     meshes: Vec<Mesh>,
+    /// Frames submitted so far, counted by the renderer as it submits them.
+    pub(crate) submitted: u64,
+    /// Every frame numbered below this one has finished on the GPU, as the
+    /// renderer learns by waiting on a frame slot's fence
+    /// ([`SceneStage::frame_waited`]).
+    complete_before: u64,
     /// The one instance a draw without instances is drawn with
     /// ([`UNIT_INSTANCE`]), bound in binding 1 in place of an instance mesh.
     unit_instance: AllocatedBuffer,
@@ -672,6 +749,8 @@ impl SceneStage {
                 depth_allocation: None,
                 framebuffer: vk::Framebuffer::null(),
                 meshes: Vec::new(),
+                submitted: 0,
+                complete_before: 0,
                 unit_instance,
                 frames,
                 staged: None,
@@ -908,14 +987,12 @@ impl SceneStage {
             buffer.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..bytes.len()]
                 .copy_from_slice(bytes);
         }
-        self.meshes.push(Mesh { buffer, count: verts.len() as u32 });
+        self.meshes.push(Mesh::new(buffer, verts.len() as u32));
         MeshId(self.meshes.len() - 1)
     }
 
-    /// Replace a mesh's vertices. Caller must have the device idle: meshes may be
-    /// referenced by in-flight frames (geometry updates are rare — settings
-    /// changes and graph rebuilds — so a wait is acceptable here).
-    #[allow(dead_code)] // cutover API: the app's rebuild_scene_geometry path
+    /// Replace a mesh's vertices without waiting for the GPU: the frames in
+    /// flight keep the buffer they read ([`Mesh::replace`]).
     pub(crate) fn update_mesh(
         &mut self,
         device: &ash::Device,
@@ -923,25 +1000,19 @@ impl SceneStage {
         id: MeshId,
         verts: &[Vertex3D],
     ) {
-        let mesh = &mut self.meshes[id.0];
-        let bytes: &[u8] = bytemuck::cast_slice(verts);
-        let needed = bytes.len() as vk::DeviceSize;
-        if needed > mesh.buffer.size {
-            let mut old = std::mem::replace(&mut mesh.buffer, AllocatedBuffer::null());
-            destroy_cpu_buffer(device, allocator, &mut old);
-            mesh.buffer = create_cpu_buffer(
-                device,
-                allocator,
-                needed.next_power_of_two(),
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                "mesh",
-            );
+        let frames = (self.submitted, self.complete_before);
+        self.meshes[id.0].replace(device, allocator, bytemuck::cast_slice(verts), verts.len() as u32, frames, "mesh");
+    }
+
+    /// After the renderer has waited on the fence of the slot the next frame
+    /// will use: the frame that slot last carried has finished, and every
+    /// frame before it, so the spares those frames read may be reused.
+    pub(crate) fn frame_waited(&mut self, device: &ash::Device, allocator: &mut Allocator, frames_in_flight: u64) {
+        self.complete_before = (self.submitted + 1).saturating_sub(frames_in_flight);
+        let complete = self.complete_before;
+        for mesh in self.meshes.iter_mut().chain(self.lit_meshes.iter_mut()) {
+            mesh.reclaim(device, allocator, complete);
         }
-        if !bytes.is_empty() {
-            mesh.buffer.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..bytes.len()]
-                .copy_from_slice(bytes);
-        }
-        mesh.count = verts.len() as u32;
     }
 
     pub(crate) fn stage(&mut self, scissor: (u32, u32, u32, u32), draws: Vec<SceneDraw>) {
@@ -967,31 +1038,15 @@ impl SceneStage {
         if !bytes.is_empty() {
             buffer.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..bytes.len()].copy_from_slice(bytes);
         }
-        self.lit_meshes.push(Mesh { buffer, count: verts.len() as u32 });
+        self.lit_meshes.push(Mesh::new(buffer, verts.len() as u32));
         LitMeshId(self.lit_meshes.len() - 1)
     }
 
-    /// Replace a lit mesh's vertices. Caller must have the device idle, as
-    /// for `update_mesh`.
+    /// Replace a lit mesh's vertices without waiting for the GPU, as
+    /// `update_mesh` does.
     pub(crate) fn update_lit_mesh(&mut self, device: &ash::Device, allocator: &mut Allocator, id: LitMeshId, verts: &[LitVertex]) {
-        let mesh = &mut self.lit_meshes[id.0];
-        let bytes: &[u8] = bytemuck::cast_slice(verts);
-        let needed = bytes.len() as vk::DeviceSize;
-        if needed > mesh.buffer.size {
-            let mut old = std::mem::replace(&mut mesh.buffer, AllocatedBuffer::null());
-            destroy_cpu_buffer(device, allocator, &mut old);
-            mesh.buffer = create_cpu_buffer(
-                device,
-                allocator,
-                needed.next_power_of_two(),
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                "lit-mesh",
-            );
-        }
-        if !bytes.is_empty() {
-            mesh.buffer.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..bytes.len()].copy_from_slice(bytes);
-        }
-        mesh.count = verts.len() as u32;
+        let frames = (self.submitted, self.complete_before);
+        self.lit_meshes[id.0].replace(device, allocator, bytemuck::cast_slice(verts), verts.len() as u32, frames, "lit-mesh");
     }
 
     /// The staged scene's images; nothing when no scene is staged.
@@ -1282,8 +1337,7 @@ impl SceneStage {
                 destroy_cpu_buffer(device, allocator, &mut quads);
             }
             for mesh in self.meshes.iter_mut().chain(self.lit_meshes.iter_mut()) {
-                let mut buffer = std::mem::replace(&mut mesh.buffer, AllocatedBuffer::null());
-                destroy_cpu_buffer(device, allocator, &mut buffer);
+                mesh.destroy(device, allocator);
             }
             let mut unit = std::mem::replace(&mut self.unit_instance, AllocatedBuffer::null());
             destroy_cpu_buffer(device, allocator, &mut unit);

@@ -1724,13 +1724,12 @@ impl VkRenderer {
             .create_mesh(&self.core.device, self.core.allocator.as_mut().unwrap(), verts)
     }
 
-    /// Replace a mesh's vertices. Waits for the GPU to go idle first — geometry
-    /// updates are rare (settings changes, graph rebuilds), matching the app.
-    #[allow(dead_code)] // cutover API: the app's rebuild_scene_geometry path
+    /// Replace a mesh's vertices, without waiting for the GPU: the frames
+    /// in flight keep the buffer they read, and the new vertices go into
+    /// another (`SceneStage::update_mesh`). It waited for the device to go
+    /// idle until 2026-10-07, which every frame of a playing simulation
+    /// paid.
     pub fn update_mesh(&mut self, id: MeshId, verts: &[Vertex3D]) {
-        unsafe {
-            let _ = self.core.device.device_wait_idle();
-        }
         self.scene
             .update_mesh(&self.core.device, self.core.allocator.as_mut().unwrap(), id, verts);
     }
@@ -1795,9 +1794,7 @@ impl VkRenderer {
 
     /// Replace a lit mesh's vertices; waits for the GPU first, as `update_mesh`.
     pub fn update_lit_mesh(&mut self, id: crate::draw::lit::LitMeshId, verts: &[crate::draw::lit::LitVertex]) {
-        unsafe {
-            let _ = self.core.device.device_wait_idle();
-        }
+        // No wait for the device: as `update_mesh`.
         self.scene.update_lit_mesh(&self.core.device, self.core.allocator.as_mut().unwrap(), id, verts);
     }
 
@@ -2137,6 +2134,9 @@ impl VkRenderer {
             self.core.device
                 .wait_for_fences(&[in_flight], true, u64::MAX)
                 .expect("Fence wait failed");
+            // What this slot last carried has finished: the mesh buffers an
+            // update replaced while those frames read them may be reused.
+            self.scene.frame_waited(&self.core.device, self.core.allocator.as_mut().unwrap(), FRAMES_IN_FLIGHT as u64);
 
             // The first frame with a blur plate that will copy the frame so
             // far allocates the snapshot it copies into. Decided the way the
@@ -2700,6 +2700,7 @@ impl VkRenderer {
             self.core.device
                 .queue_submit(self.core.queue, &[submit], in_flight)
                 .expect("Queue submit failed");
+            self.scene.submitted += 1;
 
             // The image now holds this frame; every other image fell behind
             // by this frame's damage.
