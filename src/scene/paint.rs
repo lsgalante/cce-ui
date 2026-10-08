@@ -1000,6 +1000,26 @@ impl PaintCtx {
         self.list.items.push(PaintItem { prim, clip, clip_circle, clip_rrect });
     }
 
+    /// Append items another context painted — a nested paint walk spliced into this list,
+    /// as a host does that keeps a walk's text for a pass of its own. Each item keeps its own
+    /// clips and is clipped by this context's current scissor too; its own circular or
+    /// rounded clip wins over the current one (the innermost, as when pushing). Items are
+    /// absolute already, so this context's offset does not apply.
+    pub fn append_items(&mut self, items: impl IntoIterator<Item = PaintItem>) {
+        let cur = self.current_clip();
+        let cur_circle = self.clip_circle_stack.last().copied();
+        let cur_rrect = self.clip_rrect_stack.last().copied().filter(|c| c[4] > 0.0);
+        for mut item in items {
+            item.clip = match (cur, item.clip) {
+                (Some(a), Some(b)) => Some(intersect(a, b)),
+                (a, b) => a.or(b),
+            };
+            item.clip_circle = item.clip_circle.or(cur_circle);
+            item.clip_rrect = item.clip_rrect.or(cur_rrect);
+            self.list.items.push(item);
+        }
+    }
+
     pub fn quad(&mut self, rect: Rect, color: [f32; 4]) {
         let rect = self.apply_offset(rect);
         self.push(Prim::Quad { rect, color });
@@ -1935,6 +1955,23 @@ impl crate::layout::RenderTarget for PaintCtx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A nested paint spliced in keeps its own clips under the host's: the scissors
+    /// intersect, and the nested item's rounded clip wins over the host's.
+    #[test]
+    fn appended_items_keep_their_clips_under_the_hosts() {
+        let r = |x: f32, y: f32, w: f32, h: f32| Rect { x, y, width: w, height: h };
+        let mut nested = PaintCtx::new();
+        nested.quad(r(0.0, 0.0, 5.0, 5.0), [1.0; 4]);
+        nested.clip_rounded(r(10.0, 10.0, 40.0, 40.0), 6.0, |pc| pc.quad(r(12.0, 12.0, 5.0, 5.0), [1.0; 4]));
+        let mut host = PaintCtx::new();
+        host.clip(r(0.0, 0.0, 30.0, 30.0), |pc| pc.append_items(nested.finish().items));
+        let items = host.finish().items;
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].clip, Some(r(0.0, 0.0, 30.0, 30.0)), "an unclipped item takes the host's clip");
+        assert_eq!(items[1].clip, Some(r(10.0, 10.0, 20.0, 20.0)), "the two scissors intersect");
+        assert!(items[1].clip_rrect.is_some_and(|c| c[4] == 6.0), "its rounded clip survives");
+    }
 
     /// The one flush control plate draws a face and a field that is all
     /// run — the edge every flush control wears — and no trough.
