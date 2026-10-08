@@ -9,13 +9,11 @@
 //! working unchanged.
 //!
 //! The model caches its laid-out rect via [`Layout::rect_assigned`] (all row geometry derives
-//! from it — the TextBox pattern), and serves BOTH legacy escape hatches: the plain-quad view
-//! ([`Paint::serves_legacy_plain_quads`] — the designer renders params through raw
-//! `extra_quads`, and the panel's own background is drawn by the host from
-//! [`Paint::color`]/[`Paint::corner_style`], NOT emitted here), and the per-label text view
-//! ([`Paint::serves_legacy_labels`], new with this migration — each label clips to the
-//! viewport but the code editor's clip to the code box, in monospace, which the one-font
-//! one-bounds prim bridge can't express).
+//! from it — the TextBox pattern). The panel's own background is drawn by the host from
+//! [`Paint::color`]/[`Paint::corner_style`], NOT emitted here, and its text rides the
+//! per-label view ([`Paint::serves_legacy_labels`] — each label clips to the viewport but
+//! the code editor's clip to the code box, in monospace, which the one-font one-bounds prim
+//! bridge can't express).
 //!
 //! The code row is an editor, not a text box (2026-09-24): a line-number gutter, shift+arrow /
 //! shift+click selection with ctrl+c / ctrl+x / ctrl+v through the toolkit clipboard, tab and
@@ -1486,10 +1484,9 @@ impl ParametersBg {
         self.focused_param = None;
     }
 
-    /// The legacy `extra_quads` body: section border boxes, every row's chrome (slider/spinbox
-    /// backgrounds read via `rect()`+`color()`, the code editor's box/border/cursor), the raw
-    /// children via [`collect_child_quads`], all clipped to the viewport — plus the unclipped
-    /// scrollbar. Served verbatim through [`Paint::legacy_plain_quads`].
+    /// The pane's plain quads: section border boxes, every row's chrome (slider/spinbox
+    /// backgrounds read via `rect()`+`color()`, the code editor's box/border/cursor), the
+    /// controls' own plain quads, all clipped to the viewport — plus the unclipped scrollbar.
     fn plain_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if !self.visible {
             return Vec::new();
@@ -1534,7 +1531,7 @@ impl ParametersBg {
                 if let Some(s) = &self.sliders[i] {
                     let (sx, sy, sw, sh) = s.rect();
                     param_quads.push((sx, sy, sw, sh, s.color()));
-                    param_quads.extend(s.extra_quads());
+                    param_quads.extend(crate::widget::shown_quads(s));
                 }
             } else if p.2 == "section" {
                 // Section header line is handled by the border box top border now
@@ -1544,7 +1541,7 @@ impl ParametersBg {
                 param_quads.push((r.0 + 6.0, r.1, (r.2 - 12.0).max(0.0), 1.0, [c[0], c[1], c[2], c[3] * 0.8]));
             } else if is_vec_row(&p.2) {
                 if let Some(f) = &self.float3s[i] {
-                    param_quads.extend(f.extra_quads());
+                    param_quads.extend(crate::widget::shown_quads(f));
                 }
             } else if p.2 == "code" {
                 let (bx, by, bw, bh) = (r.0, r.1 + Self::CODE_BOX_TOP, r.2, r.3 - Self::CODE_BOX_TOP);
@@ -1608,31 +1605,31 @@ impl ParametersBg {
                 param_quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));
             } else if is_text_row(&p.2) {
                 if let Some(tb) = &self.texts[i] {
-                    param_quads.extend(tb.extra_quads());
+                    param_quads.extend(crate::widget::shown_quads(tb));
                 }
                 if let Some(d) = &self.choices[i] {
-                    param_quads.extend(d.extra_quads());
+                    param_quads.extend(crate::widget::shown_quads(d));
                 }
             } else if p.2.starts_with("choice") {
                 if let Some(d) = &self.choices[i] {
-                    param_quads.extend(d.extra_quads());
+                    param_quads.extend(crate::widget::shown_quads(d));
                 }
             } else if p.2 == "button" {
                 if let Some(b) = &self.buttons[i] {
-                    param_quads.extend(b.extra_quads());
+                    param_quads.extend(crate::widget::shown_quads(b));
                 }
             } else if p.2.starts_with("spinbox") {
                 if let Some(sb) = &self.spinboxes[i] {
                     { let (bx, by, bw, bh) = sb.rect(); param_quads.push((bx, by, bw, bh, sb.color())); }
-                    param_quads.extend(sb.extra_quads());
+                    param_quads.extend(crate::widget::shown_quads(sb));
                 }
             } else if p.2 == "toggle" || p.2 == "checkbox" {
                 if let Some(cb) = &self.toggles[i] {
-                    param_quads.extend(cb.extra_quads());
+                    param_quads.extend(crate::widget::shown_quads(cb));
                 }
             } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                 if let Some(c) = &self.colors[i] {
-                    param_quads.extend(c.extra_quads());
+                    param_quads.extend(crate::widget::shown_quads(c));
                 }
             }
         }
@@ -1651,15 +1648,11 @@ impl ParametersBg {
     }
 
     /// The rounded companion to [`Self::plain_quads`]: the row controls whose boxes are
-    /// `Prim::RoundedRect` (textbox, dropdown, button, toggle, color selector). Those
-    /// backgrounds never reach the plain view — `own_plain_quads` keeps `Prim::Quad` only —
-    /// so a host that renders this panel through the legacy plain-quad hatch must read this
-    /// getter too or the controls draw as bare text. Returned unclipped; the host clips to
-    /// the pane's scroll viewport when it pushes vertices. Tuple layout matches
-    /// `all_rounded_quads`: (x, y, w, h, radius, color, (tl, tr, br, bl)).
+    /// `Prim::RoundedRect` (textbox, dropdown, button, toggle, color selector), which the
+    /// plain list does not carry. Returned unclipped; the pane's paint clips them to its
+    /// scroll viewport. (x, y, w, h, radius, color, (tl, tr, br, bl)).
     pub fn rounded_quads(
         &self,
-        ctx: &UiContext,
     ) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         if !self.visible {
             return Vec::new();
@@ -1672,27 +1665,27 @@ impl ParametersBg {
             }
             if is_text_row(&p.2) {
                 if let Some(tb) = &self.texts[i] {
-                    out.extend(tb.all_rounded_quads(ctx));
+                    out.extend(crate::widget::shown_rounded_quads(tb));
                 }
                 if let Some(d) = &self.choices[i] {
-                    out.extend(d.all_rounded_quads(ctx));
+                    out.extend(crate::widget::shown_rounded_quads(d));
                 }
             } else if p.2.starts_with("slider") {
                 // Track (square style only — the recessed style has no track
                 // background), value fill, and readout box; the thumb knob is a
                 // `Prim::Sphere` and rides `spheres()` instead.
                 if let Some(s) = &self.sliders[i] {
-                    out.extend(s.all_rounded_quads(ctx));
+                    out.extend(crate::widget::shown_rounded_quads(s));
                 }
             } else if is_vec_row(&p.2) {
                 // Three slider rows: the same set per row (readout boxes,
                 // square-style tracks and fills), through the group's own paint.
                 if let Some(f) = &self.float3s[i] {
-                    out.extend(f.all_rounded_quads(ctx));
+                    out.extend(crate::widget::shown_rounded_quads(f));
                 }
             } else if p.2.starts_with("choice") {
                 if let Some(d) = &self.choices[i] {
-                    out.extend(d.all_rounded_quads(ctx));
+                    out.extend(crate::widget::shown_rounded_quads(d));
                 }
             } else if p.2.starts_with("spinbox") {
                 // The spinbox's whole chrome (frame, display well, +/- button
@@ -1700,19 +1693,19 @@ impl ParametersBg {
                 // transparent and it has no extra_quads, so skipping it here
                 // renders the row as bare text.
                 if let Some(sb) = &self.spinboxes[i] {
-                    out.extend(sb.all_rounded_quads(ctx));
+                    out.extend(crate::widget::shown_rounded_quads(sb));
                 }
             } else if p.2 == "button" {
                 if let Some(b) = &self.buttons[i] {
-                    out.extend(b.all_rounded_quads(ctx));
+                    out.extend(crate::widget::shown_rounded_quads(b));
                 }
             } else if p.2 == "toggle" || p.2 == "checkbox" {
                 if let Some(cb) = &self.toggles[i] {
-                    out.extend(cb.all_rounded_quads(ctx));
+                    out.extend(crate::widget::shown_rounded_quads(cb));
                 }
             } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                 if let Some(c) = &self.colors[i] {
-                    out.extend(c.all_rounded_quads(ctx));
+                    out.extend(crate::widget::shown_rounded_quads(c));
                 }
             }
         }
@@ -2128,7 +2121,7 @@ impl Paint for ParametersBg {
     }
 
     /// The panel IS its own background plate (the host draws it from `color()` + the corner
-    /// style via `push_widget_vertices`) — there is no separate plate widget behind it, so
+    /// style via `append_widget_plate`) — there is no separate plate widget behind it, so
     /// this carries the full plate treatment: `PARAM_BG` scaled by the global plate opacity,
     /// with the alpha negated as the scenefx blur marker when plate blur is on. Transparent
     /// while hidden. It must not ALSO be emitted as a quad anywhere or it would double-blend.
@@ -2164,13 +2157,13 @@ impl Paint for ParametersBg {
     /// it around the pane plate), and text (`paint_self`'s own-labels bridge carries the
     /// per-row fonts and code-box bounds). Hosts clip this to their pane viewport — a rect
     /// clip pushed here would not survive `paint_self`'s replay.
-    fn paint_ui(&self, ui: &UiContext, _rect: Rect, ctx: &mut PaintCtx) {
+    fn paint_ui(&self, _ui: &UiContext, _rect: Rect, ctx: &mut PaintCtx) {
         if !self.visible {
             return;
         }
         self.claim_typing(ctx);
         self.paint_row_floors(ctx);
-        for (qx, qy, qw, qh, qr, qc, corners) in self.rounded_quads(ui) {
+        for (qx, qy, qw, qh, qr, qc, corners) in self.rounded_quads() {
             ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
         }
         for (acx, acy, ar, at, a0, a1, ac) in self.arcs() {
@@ -2249,14 +2242,6 @@ impl Paint for ParametersBg {
                 ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, None, pane);
             }
         }
-    }
-
-    fn serves_legacy_plain_quads(&self) -> bool {
-        true
-    }
-
-    fn legacy_plain_quads(&self, _rect: Rect) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        self.plain_quads()
     }
 
     fn serves_legacy_labels(&self) -> bool {
@@ -4721,21 +4706,19 @@ mod tests {
     }
 
     #[test]
-    fn plain_view_serves_row_chrome_and_all_quads_stays_empty() {
+    fn the_row_chrome_is_the_panes_and_the_plate_the_hosts() {
         let ctx = UiContext::new();
         let p = panel_with(&[("Size", "1.00", "slider:0:2")]);
-        // The designer's plain path: extra_quads carries the row chrome (clipped), including
-        // the slider background it reads via rect()+color()...
-        let extra = crate::widget::WidgetHostExt::extra_quads(&p);
-        assert!(!extra.is_empty(), "row chrome served through extra_quads");
+        // The pane's plain quads carry the row chrome (clipped), including the slider
+        // background it reads via rect()+color()...
+        let plain = p.plain_quads();
+        assert!(!plain.is_empty(), "row chrome in the pane's plain quads");
         // ...but NOT the panel's own PARAM_BG plate (the host draws that from color()).
         let (x, y, w, h) = WidgetHost::rect(&p);
         assert!(
-            !extra.iter().any(|q| (q.0, q.1, q.2, q.3) == (x, y, w, h)),
-            "panel bg plate is the host's, not extra_quads'"
+            !plain.iter().any(|q| (q.0, q.1, q.2, q.3) == (x, y, w, h)),
+            "panel bg plate is the host's, not the pane's"
         );
-        // The no-double-draw contract of the plain-quad hatch.
-        assert!(crate::widget::WidgetHostExt::all_quads(&p, &ctx).is_empty());
         // Per-label hatch: the walk's text prims carry the widget font and viewport bounds.
         let mut scratch = crate::scene::paint::PaintCtx::new();
         crate::scene::painter::append_widget_text(&ctx, &p, &mut scratch);

@@ -28,7 +28,7 @@
 //! strings) still works: its cells become text columns.
 //!
 //! The `PARAM_BG` background is NOT emitted here: the designer's render path draws every
-//! widget's background itself from `color()` + `corner_style()` (`push_widget_vertices`), and
+//! widget's background itself from `color()` + `corner_style()` (`append_widget_plate`), and
 //! `PARAM_BG` is translucent — emitting it again would double-blend. This widget's own
 //! geometry starts at the header strip, exactly like the legacy `extra_quads`.
 

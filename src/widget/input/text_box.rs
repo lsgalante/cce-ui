@@ -2811,24 +2811,17 @@ mod tests {
 
     #[test]
     fn test_textbox_multiline_selection_highlight() {
-        let dummy = crate::context::UiContext::new();
         let mut tb = TextBox::new("Line 1\nLine 2\nLine 3".to_string()).with_multiline(true);
         tb.set_rect(10.0, 10.0, 200.0, 100.0);
         tb.select_anchor = Some(7); // starts at "Line 2"
         tb.cursor_idx = 13;        // ends at end of "Line 2"
 
-        let has_rounded = crate::widget::WidgetHostExt::corner_style(&tb).1 != (false, false, false, false);
-        let has_highlight = if has_rounded {
-            let rounded = tb.all_rounded_quads(&dummy);
-            println!("Rounded quads: {:?}", rounded);
-            let quads = tb.all_quads(&dummy);
-            rounded.iter().any(|q| q.5 == [0.20, 0.50, 0.85, 0.3])
-                || quads.iter().any(|q| q.4 == [0.20, 0.50, 0.85, 0.3])
-        } else {
-            let extra = tb.extra_quads();
-            println!("Extra quads: {:?}", extra);
-            extra.iter().any(|q| q.4 == [0.20, 0.50, 0.85, 0.3])
-        };
+        use crate::scene::paint::Prim;
+        let highlight = [0.20, 0.50, 0.85, 0.3];
+        let has_highlight = crate::widget::shown_prims(&tb).iter().any(|p| match p {
+            Prim::Quad { color, .. } | Prim::RoundedRect { color, .. } => *color == highlight,
+            _ => false,
+        });
         assert!(has_highlight, "Should have a highlight quad!");
     }
 

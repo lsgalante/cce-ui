@@ -1240,25 +1240,6 @@ pub fn push_plate_solid_border_vertices_legacy(
     push_plate_solid_border_vertices(x, y, ww, h, radii, t, sw, sh, color, clip_circle, out);
 }
 
-pub fn widget_vertices(w: &dyn crate::widget::WidgetHost, sw: f32, sh: f32, clip_circle: [f32; 3]) -> Vec<Vertex> {
-    let mut verts = Vec::new();
-    push_widget_vertices(w, sw, sh, clip_circle, &mut verts);
-    verts
-}
-
-pub fn push_widget_vertices(w: &dyn crate::widget::WidgetHost, sw: f32, sh: f32, clip_circle: [f32; 3], out: &mut Vec<Vertex>) {
-    let (x, y, ww, h) = w.rect();
-    let radii = w.corner_radii();
-    push_rounded_rect_vertices_corners(x, y, ww, h, radii, sw, sh, w.color(), clip_circle, None, out);
-    if let Some((color, thickness)) = w.solid_border() {
-        push_plate_solid_border_vertices(x, y, ww, h, radii, thickness, sw, sh, color, clip_circle, out);
-    }
-
-    for (cx, cy, r, t, start, end, qc) in w.extra_arcs() {
-        push_arc_background_vertices(cx, cy, r, t, start, end, sw, sh, qc, 16, clip_circle, out);
-    }
-}
-
 /// A contiguous run of vertices sharing one scissor rect (Phase 3 single paint path) and one
 /// rounded-rect clip. `scissor` is a logical-pixel clip (`None` = unclipped); `clip_rrect` is
 /// the paint walk's `[cx, cy, bx, by, r]` rounded clip in logical px (`None` = unclipped),

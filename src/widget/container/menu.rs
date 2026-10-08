@@ -547,9 +547,12 @@ impl Paint for MenuBar {
         // separate groove rings), and the strip's full-height square state
         // quads are replaced by the trigger fills — open matches the context
         // dropdown's open tint rather than the strip's legacy palette.
+        let strip = crate::widget::shown_prims(&self.menus);
         if flat_modes {
-            for (qx, qy, qw, qh, qc) in self.menus.extra_quads() {
-                ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+            for prim in &strip {
+                if let crate::scene::paint::Prim::Quad { rect, color } = prim {
+                    ctx.quad(*rect, *color);
+                }
             }
         } else {
             for i in 0..self.menus.buttons.len() {
@@ -567,11 +570,14 @@ impl Paint for MenuBar {
                 trough_chrome(ctx, r, fill);
             }
         }
-        for (cx, cy, r, t, start, end, c) in self.menus.extra_arcs() {
-            ctx.arc(cx, cy, r, t, start, end, c);
-        }
-        for (cx, cy, r, c) in self.menus.extra_circles() {
-            ctx.circle(cx, cy, r, c);
+        for prim in strip {
+            match prim {
+                crate::scene::paint::Prim::Arc { cx, cy, radius, thickness, start, end, color } => {
+                    ctx.arc(cx, cy, radius, thickness, start, end, color);
+                }
+                crate::scene::paint::Prim::Circle { cx, cy, radius, color } => ctx.circle(cx, cy, radius, color),
+                _ => {}
+            }
         }
 
         // Text: the sidebar label (vertical), the title (curved / vertical / horizontal), and

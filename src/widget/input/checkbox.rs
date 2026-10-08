@@ -707,7 +707,10 @@ mod tests {
         let (fcx, fcy) = (f.rect.x + f.rect.width * 0.5, f.rect.y + f.rect.height * 0.5);
         assert!((pcx - fcx).abs() < 1e-3 && (pcy - fcy).abs() < 1e-3, "centred");
         assert!(!p.has_well(), "the plate is all run");
-        assert!(crate::widget::WidgetHostExt::extra_circles(&cb).is_empty(), "no mark");
+        assert!(
+            !crate::widget::shown_prims(&cb).iter().any(|p| matches!(p, crate::scene::paint::Prim::Circle { .. })),
+            "no mark"
+        );
 
         if crate::layout::control_relief() {
             cb.inner_mut().set_checked(false);

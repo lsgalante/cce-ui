@@ -2073,6 +2073,19 @@ Constraint respected: **each crate still builds standalone** — the new core is
     radius, is-Ramp flag) at re-parent time instead of the pointer —
     same refresh cadence, no deref of potentially-dead memory; watch
     the one-frame rect lag on resize if reads move to snapshots.
+  - **The legacy tuple views retired (the same day).** The five apps moved to `paint_self`
+    (cce-secrets, the greeter, the settings app's dropdown and search box, the gallery, the
+    designer's render loop), then the toolkit's own readers: `ParametersBg`, the ramp and the
+    menubar read their children's `painted_prims`; `Adapted::paint_self` computes the
+    TextBox's focus highlight itself; the bridge and `corner_radii` read `Paint::corner_style`;
+    `append_widget_plate` stopped drawing the widget's arcs; `paint_legacy_leaf` and
+    `widget_vertices` / `push_widget_vertices` had no callers left. The views and the hooks
+    that served only them (`serves_legacy_plain_quads`, `legacy_plain_quads`,
+    `aggregates_child_extra_quads`, `forwarded_highlight`) are deleted, and the tests that
+    asserted on them read `painted_prims`. Pixel A/B in a scale-2 shadow: the designer (five
+    pane layouts) and the gallery identical before and after the toolkit change; each app's
+    own move is described in its commit (cce-secrets and the greeter changed look by choice,
+    the settings dropdown gained its face plate, the gallery lost a stray outline).
   - **WidgetHost 38 → 31 (the same day).** The legacy tuple views (`extra_quads`,
     `extra_arcs`, `extra_circles`, `all_quads`, `all_rounded_quads`, `highlight_quad`,
     `corner_style`) moved to `WidgetHostExt` too, computed from the paint model exactly as

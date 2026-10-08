@@ -2,12 +2,10 @@
 //! draggable nodes with geometry toggles, input/output ports, wire routing, and interactive
 //! connection dragging. [`GraphController`] rides the `Input` capability hooks.
 //!
-//! Rendering serves the legacy dual-geometry contract through the adapter's escape hatch:
-//! [`Paint::paint`] emits the ROUNDED view (what `render_widget` hosts — cce-files — and the
-//! scene walk — cce-graph — consume), while [`Paint::legacy_plain_quads`] serves the same
-//! geometry as plain quads for raw `extra_quads` readers (the designer's render path), with
-//! `all_quads` emptied by the adapter so no host draws it twice. Node-name text is clipped to
-//! the widget rect via [`Paint::text_bounds`]. All grid geometry is in absolute screen space
+//! [`Paint::paint`] emits the graph as rounded geometry (what `render_widget` hosts — cce-files —
+//! and the scene walk — cce-graph — consume); a host that draws the nodes in its own order (the
+//! designer) reads [`Graph::geometry_quads_tagged`] and calls [`Graph::paint_wires`] itself. Node-name
+//! text is clipped to the widget rect via [`Paint::text_bounds`]. All grid geometry is in absolute screen space
 //! (hosts pan by moving `grid_origin`); the widget rect only culls and clips.
 //!
 //! The WIRES are not quads: they are strokes in a [`WireStyle`] — orthogonal, rounded,
@@ -901,15 +899,6 @@ impl Graph {
         quads
     }
 
-    /// [`geometry_quads_tagged`](Self::geometry_quads_tagged) with the cell tags
-    /// stripped — the unchanged legacy `extra_quads` shape.
-    fn geometry_quads(&self, rect: Rect) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        self.geometry_quads_tagged(rect)
-            .into_iter()
-            .map(|(qx, qy, qw, qh, qc, _)| (qx, qy, qw, qh, qc))
-            .collect()
-    }
-
     /// The rounded view of the same geometry — the legacy `all_rounded_quads` conversion: the
     /// widget background, then each plain quad either as a grid cell (superellipse cell arcs),
     /// a node body (node corner radius, all corners), or with the widget's edge-corner
@@ -1110,14 +1099,6 @@ impl Paint for Graph {
         for l in self.node_labels(rect) {
             ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, None, canvas);
         }
-    }
-
-    fn serves_legacy_plain_quads(&self) -> bool {
-        true
-    }
-
-    fn legacy_plain_quads(&self, rect: Rect) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        self.geometry_quads(rect)
     }
 
     fn text_bounds(&self, rect: Rect) -> Option<[f32; 4]> {
@@ -2265,21 +2246,34 @@ mod tests {
     }
 
     #[test]
-    fn dual_geometry_views_stay_consistent() {
+    fn the_painted_geometry_is_the_tagged_geometry_rounded() {
+        use crate::widget::WidgetHostExt;
         let g = two_nodes();
-        let ctx = UiContext::new();
 
-        // The plain view (designer path) and the rounded view (render_widget path) describe
-        // the same quads: the rounded view adds only the widget background entry up front.
-        let plain = crate::widget::WidgetHostExt::extra_quads(&g);
-        let rounded = crate::widget::WidgetHostExt::all_rounded_quads(&g, &ctx);
+        // What a host drawing the nodes itself reads (the designer) and what the graph paints
+        // describe the same quads: the paint adds only the widget background up front.
+        let plain: Vec<_> = g
+            .geometry_quads_tagged(g.content_rect())
+            .into_iter()
+            .map(|(qx, qy, qw, qh, qc, _)| (qx, qy, qw, qh, qc))
+            .collect();
+        let rounded: Vec<_> = g
+            .painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                crate::scene::paint::Prim::RoundedRect { rect, radius, corners, color } => {
+                    Some((rect.x, rect.y, rect.width, rect.height, radius, color, corners))
+                }
+                _ => None,
+            })
+            .collect();
         assert!(!plain.is_empty());
         assert_eq!(rounded.len(), plain.len() + 1);
         for ((px, py, pw, ph, pc), (rx, ry, rw, rh, _, rc, _)) in plain.iter().zip(rounded.iter().skip(1)) {
             assert_eq!((px, py, pw, ph, pc), (rx, ry, rw, rh, rc));
         }
 
-        // Node bodies carry the node corner radius in the rounded view.
+        // Node bodies carry the node corner radius.
         let node_radius = crate::layout::graph_node_corner_radius();
         let node_entries: Vec<_> = rounded
             .iter()
@@ -2290,9 +2284,5 @@ mod tests {
             assert_eq!(entry.4, node_radius);
             assert_eq!(entry.6, (true, true, true, true));
         }
-
-        // And `all_quads` stays empty so render_widget hosts (reading BOTH getters) never
-        // draw the geometry twice — the legacy Graph override's contract.
-        assert!(crate::widget::WidgetHostExt::all_quads(&g, &ctx).is_empty());
     }
 }

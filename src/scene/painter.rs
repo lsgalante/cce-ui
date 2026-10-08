@@ -53,40 +53,10 @@ pub fn append_widget_text(ui: &UiContext, root: &dyn WidgetHost, pc: &mut PaintC
     }
 }
 
-/// The `WidgetHost` default `paint_self`'s LEAF branch as a reusable body: leaf geometry
-/// (rounded quads, plain quads, arcs, circles) followed by the widget's fonted labels.
-/// Legacy leaf widgets' `paint_self` overrides call this with their own labels — the
-/// labels are PASSED IN rather than fetched through the per-widget text getters, so this
-/// helper (and every override built on it) survives the getters' deletion. `pub` so
-/// app-local legacy widgets (display-manager's status/session widgets, cloud's fuzzel)
-/// can use it too.
-pub fn paint_legacy_leaf(
-    w: &dyn WidgetHost,
-    ui: &UiContext,
-    pc: &mut PaintCtx,
-    labels: Vec<(TextLabel, Option<String>, Option<[f32; 4]>)>,
-) {
-    for (x, y, qw, qh, r, c, corners) in w.all_rounded_quads(ui) {
-        pc.rounded_rect(Rect { x, y, width: qw, height: qh }, r, corners, c);
-    }
-    for (x, y, qw, qh, c) in w.all_quads(ui) {
-        pc.quad(Rect { x, y, width: qw, height: qh }, c);
-    }
-    for (cx, cy, r, t, s, e, c) in w.extra_arcs() {
-        pc.arc(cx, cy, r, t, s, e, c);
-    }
-    for (cx, cy, r, c) in w.extra_circles() {
-        pc.circle(cx, cy, r, c);
-    }
-    for (tl, font, bounds) in labels {
-        pc.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
-    }
-}
-
-/// The prim-level mirror of the backend's `push_widget_vertices`: the widget's own plate —
-/// beveled, or rounded fill + optional solid border — plus its extra arcs. For hosts that
-/// hand-build their display list in their own draw order (the designer) instead of walking
-/// `paint_self`, but want a widget's background exactly as the vertex path drew it.
+/// The widget's own plate — beveled, or rounded fill + optional solid border — for hosts that
+/// hand-build their display list in their own draw order (the designer) and paint the widget
+/// on it with `paint_self`. The plate only: until 2026-10-08 it carried the widget's arcs too,
+/// which a host then painting the widget drew twice.
 pub fn append_widget_plate(w: &dyn WidgetHost, pc: &mut PaintCtx) {
     append_widget_plate_tinted(w, pc, None);
 }
@@ -120,9 +90,6 @@ pub fn append_widget_plate_radii(w: &dyn WidgetHost, pc: &mut PaintCtx, tint: Op
         }
     } else {
         pc.border(rect, radii_tuple, w.color(), [0.0; 4], 0.0);
-    }
-    for (cx, cy, r, t, s, e, c) in w.extra_arcs() {
-        pc.arc(cx, cy, r, t, s, e, c);
     }
 }
 

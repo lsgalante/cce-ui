@@ -840,14 +840,13 @@ mod tests {
     /// radius, and the label through the prim-derived text bridge with center justification.
     #[test]
     fn geometry_and_label_parity() {
-        let ctx = UiContext::new();
         // Pin the flat style: this test is about the legacy quad-bridge paths,
         // which the config-default raised plate bypasses entirely.
         let b = Button::new(0.0, 0.0, 100.0, 24.0).with_label("Go").with_raised(false);
 
         let radius = crate::layout::button_corner_radius();
-        let rounded = crate::widget::WidgetHostExt::all_rounded_quads(&b, &ctx);
-        let plain = crate::widget::WidgetHostExt::extra_quads(&b);
+        let rounded = crate::widget::shown_rounded_quads(&b);
+        let plain = crate::widget::shown_quads(&b);
         if radius > 0.0 {
             assert!(!rounded.is_empty() && plain.is_empty(), "rounded config -> rounded path only");
             assert_eq!(rounded[0].4, radius);

@@ -385,11 +385,10 @@ impl Paint for ColorRamp {
         }
         
         if self.selected_key_idx.is_some() {
-            let ctx_dummy = crate::context::UiContext::new();
-            quads.extend(self.r_slider.all_quads(&ctx_dummy));
-            quads.extend(self.g_slider.all_quads(&ctx_dummy));
-            quads.extend(self.b_slider.all_quads(&ctx_dummy));
-            quads.extend(self.del_button.all_quads(&ctx_dummy));
+            quads.extend(crate::widget::shown_quads(&self.r_slider));
+            quads.extend(crate::widget::shown_quads(&self.g_slider));
+            quads.extend(crate::widget::shown_quads(&self.b_slider));
+            quads.extend(crate::widget::shown_quads(&self.del_button));
         }
         
         quads

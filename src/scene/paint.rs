@@ -437,11 +437,11 @@ impl DropletFinish for DropletSpec {
 pub enum Prim {
     Quad { rect: Rect, color: [f32; 4] },
     RoundedRect { rect: Rect, radius: f32, corners: (bool, bool, bool, bool), color: [f32; 4] },
-    /// A rounded fill plus a solid border stroke — a widget's own "plate" (mirrors
-    /// `push_widget_vertices`' non-bevel branch: rounded bg + `push_plate_solid_border_vertices`).
+    /// A rounded fill plus a solid border stroke — a widget's own "plate"
+    /// (`append_widget_plate`'s non-bevel branch).
     Border { rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32 },
     /// A beveled plate: a rounded fill at full size plus a light/shadow overlay lip
-    /// (mirrors `push_widget_vertices`' bevel branch). `tint` colours the
+    /// (`append_widget_plate`'s bevel branch). `tint` colours the
     /// roll's light and shadow — neutral white normally; a host sets it to a
     /// highlight color to mark the plate (the focused-pane treatment) without a
     /// separate border ring: the light goes to the tint, the shadow to a dark

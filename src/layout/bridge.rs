@@ -193,7 +193,8 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     if let Ok(mut fs) = crate::geometry_font_system().lock() {
         w.prepare_text(&mut fs);
     }
-    let (style_r, corners) = w.corner_style();
+    let (style_r, corners) =
+        w.paint_model().corner_style(w.content_rect()).unwrap_or((0.0, (false, false, false, false)));
     let r = if corners != (false, false, false, false) { style_r } else { 0.0 };
     let (wx, mut wy, www, mut whh) = w.rect();
     let top_room = w.label_strip();

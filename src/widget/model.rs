@@ -175,10 +175,9 @@ pub trait Paint {
 
     /// Corner rounding `(radius, per-corner flags)` of the widget's background, given its
     /// laid-out rect (MenuBar's corners depend on where it sits against its parent's edges).
-    /// **Transitional:** this exists only for legacy render paths that draw widget backgrounds
-    /// themselves from style properties (`widget_vertices` / `push_widget_vertices` readers of
-    /// `WidgetHost::corner_radius` + `rounded_corners`) — the widget's real geometry is whatever
-    /// [`paint`](Paint::paint) emits. Dies with those paths. Default: sharp corners.
+    /// What a host drawing the widget's PLATE reads — `WidgetHostExt::corner_radii`, the
+    /// designer's `append_widget_plate`, the flat-host bridge; the widget's own geometry is
+    /// whatever [`paint`](Paint::paint) emits. Default: sharp corners.
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         None
     }
@@ -231,25 +230,6 @@ pub trait Paint {
     /// base-label machinery.
     fn sync_label(&mut self, _label: &str) {}
 
-    // --- Legacy dual-geometry escape hatch (transitional; Graph is the only user). Legacy
-    // hosts read DIFFERENT getters: the designer's raw render path draws `extra_quads` as
-    // PLAIN quads, while `render_widget` and the scene walk consume the rounded view
-    // (`all_rounded_quads` / `paint_self`). Legacy Graph served both by overriding all three
-    // getters. A migrated widget emits the rounded view from `paint`; when it also serves a
-    // plain view, the adapter returns it verbatim from `extra_quads` and empties `all_quads`
-    // (mirroring legacy Graph's highlight-only override) so render_widget-style hosts that
-    // read BOTH getters never draw the geometry twice. Dies with `WidgetHost`.
-
-    /// Whether this widget serves [`legacy_plain_quads`](Paint::legacy_plain_quads).
-    fn serves_legacy_plain_quads(&self) -> bool {
-        false
-    }
-
-    /// The plain-quad view of this widget's geometry for legacy `extra_quads` readers.
-    fn legacy_plain_quads(&self, _rect: Rect) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        Vec::new()
-    }
-
     /// Clip rect `[x1, y1, x2, y2]` for this widget's text on the legacy bounded-text paths
     /// (`text_labels_with_bounds` / `text_labels_with_font_and_bounds`). `None` (default) keeps
     /// the legacy behavior: unbounded, except inside a scroll ancestor. Graph clips its node
@@ -274,36 +254,11 @@ pub trait Paint {
     }
 
 
-    /// Whether the adapter re-enables the legacy shared focus/hover highlight overlay
-    /// (`WidgetHost::highlight_quad`'s default) for this widget. The adapter suppresses it for
-    /// migrated widgets — matching the `None` overrides most legacy controls carried — but
-    /// legacy TextBox kept the default: the focused editor gets the primary-highlight tint
-    /// over its background (data-editor's teal editing wash). Default: suppressed.
+    /// Whether the widget wears the shared focus highlight: the primary tint over its row
+    /// span while it holds focus, drawn by the adapter over its background. Only the TextBox
+    /// opts in (the focused editor's teal wash in the data editor). Default: none.
     fn legacy_focus_highlight(&self) -> bool {
         false
-    }
-
-    /// Legacy container `extra_quads` aggregation: when `true`, the adapter's `extra_quads`
-    /// serves the visible children's `extra_quads` — and ONLY those, like the legacy container
-    /// overrides (Paginator returned its strip's + selected page's chrome; its own background
-    /// quad lived in `all_quads` alone). Hosts that render a container through the plain
-    /// `extra_quads` getter (cce-mail's and cce-layout-interface's sidebar draw) read exactly
-    /// this view. The widget's own [`paint`](Paint::paint) prims still reach `all_quads` and
-    /// the scene walk. Default: off (a leaf's `extra_quads` is its own prims).
-    fn aggregates_child_extra_quads(&self) -> bool {
-        false
-    }
-
-    /// Forward the legacy `WidgetHost::highlight_quad` to somewhere else entirely — Paginator
-    /// served its ButtonStrip's highlight (the hovered-tab tint cce-layout-interface draws by
-    /// calling `highlight_quad` directly). Outer `Some` replaces the adapter's highlight logic
-    /// with the inner value; `None` (default) keeps the standard behavior
-    /// ([`legacy_focus_highlight`](Paint::legacy_focus_highlight)). A forwarded highlight is
-    /// served ONLY through the direct `highlight_quad` getter — the adapter keeps it out of
-    /// `all_quads`/`paint_self`, where the child's own aggregation already carries it (legacy
-    /// containers likewise excluded it from their `all_quads` overrides).
-    fn forwarded_highlight(&self, _ctx: &UiContext) -> Option<Option<(f32, f32, f32, f32, [f32; 4])>> {
-        None
     }
 
     /// Whether this widget serves
@@ -1297,15 +1252,12 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 ctx.pop_clip_circle();
             }
         }
-        // The legacy default `paint_self` drained `all_quads`, which carries the focus
-        // highlight — replicate for opt-in widgets, over the background (same draw order).
-        // Forwarded highlights stay out: the paint walk reaches the owning child itself.
-        if Paint::legacy_focus_highlight(&self.inner) {
-            if let Some((hx, hy, hw, hh, hc)) = crate::widget::WidgetHostExt::highlight_quad(self, ui) {
-                if hc != crate::colors::HIGHLIGHT_SECONDARY {
-                    ctx.quad(Rect { x: hx, y: hy, width: hw, height: hh }, hc);
-                }
-            }
+        // The focus highlight a widget opts into (the TextBox): the primary tint over the
+        // row span while focused, over the background. (The hover tint never drew here.)
+        if Paint::legacy_focus_highlight(&self.inner) && ui.is_focused_id(self.base.id()) {
+            let b = &self.base;
+            let (hx, hw) = if b.row_w > 0.0 { (b.row_x, b.row_w) } else { (b.x, b.w) };
+            ctx.quad(Rect { x: hx, y: b.y, width: hw, height: b.h }, crate::colors::highlight_primary_color());
         }
         // Own text with per-label font+bounds: the hatch view verbatim for hatched widgets
         // (caveat: its contract includes raw container children — those few widgets keep the
@@ -1346,13 +1298,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     // detached base label), and composites that need a concrete Adapted child's labels
     // call `own_labels_with_font_and_bounds` directly (pub(crate)).
 
-    // --- Reverse bridges: [`Paint::paint`] output converted back to the legacy geometry
-    // getters external render loops read (cce-test-interface's `all_*` calls, `render_widget`'s
-    // `all_quads` loop, the demo's `extra_*` loops). Each prim kind maps to the getter legacy
-    // widgets used for it — plain quads to `extra_quads` (→ `all_quads`), rounded to
-    // `all_rounded_quads` — so apps that read BOTH getters draw each prim exactly once. Covers
-    // the widget's OWN geometry only: adapted widgets are leaves for now; recursion belongs to
-    // `scene::painter`.
 
 
 

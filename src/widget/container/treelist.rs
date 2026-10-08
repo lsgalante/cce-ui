@@ -1669,7 +1669,6 @@ mod tests {
 
     #[test]
     fn test_treelist_separators() {
-        let ctx = UiContext::new();
         let mut tree_list = TreeList::new();
         tree_list.set_rect(10.0, 52.0, 380.0, 500.0);
         tree_list.set_flat_keys(vec![
@@ -1687,7 +1686,7 @@ mod tests {
         println!("scroll_box scroll_y: {}", tree_list.scroll_box.scroll_y);
         println!("item_height: {}", tree_list.item_height);
         
-        let quads = tree_list.all_rounded_quads(&ctx);
+        let quads = crate::widget::shown_rounded_quads(&tree_list);
         println!("Rounded quads count: {}", quads.len());
         for (i, q) in quads.iter().enumerate() {
             println!("Quad {}: {:?}", i, q);

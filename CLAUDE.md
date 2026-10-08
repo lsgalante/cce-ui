@@ -1690,14 +1690,24 @@ host, `dyn` included, carries what used to be one-line forwards: `focus_role`, `
 `blocks_root_plate_drag`, `wants_tick`, `is_scrollable`, the `a11y_*` reads and acts,
 `set_modifiers`, `context_action`, `color`, `solid_border`, `widget_font`,
 `clips_children`, `renders_own_subtree`, `z_index`, `preferred_height`, plus the pure
-derivations `label`, `corner_radii`, `mark_dirty` — and the legacy tuple views
-(`extra_quads`, `extra_arcs`, `extra_circles`, `all_quads`, `all_rounded_quads`,
-`highlight_quad`, `corner_style`): what a widget paints projected onto the
-pre-display-list surface, computed from `paint_model().paint(content_rect())` the way
-`Adapted` computed them, for the hosts that still draw a widget through them rather than
-`paint_self` (the designer's render loop, the gallery, the display manager's greeter, the
-settings app's flat collector, cce-secrets, the flat-host bridge). Call them as before, with
-`cce_ui::widget::WidgetHostExt` in scope. A method stays ON the trait only when the host
+derivations `label`, `corner_radii`, `mark_dirty`, and `content_rect` / `painted_prims` (what
+the widget's model paints, as prims). Call them with `cce_ui::widget::WidgetHostExt` in
+scope.
+
+**The legacy tuple views are gone** (2026-10-08): `extra_quads`, `extra_arcs`,
+`extra_circles`, `all_quads`, `all_rounded_quads`, `highlight_quad` and the host-side
+`corner_style` — what a widget paints projected onto the pre-display-list surface — with
+the model hooks that served only them (`serves_legacy_plain_quads` / `legacy_plain_quads`,
+`aggregates_child_extra_quads`, `forwarded_highlight`), the painter's `paint_legacy_leaf`
+and the tessellator's `widget_vertices`. Every host paints a widget through `paint_self` or
+the paint walk (the designer, the gallery, the greeter, the settings app and cce-secrets
+moved the same day, each checked by pixel A/B). A composite that draws a child's chrome in
+its own order — the params pane's rows, the ramp's key editor, the menubar's strip — reads
+the child's `painted_prims` (`widget::shown_prims` / `shown_quads` / `shown_rounded_quads`,
+crate-private). `Paint::corner_style` stays: it is what a widget says about its silhouette,
+read by `corner_radii`, `append_widget_plate` and the bridge. `append_widget_plate` is the
+plate alone now; it drew the widget's arcs too, which a host painting the widget after it
+drew twice. A method stays ON the trait only when the host
 adds something the model cannot (visibility gating, the content rect, child recursion,
 registry state). `plate_bevel` is gone: nothing overrode it, so it was always `None`.
 `Owned` forwards the trait's methods and the four accessors; the extension trait needs no
@@ -2054,8 +2064,7 @@ NOTHING until this change, when the wires were a hard-coded cyan 3 px.
   `Graph::paint_wires` (also on `GraphController`), `Prim::Vector`s and
   `Prim::Arc`s, since only one style is axis-aligned. `Paint::paint` calls
   it after the grid; a host drawing the quads itself (the designer) calls
-  it between `paint_grid` and the bodies. The legacy `extra_quads` view has
-  no wires.
+  it between `paint_grid` and the bodies.
 - **The run across is on the first lattice line below the source**
   (`Graph::wire_turn_y`, since 2026-10-06), for orthogonal and rounded
   wires running down. It was halfway between the ports, so a wire spanning

@@ -4,22 +4,16 @@
 //! containers toggled visible/hidden) is gone — its only observable output, the page-area
 //! background quad, is painted directly here.
 //!
-//! Two legacy behaviors ride hooks from the 5r migration:
-//! - [`Layout::register_embedded_children`]: legacy `tick`/`layout` re-registered the strip into
-//!   the ctx registry every frame — load-bearing for the spatial grid (the registered strip is
-//!   what makes the sidebar block root plate drags).
-//! - [`Paint::aggregates_child_extra_quads`] + [`Paint::forwarded_highlight`]: legacy
-//!   `extra_quads` served the strip's chrome only (cce-layout-interface renders the tab
-//!   column through that getter plus `all_rounded_quads`, which carries the strip's rounded
-//!   state fills — the paginator's own backgrounds live in `all_rounded_quads` alone), and
-//!   legacy `highlight_quad` forwarded to the strip's (the hovered-tab tint
-//!   cce-layout-interface draws directly).
+//! One legacy behavior rides a hook from the 5r migration:
+//! [`Layout::register_embedded_children`]: legacy `tick`/`layout` re-registered the strip into
+//! the ctx registry every frame — load-bearing for the spatial grid (the registered strip is
+//! what makes the sidebar block root plate drags).
 
 use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::input::ButtonStrip;
-use crate::widget::{Adapted, WidgetHost, Event, EventCtx, Input, Layout, MenuController, PageSelector, Paint, UiContext, WidgetId, WidgetHostExt};
+use crate::widget::{Adapted, WidgetHost, Event, EventCtx, Input, Layout, MenuController, PageSelector, Paint, UiContext, WidgetId};
 
 pub struct Paginator {
     /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
@@ -196,19 +190,6 @@ impl Paint for Paginator {
             }
         }
     }
-
-    /// Legacy `extra_quads` served the strip's + selected page's chrome only —
-    /// cce-layout-interface draws the tab column through this getter (and the strip's rounded
-    /// state fills through `all_rounded_quads`), over its own backgrounds.
-    fn aggregates_child_extra_quads(&self) -> bool {
-        true
-    }
-
-    /// Legacy `highlight_quad` forwarded to the strip's (the hovered-tab tint
-    /// cce-layout-interface draws directly).
-    fn forwarded_highlight(&self, ctx: &UiContext) -> Option<Option<(f32, f32, f32, f32, [f32; 4])>> {
-        Some(self.sidebar_menu.highlight_quad(ctx))
-    }
 }
 
 impl Input for Paginator {
@@ -310,23 +291,19 @@ mod tests {
     }
 
     #[test]
-    fn plain_quads_split_like_legacy_and_registration_heals_on_tick() {
+    fn the_sidebar_bg_is_rounded_and_registration_heals_on_tick() {
         let mut ctx = UiContext::new();
         let mut p = paginator();
         ctx.register_host(&mut p);
 
-        // Legacy split: `extra_quads` is the children's chrome only; the sidebar background
-        // (a rounded rect) lives in `all_rounded_quads` alone (layout-interface draws its
-        // own backgrounds under `extra_quads`).
-        let extra = crate::widget::WidgetHostExt::extra_quads(&p);
-        let strip_extra = p.sidebar_menu.extra_quads();
-        assert_eq!(extra.len(), strip_extra.len(), "children-only plain view (pages emit none)");
+        // The sidebar background is a rounded rect of the paginator's own paint, never a
+        // plain quad.
         let bg = colors::sidebar_bg_color();
         if bg[3] > 0.0 {
             let r = crate::layout::plate_corner_radius();
             let bg_quad = (0.0, 0.0, 400.0, 300.0, r, bg, (true, true, true, true));
-            assert!(!extra.iter().any(|q| q.4 == bg && q.2 == 400.0), "no own bg in extra_quads");
-            assert!(crate::widget::WidgetHostExt::all_rounded_quads(&p, &ctx).contains(&bg_quad), "own bg in all_rounded_quads");
+            assert!(!crate::widget::shown_quads(&p).iter().any(|q| q.4 == bg && q.2 == 400.0), "no plain bg");
+            assert!(crate::widget::shown_rounded_quads(&p).contains(&bg_quad), "a rounded bg");
         }
 
         // The embedded strip + pages land in the registry on tick (the spatial grid feeds off

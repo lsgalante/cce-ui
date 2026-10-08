@@ -231,10 +231,11 @@ mod tests {
         assert!(bar.text_buf.is_some());
         assert_eq!(bar.text, "world");
 
-        // Parentless: cornerless plain bg through the plain-quad bridge, at STATUS_BG.
-        let extra = crate::widget::WidgetHostExt::extra_quads(&bar);
-        assert_eq!(extra.len(), 1, "cornerless bg quad");
-        assert_eq!(crate::widget::WidgetHostExt::corner_style(&bar).1, (false, false, false, false));
+        // Parentless: a cornerless plain bg quad, at STATUS_BG.
+        let plain = crate::widget::shown_quads(&bar);
+        assert_eq!(plain.len(), 1, "cornerless bg quad");
+        let cr = crate::widget::WidgetHostExt::corner_radii(&bar);
+        assert_eq!((cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left), (0.0, 0.0, 0.0, 0.0));
         assert!(!crate::widget::WidgetHostExt::blocks_root_plate_drag(&bar));
     }
 
