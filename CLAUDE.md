@@ -1809,9 +1809,14 @@ cce-system-interface) to confirm behavior, not just the test suite.
     first use; a `(mm)` length never reached a slot. Do not add a slot for a config key.
     One thing it changed on screen: those first-use scans ran after an app's own setter and
     overwrote it, so cce-system-interface's `set_grid_gap(root_plate_gap())` lost to the
-    config's `layout { grid_gap 18 }` — the compositor's window-tiling gap, which reaches the
-    toolkit because the flatten strips `layout.` off keys it does not map. Its multi-column
+    config's `layout { grid_gap 18 }` — the compositor's window-tiling gap. Its multi-column
     pages now stand their sections the root gap apart, as the app asks (kept by choice).
+    **And another program's key never becomes the toolkit's**: the flatten maps the paths
+    the toolkit reads to its keys and leaves every other path whole (`layout.grid_gap`).
+    Until the same day it cut an unmapped path down — the compositor's `layout` and
+    `transparency` blocks to their bare keys, anything else past its first segment — which
+    is how the tiling gap arrived as `grid_gap`. A new key the toolkit reads from a nested
+    block needs its mapping; `another_programs_keys_do_not_become_the_toolkits`.
   - `bridge.rs` — the flat-host render bridge: `RenderTarget`, `PopoverCollector`,
     `render_widget`, `render_popovers`, the carve types that cross it.
   - `section.rs` — a settings page's sections: `PageFlow` places them (a masonry of

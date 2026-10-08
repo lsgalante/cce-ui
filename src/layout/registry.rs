@@ -416,19 +416,14 @@ pub(super) fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, 
                 "style.surface.plate.border_thickness" => "plate_border_thickness",
                 "input.touchpad.natural_scroll" => "touchpad_natural_scroll",
                 
-                other => {
-                    if let Some(rest) = other.strip_prefix("layout.") {
-                        rest
-                    } else if let Some(rest) = other.strip_prefix("transparency.") {
-                        rest
-                    } else {
-                        if let Some(idx) = other.find('.') {
-                            &other[idx + 1..]
-                        } else {
-                            other
-                        }
-                    }
-                }
+                // Anything else keeps its whole path. A key the toolkit reads is mapped above
+                // (or is a flat top-level key, which has no path to strip); the rest belong
+                // to other programs. Until 2026-10-08 an unmapped path was cut down — the
+                // `layout.` and `transparency.` blocks (the compositor's own) to their bare
+                // keys, anything else past its first segment — so the compositor's
+                // `layout { grid_gap 18 }`, its window-tiling gap, arrived as the toolkit's
+                // `grid_gap`, and any block's key could stand in for a toolkit one.
+                other => other,
             };
             
             if let Some(s) = val.as_str() {

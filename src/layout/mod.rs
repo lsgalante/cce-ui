@@ -2147,6 +2147,26 @@ mod tests {
         assert_eq!(textbox_height(), len.to_px(), "a length in mm is honoured");
     }
 
+    /// Another program's config keeps its own name in the registry: the compositor's
+    /// `layout { grid_gap 18 }` (its window-tiling gap) is `layout.grid_gap`, never the
+    /// toolkit's `grid_gap`, which the settings app's section flow reads. A path the
+    /// toolkit maps still lands on its key, and a flat top-level key stays flat.
+    #[test]
+    fn another_programs_keys_do_not_become_the_toolkits() {
+        let val = crate::config::parse_kdl_to_json(
+            "layout {\n    grid_gap (i64)18\n    gap (i64)48\n}\ntransparency {\n    plate_opacity (f64)0.5\n}\nwindow_manager {\n    control_relief (bool)true\n}\nstyle {\n    control {\n        button height=(i64)30\n    }\n}\nplate_corner_radius (i64)14\n",
+        );
+        let mut flat = String::new();
+        super::flatten_json_to_flat_props(&val, "", &mut flat);
+        let keys: Vec<&str> = flat.lines().filter_map(|l| l.split('=').next()).map(str::trim).collect();
+        for leaked in ["grid_gap", "gap", "plate_opacity"] {
+            assert!(!keys.contains(&leaked), "{leaked} leaked into the toolkit's keys: {keys:?}");
+        }
+        for kept in ["layout.grid_gap", "layout.gap", "transparency.plate_opacity", "control_relief", "button_height", "plate_corner_radius"] {
+            assert!(keys.contains(&kept), "{kept} missing: {keys:?}");
+        }
+    }
+
     #[test]
     fn test_column_gap() {
         // A legacy key: set (by config or setter) it is honoured; unset it
