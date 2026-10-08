@@ -10,7 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this crate is
 
 `cce-ui` is the **shared, custom retained-mode GUI toolkit** every `cce-*` client depends on
-(`cce-ui = { path = "../cce-ui" }`), and the compositor's only intra-workspace dependency. It is
+(a git pin on GitHub that the workspace root's `[patch]` redirects to this tree). Its GUI-free
+half is the sibling crate `cce-core`, which the compositor depends on instead. It is
 not a wrapper around an existing framework — it owns its transport, rendering, layout, and widget
 set outright.
 
@@ -40,8 +41,8 @@ set outright.
 
 ## Build, test, run
 
-Use cargo directly (the `Makefile` just wraps `cargo build --release` + install of the demo
-binary). Prefer `-p cce-ui` from anywhere in the workspace so you don't rebuild the compositor.
+Use cargo directly (the `Makefile` wraps `cargo build --release` and
+`ccebuild install --no-build cce-ui`, which installs every bin: the demo, `cce-relief`, `cce-ramp`). Prefer `-p cce-ui` from anywhere in the workspace so you don't rebuild the compositor.
 
 ```sh
 cargo build -p cce-ui                          # build the toolkit (+ demo binary)
@@ -483,17 +484,34 @@ following the caret through every step, each `done`'s serial equal to the commit
 Sway routes text-input focus only while an input method is bound, so with none (the
 24-step harness) nothing changes: 0 px.
 
-CI (`.github/workflows/ci.yml`, every push and PR) builds and tests on Ubuntu 24.04 with
-default and with all features, warnings as errors. It installs `libwayland-dev` and
-`libxkbcommon-dev` (the two native libraries the build links, through pkg-config) and Mesa's lavapipe, a software Vulkan device,
-so the GPU tests (`vk::compute`, `vk::plate_probe`) RUN there rather than skip — and a
-last step fails the job if they printed a skip note, since a skipped test passes. To match
-it locally: `apt install libwayland-dev libxkbcommon-dev mesa-vulkan-drivers`, then
-`RUSTFLAGS="-D warnings" cargo test --all-features`.
+CI (`.github/workflows/ci.yml`, every push and PR) has three jobs, warnings as errors in each:
+
+- **`test`** (Ubuntu 24.04) builds and tests with default and with all features. It installs
+  `libwayland-dev` and `libxkbcommon-dev` (the two native libraries the build links, through
+  pkg-config), Mesa's lavapipe, a software Vulkan device, so the GPU tests (`vk::compute`,
+  `vk::plate_probe`) RUN rather than skip — a last step fails the job if they printed a skip
+  note, since a skipped test passes — and `fonts-liberation`, named as `CCE_FONTS_DIR`, so the
+  text tests have real faces (with none they fell back to the image's leftovers, and the
+  tests needing a second face or a fallback glyph kept the workflow red from 2026-10-07 to
+  10-08). It also runs the path tracer's `#[ignore]`d GPU tests on lavapipe's compute tier
+  (`CCE_VK_RT=compute cargo test --lib vk::rt -- --ignored`).
+- **`wasm`** runs `scripts/check-wasm`: the library, its features and the four wasm examples,
+  type-checked for the browser. Its `RUSTFLAGS` carries `--cfg=web_sys_unstable_apis` itself,
+  since an environment `RUSTFLAGS` replaces `.cargo/config.toml`'s. Its first run (2026-10-08)
+  found the browser build broken since 10-06 by two native-only calls in portable code.
+- **`macos`** builds every target, LINKED, on a macOS runner and runs the tests — what
+  `scripts/check-mac` can only type-check on Linux. `ash` loads Vulkan at run time, so no
+  MoltenVK is needed to build, and the GPU tests skip there.
+
+To match the `test` job locally: `apt install libwayland-dev libxkbcommon-dev
+mesa-vulkan-drivers fonts-liberation`, then `CCE_FONTS_DIR=/usr/share/fonts/truetype/liberation
+RUSTFLAGS="-D warnings" cargo test --all-features`.
 
 Wayland protocol bindings are generated **inline at compile time** by `wayland-scanner` macros in
-`src/protocol.rs` from `protocol/*.xml` (`cce-inspector-v1`, `cce-window-management-v1`) — there is
-no `build.rs` and no codegen step to run.
+`src/protocol.rs` from `protocol/*.xml` (`cce-inspector-v1`, `cce-window-management-v1`). The one
+build step is `build.rs`, which compiles the renderer's fixed WGSL shaders to SPIR-V once, so a
+WGSL error is a build failure and no process pays naga at launch
+(`precompiled_spirv_matches_runtime_compile` holds it to the run-time compile).
 
 ## The `Application` trait — the client contract
 
@@ -527,9 +545,10 @@ Key methods (see the trait def in `backend/app.rs`):
   on the first line (`let tx: calloop::channel::Sender<_> = sender.into();`).
   `register_sources` stays a calloop-only hook: it is the Wayland shell's, not part of
   the portable contract.
-- **Draw**: `view` / `view_rounded_quads` / `view_vectors` / `overlay_quads` push legacy
-  primitive tuples; `text_items()` returns text; `custom_vertices()` appends raw vertices (e.g.
-  graph geometry). `display_list()` is the new opt-in path (see below).
+- **Draw**: `display_list()` returns the frame (the one paint path, below);
+  `display_list_text` opts its `Prim::Text` into the glyph pass. Two side channels remain:
+  `overlay_quads` (flat quads over everything, the status bar's) and `custom_vertices` (raw
+  vertices appended as a final unclipped batch).
 - **Input**: `handle_pointer_move`, `handle_mouse_input`, `handle_mouse_wheel`,
   `handle_key_input` — most return an optional `Message`. `needs_rebuild: &mut bool` is how a
   handler requests a redraw; the loop is demand-driven and idles when nothing sets it.
@@ -684,14 +703,9 @@ nothing.
 
 The backend `render()` **always builds a `scene::paint::DisplayList` and tessellates that single
 list** (`backend::frame::build_frame`, which the Wayland shell's `EngineState::render` presents).
-Two ways an app feeds it:
-
-1. **Migrated**: return `Some(DisplayList)` from `Application::display_list()`.
-2. **Legacy (default)**: return `None`, and the backend wraps the app's `view*`/`view_vectors`
-   tuples into a `DisplayList` via a `PaintCtx` — byte-for-byte the old geometry, just routed
-   through the one path.
-
-So every app, migrated or not, renders through the same tessellate step. `custom_vertices` is
+An app feeds it by returning `Some(DisplayList)` from `Application::display_list()`; `None` is
+an empty frame. (Until RFC phase 6al a `None` made the backend wrap the app's legacy `view*`
+tuples into a list instead; those sinks are gone, and every app implements `display_list`.) `custom_vertices` is
 appended as a final unclipped batch drawn on top.
 
 ## The context menu draws in its own popup surface (since 2026-09-25)
@@ -906,7 +920,7 @@ outline round both (`Prim::Field`). They differ only in where the run is:
 | flush control plate (dropdown trigger, button, breadcrumb run, …) | `run` | the whole field | none |
 | text row with its picker, spinbox with its -/+ run | `ending_in_run(split)` | the right end | left of it |
 | toggle | `sliding_run(width, t)` | half the field: the left end off, the right end on | the other half; both sides mid-glide |
-| check box | `well` unchecked, `sliding_run(width, 0.5)` checked | none, or half the field in its middle | the whole field, or either side |
+| check box | `well` (`Checkbox::box_field`), and checked a `run` plate in it (`Checkbox::box_plate`) | none, or a square plate in its middle | the whole field, showing all round the plate |
 
 **`scene::paint::Field` is the object** (since the same day), and
 `PaintCtx::field(&Field)` the one way to paint one: the outline (rect and radii,
@@ -947,18 +961,20 @@ field's rim (`ControlPlate::focus_tint`), where it lit the boss's.
 
 **The Checkbox widget is a field too** (`Checkbox::field`): a square as tall as
 the control (at most a toggle's height) at the left of its label, the largest
-square in the rect when it has none — an empty well unchecked, and checked a run
-half its width standing in its middle, the well either side. The toggle's object
-with no travel: its run is there or not. A box FILLED with its run when checked
-was tried first and dropped: at a control's size an all-run field's outline is
-an empty well's, and the two states were hard to tell apart in a render. In a
-parameter pane a `checkbox` row has always been a Toggle.
-`a_checkbox_is_a_field_with_a_run_in_it_or_not` is the test.
+square in the rect when it has none — an empty well unchecked, and checked the
+same well with a square plate centred in it (`Checkbox::box_plate`, `PLATE_SHARE`
+of the side, all run), the well showing all round. Since 2026-10-05 (bae3712):
+until then a checked box drew the toggle's run, half the box's width and its
+whole height, which in a square box is a tall bar, and a ticked box read as
+having narrowed. A box FILLED with a run was tried before that and dropped: at a
+control's size an all-run field's outline is an empty well's, and the two states
+were hard to tell apart. In a parameter pane a `checkbox` row has always been a
+Toggle. `a_checkbox_is_a_well_with_a_square_plate_in_it_or_not` is the test.
 
 **A check drawn inline is the same box** (`Checkbox::paint_inline(ctx, cx, cy,
 half, checked)`): cce-list's rows, a markdown task item, the doc editor. Both it
-and the widget build the field through `Checkbox::box_field(square, checked)`, so
-they cannot disagree; the corner is the toggle's IN PROPORTION (its radius over
+and the widget build the box through `Checkbox::box_field(square)` and, checked,
+`Checkbox::box_plate(&well)`, so they cannot disagree; the corner is the toggle's IN PROPORTION (its radius over
 its height), which is the toggle's corner exactly at a toggle's height and keeps a
 14px box (`Checkbox::INLINE_HALF`, cce-list's) a rounded square where the
 toggle's radius taken whole would make it a disc. They drew a ring with a blue
@@ -1207,7 +1223,7 @@ What this buys, and where the code is heading:
   well's `recess_tinted` gives its rim while editing — never extra geometry.
   The tint recolours the relief rather than replacing it: the rim's light
   composites in the accent instead of white and its shadow in a dark accent
-  instead of black (`FOCUS_SHADOW`, both at `FOCUS_GAIN`, in
+  instead of black (`FOCUS_SHADOW_LUM`, both at `FOCUS_GAIN`, in
   `shader2d.wgsl`), so a focused plate still reads which edges face the lamp.
   A Checkbox and a Toggle light the rim of their field, as every field is
   lit.
@@ -1269,7 +1285,7 @@ What this buys, and where the code is heading:
 - **A config hex is gamma-decoded; a built-in default colour is not.** The
   style loader's `parse_hex` runs every channel through `srgb_to_linear`
   (alpha excepted), so `"#595969"` arrives as `[0.10, 0.10, 0.14]` — which is
-  exactly `PARAM_BG`'s default. The constants in `color.rs` are already
+  exactly `PARAM_BG`'s default. The constants in `color` are already
   linear, so **the hex that pins a default is not that default's floats times
   255.** `PARAM_BG = [0.10, 0.10, 0.14]` reads as `#1a1a24` if you scale it
   naively, and `#1a1a24` decodes to `[0.010, 0.010, 0.018]` — a plate ten
@@ -1921,7 +1937,7 @@ one as it always did, so cce-files and cce-graph see no change.
 ## Units — logical px inside, real lengths at the edges
 
 The toolkit's working unit is and stays the **logical pixel**: every layout
-node, style slot and widget measure is an `f32` of logical px. `units.rs`
+node, style slot and widget measure is an `f32` of logical px. `units` (in `cce-core`)
 adds the bridge to real lengths, in two parts:
 
 - **`Len`** — a value with a unit (`px`, `mm`, `cm`, `in`, `pt`), parsed from
@@ -2161,11 +2177,12 @@ All opt-in, all read once, all quiet when unset — set one and run any client.
   driver that failed to LOAD is in no list, which is the case the line points at
   (`VK_LOADER_DEBUG=error` says why). Until then the fallback was silent, and a fallback
   renders exactly as the asked-for device would, so nothing on screen gave it away.
-- The cce-ui suite reads `~/.config/cce` through the style registry, and LAZILY: a value
-  read before the first load and one read after come from two configurations. A test
-  asserting on shading numbers pins its inputs instead (`relief_shade`'s tests:
-  `pinned_light`, `pinned_finish`); `deeper_carve_shades_harder` failed run alone and
-  passed in the full suite until it did.
+- The style registry loads config LAZILY: a value read before the first load and one read
+  after come from two configurations. The suite no longer reads the machine's config at all
+  (see "The tests never read the machine's config"), but the lazy load still holds within a
+  run, so a test asserting on shading numbers pins its inputs (`relief_shade`'s tests:
+  `pinned_light`, `pinned_finish`); `deeper_carve_shades_harder` failed run alone and passed
+  in the full suite until it did.
 - `CCE_FORCE_SCALE=<f>` — override HiDPI scale detection.
 - `CCE_FORCE_PPI=<f>` — pin the display metric (logical px per inch) regardless of what
   the outputs report; a headless shadow has no EDID and would run `assumed`. The live
