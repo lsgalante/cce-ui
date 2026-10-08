@@ -34,7 +34,7 @@
 use accesskit::{Action, Affine, Node, NodeId, Rect, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
 
 use crate::context::UiContext;
-use crate::widget::{FocusRole, NamedKey, WidgetHost, WidgetId};
+use crate::widget::{FocusRole, NamedKey, WidgetHost, WidgetId, WidgetHostExt};
 
 /// The window's node, the root every widget hangs from.
 pub const WINDOW: NodeId = NodeId(0);

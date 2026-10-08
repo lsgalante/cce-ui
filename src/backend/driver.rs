@@ -17,7 +17,7 @@ use web_time::Instant;
 
 use super::app::{Application, LogicalPosition, LogicalSize};
 use cursor_icon::CursorIcon;
-use crate::widget::{ElementState, Key, KeyEvent, MouseButton, MouseScrollDelta, NamedKey, Position, ScrollPhase};
+use crate::widget::{ElementState, Key, KeyEvent, MouseButton, MouseScrollDelta, NamedKey, Position, ScrollPhase, WidgetHostExt};
 
 /// A key held down, for the runner's own key repeat.
 pub struct PressedKey {

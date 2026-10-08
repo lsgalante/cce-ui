@@ -235,7 +235,7 @@ mod tests {
         let extra = WidgetHost::extra_quads(&bar);
         assert_eq!(extra.len(), 1, "cornerless bg quad");
         assert_eq!(WidgetHost::corner_style(&bar).1, (false, false, false, false));
-        assert!(!WidgetHost::blocks_root_plate_drag(&bar));
+        assert!(!crate::widget::WidgetHostExt::blocks_root_plate_drag(&bar));
     }
 
     /// The paint walk strips prim fonts and re-fonts labels via `Paint::text_font` — the

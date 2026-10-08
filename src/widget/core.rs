@@ -2623,14 +2623,16 @@ mod context_menu_action_tests {
         base: Widget,
         got: Option<ContextAction>,
     }
-    impl WidgetHost for Recorder {
-        crate::impl_widget_base!(Recorder);
-        fn color(&self) -> [f32; 4] {
-            [0.0; 4]
-        }
+    impl crate::widget::Input for Recorder {
         fn context_action(&mut self, action: ContextAction) -> bool {
             self.got = Some(action);
             true
+        }
+    }
+    impl WidgetHost for Recorder {
+        crate::impl_widget_base!(Recorder);
+        fn input_model_mut(&mut self) -> &mut dyn crate::widget::Input {
+            self
         }
     }
 

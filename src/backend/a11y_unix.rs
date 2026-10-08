@@ -20,6 +20,7 @@
 //! Without the `a11y` feature the same API compiles to a stub whose [`Publisher::start`] is
 //! `None`, so the runner carries no `cfg`.
 
+use crate::widget::WidgetHostExt;
 use accesskit::{Action, ActionData, ActionRequest};
 
 use crate::widget::NamedKey;

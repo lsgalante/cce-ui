@@ -280,9 +280,6 @@ mod tests {
     }
     impl WidgetHost for Marker {
         crate::impl_widget_base!(Marker);
-        fn color(&self) -> [f32; 4] {
-            [0.0, 0.0, 0.0, 0.0]
-        }
     }
 
     /// Owns marker widgets and hands out stable raw pointers + ids for them.

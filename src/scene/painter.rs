@@ -14,7 +14,7 @@
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::{DisplayList, PaintCtx, Prim};
-use crate::widget::{WidgetHost, TextLabel, UiContext};
+use crate::widget::{WidgetHost, TextLabel, UiContext, WidgetHostExt};
 
 /// Walk the widget subtree rooted at `root` and produce its ordered, clipped [`DisplayList`].
 /// The walk only reads through the widgets; descent resolves children through the registry
@@ -112,9 +112,7 @@ pub fn append_widget_plate_radii(w: &dyn WidgetHost, pc: &mut PaintCtx, tint: Op
     let (x, y, ww, h) = w.rect();
     let rect = Rect { x, y, width: ww, height: h };
     let tint = tint.unwrap_or([1.0, 1.0, 1.0]);
-    if let Some(thickness) = w.plate_bevel() {
-        pc.bevel_tinted(rect, radii_tuple, &crate::scene::material::Material::from_fill(w.color()), thickness, tint);
-    } else if let Some((border_color, thickness)) = w.solid_border() {
+    if let Some((border_color, thickness)) = w.solid_border() {
         if crate::layout::control_relief() {
             pc.bevel_tinted(rect, radii_tuple, &crate::scene::material::Material::from_fill(w.color()), crate::colors::plate_bevel_width(), tint);
         } else {
@@ -217,16 +215,21 @@ mod tests {
             Box::new(P { base: Widget::new(), tag, clips: false, vis: true })
         }
     }
-    impl WidgetHost for P {
-        crate::impl_widget_base!(P);
+    impl crate::widget::Paint for P {
         fn color(&self) -> [f32; 4] {
             [self.tag, 0.0, 0.0, 1.0]
         }
-        fn visible(&self) -> bool {
-            self.vis
-        }
         fn clips_children(&self) -> bool {
             self.clips
+        }
+    }
+    impl WidgetHost for P {
+        crate::impl_widget_base!(P);
+        fn paint_model(&self) -> &dyn crate::widget::Paint {
+            self
+        }
+        fn visible(&self) -> bool {
+            self.vis
         }
         fn paint_self(&self, _ui: &UiContext, ctx: &mut PaintCtx) {
             let (x, y, w, h) = self.rect();
@@ -362,10 +365,15 @@ mod tests {
         struct Rounded {
             base: Widget,
         }
-        impl WidgetHost for Rounded {
-            crate::impl_widget_base!(Rounded);
+        impl crate::widget::Paint for Rounded {
             fn color(&self) -> [f32; 4] {
                 [0.2, 0.4, 0.6, 1.0]
+            }
+        }
+        impl WidgetHost for Rounded {
+            crate::impl_widget_base!(Rounded);
+            fn paint_model(&self) -> &dyn crate::widget::Paint {
+                self
             }
             fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) {
                 (4.0, (true, true, true, true))

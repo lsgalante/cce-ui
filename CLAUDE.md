@@ -1671,7 +1671,7 @@ Modules:
 
 ### `WidgetHost` (formerly the `Element` god-trait)
 
-`WidgetHost` (`src/widget/mod.rs`) is the single ~52-method host surface the machinery
+`WidgetHost` (`src/widget/mod.rs`) is the single 38-method host surface the machinery
 (context routing, paint walk, render loop, app dyn broadcasts) sees, produced by the RFC's 6bd
 shrink-then-rename of the old ~125-method `Element` god-trait. Its ONE production implementor
 is `Adapted<W>`; concrete widget behavior lives on the narrow `Layout`/`Paint`/`Input` traits
@@ -1680,6 +1680,22 @@ block (mouse/key/drag) and the value/polling block (`take_click`/`take_change`/v
 are GONE from the trait — events route through `handle_event`, and apps drain widget state
 through the concrete inherent `Adapted<W>` methods. See the RFC's blueprint notes before
 adding anything to this trait.
+
+**What a host's widget model answers is not a trait slot** (since 2026-10-08, 57 → 38).
+The host hands out its widget as its narrow traits — `layout_model()`, `paint_model()`,
+`input_model()` / `input_model_mut()` (`Adapted` returns its inner widget; a test shim that
+implements `WidgetHost` directly gets `NoModel`'s defaults, or returns itself after
+implementing the narrow trait it needs) — and `WidgetHostExt`, blanket-implemented for every
+host, `dyn` included, carries what used to be one-line forwards: `focus_role`, `keeps_tab`,
+`blocks_root_plate_drag`, `wants_tick`, `is_scrollable`, the `a11y_*` reads and acts,
+`set_modifiers`, `context_action`, `color`, `solid_border`, `widget_font`,
+`clips_children`, `renders_own_subtree`, `z_index`, `preferred_height`, plus the pure
+derivations `label`, `corner_radii`, `mark_dirty`. Call them as before, with
+`cce_ui::widget::WidgetHostExt` in scope. A method stays ON the trait only when the host
+adds something the model cannot (visibility gating, the content rect, child recursion,
+registry state). `plate_bevel` is gone: nothing overrode it, so it was always `None`.
+`Owned` forwards the trait's methods and the four accessors; the extension trait needs no
+forwarding.
 
 ### Global state has a plan (`docs/rfc-global-state.md`)
 
@@ -1720,7 +1736,7 @@ while that token exists.
 **App widgets live in `Owned` boxes** (`widget::Owned<W>`, since 2026-10-07). An `Owned` keeps
 the widget in a heap allocation of its own and carries a token for that ALLOCATION. Moving the
 `Owned` (a `Vec` reallocating, a struct returned by value) does not move the widget, and the token
-dies only when the box is freed. `Owned` is itself a `WidgetHost`, forwarding every method, and
+dies only when the box is freed. `Owned` is itself a `WidgetHost`, forwarding every trait method, and
 reports the boxed widget through `WidgetHost::stable_target`. So `register_host(&mut self.x)`,
 `set_focused`, `render_widget` and `link_parent_child` all record the boxed widget and the box's
 token without the caller doing anything. `Deref`/`DerefMut` reach the widget, so

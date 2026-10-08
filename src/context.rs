@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::widget::{WidgetHost, WidgetId, Key, NamedKey, MouseButton, ElementState, Event};
+use crate::widget::{WidgetHost, WidgetId, Key, NamedKey, MouseButton, ElementState, Event, WidgetHostExt};
 
 pub struct SpatialGrid {
     pub cell_size: f32,
@@ -1508,9 +1508,6 @@ mod tests {
     }
     impl WidgetHost for Block {
         crate::impl_widget_base!(Block);
-        fn color(&self) -> [f32; 4] {
-            [0.0, 0.0, 0.0, 1.0]
-        }
     }
 
     /// `drag_allowed_at` — the window-drag question: allowed on empty surface, denied over a
@@ -1570,7 +1567,7 @@ mod focus_step_tests {
         // A widget with no role is not a stop.
         let mut sep = crate::widget::Separator::new(0.0, 0.0, 10.0, 1.0, [1.0; 4]);
         WidgetHost::set_rect(&mut sep, 300.0, 10.0, 10.0, 1.0);
-        assert_eq!(WidgetHost::focus_role(&sep), crate::widget::FocusRole::None);
+        assert_eq!(crate::widget::WidgetHostExt::focus_role(&sep), crate::widget::FocusRole::None);
 
         // A group's members walk together, where the group's first member falls:
         // grouping a and t (skipping b, which sits between them in reading order)

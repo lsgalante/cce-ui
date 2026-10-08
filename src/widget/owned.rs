@@ -17,7 +17,7 @@
 //! with `mem::swap` — but the allocation always holds a valid `W` while the token lives. So a
 //! pointer the registry resolves through an `Owned`'s token always names a live `W`.
 //!
-//! `Owned<W>` is itself a [`WidgetHost`] (every method forwards to the boxed widget), so it goes
+//! `Owned<W>` is itself a [`WidgetHost`] (every trait method forwards to the boxed widget), so it goes
 //! wherever a widget went: `register_host(&mut self.button)`, `set_focused`, `render_widget`,
 //! `link_parent_child`. Each of those registers through `WidgetTree::register`, which asks
 //! [`WidgetHost::stable_target`] and, for an `Owned`, stores the BOXED widget and the
@@ -35,7 +35,7 @@ use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
 use super::core::Liveness;
-use super::{ContextAction, CornerRadii, Event, FocusRole, LayoutConstraints, Point, Size, Widget, WidgetHost, WidgetId};
+use super::{Event, LayoutConstraints, Point, Size, Widget, WidgetHost, WidgetId};
 use crate::context::UiContext;
 
 /// A widget in a heap allocation of its own, which the registry can point at however the
@@ -137,6 +137,10 @@ impl<W: WidgetHost + std::fmt::Debug + 'static> std::fmt::Debug for Owned<W> {
 /// Every method forwards to the boxed widget, so an `Owned` behaves exactly as the widget does;
 /// the one addition is [`stable_target`](WidgetHost::stable_target).
 impl<W: WidgetHost + 'static> WidgetHost for Owned<W> {
+    fn layout_model(&self) -> &dyn crate::widget::Layout { (**self).layout_model() }
+    fn paint_model(&self) -> &dyn crate::widget::Paint { (**self).paint_model() }
+    fn input_model(&self) -> &dyn crate::widget::Input { (**self).input_model() }
+    fn input_model_mut(&mut self) -> &mut dyn crate::widget::Input { (**self).input_model_mut() }
     fn stable_target(&mut self) -> Option<(*mut (dyn WidgetHost + 'static), std::sync::Weak<()>)> {
         // The raw root itself, not a pointer taken from a reborrow (see the type's docs).
         let ptr: *mut (dyn WidgetHost + 'static) = self.widget.as_ptr();
@@ -145,36 +149,26 @@ impl<W: WidgetHost + 'static> WidgetHost for Owned<W> {
 
     fn base(&self) -> &Widget { (**self).base() }
     fn base_mut(&mut self) -> &mut Widget { (**self).base_mut() }
-    fn preferred_height(&self) -> Option<f32> { (**self).preferred_height() }
     fn label_strip(&self) -> f32 { (**self).label_strip() }
     fn detached_label_rect(&self) -> Option<crate::scene::layout::Rect> { (**self).detached_label_rect() }
-    fn mark_dirty(&mut self, ctx: &mut UiContext) { (**self).mark_dirty(ctx) }
     fn as_any(&self) -> &dyn std::any::Any { (**self).as_any() }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { (**self).as_any_mut() }
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool { (**self).handle_event(event, ctx) }
     fn measure(&self, constraints: LayoutConstraints, ctx: &UiContext) -> Size { (**self).measure(constraints, ctx) }
     fn layout(&mut self, origin: Point, constraints: LayoutConstraints, ctx: &mut UiContext) { (**self).layout(origin, constraints, ctx) }
     fn rect(&self) -> (f32, f32, f32, f32) { (**self).rect() }
-    fn label(&self) -> Option<String> { (**self).label() }
-    fn context_action(&mut self, action: ContextAction) -> bool { (**self).context_action(action) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { (**self).set_rect(x, y, w, h) }
     fn set_row_rect(&mut self, x: f32, w: f32) { (**self).set_row_rect(x, w) }
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool { (**self).hit_test(px, py, ctx) }
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> { (**self).highlight_quad(ctx) }
-    fn color(&self) -> [f32; 4] { (**self).color() }
-    fn solid_border(&self) -> Option<([f32; 4], f32)> { (**self).solid_border() }
-    fn plate_bevel(&self) -> Option<f32> { (**self).plate_bevel() }
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> { (**self).extra_quads() }
     fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> { (**self).extra_arcs() }
     fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> { (**self).extra_circles() }
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> { (**self).all_quads(ctx) }
     fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) { (**self).paint_self(ui, ctx) }
-    fn clips_children(&self) -> bool { (**self).clips_children() }
-    fn renders_own_subtree(&self) -> bool { (**self).renders_own_subtree() }
     fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         (**self).all_rounded_quads(ctx)
     }
-    fn widget_font(&self) -> Option<String> { (**self).widget_font() }
     fn type_name(&self) -> &'static str { (**self).type_name() }
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> { (**self).popover_rect() }
     fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) { (**self).render_popover(pc) }
@@ -185,22 +179,9 @@ impl<W: WidgetHost + 'static> WidgetHost for Owned<W> {
     fn set_visible(&mut self, visible: bool) { (**self).set_visible(visible) }
     fn visible(&self) -> bool { (**self).visible() }
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool { (**self).tick(dt, ctx) }
-    fn wants_tick(&self) -> bool { (**self).wants_tick() }
     fn is_child_visible(&self, child_id: WidgetId) -> bool { (**self).is_child_visible(child_id) }
-    fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) { (**self).set_modifiers(ctrl, shift, alt) }
-    fn z_index(&self) -> i32 { (**self).z_index() }
-    fn is_scrollable(&self) -> bool { (**self).is_scrollable() }
-    fn blocks_root_plate_drag(&self) -> bool { (**self).blocks_root_plate_drag() }
     fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) { (**self).corner_style() }
-    fn focus_role(&self) -> FocusRole { (**self).focus_role() }
-    fn keeps_tab(&self) -> bool { (**self).keeps_tab() }
-    fn a11y_role(&self) -> Option<accesskit::Role> { (**self).a11y_role() }
-    fn a11y_value(&self) -> Option<String> { (**self).a11y_value() }
-    fn a11y_range(&self) -> Option<(f64, f64, f64)> { (**self).a11y_range() }
-    fn a11y_set_value(&mut self, value: f64) -> bool { (**self).a11y_set_value(value) }
     fn a11y_items(&self) -> Vec<crate::a11y::A11yItem> { (**self).a11y_items() }
-    fn a11y_select_item(&mut self, idx: usize) -> bool { (**self).a11y_select_item(idx) }
-    fn corner_radii(&self) -> CornerRadii { (**self).corner_radii() }
 }
 
 #[cfg(test)]
@@ -215,9 +196,6 @@ mod tests {
     }
     impl WidgetHost for Tag {
         crate::impl_widget_base!(Tag);
-        fn color(&self) -> [f32; 4] {
-            [0.0; 4]
-        }
     }
     fn tag(n: u32) -> Owned<Tag> {
         Owned::new(Tag { base: Widget::new(), n })

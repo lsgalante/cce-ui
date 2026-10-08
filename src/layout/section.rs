@@ -14,6 +14,7 @@
 //! box and a one- or two-column grid for the widgets that do not span it. Its geometry is the
 //! settings app's, and documented on each placer.
 
+use crate::widget::WidgetHostExt;
 use super::*;
 use crate::widget::WidgetHost;
 use crate::context::UiContext;

@@ -1673,7 +1673,7 @@ mod tests {
         dd.parent_snapshot = Some(ParentSnapshot {
             rect: crate::widget::WidgetHost::rect(&ramp),
             is_ramp: true,
-            color: crate::widget::WidgetHost::color(&ramp),
+            color: crate::widget::WidgetHostExt::color(&ramp),
         });
 
         // Compute geometry

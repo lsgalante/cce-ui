@@ -795,7 +795,7 @@ mod tests {
         assert!(painted(&t) != before, "toggling changes the emitted geometry");
 
         // preferred_height forwards the legacy toggle height.
-        assert_eq!(WidgetHost::preferred_height(&t), Some(crate::layout::toggle_height()));
+        assert_eq!(crate::widget::WidgetHostExt::preferred_height(&t), Some(crate::layout::toggle_height()));
     }
 
     /// The toggle is ONE field, the form a text row's picker and a spinbox's

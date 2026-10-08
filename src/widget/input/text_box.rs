@@ -2617,7 +2617,7 @@ mod tests {
         assert_eq!(tb.history.undo_len(), 5);
 
         // Undo through the ContextAction route, then the raw-chord route.
-        assert!(WidgetHost::context_action(&mut tb, crate::widget::ContextAction::Undo));
+        assert!(crate::widget::WidgetHostExt::context_action(&mut tb, crate::widget::ContextAction::Undo));
         assert_eq!(tb.edit_buffer, "hello worlXYd");
         assert!(tb.keyboard_input(&key("z", true, false), &mut dummy));
         assert_eq!(tb.edit_buffer, "hello world");
@@ -2633,7 +2633,7 @@ mod tests {
         assert!(!tb.undo_edit(), "history exhausted");
 
         // Redo forward one, then a fresh keystroke forks the branch.
-        assert!(WidgetHost::context_action(&mut tb, crate::widget::ContextAction::Redo));
+        assert!(crate::widget::WidgetHostExt::context_action(&mut tb, crate::widget::ContextAction::Redo));
         assert_eq!(tb.edit_buffer, "hello");
         type_str(&mut tb, &mut dummy, "!");
         assert_eq!(tb.edit_buffer, "hello!");
@@ -2642,7 +2642,7 @@ mod tests {
         // A committed value is not the box's to undo.
         tb.unfocus();
         assert!(!tb.editing);
-        assert!(!WidgetHost::context_action(&mut tb, crate::widget::ContextAction::Undo));
+        assert!(!crate::widget::WidgetHostExt::context_action(&mut tb, crate::widget::ContextAction::Undo));
     }
 
     #[test]
@@ -2870,7 +2870,7 @@ mod tests {
         assert!(opts.contains(&"Clear".to_string()));
 
         // Simulate choosing the "Clear" option
-        WidgetHost::context_action(&mut tb, crate::widget::ContextAction::ClearText);
+        crate::widget::WidgetHostExt::context_action(&mut tb, crate::widget::ContextAction::ClearText);
         assert_eq!(tb.text, "");
         assert_eq!(tb.edit_buffer, "");
     }
@@ -2938,7 +2938,7 @@ mod tests {
         };
         tb.keyboard_input(&ctrl_x, &mut dummy);
         assert_eq!(tb.edit_buffer, "hunter2", "Ctrl+X cuts nothing");
-        assert!(!WidgetHost::context_action(&mut tb, crate::widget::ContextAction::Cut));
+        assert!(!crate::widget::WidgetHostExt::context_action(&mut tb, crate::widget::ContextAction::Cut));
         assert_eq!(tb.edit_buffer, "hunter2", "nor does the menu's Cut");
 
         dummy.hide_context_menu();

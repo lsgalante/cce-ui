@@ -120,7 +120,7 @@ mod tests {
 
         let size = l.intrinsic_size().unwrap();
         assert!(size.width > 0.0);
-        assert!(!WidgetHost::blocks_root_plate_drag(&l));
+        assert!(!crate::widget::WidgetHostExt::blocks_root_plate_drag(&l));
     }
 }
 

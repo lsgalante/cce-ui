@@ -3,6 +3,7 @@
 //! onto one, and the carve and popover types that cross it. Legacy: new code paints
 //! through `scene::paint::PaintCtx`.
 
+use crate::widget::WidgetHostExt;
 use crate::widget::WidgetHost;
 use crate::context::UiContext;
 

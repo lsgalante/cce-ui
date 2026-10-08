@@ -4,6 +4,7 @@
 //! draws and knows nothing of the window system; moved out of
 //! `window_runner` so another shell can share it.
 
+use crate::widget::WidgetHostExt;
 use crate::widget::WidgetHost;
 use crate::draw::Batch2D;
 
@@ -1248,17 +1249,9 @@ pub fn widget_vertices(w: &dyn crate::widget::WidgetHost, sw: f32, sh: f32, clip
 pub fn push_widget_vertices(w: &dyn crate::widget::WidgetHost, sw: f32, sh: f32, clip_circle: [f32; 3], out: &mut Vec<Vertex>) {
     let (x, y, ww, h) = w.rect();
     let radii = w.corner_radii();
-    if let Some(thickness) = w.plate_bevel() {
-        let t = thickness;
-        // Full-size fill: the bevel lip is a shading overlay now, not a paint of the
-        // outer ring, so an inset fill would leave the ring unfilled.
-        push_rounded_rect_vertices_corners(x, y, ww, h, radii, sw, sh, w.color(), clip_circle, None, out);
-        push_plate_bevel_vertices(x, y, ww, h, radii.top_left, t, sw, sh, w.color(), clip_circle, out);
-    } else {
-        push_rounded_rect_vertices_corners(x, y, ww, h, radii, sw, sh, w.color(), clip_circle, None, out);
-        if let Some((color, thickness)) = w.solid_border() {
-            push_plate_solid_border_vertices(x, y, ww, h, radii, thickness, sw, sh, color, clip_circle, out);
-        }
+    push_rounded_rect_vertices_corners(x, y, ww, h, radii, sw, sh, w.color(), clip_circle, None, out);
+    if let Some((color, thickness)) = w.solid_border() {
+        push_plate_solid_border_vertices(x, y, ww, h, radii, thickness, sw, sh, color, clip_circle, out);
     }
 
     for (cx, cy, r, t, start, end, qc) in w.extra_arcs() {

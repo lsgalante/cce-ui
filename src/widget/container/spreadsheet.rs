@@ -1436,7 +1436,7 @@ mod tests {
         assert_eq!(s.inner().selected_rows(), vec![2]);
 
         // Ctrl adds and removes.
-        WidgetHost::set_modifiers(&mut s, true, false, false);
+        crate::widget::WidgetHostExt::set_modifiers(&mut s, true, false, false);
         s.handle_event(&body_click(row_y(0)), &mut ctx);
         assert_eq!(s.inner().selected_rows(), vec![0, 2]);
         s.handle_event(&body_click(row_y(2)), &mut ctx);
@@ -1444,12 +1444,12 @@ mod tests {
 
         // Shift runs from the last row pressed without it (row 2, the ctrl
         // press) to this one.
-        WidgetHost::set_modifiers(&mut s, false, true, false);
+        crate::widget::WidgetHostExt::set_modifiers(&mut s, false, true, false);
         s.handle_event(&body_click(row_y(0)), &mut ctx);
         assert_eq!(s.inner().selected_rows(), vec![0, 1, 2]);
 
         // A plain press on the one selected row clears it.
-        WidgetHost::set_modifiers(&mut s, false, false, false);
+        crate::widget::WidgetHostExt::set_modifiers(&mut s, false, false, false);
         s.handle_event(&body_click(row_y(3)), &mut ctx);
         s.handle_event(&body_click(row_y(3)), &mut ctx);
         assert!(s.inner().selected_rows().is_empty());
@@ -1483,7 +1483,7 @@ mod tests {
         t.handle_event(&header_click(mid(&t, 0)), &mut ctx); // ascending: 2, 9, 10 = rows 2, 1, 0
         t.handle_event(&body_click(row_y(0)), &mut ctx);
         assert_eq!(t.inner().selected_rows(), vec![2], "the first row shown is the data's third");
-        WidgetHost::set_modifiers(&mut t, false, true, false);
+        crate::widget::WidgetHostExt::set_modifiers(&mut t, false, true, false);
         t.handle_event(&body_click(row_y(1)), &mut ctx);
         assert_eq!(t.inner().selected_rows(), vec![1, 2]);
 

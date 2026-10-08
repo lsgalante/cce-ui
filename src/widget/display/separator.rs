@@ -86,9 +86,9 @@ mod tests {
     fn constructor_places_the_rect_and_bridge_emits_it() {
         let sep = Separator::new(100.0, 0.0, 1.0, 24.0, [0.3, 0.3, 0.3, 1.0]);
         assert_eq!(WidgetHost::rect(&sep), (100.0, 0.0, 1.0, 24.0));
-        assert!(!WidgetHost::blocks_root_plate_drag(&sep));
+        assert!(!crate::widget::WidgetHostExt::blocks_root_plate_drag(&sep));
         if !crate::layout::control_relief() {
-            assert_eq!(WidgetHost::color(&sep), [0.3, 0.3, 0.3, 1.0]);
+            assert_eq!(crate::widget::WidgetHostExt::color(&sep), [0.3, 0.3, 0.3, 1.0]);
             assert_eq!(WidgetHost::extra_quads(&sep), vec![(100.0, 0.0, 1.0, 24.0, [0.3, 0.3, 0.3, 1.0])]);
         }
     }

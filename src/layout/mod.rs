@@ -2004,9 +2004,6 @@ mod tests {
             self.w = w;
             self.h = h;
         }
-        fn color(&self) -> [f32; 4] {
-            [0.0, 0.0, 0.0, 0.0]
-        }
     }
 
     struct MockWidgetWithLabel {
@@ -2025,9 +2022,6 @@ mod tests {
             self.base.y = y + offset;
             self.base.w = w;
             self.base.h = (h - offset).max(0.0);
-        }
-        fn color(&self) -> [f32; 4] {
-            [0.0, 0.0, 0.0, 0.0]
         }
     }
 

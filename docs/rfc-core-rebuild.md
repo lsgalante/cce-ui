@@ -2073,6 +2073,16 @@ Constraint respected: **each crate still builds standalone** — the new core is
     radius, is-Ramp flag) at re-parent time instead of the pointer —
     same refresh cadence, no deref of potentially-dead memory; watch
     the one-frame rect lag on resize if reads move to snapshots.
+  - **WidgetHost 57 → 38 (2026-10-08).** The trait had grown back past the blueprint's ~55
+    with the keyboard and accessibility hooks, and most of what `Adapted` implemented was a
+    one-line forward to a narrow trait. The narrow traits are dyn-compatible, so the host now
+    hands its widget out as them (`layout_model` / `paint_model` / `input_model` /
+    `input_model_mut`) and `WidgetHostExt` (blanket over every host, `dyn` included) carries
+    the 19 forwards and 3 derivations (`label`, `corner_radii`, `mark_dirty`) as provided
+    methods; `plate_bevel`, never overridden and so always `None`, went. What stays on the
+    trait adds host state to the model's answer. Apps changed only by importing the
+    extension trait; the designer, the demo, the gallery, cce-files, the data editor and
+    the settings app drew identically to the pixel before and after (scale-2 shadow).
   - **The `Element` endgame design (6bd, decided 2026-07-12).** The
     endgame is a **trait replacement, not an app rewrite**. Grounding
     facts (consumer survey): direct per-method dispatch

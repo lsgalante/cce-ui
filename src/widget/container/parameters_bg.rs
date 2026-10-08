@@ -4764,7 +4764,7 @@ mod tests {
         ParamController::set_display_params(&mut *p, &rows);
         WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 200.0);
         assert!(p.content_h > 200.0);
-        assert!(WidgetHost::is_scrollable(&p));
+        assert!(crate::widget::WidgetHostExt::is_scrollable(&p));
         // Wheel over the panel body but off every slider row's x-span is impossible (rows are
         // full-width), so scroll via the region below the last visible row: use a y between
         // rows (the 2px slack above a row) — simplest is the bottom padding strip.

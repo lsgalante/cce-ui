@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(quads[0].3, 8.0, "track keeps the assigned height");
 
         // preferred_height is the content height; the label strip is `label_strip`.
-        assert_eq!(WidgetHost::preferred_height(&bar), Some(crate::layout::progressbar_height()));
+        assert_eq!(crate::widget::WidgetHostExt::preferred_height(&bar), Some(crate::layout::progressbar_height()));
         assert_eq!(WidgetHost::label_strip(&bar), offset);
         // Runtime type-name matching still sees "ProgressBar", not Adapted<..>.
         assert_eq!(WidgetHost::type_name(&bar), "ProgressBar");

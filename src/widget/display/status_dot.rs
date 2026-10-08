@@ -85,7 +85,7 @@ mod tests {
         );
         assert!(WidgetHost::extra_quads(&dot).is_empty(), "nothing on the plain path (apps read both)");
         // Drags pass through, as legacy declared.
-        assert!(!WidgetHost::blocks_root_plate_drag(&dot));
+        assert!(!crate::widget::WidgetHostExt::blocks_root_plate_drag(&dot));
         // State mutation through Deref, as call sites write it.
         dot.set_status(DotStatus::Error);
         assert_eq!(dot.status, DotStatus::Error);

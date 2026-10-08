@@ -28,9 +28,7 @@
 
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::{PaintCtx, Prim};
-use crate::widget::{
-    WidgetHost, Event, TextLabel, UiContext, Widget, WidgetId,
-};
+use crate::widget::{WidgetHost, Event, TextLabel, UiContext, Widget, WidgetId, WidgetHostExt};
 
 /// Layout inputs for the scene layout engine — the RFC's `Widget` concern, named `Layout` here to
 /// avoid the existing [`Widget`] base struct.
@@ -1131,6 +1129,18 @@ impl<W: Layout + Paint + Input + 'static> std::ops::DerefMut for Adapted<W> {
 }
 
 impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
+    fn layout_model(&self) -> &dyn Layout {
+        &self.inner
+    }
+    fn paint_model(&self) -> &dyn Paint {
+        &self.inner
+    }
+    fn input_model(&self) -> &dyn Input {
+        &self.inner
+    }
+    fn input_model_mut(&mut self) -> &mut dyn Input {
+        &mut self.inner
+    }
     fn base(&self) -> &Widget {
         &self.base
     }
@@ -1172,13 +1182,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         false
     }
 
-    fn z_index(&self) -> i32 {
-        Layout::z_order(&self.inner)
-    }
 
-    fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
-        Input::set_modifiers(&mut self.inner, ctrl, shift, alt)
-    }
 
     fn focused(&self, _ctx: &UiContext) -> bool {
         Input::is_focused(&self.inner, self.base.focused)
@@ -1252,10 +1256,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         }
     }
 
-    /// The intrinsic content height — the control below the label.
-    fn preferred_height(&self) -> Option<f32> {
-        Layout::intrinsic_size(&self.inner).map(|s| s.height)
-    }
 
     fn label_strip(&self) -> f32 {
         if Layout::inline_label(&self.inner) { 0.0 } else { self.base.label_offset() }
@@ -1326,62 +1326,21 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     }
 
     // --- Paint concern -> `Paint` ---
-    fn color(&self) -> [f32; 4] {
-        Paint::color(&self.inner)
-    }
-    fn clips_children(&self) -> bool {
-        Paint::clips_children(&self.inner)
-    }
     fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) {
         // 12.0 / all-off mirrors the `WidgetHost` default for widgets without a corner style.
         Paint::corner_style(&self.inner, self.content_rect())
             .unwrap_or((12.0, (false, false, false, false)))
     }
-    fn focus_role(&self) -> FocusRole {
-        Input::focus_role(&self.inner)
-    }
 
-    fn keeps_tab(&self) -> bool {
-        Input::keeps_tab(&self.inner)
-    }
 
-    fn a11y_role(&self) -> Option<accesskit::Role> {
-        Input::a11y_role(&self.inner)
-    }
 
-    fn a11y_value(&self) -> Option<String> {
-        Input::value_string(&self.inner)
-    }
 
-    fn a11y_range(&self) -> Option<(f64, f64, f64)> {
-        Input::a11y_range(&self.inner)
-    }
 
-    fn a11y_set_value(&mut self, value: f64) -> bool {
-        Input::a11y_set_value(&mut self.inner, value)
-    }
 
     fn a11y_items(&self) -> Vec<crate::a11y::A11yItem> {
         Input::a11y_items(&self.inner, self.content_rect())
     }
 
-    fn a11y_select_item(&mut self, idx: usize) -> bool {
-        Input::a11y_select_item(&mut self.inner, idx)
-    }
-    fn solid_border(&self) -> Option<([f32; 4], f32)> {
-        Paint::solid_border(&self.inner)
-    }
-    fn widget_font(&self) -> Option<String> {
-        Paint::widget_font(&self.inner)
-    }
-    /// Scene-path emission. Geometry comes from [`Paint::paint`]; its plain `Text` prims are
-    /// REPLACED by the same font+bounds view the standard text bridges serve
-    /// (`own_labels_with_font_and_bounds`, or the per-label hatch), so a display list built by
-    /// the paint walk carries per-widget fonts and clip rects (Phase 6 — text ordering
-    /// relative to geometry is immaterial: glyphs always render in the later text pass).
-    fn renders_own_subtree(&self) -> bool {
-        Paint::paints_own_subtree(&self.inner)
-    }
 
     fn paint_self(&self, ui: &UiContext, ctx: &mut PaintCtx) {
         let mut tmp = PaintCtx::new();
@@ -1593,12 +1552,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     }
 
     // --- Input concern -> `Input` ---
-    fn blocks_root_plate_drag(&self) -> bool {
-        Input::blocks_root_plate_drag(&self.inner)
-    }
-    fn context_action(&mut self, action: crate::widget::ContextAction) -> bool {
-        Input::context_action(&mut self.inner, action)
-    }
     /// Row-rect assignment (row-layout hosts): apply the widget's clamp
     /// ([`Layout::adjust_row_rect`] — TextBox's `width`/`max_width`), then the base write the
     /// `WidgetHost` default does.
@@ -1625,12 +1578,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
             }
         }
         changed
-    }
-    fn wants_tick(&self) -> bool {
-        Input::wants_tick(&self.inner)
-    }
-    fn is_scrollable(&self) -> bool {
-        Input::scrollable(&self.inner)
     }
     /// Focus set/cleared directly (hosts call `w.focus()`/`w.unfocus()`): keep the base flag
     /// (unless the widget opts out — [`Input::tracks_base_focus`], TextBox's legacy `focus`

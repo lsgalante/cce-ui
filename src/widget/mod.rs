@@ -248,11 +248,6 @@ pub trait WidgetHost {
     fn stable_target(&mut self) -> Option<(*mut (dyn WidgetHost + 'static), std::sync::Weak<()>)> {
         None
     }
-    /// The widget's natural CONTENT height — the control below its detached label, if
-    /// any. What a layout strategy allots; [`WidgetHost::layout`] places that content
-    /// box at the origin it is given and hangs the label ([`WidgetHost::label_strip`])
-    /// above it. `None` when the widget has no natural height.
-    fn preferred_height(&self) -> Option<f32> { None }
 
     /// The height of the detached-label strip above this widget's content: zero for
     /// unlabeled widgets and for those whose base label IS their content
@@ -270,20 +265,6 @@ pub trait WidgetHost {
     /// as a block (a `Group`'s hull) unions this with the rect.
     fn detached_label_rect(&self) -> Option<crate::scene::layout::Rect> { None }
 
-    fn mark_dirty(&mut self, ctx: &mut UiContext) {
-        let b = self.base_mut();
-        if b.dirty {
-            return;
-        }
-        b.dirty = true;
-        if let Some(id) = b.id.get() {
-            if let Some(parent_ptr) = ctx.tree.parent_ptr(id) {
-                unsafe {
-                    (*parent_ptr).mark_dirty(ctx);
-                }
-            }
-        }
-    }
 
     // Required (the flip): the old defaults manufactured DummyAny stand-ins nothing
     // could legitimately use. `impl_widget_base!` provides both. `as_ptr`/`as_ptr_mut`
@@ -293,6 +274,23 @@ pub trait WidgetHost {
     // bridge — derived from a live borrow, never stored beyond the registry).
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+    /// The widget's own model, as its narrow traits: what [`WidgetHostExt`] reads its
+    /// one-line answers off (`Adapted` hands out its inner widget; a test shim with no
+    /// model gets [`NoModel`]'s defaults).
+    fn layout_model(&self) -> &dyn Layout {
+        &NoModel
+    }
+    fn paint_model(&self) -> &dyn Paint {
+        &NoModel
+    }
+    fn input_model(&self) -> &dyn Input {
+        &NoModel
+    }
+    fn input_model_mut(&mut self) -> &mut dyn Input {
+        // A zero-sized value: leaking it allocates nothing.
+        Box::leak(Box::new(NoModel))
+    }
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
         // The default serves test shims only (Adapted overrides this): base hover
@@ -337,9 +335,6 @@ pub trait WidgetHost {
         (b.x, b.y, b.w, b.h)
     }
 
-    fn label(&self) -> Option<String> {
-        self.base().label.clone()
-    }
 
     // The value/polling block (`get_value_string`/`set_value_string`/`take_change`/
     // `take_click`/`value`/`set_text`/`set_selected`) is GONE from the trait (6bd value
@@ -347,12 +342,6 @@ pub trait WidgetHost {
     // (which forward to the narrow `Input` hooks). The last dyn readers went concrete-slot
     // (TI's roster drain, cloud's JsonControl, designer's pane-focus sync).
 
-    /// Dispatch a context-menu action on this widget. Returns whether it was applied.
-    /// Default inert; the adapter forwards to `Input::context_action` (whose default gives
-    /// every widget whole-value Cut/Copy/Paste through the value-string pair).
-    fn context_action(&mut self, _action: ContextAction) -> bool {
-        false
-    }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         let b = self.base_mut();
@@ -406,9 +395,6 @@ pub trait WidgetHost {
         Some((hx, b.y, hw, b.h, hc))
     }
 
-    fn color(&self) -> [f32; 4];
-    fn solid_border(&self) -> Option<([f32; 4], f32)> { None }
-    fn plate_bevel(&self) -> Option<f32> { None }
 
     // `draggable`/`is_dragging` are GONE from the trait (the ControlPanel endgame
     // removed their last stored-child-pointer consumer): the drag queries are concrete
@@ -454,9 +440,7 @@ pub trait WidgetHost {
             // `all_rounded_quads` here (that would recurse and double-draw them).
             let cr = self.corner_radii();
             let radii = (cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
-            if let Some(depth) = self.plate_bevel() {
-                ctx.bevel(rect, radii, &crate::scene::material::Material::from_fill(color), depth);
-            } else if let Some((border_color, thickness)) = self.solid_border() {
+            if let Some((border_color, thickness)) = self.solid_border() {
                 ctx.border(rect, radii, color, border_color, thickness);
             } else if color[3].abs() > 0.001 {
                 let (radius, (r1, r2, r3, r4)) = self.corner_style();
@@ -482,17 +466,7 @@ pub trait WidgetHost {
         // trap). Migrated widgets go through `Adapted::paint_self`, never this default.
     }
 
-    /// Whether the paint walk should clip this widget's children to its rect (scroll/root plate
-    /// containers). Default: no clipping.
-    fn clips_children(&self) -> bool { false }
 
-    /// Whether this widget paints its ENTIRE subtree itself through its (recursive)
-    /// `all_rounded_quads` / `all_quads` — a legacy "subtree painter" such as `TreeList`, whose
-    /// row backgrounds and separators live in an `all_rounded_quads` override that also recurses
-    /// into its children. When true, the paint walk emits those directly and does NOT recurse
-    /// (the widget already did). Transitional: such widgets will eventually get a proper
-    /// non-recursive `paint_self`. Default: false.
-    fn renders_own_subtree(&self) -> bool { false }
 
     fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         if !self.visible() {
@@ -522,7 +496,6 @@ pub trait WidgetHost {
     // deleted default's base-label synthesis lives on in Adapted's base-label fallback,
     // and its scroll-ancestor clamp in scene::painter::scroll_ancestor_text_bounds.
 
-    fn widget_font(&self) -> Option<String> { None }
     fn type_name(&self) -> &'static str {
         let full_name = std::any::type_name::<Self>();
         full_name.split("::").last().unwrap_or("Widget")
@@ -544,9 +517,7 @@ pub trait WidgetHost {
     fn set_visible(&mut self, _visible: bool) {}
     fn visible(&self) -> bool { true }
     fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool { false }
-    fn wants_tick(&self) -> bool { false }
     fn is_child_visible(&self, _child_id: WidgetId) -> bool { true }
-    fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
 
     // `set_parent`/`add_child` are GONE from the trait (6bd batch 4): linking is a tree
     // operation — concrete callers ride the inherent `Adapted` methods, dyn callers go
@@ -557,9 +528,6 @@ pub trait WidgetHost {
     // child (the one `Layout::container_children` implementor) reaches the walks through
     // the tree link its per-tick `register_embedded_children` maintains.
 
-    fn z_index(&self) -> i32 { 0 }
-    fn is_scrollable(&self) -> bool { false }
-    fn blocks_root_plate_drag(&self) -> bool { true }
 
     /// Uniform corner radius + per-corner on-flags, in one read (6bd batch 2 — replaced the
     /// separate `corner_radius`/`rounded_corners` getters). The radius is meaningful even with
@@ -569,47 +537,132 @@ pub trait WidgetHost {
         (12.0, (false, false, false, false))
     }
 
-    /// This widget's part in keyboard navigation — `Input::focus_role` through
-    /// the adapter; `FocusRole::None` for anything that is not a plate or a well.
-    fn focus_role(&self) -> FocusRole {
-        FocusRole::None
-    }
 
-    /// Whether, focused, it takes Tab itself instead of the Tab walk (`Input::keeps_tab`).
-    fn keeps_tab(&self) -> bool {
-        false
-    }
 
-    /// An explicit accessibility role, overriding the guess `crate::a11y::role_for` makes
-    /// from the widget's type and focus role. Default `None`.
-    fn a11y_role(&self) -> Option<accesskit::Role> {
-        None
-    }
 
-    /// The widget's value for assistive technology: a field's text, a slider's number, a
-    /// check box's "true" / "false". Default `None`.
-    fn a11y_value(&self) -> Option<String> {
-        None
-    }
 
-    /// The `(min, max, step)` an assistive tool may set the value in (`Input::a11y_range`).
-    fn a11y_range(&self) -> Option<(f64, f64, f64)> {
-        None
-    }
 
-    /// Set the value an assistive tool asked for (`Input::a11y_set_value`).
-    fn a11y_set_value(&mut self, _value: f64) -> bool {
-        false
-    }
 
     /// The parts a screen reader sees as nodes of their own (`Input::a11y_items`).
     fn a11y_items(&self) -> Vec<crate::a11y::A11yItem> {
         Vec::new()
     }
 
+
+}
+
+/// The host surface that does not need a slot of its own in `WidgetHost`: what a widget's
+/// narrow traits answer ([`Input`], [`Paint`], [`Layout`], reached through the host's
+/// [`WidgetHost::input_model`] / [`paint_model`](WidgetHost::paint_model) /
+/// [`layout_model`](WidgetHost::layout_model)) and what is derived from the host's own state.
+/// Implemented for every host, `dyn WidgetHost` included, so `w.focus_role()` reads as it
+/// always did — with this trait in scope (`use cce_ui::widget::WidgetHostExt`). Until
+/// 2026-10-08 each of these was a `WidgetHost` method that `Adapted` overrode with a one-line
+/// forward and `Owned` forwarded again.
+pub trait WidgetHostExt: WidgetHost {
+    /// This widget's part in keyboard navigation — `Input::focus_role` through
+    /// the adapter; `FocusRole::None` for anything that is not a plate or a well.
+    fn focus_role(&self) -> FocusRole {
+        self.input_model().focus_role()
+    }
+
+    /// Whether, focused, it takes Tab itself instead of the Tab walk (`Input::keeps_tab`).
+    fn keeps_tab(&self) -> bool {
+        self.input_model().keeps_tab()
+    }
+
+    fn blocks_root_plate_drag(&self) -> bool {
+        self.input_model().blocks_root_plate_drag()
+    }
+
+    fn wants_tick(&self) -> bool {
+        self.input_model().wants_tick()
+    }
+
+    fn is_scrollable(&self) -> bool {
+        self.input_model().scrollable()
+    }
+
+    /// An explicit accessibility role, overriding the guess `crate::a11y::role_for` makes
+    /// from the widget's type and focus role. Default `None`.
+    fn a11y_role(&self) -> Option<accesskit::Role> {
+        self.input_model().a11y_role()
+    }
+
+    /// The widget's value for assistive technology: a field's text, a slider's number, a
+    /// check box's "true" / "false". Default `None`.
+    fn a11y_value(&self) -> Option<String> {
+        self.input_model().value_string()
+    }
+
+    /// The `(min, max, step)` an assistive tool may set the value in (`Input::a11y_range`).
+    fn a11y_range(&self) -> Option<(f64, f64, f64)> {
+        self.input_model().a11y_range()
+    }
+
+    /// Set the value an assistive tool asked for (`Input::a11y_set_value`).
+    fn a11y_set_value(&mut self, value: f64) -> bool {
+        self.input_model_mut().a11y_set_value(value)
+    }
+
     /// An assistive tool clicked one of them (`Input::a11y_select_item`).
-    fn a11y_select_item(&mut self, _idx: usize) -> bool {
-        false
+    fn a11y_select_item(&mut self, idx: usize) -> bool {
+        self.input_model_mut().a11y_select_item(idx)
+    }
+
+    fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
+        self.input_model_mut().set_modifiers(ctrl, shift, alt)
+    }
+
+    /// Dispatch a context-menu action on this widget. Returns whether it was applied.
+    /// Default inert; the adapter forwards to `Input::context_action` (whose default gives
+    /// every widget whole-value Cut/Copy/Paste through the value-string pair).
+    fn context_action(&mut self, action: ContextAction) -> bool {
+        self.input_model_mut().context_action(action)
+    }
+
+    fn color(&self) -> [f32; 4] {
+        self.paint_model().color()
+    }
+
+    fn solid_border(&self) -> Option<([f32; 4], f32)> {
+        self.paint_model().solid_border()
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        self.paint_model().widget_font()
+    }
+
+    /// Whether the paint walk should clip this widget's children to its rect (scroll/root plate
+    /// containers). Default: no clipping.
+    fn clips_children(&self) -> bool {
+        self.paint_model().clips_children()
+    }
+
+    /// Whether this widget paints its ENTIRE subtree itself through its (recursive)
+    /// `all_rounded_quads` / `all_quads` — a legacy "subtree painter" such as `TreeList`, whose
+    /// row backgrounds and separators live in an `all_rounded_quads` override that also recurses
+    /// into its children. When true, the paint walk emits those directly and does NOT recurse
+    /// (the widget already did). Transitional: such widgets will eventually get a proper
+    /// non-recursive `paint_self`. Default: false.
+    fn renders_own_subtree(&self) -> bool {
+        self.paint_model().paints_own_subtree()
+    }
+
+    fn z_index(&self) -> i32 {
+        self.layout_model().z_order()
+    }
+
+    /// The widget's natural CONTENT height — the control below its detached label, if
+    /// any. What a layout strategy allots; [`WidgetHost::layout`] places that content
+    /// box at the origin it is given and hangs the label ([`WidgetHost::label_strip`])
+    /// above it. `None` when the widget has no natural height.
+    fn preferred_height(&self) -> Option<f32> {
+        self.layout_model().intrinsic_size().map(|s| s.height)
+    }
+
+    fn label(&self) -> Option<String> {
+        self.base().label.clone()
     }
 
     fn corner_radii(&self) -> CornerRadii {
@@ -621,7 +674,36 @@ pub trait WidgetHost {
             if bl { r } else { 0.0 },
         )
     }
+
+    fn mark_dirty(&mut self, ctx: &mut UiContext){
+        let b = self.base_mut();
+        if b.dirty {
+            return;
+        }
+        b.dirty = true;
+        if let Some(id) = b.id.get() {
+            if let Some(parent_ptr) = ctx.tree.parent_ptr(id) {
+                unsafe {
+                    (*parent_ptr).mark_dirty(ctx);
+                }
+            }
+        }
+    }
 }
+
+impl<T: WidgetHost + ?Sized> WidgetHostExt for T {}
+
+/// The narrow traits' defaults, for a host that has no widget model of its own (the test
+/// shims that implement `WidgetHost` directly): transparent, no focus role, no value.
+pub struct NoModel;
+impl Layout for NoModel {}
+impl Paint for NoModel {
+    fn color(&self) -> [f32; 4] {
+        [0.0; 4]
+    }
+}
+impl Input for NoModel {}
+
 
 // The `Control` subtrait (set_label + control_label) is DELETED (6bd value shrink):
 // zero dyn consumers and zero `control_label()` callers remained; `set_label` lives on as

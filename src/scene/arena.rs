@@ -567,19 +567,25 @@ mod tests {
     fn holds_and_trees_real_dyn_element_payloads() {
         use crate::widget::WidgetHost;
 
-        // A minimal real `WidgetHost` — `color` is the trait's only required method, everything
-        // else is defaulted, so this exercises the actual trait object without dragging in a
-        // heavyweight widget constructor.
+        // A minimal real `WidgetHost` — its base and a paint model are all it supplies,
+        // everything else is defaulted, so this exercises the actual trait object without
+        // dragging in a heavyweight widget constructor.
+        use crate::widget::WidgetHostExt;
         struct Marker {
             base: crate::widget::Widget,
             tint: [f32; 4],
             painted: std::cell::Cell<bool>,
         }
-        impl WidgetHost for Marker {
-            crate::impl_widget_base!(Marker);
+        impl crate::widget::Paint for Marker {
             fn color(&self) -> [f32; 4] {
                 self.painted.set(true);
                 self.tint
+            }
+        }
+        impl WidgetHost for Marker {
+            crate::impl_widget_base!(Marker);
+            fn paint_model(&self) -> &dyn crate::widget::Paint {
+                self
             }
         }
 
