@@ -575,6 +575,11 @@ pub trait WidgetHost {
         FocusRole::None
     }
 
+    /// Whether, focused, it takes Tab itself instead of the Tab walk (`Input::keeps_tab`).
+    fn keeps_tab(&self) -> bool {
+        false
+    }
+
     /// An explicit accessibility role, overriding the guess `crate::a11y::role_for` makes
     /// from the widget's type and focus role. Default `None`.
     fn a11y_role(&self) -> Option<accesskit::Role> {

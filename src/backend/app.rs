@@ -443,14 +443,18 @@ pub trait Application: Sized + 'static {
         false
     }
 
-    /// Opt into the toolkit's keyboard navigation in plate terms: Tab and
-    /// Shift+Tab move focus to the next / previous plate or well in reading
-    /// order (`UiContext::focus_step`), a press (Enter / Space) acts on the
-    /// focused plate, a well opens for typing when focused. Default false: an
-    /// app that routes Tab itself (a terminal, a web view, its own field
-    /// order) is undisturbed. See "Plates, wells and seams" in `CLAUDE.md`.
+    /// The toolkit's keyboard navigation in plate terms: Tab and Shift+Tab move
+    /// focus to the next / previous plate or well in reading order
+    /// (`UiContext::focus_step`), a press (Enter / Space) acts on the focused
+    /// plate, a well opens for typing when focused. **On by default** (since
+    /// 2026-10-08, `docs/rfc-accessibility-locale.md` phase 3): the keyboard is
+    /// how a person who cannot use a pointer reaches anything. It needs the
+    /// app's `ui_context_mut`, so an app without a widget tree is untouched
+    /// (Tab reaches its `handle_key_input` as before); a focused widget that
+    /// takes Tab itself keeps it (`WidgetHost::keeps_tab`). An app that routes
+    /// Tab itself (its own field order, a completion popup) returns false.
     fn plate_navigation(&self) -> bool {
-        false
+        true
     }
 
     /// Wait for the NEXT compositor when this one goes away, instead of

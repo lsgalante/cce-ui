@@ -1210,12 +1210,16 @@ What this buys, and where the code is heading:
   first member falls (`focus_clusters`), wrapping; `focus_step_group` jumps
   between runs (input.kdl `focus_next_group` / `focus_prev_group`, defaults
   `ctrl+tab` / `ctrl+shift+tab`). The runner calls them for Tab / Shift+Tab
-  and the chords when the app opts
-  in with `Application::plate_navigation` (default off, so an app that routes
-  Tab itself — a terminal, a web view, its own field order — is undisturbed)
-  and tells the app through `Application::focus_stepped` — an app that caches
-  its geometry until its own rebuild flag raises it there. The walk needs the
-  app's context exposed (`ui_context_mut`); the ring reaches flat-path hosts
+  and the chords unless the app opts OUT with `Application::plate_navigation`
+  (default ON since 2026-10-08, accessibility RFC phase 3; the designer, the
+  display manager and cce-notes give Tab meanings of their own and return
+  false), and tells the app through `Application::focus_stepped` — an app that caches
+  its geometry until its own rebuild flag raises it there. A focused widget
+  that types Tab keeps it (`Input::keeps_tab`: a multi-line `TextBox` while
+  editing), and the group chord leaves it. The walk needs the
+  app's context exposed (`ui_context_mut`), so an app without one (a terminal,
+  a web view) gets Tab as before; a widget registered but never drawn is a
+  stop nobody can see, so register a widget only while it is shown. The ring reaches flat-path hosts
   through `RenderTarget::inset_plate_tinted` and `CarveKind::Boss { tint }`.
   `CCE_FOCUS_DEBUG=1` prints the stops in walk order.
   The focus ring is the plate's own silhouette: `ControlPlate::with_tint`

@@ -1894,6 +1894,12 @@ impl Input for TextBox {
     fn focus_role(&self) -> crate::widget::FocusRole {
         crate::widget::FocusRole::Well
     }
+
+    /// A multi-line box that is editing types Tab, as an editor does; a one-line field lets
+    /// the Tab walk take it (Tab leaves a field).
+    fn keeps_tab(&self) -> bool {
+        self.multiline && self.editing
+    }
     /// Advances the wheel glide / trackpad coast behind the scroll offsets.
     /// Cheap when idle (the common case); `wants_tick` is unconditional
     /// because it is sampled once at registration.

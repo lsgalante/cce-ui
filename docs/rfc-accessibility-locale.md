@@ -36,7 +36,8 @@ the cheapest moment there will be.
 
 **Keyboard.**
 - Tab / Shift+Tab plate navigation exists (`UiContext::focus_step`, `focus_step_group`)
-  but is OPT-IN (`Application::plate_navigation`, default false). Four apps turn it on:
+  but is OPT-IN (`Application::plate_navigation`, default false; on by default since phase
+  3). Four apps turn it on:
   cce-data-editor, cce-files, cce-gallery, cce-system-interface (plus the demo).
 - There is no tooltip (where an accessible description usually lives), no modal dialog
   widget (where focus must be trapped), and no radio group.
@@ -173,6 +174,19 @@ Orca.
   IME already makes with its hidden `<textarea>`.
 
 ### Phase 3 — keyboard first
+
+**Progress (2026-10-08): the walk is on by default.** `Application::plate_navigation`
+answers true. It changes nothing for an app without a `UiContext` (the walk finds no stops
+and Tab reaches `handle_key_input` as before: the terminal, the browser, the calendar and
+the other immediate-mode apps), so the apps it reached are the seven with a context that had
+not opted in. Three give Tab a meaning of their own and opt out: the designer (the node
+palette), the display manager (its username / password order) and cce-notes (accepting a
+link completion). A focused widget that types Tab keeps it (`Input::keeps_tab`: a
+multi-line `TextBox` while editing), and Ctrl+Tab still leaves it
+(`tab_walks_the_stops_but_a_multi_line_box_keeps_it`). Checked in a shadow, two Tabs each:
+cce-list, cce-weather, the demo and cce-relief ring their second stop; cce-fonts' first
+two stops were its picker buttons, registered outside picker mode and never drawn, and are
+now registered only in it; cce-text-editor has no stops and is unchanged.
 
 - `plate_navigation` defaults to true; an app that routes Tab itself (a terminal, a web
   view) opts OUT.

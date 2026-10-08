@@ -442,6 +442,14 @@ pub trait Input {
         FocusRole::None
     }
 
+    /// Whether, focused, this widget takes Tab itself, so the toolkit's Tab walk
+    /// (`Application::plate_navigation`) passes it the key instead of moving focus: a
+    /// multi-line text box that is editing types it. The group chord (`focus_next_group`,
+    /// Ctrl+Tab by default) still leaves it. Default false: Tab leaves a widget.
+    fn keeps_tab(&self) -> bool {
+        false
+    }
+
     /// Container hit policy: hit whenever any [`Layout::child_visible`] child hits (Layer,
     /// Switcher). The container's own rect is not consulted. Default: own-rect hit.
     fn hits_through_children(&self) -> bool {
@@ -1300,6 +1308,10 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     }
     fn focus_role(&self) -> FocusRole {
         Input::focus_role(&self.inner)
+    }
+
+    fn keeps_tab(&self) -> bool {
+        Input::keeps_tab(&self.inner)
     }
 
     fn a11y_role(&self) -> Option<accesskit::Role> {
