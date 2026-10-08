@@ -1562,6 +1562,19 @@ the ladder should be supplying, and the audit counts them.
   and a measured change for spacing: screenshot in a shadow session, count
   the columns of flat face at the edges and across a split, and they match.
 
+## Accessibility and locale are on the roadmap (read `docs/rfc-accessibility-locale.md`)
+
+There is no accessibility support yet (no AT-SPI, AccessKit, NSAccessibility or ARIA), the
+locale is the literal `"en-US"`, and the editors assume left-to-right text (`TextBox`
+assumes monospace too). The RFC has the measured state and a phased plan. Until it lands,
+two rules keep the retrofit cheap:
+
+- **A new widget declares what it is**: its `focus_role`, and a label that names it to a
+  person (not to a host).
+- **An action is keyed by an ID, never by its label text.** A context-menu row's label is its
+  identity today and hosts match on it, so translating any label breaks its action; do not
+  add more code that matches on displayed text.
+
 ## The `scene/` core rebuild (read `docs/rfc-core-rebuild.md` before touching it)
 
 `src/scene/` is a **retained scene graph being grown additively** to replace three overlaid legacy
