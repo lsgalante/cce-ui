@@ -1020,13 +1020,13 @@ impl DocEditor {
                 };
                 let top = oy + self.tops[i];
                 // Selection, behind everything on the line.
+                // The boxes of the selected clusters, so a selection crossing a change of
+                // direction is drawn where its letters are.
                 if let Some((a, b)) = sel {
                     if i >= a.line && i <= b.line {
-                        let from = if i == a.line { l.caret_xy(a.col) } else { (l.runs.first().map_or(l.content_x, |r| r.x), 0) };
-                        let to = if i == b.line { l.caret_xy(b.col) } else { (l.runs.iter().map(|r| r.x + r.w).fold(l.content_x, f32::max) + 6.0, l.rows - 1) };
-                        for row in from.1..=to.1 {
-                            let x0 = if row == from.1 { from.0 } else { l.runs.iter().filter(|r| r.row == row).map(|r| r.x).fold(f32::INFINITY, f32::min).min(l.content_x) };
-                            let x1 = if row == to.1 { to.0 } else { l.runs.iter().filter(|r| r.row == row).map(|r| r.x + r.w).fold(x0, f32::max) };
+                        let from = if i == a.line { a.col } else { 0 };
+                        let to = if i == b.line { b.col } else { usize::MAX };
+                        for (row, x0, x1) in l.selection_rects(from, to, i < b.line) {
                             if x1 > x0 {
                                 pc.quad(Rect { x: ox + x0, y: top + row as f32 * l.row_h, width: x1 - x0, height: l.row_h }, th.selection);
                             }

@@ -99,8 +99,14 @@ pub struct Run {
     pub strike: bool,
     pub link: Option<usize>,
     pub look: Look,
-    /// (line byte, x relative to `x`) at every char boundary of `src`.
+    /// (line byte, x relative to `x`) at every char boundary of `src`: the caret's place
+    /// before that char (a right-to-left letter's right edge), so not ascending in x where
+    /// the text turns.
     pub xs: Vec<(usize, f32)>,
+    /// The run's clusters (line bytes, x relative to `x`), what a selection covers.
+    pub clusters: Vec<crate::widget::shaping::ShapedCluster>,
+    /// Whether the run reads right to left (its own first strong character).
+    pub rtl: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -338,22 +344,87 @@ pub fn layout_line(text: &str, line: &preview::Line, active: bool, width: f32, t
                 link: seg.link,
                 look: seg.look,
                 xs: Vec::new(),
+                clusters: Vec::new(),
+                rtl: false,
             });
         }
     }
+    // Split every run where the bidirectional level changes, so each is one direction: a
+    // run of plain text can hold an English word and a Hebrew one, which the reordering
+    // below must be able to place apart. Levels are the whole line's, neutrals (spaces,
+    // markup) resolved from their neighbours.
+    let para_rtl = crate::backend::text::paragraph_rtl(text);
+    let levels = crate::backend::text::bidi_levels(text, para_rtl);
+    let level_at = |b: usize| levels.get(b).copied().unwrap_or(if para_rtl { 1 } else { 0 });
+    let mut split: Vec<Run> = Vec::with_capacity(runs.len());
+    for r in runs {
+        let mut from = r.src.start;
+        let mut cur = level_at(from);
+        for (i, _) in text[r.src.clone()].char_indices() {
+            let b = r.src.start + i;
+            if level_at(b) != cur {
+                split.push(Run { src: from..b, ..r.clone() });
+                from = b;
+                cur = level_at(b);
+            }
+        }
+        split.push(Run { src: from..r.src.end, ..r });
+    }
+    let mut runs = split;
     for r in &mut runs {
         while row_x.len() <= r.row {
             row_x.push(if row_x.is_empty() { start_x } else { content_x });
         }
         let shown = text[r.src.clone()].replace('\t', " ");
-        let offs = m.offsets(&shown, r.size, &r.font, r.attrs);
-        r.w = offs.last().map(|o| o.1).unwrap_or(0.0);
-        r.xs = offs.into_iter().map(|(b, x)| (r.src.start + b, x)).collect();
+        let shaped = m.shape(&shown, r.size, &r.font, r.attrs);
+        r.w = shaped.width;
+        r.rtl = shaped.rtl;
+        r.xs = shaped.stops.iter().map(|&(b, x)| (r.src.start + b, x)).collect();
+        r.clusters = shaped
+            .clusters
+            .iter()
+            .map(|c| crate::widget::shaping::ShapedCluster { start: r.src.start + c.start, end: r.src.start + c.end, ..*c })
+            .collect();
         r.text = shown;
         let pad = if r.look.pill { PILL_PAD } else { 0.0 };
         r.x = row_x[r.row] + pad;
         row_x[r.row] += r.w + 2.0 * pad + if r.look.pill { PILL_GAP } else { 0.0 };
     }
+    // Visual order. Runs were placed left to right in logical order; a row whose runs are
+    // not all of the paragraph's direction is re-placed in the order the bidirectional
+    // algorithm draws them (`visual_run_order`), and a right-to-left paragraph's rows are
+    // set against the right edge — a plain line or a heading's; a list, quote or table
+    // keeps its markers at the left and only reorders.
+    let align_right = para_rtl && matches!(line.kind, Kind::Plain | Kind::Heading(_));
+    let rows_placed = runs.last().map_or(0, |r| r.row + 1);
+    for row in 0..rows_placed {
+        let idx: Vec<usize> = (0..runs.len()).filter(|&i| runs[i].row == row).collect();
+        if idx.is_empty() {
+            continue;
+        }
+        let order = {
+            let run_levels: Vec<u8> = idx.iter().map(|&i| level_at(runs[i].src.start)).collect();
+            crate::backend::text::visual_order(&run_levels)
+        };
+        if !align_right && order.iter().enumerate().all(|(k, &o)| k == o) {
+            continue;
+        }
+        // A run's room: its pill padding either side, and the gap after a pill.
+        let room = |r: &Run| {
+            let pad = if r.look.pill { PILL_PAD } else { 0.0 };
+            (pad, r.w + 2.0 * pad + if r.look.pill { PILL_GAP } else { 0.0 })
+        };
+        let start = runs[idx[0]].x - room(&runs[idx[0]]).0;
+        let total: f32 = idx.iter().map(|&i| room(&runs[i]).1).sum();
+        let mut x = if align_right { (width - total).max(start) } else { start };
+        for &k in &order {
+            let i = idx[k];
+            let (pad, adv) = room(&runs[i]);
+            runs[i].x = x + pad;
+            x += adv;
+        }
+    }
+
     let rows = runs.last().map(|r| r.row + 1).unwrap_or(1);
     let mut height = rows as f32 * row_h;
 
@@ -502,13 +573,46 @@ impl LineLayout {
                     break;
                 }
             } else {
-                best = Some((r.x + r.w, r.row));
+                // Past the run's end: its trailing side, the left of a right-to-left run.
+                best = Some((if r.rtl { r.x } else { r.x + r.w }, r.row));
             }
         }
         best.unwrap_or_else(|| match self.runs.first() {
             Some(r) => (r.x, r.row),
             None => (self.content_x, 0),
         })
+    }
+
+    /// What the bytes `a..b` of the line cover, as `(row, x0, x1)` rects left to right: the
+    /// boxes of the clusters in that range, merged where they touch (and across the gap
+    /// between two runs of a row). A range crossing a change of direction is visually apart,
+    /// so it can be several on one row. `to_end` stretches the last row's selection a little
+    /// past the line's end, for a selection that goes on to the next line.
+    pub fn selection_rects(&self, a: usize, b: usize, to_end: bool) -> Vec<(usize, f32, f32)> {
+        let mut boxes: Vec<(usize, f32, f32)> = Vec::new();
+        for r in &self.runs {
+            for c in r.clusters.iter().filter(|c| c.start < b && c.end > a) {
+                boxes.push((r.row, r.x + c.x0, r.x + c.x1));
+            }
+        }
+        boxes.sort_by(|p, q| p.0.cmp(&q.0).then(p.1.total_cmp(&q.1)));
+        let gap = 2.0 * PILL_PAD + PILL_GAP + 1.0;
+        let mut out: Vec<(usize, f32, f32)> = Vec::new();
+        for (row, x0, x1) in boxes {
+            match out.last_mut() {
+                Some(last) if last.0 == row && x0 <= last.2 + gap => last.2 = last.2.max(x1),
+                _ => out.push((row, x0, x1)),
+            }
+        }
+        if to_end {
+            let last_row = self.rows.saturating_sub(1);
+            let end = self.runs.iter().map(|r| r.x + r.w).fold(self.content_x, f32::max) + 6.0;
+            match out.iter_mut().rev().find(|s| s.0 == last_row) {
+                Some(s) => s.2 = s.2.max(end),
+                None => out.push((last_row, end - 6.0, end)),
+            }
+        }
+        out
     }
 
     /// The byte nearest a point (x, row) of the line.
@@ -576,6 +680,54 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A Hebrew word in a Latin line: its carets fall from its right end, a click on its
+    /// right edge is its first letter, and a selection from inside the Latin into it is two
+    /// rects, the Latin end and the Hebrew word's right side (its first letters).
+    #[test]
+    fn right_to_left_words_are_laid_out_and_selected_where_they_are() {
+        let t = "ab שלום cd";
+        let l = lay(t, false, 2000.0);
+        let w0 = t.find('ש').unwrap();
+        let w_end = w0 + "שלום".len();
+        let (first, _) = l.caret_xy(w0);
+        let (last, _) = l.caret_xy(w0 + 6);
+        assert!(first > last, "the word's first letter is right of its last: {first} vs {last}");
+        assert_eq!(l.col_at(first, 0), w0, "a click at its right edge is its first letter");
+        let rects = l.selection_rects(1, w0 + 2, false);
+        assert_eq!(rects.len(), 2, "the Latin end and the word's right side: {rects:?}");
+        let (x_b, _) = l.caret_xy(1);
+        assert!((rects[0].1 - x_b).abs() < 0.5, "the first starts at the b: {rects:?}");
+        assert!(rects[1].2 <= first + 0.5 && rects[1].1 > last, "the second is inside the word, at its right");
+        let whole = l.selection_rects(0, w_end, false);
+        assert_eq!(whole.len(), 1, "a range ending at the word's end is one strip: {whole:?}");
+    }
+
+    /// A Hebrew paragraph is set against the right edge with its runs placed from the
+    /// right: its first word rightmost, a bold word after it to its left. In an English line,
+    /// two Hebrew runs side by side swap places (the right-to-left sequence reads from the
+    /// right), the English around them staying where it was.
+    #[test]
+    fn styled_runs_are_placed_in_visual_order() {
+        let width = 600.0;
+        let rtl = "שלום **עולם** טוב";
+        let l = lay(rtl, false, width);
+        let run_of = |l: &LineLayout, needle: &str| l.runs.iter().find(|r| r.text.contains(needle)).map(|r| (r.x, r.x + r.w)).unwrap();
+        let (first_x0, first_x1) = run_of(&l, "שלום");
+        let (bold_x0, bold_x1) = run_of(&l, "עולם");
+        let (last_x0, _) = run_of(&l, "טוב");
+        assert!((first_x1 - width).abs() < 1.0, "set against the right edge: {first_x1}");
+        assert!(bold_x1 <= first_x0 + 0.5 && last_x0 < bold_x0, "placed from the right: {:?}", l.runs.iter().map(|r| (&r.text, r.x)).collect::<Vec<_>>());
+
+        let mixed = "say שלום **עולם** now";
+        let m = lay(mixed, false, width);
+        let (say_x0, _) = run_of(&m, "say");
+        let (shalom_x0, _) = run_of(&m, "שלום");
+        let (olam_x0, olam_x1) = run_of(&m, "עולם");
+        let (now_x0, _) = run_of(&m, "now");
+        assert!(say_x0 < olam_x0 && olam_x1 <= shalom_x0 + 0.5 && shalom_x0 < now_x0, "the Hebrew pair swapped, between the English: {:?}", m.runs.iter().map(|r| (&r.text, r.x)).collect::<Vec<_>>());
+        assert!(say_x0 < 50.0, "a left-to-right line still starts at the left");
     }
 
     #[test]

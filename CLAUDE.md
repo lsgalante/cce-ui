@@ -1586,7 +1586,9 @@ Accessibility reaches Linux screen readers only, and only for an app that opts i
 widget tree is published over AT-SPI through AccessKit (`backend::a11y_unix`, the `a11y`
 feature, `Application::publishes_accessibility` or `CCE_A11Y=1`; phase 2, proven on
 cce-data-editor). There is nothing yet on macOS or in the browser, no message catalogue,
-and the editors assume left-to-right text (`TextBox` assumes monospace too). The RFC has
+and right-to-left text is edited where it is drawn (carets, clicks and selections follow
+it, a right-to-left paragraph is set against the right, the `DocEditor` draws styled runs
+in bidi order, a multiline `TextBox` wraps by shaped width — phase 4). The RFC has
 the measured state and a phased plan. Until it lands, two rules keep the retrofit cheap:
 
 - **A new widget declares what it is**: its `focus_role`, and a label that names it to a

@@ -53,46 +53,21 @@ struct PrepKey {
     attrs: crate::scene::paint::TextAttrs,
     scale_bits: u32,
     vertical: bool,
-    /// `Some(max chars per line)` for a multiline box.
-    wrap: Option<usize>,
+    /// `Some(the wrap width's bits)` for a multiline box ([`TextBox::wrap_width`]).
+    wrap: Option<u32>,
+    /// The width a right-to-left paragraph is set against the right of (the box less its
+    /// padding), as bits.
+    room_bits: u32,
 }
 
-/// Per-column x offsets of `text` as `buffer` shaped it: one entry per char plus
-/// its total advance. Byte offsets map to columns through one table, rather than
-/// recounting the prefix per glyph — which made long text quadratic.
-fn column_offsets(buffer: &cosmic_text::Buffer, text: &str, scale: f32) -> (Vec<f32>, f32) {
-    let mut col_of_byte = vec![0usize; text.len() + 1];
-    let mut n = 0;
-    for (col, (b, ch)) in text.char_indices().enumerate() {
-        col_of_byte[b..b + ch.len_utf8()].fill(col);
-        n = col + 1;
-    }
-    col_of_byte[text.len()] = n;
-
-    let mut offs = vec![0.0f32; n + 1];
-    let mut total: f32 = 0.0;
-    for (start, gx, gw) in crate::backend::text::normalized_glyph_starts(buffer, text) {
-        let c_idx = col_of_byte[start.min(text.len())];
-        if c_idx < offs.len() {
-            offs[c_idx] = gx / scale;
-        }
-        total = total.max((gx + gw) / scale);
-    }
-    (offs, total)
-}
-
-/// Carry the last recorded offset forward over columns no glyph started at
-/// (the trailing chars of a ligature or cluster). The single-line pass has
-/// always kept column 0's own value; the per-line pass fills it too.
-fn fill_gaps(offs: &mut [f32], include_first: bool) {
-    let mut current = 0.0;
-    for (i, o) in offs.iter_mut().enumerate() {
-        if *o == 0.0 && (include_first || i > 0) {
-            *o = current;
-        } else {
-            current = *o;
-        }
-    }
+/// What a [`TextBox`]'s cached advances were measured for.
+#[derive(Debug, Clone, PartialEq)]
+struct AdvanceKey {
+    text: String,
+    font_size_bits: u32,
+    font: Option<String>,
+    attrs: crate::scene::paint::TextAttrs,
+    scale_bits: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +129,22 @@ pub struct TextBox {
     /// families through fontdb, not cosmic-text) — a per-column error that made the multiline
     /// selection highlight drift off the glyphs. 0.0 until the first `prepare_text`.
     shaped_char_advance: f32,
+    /// Each char's shaped advance in the text being wrapped (logical px; a cluster's
+    /// whole width on its first char, 0 on the rest and on a newline), for the key it was
+    /// measured for. Wrapping sums these against the width, so a proportional face and
+    /// two-column CJK wrap where they are drawn. Filled from the paint's font system in
+    /// `prepare_text`, else from `geometry_font_system` when an edit outruns the frame.
+    advances: std::cell::RefCell<Option<(AdvanceKey, Vec<f32>)>>,
+    /// How far right a right-to-left paragraph is set so its right edge meets the box's
+    /// (0 for left-to-right text, and for a line too wide to fit): the single line's, and
+    /// each wrapped line's. Already in `glyph_positions` / `line_glyph_positions`, so
+    /// carets, clicks and selections follow; the drawing adds it to the text's x.
+    glyph_shift: f32,
+    line_shift: Vec<f32>,
+    /// The shaped runs those positions came from, for selections drawn as the boxes of
+    /// the clusters they cover (two pieces where one crosses a change of direction).
+    glyph_run: Option<crate::backend::text::ShapedRun>,
+    line_runs: Vec<crate::backend::text::ShapedRun>,
     /// Multiline counterpart of `glyph_positions`: per WRAPPED line, per-column x
     /// offsets of that line as drawn (`[line][col]`, one extra entry per line = its
     /// total advance), recorded by [`Paint::prepare_text`] over the same wrap the
@@ -235,6 +226,11 @@ impl TextBox {
             glyph_positions: Vec::new(),
             total_text_width: 0.0,
             shaped_char_advance: 0.0,
+            advances: std::cell::RefCell::new(None),
+            glyph_shift: 0.0,
+            line_shift: Vec::new(),
+            glyph_run: None,
+            line_runs: Vec::new(),
             line_glyph_positions: Vec::new(),
             prep_key: None,
             update_on_type: false,
@@ -342,15 +338,44 @@ impl TextBox {
         // A multiline box reads only the per-line offsets; shaping the whole
         // document as one buffer would be its most expensive and least used step.
         self.line_glyph_positions.clear();
-        if let Some(max_chars) = key.wrap {
-            let (lines, _) = self.wrap_text(max_chars);
-            for line in &lines {
+        if let Some(bits) = key.wrap {
+            // Measure the wrapped text's advances with the paint's font system first, so
+            // the wrap below never reaches for the shared one (which may be this one).
+            let src = if self.editing { self.edit_buffer.clone() } else { self.text.clone() };
+            self.cache_advances(fs, &src);
+            let (lines, map) = self.wrap_text(f32::from_bits(bits));
+            // Each wrapped line's paragraph, and whether that paragraph is right to left: a
+            // paragraph's direction is its first strong character's, for all its lines.
+            let para_rtl: Vec<bool> = src.split('\n').map(crate::backend::text::paragraph_rtl).collect();
+            let mut para_of_line = vec![0usize; lines.len()];
+            let mut para = 0usize;
+            let mut seen = vec![false; lines.len()];
+            for (ci, ch) in src.chars().enumerate() {
+                let line = map[ci].0.min(lines.len() - 1);
+                if !seen[line] {
+                    seen[line] = true;
+                    para_of_line[line] = para;
+                }
+                if ch == '\n' {
+                    para += 1;
+                }
+            }
+            for (line, s) in seen.iter().enumerate() {
+                if !s {
+                    para_of_line[line] = para;
+                }
+            }
+            let room = f32::from_bits(key.room_bits);
+            self.line_shift.clear();
+            self.line_runs.clear();
+            for (li, line) in lines.iter().enumerate() {
                 let line_buffer = shared(fs, line, self.font_size, font_fam, attrs);
-                let (mut offs, line_total) = column_offsets(&line_buffer, line, scale);
-                fill_gaps(&mut offs, true);
-                let n = offs.len() - 1;
-                offs[n] = line_total;
-                self.line_glyph_positions.push(offs);
+                let run = crate::backend::text::shaped_run(&line_buffer, line, scale);
+                let rtl = para_rtl.get(para_of_line[li]).copied().unwrap_or(false);
+                let shift = if rtl { (room - run.width).max(0.0) } else { 0.0 };
+                self.line_glyph_positions.push(run.stops.iter().map(|s| s.1 + shift).collect());
+                self.line_shift.push(shift);
+                self.line_runs.push(run);
             }
             self.glyph_positions = vec![0.0; render_text.chars().count() + 1];
             self.total_text_width = 0.0;
@@ -358,12 +383,15 @@ impl TextBox {
         }
 
         let buffer = shared(fs, &render_text, self.font_size, font_fam, attrs);
-        let (mut x_offsets, total_w) = column_offsets(&buffer, &render_text, scale);
-        fill_gaps(&mut x_offsets, false);
-        let last_idx = x_offsets.len() - 1;
-        x_offsets[last_idx] = total_w;
-
-        self.glyph_positions = x_offsets;
+        let run = crate::backend::text::shaped_run(&buffer, &render_text, scale);
+        let total_w = run.width;
+        // A right-to-left line that fits is set against the right; one that does not starts
+        // at the left and scrolls, as any overflowing line does.
+        let room = f32::from_bits(key.room_bits);
+        let shift = if crate::backend::text::paragraph_rtl(&render_text) && total_w < room { room - total_w } else { 0.0 };
+        self.glyph_positions = run.stops.iter().map(|s| s.1 + shift).collect();
+        self.glyph_shift = shift;
+        self.glyph_run = Some(run);
         self.total_text_width = total_w;
     }
 
@@ -379,14 +407,105 @@ impl TextBox {
         self.font_size * 1.333
     }
 
-    pub fn wrap_text(&self, max_chars_per_line: usize) -> (Vec<String>, Vec<(usize, usize)>) {
+    /// The width a multiline box wraps its lines at, for a box `outer_w` wide: its width
+    /// less the padding, or no limit with wrapping off.
+    pub fn wrap_width(&self, outer_w: f32) -> f32 {
+        if self.line_wrap_enabled() {
+            (outer_w - 2.0 * self.pad()).max(1.0)
+        } else {
+            f32::INFINITY
+        }
+    }
+
+    fn advance_key(&self, text: &str) -> AdvanceKey {
+        AdvanceKey {
+            text: text.to_string(),
+            font_size_bits: self.font_size.to_bits(),
+            font: self.value_font(),
+            attrs: self.font_attrs,
+            scale_bits: crate::scale::scale_factor().to_bits(),
+        }
+    }
+
+    /// Each char's shaped advance in `text` (see the `advances` field), shaped with `fs`.
+    fn measure_advances(&self, fs: &mut cosmic_text::FontSystem, text: &str) -> Vec<f32> {
+        let scale = crate::scale::scale_factor().max(0.01);
+        let font = self.value_font();
+        let mut out = Vec::with_capacity(text.chars().count());
+        for (pi, para) in text.split('\n').enumerate() {
+            if pi > 0 {
+                out.push(0.0); // the newline
+            }
+            let shown = if self.is_password { "•".repeat(para.chars().count()) } else { para.to_string() };
+            let buf = crate::backend::text::shared_text_buffer(fs, &shown, self.font_size, font.as_deref(), self.font_attrs);
+            let run = crate::backend::text::shaped_run(&buf, &shown, scale);
+            let mut adv = vec![0.0f32; shown.chars().count()];
+            let char_at: std::collections::HashMap<usize, usize> =
+                shown.char_indices().enumerate().map(|(ci, (b, _))| (b, ci)).collect();
+            for c in &run.clusters {
+                if let Some(&ci) = char_at.get(&c.start) {
+                    adv[ci] += c.x1 - c.x0;
+                }
+            }
+            out.extend(adv);
+        }
+        out
+    }
+
+    /// Measure `text`'s advances with `fs` into the cache, unless it already holds them.
+    fn cache_advances(&self, fs: &mut cosmic_text::FontSystem, text: &str) {
+        let key = self.advance_key(text);
+        if self.advances.borrow().as_ref().is_some_and(|(k, _)| *k == key) {
+            return;
+        }
+        let adv = self.measure_advances(fs, text);
+        *self.advances.borrow_mut() = Some((key, adv));
+    }
+
+    /// `text`'s char advances: the cache, else measured with the shared geometry font
+    /// system, else — that one held, by this thread further up the stack or by another —
+    /// with a font system of this thread's own, from the same font set. Always measured,
+    /// never a grid: two wraps of one text must agree.
+    fn char_advances(&self, text: &str) -> Vec<f32> {
+        thread_local! {
+            static OWN_FS: std::cell::RefCell<Option<cosmic_text::FontSystem>> = const { std::cell::RefCell::new(None) };
+        }
+        let key = self.advance_key(text);
+        if let Some((k, adv)) = self.advances.borrow().as_ref() {
+            if *k == key {
+                return adv.clone();
+            }
+        }
+        let adv = match crate::geometry_font_system().try_lock() {
+            Ok(mut fs) => self.measure_advances(&mut fs, text),
+            Err(_) => OWN_FS.with(|own| {
+                let mut own = own.borrow_mut();
+                let fs = own.get_or_insert_with(crate::create_font_system);
+                self.measure_advances(fs, text)
+            }),
+        };
+        *self.advances.borrow_mut() = Some((key, adv.clone()));
+        adv
+    }
+
+    /// The box's text wrapped at `max_width` px ([`TextBox::wrap_width`]): its lines, and
+    /// where each char lands as (line, column). Words move whole to the next line; a word
+    /// wider than the line breaks where it overflows. Widths are the shaped advances, so a
+    /// proportional face and two-column CJK wrap where they are drawn (until 2026-10-08 it
+    /// counted chars against one monospace advance).
+    pub fn wrap_text(&self, max_width: f32) -> (Vec<String>, Vec<(usize, usize)>) {
         let text_src = if self.editing { &self.edit_buffer } else { &self.text };
+        self.wrap_str(text_src, max_width)
+    }
+
+    /// [`TextBox::wrap_text`] for any text in the box's face (its placeholder).
+    pub fn wrap_str(&self, text_src: &str, max_width: f32) -> (Vec<String>, Vec<(usize, usize)>) {
         let chars: Vec<char> = text_src.chars().collect();
         let mut lines = Vec::new();
         let mut current_line = Vec::new();
         let mut index_map = vec![(0, 0); chars.len() + 1];
 
-        if !self.line_wrap_enabled() {
+        if !self.line_wrap_enabled() || !max_width.is_finite() {
             let mut i = 0;
             while i < chars.len() {
                 let ch = chars[i];
@@ -405,7 +524,10 @@ impl TextBox {
             return (lines, index_map);
         }
 
-        let max_chars = max_chars_per_line.max(1);
+        let adv = self.char_advances(text_src);
+        let max_width = max_width.max(1.0);
+        // The current line's width: the advances of the chars it holds.
+        let mut line_w = 0.0f32;
 
         let mut i = 0;
         while i < chars.len() {
@@ -415,46 +537,34 @@ impl TextBox {
                 index_map[i] = (lines.len(), current_line.len());
                 lines.push(current_line.iter().collect::<String>());
                 current_line.clear();
+                line_w = 0.0;
                 i += 1;
                 continue;
             }
 
             current_line.push(ch);
+            line_w += adv.get(i).copied().unwrap_or(0.0);
             index_map[i] = (lines.len(), current_line.len() - 1);
 
-            if current_line.len() > max_chars {
-                let mut space_idx = None;
-                for (s_idx, &c) in current_line.iter().enumerate().rev() {
-                    if c.is_whitespace() {
-                        space_idx = Some(s_idx);
-                        break;
-                    }
-                }
+            // A space may hang past the edge, as it is drawn there; anything else that
+            // overflows breaks the line after its last space, else before itself.
+            if line_w > max_width + 0.5 && current_line.len() > 1 && !ch.is_whitespace() {
+                let split = match current_line.iter().rposition(|c| c.is_whitespace()) {
+                    Some(s_idx) => s_idx + 1,
+                    None => current_line.len() - 1,
+                };
+                let line_to_push: Vec<char> = current_line[..split].to_vec();
+                let remaining: Vec<char> = current_line[split..].to_vec();
 
-                if let Some(s_idx) = space_idx {
-                    let line_to_push: Vec<char> = current_line[0..s_idx + 1].to_vec();
-                    let remaining: Vec<char> = current_line[s_idx + 1..].to_vec();
+                let line_idx = lines.len();
+                lines.push(line_to_push.iter().collect::<String>());
 
-                    let line_idx = lines.len();
-                    lines.push(line_to_push.iter().collect::<String>());
-
-                    current_line = remaining;
-                    let start_orig = i - current_line.len() + 1;
-                    for c_idx in 0..current_line.len() {
-                        index_map[start_orig + c_idx] = (line_idx + 1, c_idx);
-                    }
-                } else {
-                    let line_to_push: Vec<char> = current_line[0..max_chars].to_vec();
-                    let remaining: Vec<char> = current_line[max_chars..].to_vec();
-
-                    let line_idx = lines.len();
-                    lines.push(line_to_push.iter().collect::<String>());
-
-                    current_line = remaining;
-                    let start_orig = i - current_line.len() + 1;
-                    for c_idx in 0..current_line.len() {
-                        index_map[start_orig + c_idx] = (line_idx + 1, c_idx);
-                    }
+                current_line = remaining;
+                let start_orig = i + 1 - current_line.len();
+                line_w = 0.0;
+                for c_idx in 0..current_line.len() {
+                    index_map[start_orig + c_idx] = (line_idx + 1, c_idx);
+                    line_w += adv.get(start_orig + c_idx).copied().unwrap_or(0.0);
                 }
             }
             i += 1;
@@ -744,7 +854,9 @@ impl TextBox {
         let shaped = if self.multiline {
             self.line_glyph_positions
                 .iter()
-                .filter_map(|l| l.last().copied())
+                // A line's width is its widest stop: the last in left-to-right text, the
+                // first in right-to-left.
+                .map(|l| l.iter().copied().fold(0.0f32, f32::max))
                 .fold(0.0f32, f32::max)
         } else {
             self.total_text_width
@@ -759,15 +871,10 @@ impl TextBox {
 
     pub fn clamp_scroll(&mut self) {
         let pad = self.pad();
-        let char_width = self.char_width();
         let line_height = self.line_height();
-        let max_chars = if self.line_wrap_enabled() {
-            (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1)
-        } else {
-            999999
-        };
+        let max_w = self.wrap_width(self.rect.width);
         let (lines, _) = if self.multiline {
-            self.wrap_text(max_chars)
+            self.wrap_text(max_w)
         } else {
             let buffer = if self.editing { &self.edit_buffer } else { &self.text };
             (vec![buffer.clone()], vec![(0, 0); buffer.chars().count() + 1])
@@ -794,13 +901,9 @@ impl TextBox {
         let pad = self.pad();
         let char_width = self.char_width();
         let line_height = self.line_height();
-        let max_chars = if self.line_wrap_enabled() {
-            (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1)
-        } else {
-            999999
-        };
+        let max_w = self.wrap_width(self.rect.width);
         let (_lines, index_map) = if self.multiline {
-            self.wrap_text(max_chars)
+            self.wrap_text(max_w)
         } else {
             let buffer = if self.editing { &self.edit_buffer } else { &self.text };
             let mut m = Vec::new();
@@ -949,16 +1052,11 @@ impl TextBox {
     /// `mouse_input` press arm and `drag_update`.
     fn position_to_idx(&self, px: f32, py: f32) -> usize {
         let pad = self.pad();
-        let char_width = self.char_width();
         let top = self.label_top();
         if self.multiline {
             let line_height = self.line_height();
-            let max_chars = if self.line_wrap_enabled() {
-                (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1)
-            } else {
-                999999
-            };
-            let (lines, index_map) = self.wrap_text(max_chars);
+            let max_w = self.wrap_width(self.rect.width);
+            let (lines, index_map) = self.wrap_text(max_w);
             let click_line = (((py - (self.rect.y + top + pad) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
             let rel_x = px - (self.rect.x + pad) + self.scroll_x;
             let click_col = self.line_x_to_col(click_line.min(lines.len() - 1), rel_x);
@@ -987,7 +1085,6 @@ impl TextBox {
 
     /// Port of the legacy `keyboard_input` body.
     fn handle_key(&mut self, event: &KeyEvent) -> bool {
-        let pad = self.pad();
         if !self.editing || self.disabled { return false; }
         if event.state != ElementState::Pressed { return false; }
         // While an input method composes, its keys are its own: a shell does
@@ -1039,9 +1136,8 @@ impl TextBox {
                     state.clear_selection();
                 }
                 if self.multiline {
-                    let char_width = self.char_width();
-                    let max_chars = (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1);
-                    let (lines, index_map) = self.wrap_text(max_chars);
+                    let max_w = self.wrap_width(self.rect.width);
+                    let (lines, index_map) = self.wrap_text(max_w);
                     let (cursor_l, cursor_c) = index_map[state.cursor_idx.min(index_map.len() - 1)];
                     if cursor_l > 0 {
                         state.cursor_idx = self.map_2d_to_1d(&index_map, cursor_l - 1, cursor_c, lines.len() - 1);
@@ -1064,9 +1160,8 @@ impl TextBox {
                     state.clear_selection();
                 }
                 if self.multiline {
-                    let char_width = self.char_width();
-                    let max_chars = (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1);
-                    let (lines, index_map) = self.wrap_text(max_chars);
+                    let max_w = self.wrap_width(self.rect.width);
+                    let (lines, index_map) = self.wrap_text(max_w);
                     let (cursor_l, cursor_c) = index_map[state.cursor_idx.min(index_map.len() - 1)];
                     if cursor_l < lines.len() - 1 {
                         state.cursor_idx = self.map_2d_to_1d(&index_map, cursor_l + 1, cursor_c, lines.len() - 1);
@@ -1188,14 +1283,10 @@ impl TextBox {
         let char_width = self.char_width();
         let line_height = self.line_height();
 
-        let max_chars = if self.line_wrap_enabled() {
-            (((self.rect.width - 2.0 * pad) / char_width).floor() as usize).max(1)
-        } else {
-            999999
-        };
+        let max_w = self.wrap_width(self.rect.width);
 
         let (lines, _) = if self.multiline {
-            self.wrap_text(max_chars)
+            self.wrap_text(max_w)
         } else {
             let buffer = if self.editing { &self.edit_buffer } else { &self.text };
             (vec![buffer.clone()], vec![(0, 0); buffer.chars().count() + 1])
@@ -1284,12 +1375,8 @@ impl TextBox {
         let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
 
         if self.multiline {
-            let max_chars = if self.line_wrap_enabled() {
-                (((w - 2.0 * pad) / char_width).floor() as usize).max(1)
-            } else {
-                999999
-            };
-            let (_lines, index_map) = self.wrap_text(max_chars);
+            let max_w = self.wrap_width(w);
+            let (_lines, index_map) = self.wrap_text(max_w);
 
             let view_top = self.rect.y + top;
             let view_bottom = self.rect.y + self.rect.height;
@@ -1315,15 +1402,28 @@ impl TextBox {
                         }
                     }
                     if let (Some(sc), Some(ec)) = (line_start_col, line_end_col) {
-                        let highlight_x = x + pad + self.line_col_x(line_idx, sc) - self.scroll_x;
-                        let highlight_w = self.line_col_x(line_idx, ec + 1) - self.line_col_x(line_idx, sc);
                         let highlight_y = self.rect.y + top + pad + (line_idx as f32 * line_height) - self.scroll_y;
                         let clipped_y = highlight_y.max(view_top);
                         let clipped_bottom = (highlight_y + line_height).min(view_bottom);
-                        let h_left = highlight_x.max(x + pad);
-                        let h_right = (highlight_x + highlight_w).min(x + w - pad);
-                        if h_left < h_right && clipped_y < clipped_bottom {
-                            out.push((h_left, clipped_y, h_right - h_left, clipped_bottom - clipped_y, highlight_color));
+                        let shift = self.line_shift.get(line_idx).copied().unwrap_or(0.0);
+                        // The boxes of the selected clusters: two pieces where the selection
+                        // crosses a change of direction. Without a shaped run, the column span.
+                        let spans = match (self.line_runs.get(line_idx), _lines.get(line_idx)) {
+                            (Some(run), Some(line)) => {
+                                let byte = |col: usize| line.char_indices().nth(col).map_or(line.len(), |(b, _)| b);
+                                run.spans(byte(sc), byte(ec + 1)).into_iter().map(|(a, b)| (a + shift, b + shift)).collect()
+                            }
+                            _ => {
+                                let (a, b) = (self.line_col_x(line_idx, sc), self.line_col_x(line_idx, ec + 1));
+                                vec![(a.min(b), a.max(b))]
+                            }
+                        };
+                        for (a, b) in spans {
+                            let h_left = (x + pad + a - self.scroll_x).max(x + pad);
+                            let h_right = (x + pad + b - self.scroll_x).min(x + w - pad);
+                            if h_left < h_right && clipped_y < clipped_bottom {
+                                out.push((h_left, clipped_y, h_right - h_left, clipped_bottom - clipped_y, highlight_color));
+                            }
                         }
                     }
                 }
@@ -1339,8 +1439,9 @@ impl TextBox {
                         .filter_map(|i| index_map.get(i).filter(|p| p.0 == line_idx).map(|p| p.1))
                         .collect();
                     if let (Some(&a), Some(&b)) = (cols.iter().min(), cols.iter().max()) {
-                        let ux = x + pad + self.line_col_x(line_idx, a) - self.scroll_x;
-                        let uw = self.line_col_x(line_idx, b + 1) - self.line_col_x(line_idx, a);
+                        let (xa, xb) = (self.line_col_x(line_idx, a), self.line_col_x(line_idx, b + 1));
+                        let ux = x + pad + xa.min(xb) - self.scroll_x;
+                        let uw = (xb - xa).abs();
                         let uy = self.rect.y + top + pad + ((line_idx + 1) as f32 * line_height) - 2.0 - self.scroll_y;
                         let left = ux.max(x + pad);
                         let right = (ux + uw).min(x + w - pad);
@@ -1368,26 +1469,39 @@ impl TextBox {
         } else {
             let caret_h = self.font_size * 1.15;
             if start != end {
-                let h_left_offset = self.glyph_positions.get(start).copied().unwrap_or_else(|| start as f32 * char_width);
-                let h_right_offset = self.glyph_positions.get(end).copied().unwrap_or_else(|| end as f32 * char_width);
-                let highlight_x = x + pad + h_left_offset - self.scroll_x;
-                let h_left = highlight_x.max(x + pad);
-                let h_right = (x + pad + h_right_offset - self.scroll_x).min(x + w - pad);
-                if h_left < h_right {
-                    out.push((
-                        h_left,
-                        crate::layout::align_text_y(self.rect.y, self.rect.height, self.font_size, top),
-                        h_right - h_left,
-                        crate::layout::line_height(self.font_size),
-                        highlight_color,
-                    ));
+                // The boxes of the selected clusters: two pieces where the selection crosses
+                // a change of direction. Without a shaped run, the column span.
+                let shown = if self.is_password { "•".repeat(self.edit_buffer.chars().count()) } else { self.edit_buffer.clone() };
+                let spans: Vec<(f32, f32)> = match &self.glyph_run {
+                    Some(run) => {
+                        let byte = |col: usize| shown.char_indices().nth(col).map_or(shown.len(), |(b, _)| b);
+                        run.spans(byte(start), byte(end)).into_iter().map(|(a, b)| (a + self.glyph_shift, b + self.glyph_shift)).collect()
+                    }
+                    None => {
+                        let at = |i: usize| self.glyph_positions.get(i).copied().unwrap_or(i as f32 * char_width);
+                        vec![(at(start).min(at(end)), at(start).max(at(end)))]
+                    }
+                };
+                for (a, b) in spans {
+                    let h_left = (x + pad + a - self.scroll_x).max(x + pad);
+                    let h_right = (x + pad + b - self.scroll_x).min(x + w - pad);
+                    if h_left < h_right {
+                        out.push((
+                            h_left,
+                            crate::layout::align_text_y(self.rect.y, self.rect.height, self.font_size, top),
+                            h_right - h_left,
+                            crate::layout::line_height(self.font_size),
+                            highlight_color,
+                        ));
+                    }
                 }
             }
 
             if let Some((cs, cl)) = self.composing {
                 let at = |i: usize| self.glyph_positions.get(i).copied().unwrap_or(i as f32 * char_width);
-                let left = (x + pad + at(cs) - self.scroll_x).max(x + pad);
-                let right = (x + pad + at(cs + cl) - self.scroll_x).min(x + w - pad);
+                let (ca, cb) = (at(cs).min(at(cs + cl)), at(cs).max(at(cs + cl)));
+                let left = (x + pad + ca - self.scroll_x).max(x + pad);
+                let right = (x + pad + cb - self.scroll_x).min(x + w - pad);
                 if left < right {
                     let text_y = crate::layout::align_text_y(self.rect.y, self.rect.height, self.font_size, top);
                     out.push((left, text_y + self.font_size + 1.0, right - left, 1.5, cursor_color));
@@ -1452,40 +1566,19 @@ impl TextBox {
         let w = self.rect.width;
 
         if self.multiline {
-            let char_width = self.char_width();
             let line_height = self.line_height();
-            let max_chars = if self.line_wrap_enabled() {
-                (((w - 2.0 * pad) / char_width).floor() as usize).max(1)
-            } else {
-                999999
-            };
-            let (lines, _) = self.wrap_text(max_chars);
+            let max_w = self.wrap_width(w);
+            let (lines, _) = self.wrap_text(max_w);
             let lines_to_draw = if is_placeholder {
-                let placeholder_src = self.placeholder.as_ref().unwrap();
-                let chars: Vec<char> = placeholder_src.chars().collect();
-                let mut p_lines = Vec::new();
-                let mut current_line = Vec::new();
-                for ch in chars {
-                    if ch == '\n' {
-                        p_lines.push(current_line.iter().collect::<String>());
-                        current_line.clear();
-                    } else {
-                        current_line.push(ch);
-                        if self.line_wrap_enabled() && current_line.len() > max_chars {
-                            p_lines.push(current_line.iter().collect::<String>());
-                            current_line.clear();
-                        }
-                    }
-                }
-                p_lines.push(current_line.iter().collect::<String>());
-                p_lines
+                self.wrap_str(self.placeholder.as_deref().unwrap_or(""), max_w).0
             } else {
                 lines
             };
             for (line_idx, line_text) in lines_to_draw.iter().enumerate() {
+                let shift = if is_placeholder { 0.0 } else { self.line_shift.get(line_idx).copied().unwrap_or(0.0) };
                 labels.push(TextLabel {
                     text: line_text.clone(),
-                    x: x + pad - self.scroll_x,
+                    x: x + pad + shift - self.scroll_x,
                     y: self.rect.y + top + pad + (line_idx as f32 * line_height) + (line_height - self.font_size) / 2.0 - self.scroll_y,
                     font_size: self.font_size,
                     color: label_color,
@@ -1494,7 +1587,7 @@ impl TextBox {
         } else {
             labels.push(TextLabel {
                 text: display_text,
-                x: x + pad - self.scroll_x,
+                x: x + pad + self.glyph_shift - self.scroll_x,
                 y: crate::layout::align_text_y(self.rect.y, self.rect.height, self.font_size, top),
                 font_size: self.font_size,
                 color: label_color,
@@ -1693,7 +1786,6 @@ impl Paint for TextBox {
     /// The legacy `prepare_text`: sync font family/size with the live config defaults, then
     /// shape the display text and record per-glyph advances (`map_x_to_idx` reads them).
     fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
-        let pad = self.pad();
         // The input method's composition, shown before the buffer is shaped.
         self.sync_preedit();
         let (style_family, style_size) = crate::layout::control_label_font_detached_parsed();
@@ -1737,13 +1829,7 @@ impl Paint for TextBox {
         // `char_width()` returns this frame's shaped advance from here on, so the
         // wrap below matches the one `selection_quads`/`value_labels` compute at
         // paint time.
-        let wrap = self.multiline.then(|| {
-            if self.line_wrap_enabled() {
-                (((self.rect.width - 2.0 * pad) / self.char_width()).floor() as usize).max(1)
-            } else {
-                999999
-            }
-        });
+        let wrap = self.multiline.then(|| self.wrap_width(self.rect.width).to_bits());
 
         let key = PrepKey {
             text: display_text.to_string(),
@@ -1755,6 +1841,7 @@ impl Paint for TextBox {
             scale_bits: scale.to_bits(),
             vertical: crate::backend::text::vertical_text().is_some(),
             wrap,
+            room_bits: (self.rect.width - 2.0 * self.pad()).max(0.0).to_bits(),
         };
         if self.prep_key.as_ref() != Some(&key) {
             self.shape_columns(fs, &key);
@@ -1863,12 +1950,7 @@ impl Paint for TextBox {
             // top and bottom), so the thumb tracks the scroll range exactly.
             if self.multiline {
                 let line_height = self.line_height();
-                let max_chars = if self.line_wrap_enabled() {
-                    (((self.rect.width - 2.0 * pad) / self.char_width()).floor() as usize).max(1)
-                } else {
-                    999999
-                };
-                let content_h = self.wrap_text(max_chars).0.len() as f32 * line_height;
+                let content_h = self.wrap_text(self.wrap_width(self.rect.width)).0.len() as f32 * line_height;
                 crate::widget::container::scroll_box::paint_relief_scrollbar(
                     ctx,
                     Rect { x, y: self.rect.y + top, width: w, height: visual_h },
@@ -2110,6 +2192,99 @@ mod tests {
 
     /// The multiline caret/click math reads shaped per-line offsets; a caret
     /// must land exactly where it is drawn, on every column of every line.
+    /// A right-to-left word in a one-line box is set against the box's right edge, and
+    /// edited where it is drawn: the caret before each letter stands at its right edge, so
+    /// the offsets fall from the right end to the word's left; a click at the right end is
+    /// the start, at the word's left the end; the drawn text starts where the offsets do.
+    /// A selection from inside English into Hebrew is two pieces. The bidi levels come from
+    /// the text, so this holds whatever face draws the letters.
+    #[test]
+    fn a_right_to_left_word_is_edited_where_it_is_drawn() {
+        let mut fs = crate::create_font_system();
+        let mut tb = TextBox::new("שלום".to_string());
+        tb.set_rect(10.0, 10.0, 300.0, 30.0);
+        tb.prepare_text(&mut fs);
+        let offs = tb.glyph_positions.clone();
+        assert_eq!(offs.len(), 5, "four letters and the end");
+        if tb.total_text_width == 0.0 {
+            return; // nothing shaped (no fonts at all): nothing to check
+        }
+        let pad = tb.inner().pad();
+        let (left, room) = (10.0 + pad, 300.0 - 2.0 * pad);
+        assert!(offs.windows(2).all(|w| w[1] < w[0]), "carets fall right to left: {offs:?}");
+        assert!((offs[0] - room).abs() < 0.01, "set against the right edge: {offs:?}");
+        assert!((offs[4] - (room - tb.total_text_width)).abs() < 0.01, "{offs:?}");
+        assert_eq!(tb.inner().map_x_to_idx(left + room), 0, "the right end is the start");
+        assert_eq!(tb.inner().map_x_to_idx(left + offs[4]), 4, "the word's left is the end");
+        let label = &tb.inner().value_labels()[0];
+        assert!((label.x - (left + offs[4])).abs() < 0.01, "drawn where the offsets are: {} vs {}", label.x, left + offs[4]);
+
+        // English then Hebrew: a left-to-right line, as it was; a selection from the "b" to
+        // the Hebrew word's first letter is the b and that letter at the word's far right.
+        let mut tb = TextBox::new("ab שלום".to_string());
+        tb.set_rect(10.0, 10.0, 300.0, 30.0);
+        tb.inner_mut().editing = true;
+        tb.inner_mut().edit_buffer = "ab שלום".to_string();
+        tb.prepare_text(&mut fs);
+        assert!(tb.glyph_positions[0].abs() < 0.01, "a left-to-right line starts at the left");
+        tb.inner_mut().select_anchor = Some(1);
+        tb.inner_mut().cursor_idx = 4;
+        let mut quads = Vec::new();
+        tb.inner().selection_quads(10.0, 300.0, &mut quads);
+        let sel: Vec<_> = quads.iter().filter(|q| q.2 > 2.0).collect();
+        assert_eq!(sel.len(), 2, "two pieces: {sel:?}");
+    }
+
+    /// In a multiline box a Hebrew paragraph's lines are set against the right edge and an
+    /// English paragraph's are not; the drawn lines carry the same shift as the offsets.
+    #[test]
+    fn a_right_to_left_paragraph_is_set_against_the_right() {
+        let mut fs = crate::create_font_system();
+        let mut tb = TextBox::new("hello there\nשלום עולם".to_string()).with_multiline(true).with_line_wrap(true);
+        tb.set_rect(10.0, 10.0, 300.0, 200.0);
+        tb.prepare_text(&mut fs);
+        let room = 300.0 - 2.0 * tb.inner().pad();
+        let lines = tb.line_glyph_positions.clone();
+        assert_eq!(lines.len(), 2);
+        if lines[1].iter().all(|x| *x == 0.0) {
+            return; // nothing shaped
+        }
+        assert!(lines[0][0].abs() < 0.01, "English starts at the left");
+        let widest = lines[1].iter().copied().fold(0.0f32, f32::max);
+        assert!((widest - room).abs() < 0.01, "Hebrew ends at the right: {:?}", lines[1]);
+        let labels = tb.inner().value_labels();
+        assert!(labels[1].x > labels[0].x + 50.0, "the Hebrew line is drawn shifted: {} vs {}", labels[1].x, labels[0].x);
+    }
+
+    /// A multiline box wraps by the shaped width of what it holds, not a count of chars:
+    /// every line fits the box (a hanging space aside) and none breaks early — the next
+    /// line's first word would not have fitted on it. Text of mixed widths (narrow, wide,
+    /// CJK) is where a column count and the drawn width disagree.
+    #[test]
+    fn a_multiline_box_wraps_where_its_text_is_wide() {
+        let text = "iiii WWWW lll MMM 漢字漢字 iii WW 漢字漢字漢字 il WM 漢字".repeat(3);
+        let mut tb = TextBox::new(text.clone()).with_multiline(true).with_line_wrap(true);
+        crate::widget::WidgetHost::set_rect(&mut tb, 0.0, 0.0, 160.0, 400.0);
+        let inner = tb.inner();
+        let max_w = inner.wrap_width(160.0);
+        let (lines, map) = inner.wrap_text(max_w);
+        assert!(lines.len() > 2, "{lines:?}");
+        let width = |s: &str| inner.char_advances(s).iter().sum::<f32>();
+        for (i, line) in lines.iter().enumerate() {
+            let shown = line.trim_end();
+            assert!(width(shown) <= max_w + 0.5 || shown.chars().count() == 1, "line {i} {shown:?} is {} wide, past {max_w}", width(shown));
+            if let Some(next) = lines.get(i + 1) {
+                let word: String = next.chars().take_while(|c| !c.is_whitespace()).collect();
+                if !word.is_empty() && line.ends_with(' ') {
+                    assert!(width(&format!("{line}{word}")) > max_w + 0.5, "line {i} {line:?} broke before {word:?}, which fitted");
+                }
+            }
+        }
+        let rejoined: String = lines.concat();
+        assert_eq!(rejoined, text, "the lines are the text, cut");
+        assert_eq!(map.len(), text.chars().count() + 1);
+    }
+
     #[test]
     fn multiline_shaped_offsets_round_trip() {
         let mut fs = cosmic_text::FontSystem::new();

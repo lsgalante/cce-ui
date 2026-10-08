@@ -43,6 +43,9 @@ naga = { version = "24", features = ["wgsl-in"] }
 # Pinned to the exact version glyphon 0.8 resolved to, so shaping does not change:
 # verified by diffing shaped glyph ids/advances both ways over 288 runs.
 cosmic-text = "=0.12.1"
+# A paragraph's base direction and the reordering of styled runs (accessibility RFC phase 4).
+# Already in the tree through cosmic-text, which shapes with it.
+unicode-bidi = { version = "0.3.13", default-features = false, features = ["hardcoded-data"] }
 bitflags = "2"
 # The cursor names an app returns. smithay-client-toolkit re-exports this same
 # crate's type, so the Wayland shell hands it over unconverted; depending on it

@@ -210,6 +210,58 @@ accessible description is not done: no tooltips yet, by decision.
 
 ### Phase 4 — text that is not left-to-right monospace
 
+**Progress (2026-10-08).** Carets, clicks and selections follow the text in either
+direction, and a multiline `TextBox` wraps by shaped width:
+- **`backend::text::shaped_run`** (`ShapingMeasure::shape`) is a line as an editor needs it:
+  the caret's x at every char boundary — a cluster's LEADING edge, a right-to-left
+  letter's right — the clusters in logical order with their boxes, the width, and the
+  paragraph's base direction, which cosmic-text already takes from the first strong
+  character. `index_at` is a click, `spans` a selection (two where it crosses a change of
+  direction). `ShapingMeasure::offsets` is its stops; `shaped_cluster_offsets`, what
+  hand-drawn fields (`LineEdit` hosts) read, gives leading edges too.
+- **A fix underneath:** `normalized_glyph_starts` rebuilt glyph starts whenever they fell,
+  to repair cosmic-text 0.12's Basic shaping (span-relative starts) — but they also fall in
+  every right-to-left run, which it scrambled. Basic shaping is ASCII only, so the repair
+  now is too.
+- **`DocEditor`**: runs carry their cluster boxes and the shaped width; a selection is the
+  boxes it covers (`LineLayout::selection_rects`), so it is drawn where its letters are.
+- **`TextBox`**: its column offsets are the shaped stops (a right-to-left word is clicked and
+  selected where it is drawn), and a multiline box wraps by the summed shaped advances of
+  its chars against the width (`wrap_text(max_width)`, `wrap_width`), not a char count
+  against one monospace advance, so a proportional face and CJK wrap where they are drawn.
+  The advances are measured with the paint's font system in `prepare_text` and cached;
+  an edit that outruns the frame measures with the shared geometry font system, or a
+  thread's own when that one is held.
+
+**And the rest (the same day):**
+- **A right-to-left paragraph is set against the right.** `backend::text::paragraph_rtl` is
+  a paragraph's base direction (`unicode-bidi`, already in the tree through cosmic-text).
+  In a `TextBox` the shift is folded into the offsets, so caret, click and selection
+  follow, and added to where the text is drawn — a one-line box's text when it fits, each
+  wrapped line of a multiline box by its paragraph's direction. The shaping key now
+  carries the room the text is aligned in, which also re-shapes a box whose width was set
+  after its first shaping: cce-text-editor's highlight had stopped short on a CJK line
+  because its offsets were never re-shaped once the box had its size.
+- **The `DocEditor` draws a line's styled runs in visual order.** The line's bidi levels
+  (`bidi_levels`, neutrals resolved) split every run where the level changes, so a plain
+  run holding an English word and a Hebrew one becomes two, and each row's runs are placed
+  in the order rule L2 gives (`visual_order`); a plain or heading line of a right-to-left
+  paragraph is set against the right edge (a list, quote or table keeps its markers at the
+  left and only reorders).
+- **A selection crossing a change of direction is drawn as its pieces** in a `TextBox` too,
+  one-line and multiline, from the cluster boxes of each line's shaped run.
+
+Tests: `carets_follow_the_text_in_either_direction`,
+`right_to_left_words_are_laid_out_and_selected_where_they_are`,
+`styled_runs_are_placed_in_visual_order`, `runs_are_reordered_as_the_bidi_algorithm_draws_them`,
+`a_right_to_left_word_is_edited_where_it_is_drawn`,
+`a_right_to_left_paragraph_is_set_against_the_right`, `a_multiline_box_wraps_where_its_text_is_wide`.
+Checked in a shadow: cce-text-editor sets a Hebrew paragraph against the right with its
+English and Arabic in bidi order. Still the shaping's own limit: a run's base direction is
+cosmic-text's guess from the run's text, which a style split mid-paragraph can get wrong
+for a run that starts with a neutral; arrow keys move the caret in logical order, as
+editors on most platforms do.
+
 - Carets and selection from shaped clusters in VISUAL order (cosmic-text's layout runs
   carry direction), not byte-sorted x positions: `ShapingMeasure::offsets` grows a
   direction-aware form, and `DocEditor` and `LineEdit` use it.
