@@ -118,7 +118,6 @@ impl StyleRegistry {
         #[cfg(test)]
         {
             test_overlay::set_float(key, val);
-            return;
         }
         #[cfg(not(test))]
         self.load_float(key, val);
@@ -128,7 +127,6 @@ impl StyleRegistry {
         #[cfg(test)]
         {
             test_overlay::set_len(key, len);
-            return;
         }
         #[cfg(not(test))]
         self.load_len(key, len);
@@ -138,7 +136,6 @@ impl StyleRegistry {
         #[cfg(test)]
         {
             test_overlay::set_string(key, val);
-            return;
         }
         #[cfg(not(test))]
         self.load_string(key, val);

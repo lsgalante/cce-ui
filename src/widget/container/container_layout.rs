@@ -556,13 +556,12 @@ impl Packer {
         let mut best_x = f32::MAX;
 
         for (idx, &(rx, ry, rw, rh)) in self.free_rects.iter().enumerate() {
-            if rw >= cw_clamped && rh >= ch {
-                if ry < best_y || (ry == best_y && rx < best_x) {
+            if rw >= cw_clamped && rh >= ch
+                && (ry < best_y || (ry == best_y && rx < best_x)) {
                     best_y = ry;
                     best_x = rx;
                     best_idx = Some(idx);
                 }
-            }
         }
 
         let chosen_idx = match best_idx {

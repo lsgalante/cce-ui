@@ -268,6 +268,9 @@ mod tests {
 
     /// Owns marker widgets and hands out stable raw pointers + ids for them.
     struct Widgets {
+        // Boxed: each marker's address must not move as the Vec grows (the tree holds
+        // raw pointers to them).
+        #[allow(clippy::vec_box)]
         boxes: Vec<Box<Marker>>,
     }
     impl Widgets {
@@ -276,7 +279,7 @@ mod tests {
         }
         /// Create a widget, returning `(WidgetId, *mut dyn WidgetHost)`.
         fn make(&mut self, tag: u32) -> (WidgetId, *mut (dyn WidgetHost + 'static)) {
-            let mut b = Box::new(Marker { base: crate::widget::Widget::new(), tag: tag });
+            let mut b = Box::new(Marker { base: crate::widget::Widget::new(), tag });
             let ptr: *mut (dyn WidgetHost + 'static) = &mut *b;
             self.boxes.push(b);
             (WidgetId(tag as usize), ptr)

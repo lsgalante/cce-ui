@@ -243,7 +243,7 @@ impl HeightField {
                 continue;
             }
             let shape = p.shape.clamp(2.0, 16.0);
-            if profiles.as_ref().map_or(true, |(s, _)| (*s - shape).abs() > 1e-3) {
+            if profiles.as_ref().is_none_or(|(s, _)| (*s - shape).abs() > 1e-3) {
                 profiles = Some((shape, Profiles::build(shape)));
             }
             let prof = &profiles.as_ref().unwrap().1;
@@ -478,9 +478,9 @@ pub fn export_png(hf: &HeightField, path: &Path, mm_per_sample: Option<f32>) -> 
     let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w as u32, h as u32);
     enc.set_color(png::ColorType::Grayscale);
     enc.set_depth(png::BitDepth::Sixteen);
-    let mut writer = enc.write_header().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    writer.write_image_data(&bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    writer.finish().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let mut writer = enc.write_header().map_err(std::io::Error::other)?;
+    writer.write_image_data(&bytes).map_err(std::io::Error::other)?;
+    writer.finish().map_err(std::io::Error::other)?;
     let side = serde_json::json!({
         "width": w,
         "height": h,

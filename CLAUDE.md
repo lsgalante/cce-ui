@@ -484,7 +484,7 @@ following the caret through every step, each `done`'s serial equal to the commit
 Sway routes text-input focus only while an input method is bound, so with none (the
 24-step harness) nothing changes: 0 px.
 
-CI (`.github/workflows/ci.yml`, every push and PR) has three jobs, warnings as errors in each:
+CI (`.github/workflows/ci.yml`, every push and PR) has four jobs, warnings as errors in each:
 
 - **`test`** (Ubuntu 24.04) builds and tests with default and with all features. It installs
   `libwayland-dev` and `libxkbcommon-dev` (the two native libraries the build links, through
@@ -495,6 +495,12 @@ CI (`.github/workflows/ci.yml`, every push and PR) has three jobs, warnings as e
   tests needing a second face or a fallback glyph kept the workflow red from 2026-10-07 to
   10-08). It also runs the path tracer's `#[ignore]`d GPU tests on lavapipe's compute tier
   (`CCE_VK_RT=compute cargo test --lib vk::rt -- --ignored`).
+- **`clippy`** runs `cargo clippy --all-targets --all-features -- -D warnings` (since
+  2026-10-08). Five lints are allowed as house style in `Cargo.toml`'s `[lints.clippy]`, each
+  with its reason (too many arguments, complex tuple types, precise colour constants, index
+  loops, `new` without `Default`); anything else clippy reports is fixed, not allowed —
+  locally, `cargo clippy -p cce-ui --all-features --all-targets -- -D warnings` is the check.
+  Linux only: `src/web` and `src/mac` are compiled out there.
 - **`wasm`** runs `scripts/check-wasm`: the library, its features and the four wasm examples,
   type-checked for the browser. Its `RUSTFLAGS` carries `--cfg=web_sys_unstable_apis` itself,
   since an environment `RUSTFLAGS` replaces `.cargo/config.toml`'s. Its first run (2026-10-08)

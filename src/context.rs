@@ -207,15 +207,15 @@ impl UiContext {
             self.note_scroll_event();
         }
         if let Event::KeyInput(ref key_event) = event {
-            let is_scroll_key = match &key_event.logical_key {
+            let is_scroll_key = matches!(
+                &key_event.logical_key,
                 Key::Named(NamedKey::PageUp)
-                | Key::Named(NamedKey::PageDown)
-                | Key::Named(NamedKey::Home)
-                | Key::Named(NamedKey::End)
-                | Key::Named(NamedKey::ArrowUp)
-                | Key::Named(NamedKey::ArrowDown) => true,
-                _ => false,
-            };
+                    | Key::Named(NamedKey::PageDown)
+                    | Key::Named(NamedKey::Home)
+                    | Key::Named(NamedKey::End)
+                    | Key::Named(NamedKey::ArrowUp)
+                    | Key::Named(NamedKey::ArrowDown)
+            );
             if is_scroll_key {
                 let mut handled = false;
                 if let Some(focused) = self.focused_widget.and_then(|id| self.tree.get_ptr(id)) {

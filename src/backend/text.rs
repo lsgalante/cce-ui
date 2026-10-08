@@ -288,7 +288,7 @@ fn replay_font_ops(fs: &mut FontSystem, ops: &[FontOp]) {
     };
     let synced = FONT_OPS_SYNCED.with(|m| m.borrow().get(&key).copied());
     let (mut done, mut last) = match synced {
-        Some((done, last)) if last.map_or(true, |(id, n)| is_alias(fs, id, n)) => (done, last),
+        Some((done, last)) if last.is_none_or(|(id, n)| is_alias(fs, id, n)) => (done, last),
         _ => (0, None),
     };
     if done == ops.len() {
@@ -704,7 +704,7 @@ pub fn visual_run_order(runs: &[&str], rtl: bool) -> Vec<usize> {
         .iter()
         .map(|t| match unicode_bidi::get_base_direction(*t) {
             unicode_bidi::Direction::Rtl => if base % 2 == 1 { base } else { base + 1 },
-            unicode_bidi::Direction::Ltr => if base % 2 == 0 { base } else { base + 1 },
+            unicode_bidi::Direction::Ltr => if base.is_multiple_of(2) { base } else { base + 1 },
             unicode_bidi::Direction::Mixed => base,
         })
         .collect();

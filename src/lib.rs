@@ -156,7 +156,7 @@ pub fn icon_pixels(name: &str, px: u32, tint: Option<[u8; 3]>) -> Option<(Vec<u8
     let data = std::fs::read(&path).ok()?;
     let (mut rgba, w, h) = rasterize_svg(&data, px)?;
     if let Some(rgb) = tint {
-        for p in rgba.chunks_exact_mut(4) {
+        for p in rgba.as_chunks_mut::<4>().0 {
             for (c, &t) in p[..3].iter_mut().zip(rgb.iter()) {
                 *c = ((*c as u16 * t as u16 + 127) / 255) as u8;
             }
@@ -231,7 +231,7 @@ pub fn rasterize_svg(data: &[u8], px: u32) -> Option<(Vec<u8>, u32, u32)> {
     );
     // tiny-skia pixels are premultiplied; the upload path takes straight RGBA.
     let mut rgba = pixmap.take();
-    for p in rgba.chunks_exact_mut(4) {
+    for p in rgba.as_chunks_mut::<4>().0 {
         let a = p[3] as f32 / 255.0;
         if a > 0.0 {
             p[0] = ((p[0] as f32 / a).min(255.0)) as u8;

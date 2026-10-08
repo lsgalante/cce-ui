@@ -1134,7 +1134,7 @@ mod tests {
     fn a_half_scrolled_row_draws_its_text_cut_at_the_body() {
         let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
         let mut s = filled(20);
-        (*s).scroll_y = ROW_H * 0.5;
+        s.scroll_y = ROW_H * 0.5;
         let mut pc = crate::scene::paint::PaintCtx::new();
         Paint::paint(&*s, rect, &mut pc);
         let items = pc.finish().items;
@@ -1215,7 +1215,7 @@ mod tests {
         let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
         let mut s = wide(6);
         assert_eq!((*s).header_col_at(10.0, 5.0, rect), Some(0));
-        (*s).scroll_x = (*s).col_edges()[1];
+        s.scroll_x = (*s).col_edges()[1];
         assert_eq!((*s).header_col_at(10.0, 5.0, rect), Some(1));
     }
 
@@ -1243,8 +1243,8 @@ mod tests {
         }
         let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
         let max = (*s).hgeom(rect).unwrap().max_scroll;
-        assert!((*s).scroll_x >= 0.0 && (*s).scroll_x <= max, "h-scroll stays clamped");
-        assert!((*s).scroll_x > 0.0, "negative dx scrolled the columns (ScrollRegion sign convention)");
+        assert!(s.scroll_x >= 0.0 && s.scroll_x <= max, "h-scroll stays clamped");
+        assert!(s.scroll_x > 0.0, "negative dx scrolled the columns (ScrollRegion sign convention)");
 
         // A pane whose columns fit ignores horizontal wheels.
         let mut fits = wide(2);

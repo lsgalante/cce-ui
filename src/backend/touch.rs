@@ -119,7 +119,7 @@ impl TouchTracker {
     }
 
     pub fn up(&mut self, id: i32) -> Vec<TouchAction> {
-        if self.finger.map_or(true, |f| f.id != id) {
+        if self.finger.is_none_or(|f| f.id != id) {
             return Vec::new();
         }
         let f = self.finger.take().unwrap();

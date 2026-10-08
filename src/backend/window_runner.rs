@@ -250,7 +250,7 @@ impl<A: Application> EngineState<A> {
         let surface_ptr = surface.id().as_ptr() as *mut std::ffi::c_void;
         self.display_ptr = display_ptr as usize;
 
-        let load_system_fonts = self.inner.as_ref().map_or(false, |a| a.load_system_fonts());
+        let load_system_fonts = self.inner.as_ref().is_some_and(|a| a.load_system_fonts());
         // Corner radius 0: runner apps tessellate their own rounded corners.
         let mut renderer = unsafe { VkRenderer::try_new(display_ptr, surface_ptr, pw, ph, 0.0) }?;
         if self.inner.as_ref().is_some_and(|a| a.grid()) {
@@ -513,7 +513,7 @@ impl<A: Application> EngineState<A> {
                 // ~5s of continuous skipping at the 16ms loop cadence: nothing
                 // is presenting and nothing else will say so — this is the
                 // only witness to a wedged pending extent.
-                if self.extent_gate_skips % 300 == 0 {
+                if self.extent_gate_skips.is_multiple_of(300) {
                     log::warn!(
                         "[window_runner] extent gate: pending {}x{} != expected {}x{} for {} consecutive renders; no frame is presenting",
                         e.width, e.height, epw, eph, self.extent_gate_skips,
@@ -892,7 +892,7 @@ impl<A: Application> CompositorHandler for EngineState<A> {
             // not clobber the override.
             return;
         }
-        if self.inner.as_ref().map_or(false, |a| a.grid()) {
+        if self.inner.as_ref().is_some_and(|a| a.grid()) {
             // Grid surfaces stay at scale 1 — patch.scale is the sole
             // resolution authority (see the pin at surface creation).
             return;
@@ -1460,21 +1460,9 @@ fn xkb_logical_key(event: &smithay_client_toolkit::seat::keyboard::KeyEvent, ctr
             // transformation (ctrl+j = "\n", ctrl+a = 0x01, ...); the keysym is
             // untransformed, so prefer it there or ctrl+<letter> shortcuts can
             // never match their letter.
-            if ctrl {
-                if let Some(ch) = event.keysym.key_char() {
-                    Key::Character(ch.to_string())
-                } else if let Some(ref text) = event.utf8 {
-                    Key::Character(text.clone())
-                } else {
-                    return None;
-                }
-            } else if let Some(ref text) = event.utf8 {
-                Key::Character(text.clone())
-            } else if let Some(ch) = event.keysym.key_char() {
-                Key::Character(ch.to_string())
-            } else {
-                return None;
-            }
+            let from_keysym = || event.keysym.key_char().map(|ch| ch.to_string());
+            let text = if ctrl { from_keysym().or_else(|| event.utf8.clone()) } else { event.utf8.clone().or_else(from_keysym) };
+            Key::Character(text?)
         }
     })
 }

@@ -1220,9 +1220,9 @@ pub fn control_label_focus_color() -> Option<[f32; 4]> {
 
 pub fn control_label_color_for_state(hovered: bool, focused: bool) -> [u8; 3] {
     let c = if focused {
-        control_label_focus_color().unwrap_or_else(|| control_label_color())
+        control_label_focus_color().unwrap_or_else(control_label_color)
     } else if hovered {
-        control_label_hover_color().unwrap_or_else(|| control_label_color())
+        control_label_hover_color().unwrap_or_else(control_label_color)
     } else {
         control_label_color()
     };
@@ -1252,9 +1252,9 @@ pub fn set_control_label_color_detached(color: [f32; 4]) {
 
 pub fn control_label_color_detached_for_state(hovered: bool, focused: bool) -> [u8; 3] {
     let c = if focused {
-        control_label_focus_color().unwrap_or_else(|| control_label_color_detached())
+        control_label_focus_color().unwrap_or_else(control_label_color_detached)
     } else if hovered {
-        control_label_hover_color().unwrap_or_else(|| control_label_color_detached())
+        control_label_hover_color().unwrap_or_else(control_label_color_detached)
     } else {
         control_label_color_detached()
     };

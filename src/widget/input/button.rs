@@ -453,14 +453,14 @@ impl Paint for Button {
                 }
             }
             ButtonKind::CopyIcon => {
+                // Pressed and hovered wear the same wash.
+                let lit = self.pressed || self.hovered;
                 if self.selected {
-                    if self.pressed { [0.30, 0.52, 0.78, 0.5] }
-                    else if self.hovered { [0.30, 0.52, 0.78, 0.5] }
-                    else { [0.20, 0.40, 0.65, 0.2] }
+                    if lit { [0.30, 0.52, 0.78, 0.5] } else { [0.20, 0.40, 0.65, 0.2] }
+                } else if lit {
+                    [0.20, 0.20, 0.25, 0.25]
                 } else {
-                    if self.pressed { [0.20, 0.20, 0.25, 0.25] }
-                    else if self.hovered { [0.20, 0.20, 0.25, 0.25] }
-                    else { [0.0, 0.0, 0.0, 0.0] }
+                    [0.0, 0.0, 0.0, 0.0]
                 }
             }
         }

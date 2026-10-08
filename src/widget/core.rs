@@ -9,7 +9,7 @@ pub mod focus {
     // previous holder (`unfocus`) resolves through the caller's generational tree, so a
     // stale id is skipped instead of dereferencing freed memory (the 6w settings UAF class).
     thread_local! {
-        static FOCUSED_WIDGET: Cell<Option<WidgetId>> = Cell::new(None);
+        static FOCUSED_WIDGET: Cell<Option<WidgetId>> = const { Cell::new(None) };
     }
 
     /// Resolve `id` in `ctx`'s tree (when a ctx is in reach) and call `unfocus()` on it.
@@ -137,7 +137,7 @@ pub mod hover_animation {
 
     thread_local! {
         pub static HOVER_STATE: RefCell<HoverState> = RefCell::new(HoverState::new());
-        pub static CURSOR_POS: RefCell<(f32, f32)> = RefCell::new((0.0, 0.0));
+        pub static CURSOR_POS: RefCell<(f32, f32)> = const { RefCell::new((0.0, 0.0)) };
     }
 
     pub fn set_cursor_pos(x: f32, y: f32) {
@@ -326,33 +326,25 @@ pub mod clipboard {
         }
 
         pub fn read() -> Option<String> {
-            match std::process::Command::new("wl-paste")
+            if let Ok(output) = std::process::Command::new("wl-paste")
                 .arg("-n")
-                .output()
-            {
-                Ok(output) => {
-                    if output.status.success() {
-                        if let Ok(text) = String::from_utf8(output.stdout) {
-                            return Some(text);
-                        }
+                .output() {
+                if output.status.success() {
+                    if let Ok(text) = String::from_utf8(output.stdout) {
+                        return Some(text);
                     }
                 }
-                Err(_) => {}
             }
-            match std::process::Command::new("xclip")
+            if let Ok(output) = std::process::Command::new("xclip")
                 .arg("-selection")
                 .arg("clipboard")
                 .arg("-o")
-                .output()
-            {
-                Ok(output) => {
-                    if output.status.success() {
-                        if let Ok(text) = String::from_utf8(output.stdout) {
-                            return Some(text);
-                        }
+                .output() {
+                if output.status.success() {
+                    if let Ok(text) = String::from_utf8(output.stdout) {
+                        return Some(text);
                     }
                 }
-                Err(_) => {}
             }
             None
         }
@@ -1348,10 +1340,10 @@ pub mod context_menu {
                     }
                 }
                 self.hide();
-                return true;
+                true
             } else {
                 self.hide();
-                return true;
+                true
             }
         }
 

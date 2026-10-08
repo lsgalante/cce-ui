@@ -7,6 +7,20 @@ edition = "2021"
 name = "cce_ui"
 path = "src/lib.rs"
 
+[lints.clippy]
+# House style, not defects (CI runs clippy with warnings as errors; anything not listed here
+# is fixed, not allowed):
+# - the paint and tessellation functions take geometry and colour piecewise;
+too_many_arguments = "allow"
+# - the legacy tuple views (`(f32, f32, f32, f32, [f32; 4])` quads and friends);
+type_complexity = "allow"
+# - colour and curve constants are written as their specs give them;
+excessive_precision = "allow"
+# - geometry loops index several arrays in step;
+needless_range_loop = "allow"
+# - a widget's `new` returns `Adapted<Self>`, which a `Default` would not.
+new_without_default = "allow"
+
 [features]
 # `widget::markdown` (MarkdownView): lays out vault notes for reading views
 # and note cards. Brings in cce-vault and its Markdown parser, so only the

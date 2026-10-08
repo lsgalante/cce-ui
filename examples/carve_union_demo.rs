@@ -55,7 +55,7 @@ impl Application for DemoApp {
 
     fn display_list(&mut self, size: LogicalSize, _scale: f64) -> Option<DisplayList> {
         let mut pc = PaintCtx::new();
-        let (w, h) = (size.width as f32, size.height as f32);
+        let (w, h) = (size.width, size.height);
         pc.plate(
             Rect { x: 0.0, y: 0.0, width: w, height: h },
             (12.0, 12.0, 12.0, 12.0),

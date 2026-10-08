@@ -55,7 +55,7 @@ impl Application for ProbeApp {
 
     fn display_list(&mut self, size: LogicalSize, _scale: f64) -> Option<DisplayList> {
         let mut pc = PaintCtx::new();
-        let (w, h) = (size.width as f32, size.height as f32);
+        let (w, h) = (size.width, size.height);
         let half = (w - 30.0) * 0.5;
         let bevel = cce_ui::layout::bevel_width();
         for (i, x) in [10.0, 20.0 + half].into_iter().enumerate() {

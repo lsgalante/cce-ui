@@ -838,7 +838,7 @@ pub fn paint_band_shape_colored(ctx: &mut PaintCtx, track_x: f32, track_w: f32, 
 pub(crate) fn detached_strip(label: &Option<String>) -> f32 {
     // An EMPTY label is no label: `Adapted::clear_label` syncs one to take a
     // label off a widget that stores whatever it is handed.
-    if label.as_deref().map_or(false, |l| !l.is_empty()) { crate::layout::control_label_strip() } else { 0.0 }
+    if label.as_deref().is_some_and(|l| !l.is_empty()) { crate::layout::control_label_strip() } else { 0.0 }
 }
 
 impl Layout for RangeSlider {
@@ -870,7 +870,7 @@ impl Paint for RangeSlider {
         // is the highlight — the colour rides the swell's own bell, so it
         // blooms over that end and fades back to the band along its flanks.
         let base = if self.active_thumb.is_some() { colors::rangeslider_thumb_drag() } else { colors::rangeslider_thumb() };
-        let focus_center = self.focused.then(|| if matches!(self.focus_end, ActiveThumb::Low) { lo } else { hi });
+        let focus_center = self.focused.then_some(if matches!(self.focus_end, ActiveThumb::Low) { lo } else { hi });
         let hl = crate::color::highlight_primary_color();
         let bulge_w = crate::layout::slider_bulge_width().max(2.0);
         let color_at = |px: f32| -> [f32; 4] {

@@ -11,11 +11,11 @@ fn serialize_single_widget(w: &dyn WidgetHost, json: &mut String) {
     let a = w.as_any();
     let value = a
         .downcast_ref::<Checkbox>()
-        .map(|x| Input::value(x))
-        .or_else(|| a.downcast_ref::<Dropdown>().map(|x| Input::value(x)))
-        .or_else(|| a.downcast_ref::<Slider>().map(|x| Input::value(x)))
-        .or_else(|| a.downcast_ref::<RangeSlider>().map(|x| Input::value(x)))
-        .or_else(|| a.downcast_ref::<Spinbox>().map(|x| Input::value(x)))
+        .map(Input::value)
+        .or_else(|| a.downcast_ref::<Dropdown>().map(Input::value))
+        .or_else(|| a.downcast_ref::<Slider>().map(Input::value))
+        .or_else(|| a.downcast_ref::<RangeSlider>().map(Input::value))
+        .or_else(|| a.downcast_ref::<Spinbox>().map(Input::value))
         .unwrap_or(0);
     let type_name = w.type_name();
 

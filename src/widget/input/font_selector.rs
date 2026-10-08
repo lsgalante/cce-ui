@@ -236,6 +236,8 @@ impl Input for FontSelector {
         true
     }
 
+    // `try_wait` has reaped the picker by the time its handle is dropped unread.
+    #[allow(clippy::zombie_processes)]
     fn tick(&mut self, _dt: f32, _rect: Rect) -> bool {
         let mut child_guard = self.child.lock().unwrap();
         if let Some(ref mut child) = *child_guard {

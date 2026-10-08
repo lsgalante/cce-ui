@@ -63,7 +63,7 @@ impl Batch {
     /// hidden) as `Preedit`'s.
     pub fn set_preedit(&mut self, text: Option<String>, begin: i32, end: i32) {
         let text = text.unwrap_or_default();
-        let cursor = (begin >= 0 && end >= 0).then(|| (begin as usize, end as usize));
+        let cursor = (begin >= 0 && end >= 0).then_some((begin as usize, end as usize));
         self.preedit = (!text.is_empty()).then(|| Preedit::new(text, cursor));
     }
 
@@ -184,8 +184,7 @@ mod tests {
 
     #[test]
     fn a_done_ends_the_composition_types_the_commit_and_starts_the_next() {
-        let mut b = Batch::default();
-        b.commit = Some("日本".into());
+        let mut b = Batch { commit: Some("日本".into()), ..Batch::default() };
         b.set_preedit(Some("ご".into()), 3, 3);
         assert_eq!(
             b.apply_order(),

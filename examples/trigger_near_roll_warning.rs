@@ -57,7 +57,7 @@ impl Application for TriggerApp {
 
     fn display_list(&mut self, size: LogicalSize, _scale: f64) -> Option<DisplayList> {
         let mut pc = PaintCtx::new();
-        let (w, h) = (size.width as f32, size.height as f32);
+        let (w, h) = (size.width, size.height);
         let roll = cce_ui::layout::bevel_width();
 
         // 1. The window plate — opens the carve-grouping window.

@@ -587,7 +587,7 @@ impl TextBox {
 
         for (i, &(l, c)) in index_map.iter().enumerate() {
             if l == line {
-                let dist = (c as isize - target_col as isize).abs() as usize;
+                let dist = (c as isize - target_col as isize).unsigned_abs();
                 if dist < best_dist {
                     best_dist = dist;
                     best_idx = i;
@@ -1255,7 +1255,7 @@ impl TextBox {
                     Key::Named(NamedKey::Backspace) => Some(2),
                     Key::Named(NamedKey::Delete) => Some(3),
                     Key::Character(_) if !control => {
-                        let ws = event.text.as_deref().map_or(false, |t| t.chars().all(char::is_whitespace));
+                        let ws = event.text.as_deref().is_some_and(|t| t.chars().all(char::is_whitespace));
                         Some(if ws { 4 } else { 1 })
                     }
                     _ => None,
@@ -1325,8 +1325,8 @@ impl TextBox {
                 }
                 MouseScrollDelta::PixelDelta(pos) => {
                     if !self.multiline {
-                        let scroll_val = if pos.y != 0.0 { -pos.y as f32 } else { if natural { -pos.x as f32 } else { pos.x as f32 } };
-                        scroll_val
+                        
+                        if pos.y != 0.0 { -pos.y as f32 } else { if natural { -pos.x as f32 } else { pos.x as f32 } }
                     } else {
                         if natural { -pos.x as f32 } else { pos.x as f32 }
                     }
@@ -1464,11 +1464,10 @@ impl TextBox {
                 caret = Some([cursor_x, cursor_y, 1.5, caret_h]);
                 let clipped_y = cursor_y.max(view_top);
                 let clipped_bottom = (cursor_y + caret_h).min(view_bottom);
-                if cursor_x >= x + pad && cursor_x <= x + w - pad {
-                    if clipped_y < clipped_bottom {
+                if cursor_x >= x + pad && cursor_x <= x + w - pad
+                    && clipped_y < clipped_bottom {
                         out.push((cursor_x, clipped_y, 1.5, clipped_bottom - clipped_y, cursor_color));
                     }
-                }
             }
         } else {
             let caret_h = self.font_size * 1.15;

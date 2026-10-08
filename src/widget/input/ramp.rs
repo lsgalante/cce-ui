@@ -541,8 +541,8 @@ impl Input for ColorRamp {
                 self.r_slider.mouse_input(button, state, px, py_event, ui);
                 self.g_slider.mouse_input(button, state, px, py_event, ui);
                 self.b_slider.mouse_input(button, state, px, py_event, ui);
-                if self.del_button.mouse_input(button, state, px, py_event, ui) {
-                    if self.del_button.take_click() {
+                if self.del_button.mouse_input(button, state, px, py_event, ui)
+                    && self.del_button.take_click() {
                         if let Some(idx) = self.selected_key_idx {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
@@ -552,7 +552,6 @@ impl Input for ColorRamp {
                             }
                         }
                     }
-                }
                 return true;
             }
         }
@@ -608,7 +607,7 @@ impl Input for ColorRamp {
                 // Wheel forwarding (6bd self-routing): with the field widgets no longer
                 // tree-linked, the sliders' wheel rides this arm — and the key color syncs
                 // immediately (the old descent path left it stale until the next hover flip).
-                let (delta, px, py) = (delta.clone(), *x, *y);
+                let (delta, px, py) = (*delta, *x, *y);
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
                 if self.selected_key_idx.is_none() {
                     return false;
@@ -1346,11 +1345,8 @@ impl Input for Ramp {
 
     /// The open dropdown popover extends the hit area (the 5p Dropdown pattern).
     fn hit(&self, rect: Rect, x: f32, y: f32) -> bool {
-        if let Some((px, py, pw, ph)) = {
-        self.preset_dropdown.popover_rect()
-            .or_else(|| self.line_type_dropdown.popover_rect())
-    
-        } {
+        let popover = self.preset_dropdown.popover_rect().or_else(|| self.line_type_dropdown.popover_rect());
+        if let Some((px, py, pw, ph)) = popover {
             if x >= px && x <= px + pw && y >= py && y <= py + ph {
                 return true;
             }
@@ -1526,8 +1522,8 @@ impl Input for Ramp {
             self.is_dragging_key = false;
             if self.selected_key_idx.is_some() {
                 self.key_pad.mouse_input(button, state, px, py_event, ui);
-                if self.del_button.mouse_input(button, state, px, py_event, ui) {
-                    if self.del_button.take_click() {
+                if self.del_button.mouse_input(button, state, px, py_event, ui)
+                    && self.del_button.take_click() {
                         if let Some(idx) = self.selected_key_idx {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
@@ -1538,7 +1534,6 @@ impl Input for Ramp {
                             }
                         }
                     }
-                }
                 return true;
             }
         }
@@ -1591,7 +1586,7 @@ impl Input for Ramp {
             Event::MouseWheel { delta, x, y, .. } => {
                 // Wheel forwarding (6bd self-routing): dropdowns first (mirroring the press
                 // order, incl. the preset drain), then the value slider with the key sync.
-                let (delta, px, py) = (delta.clone(), *x, *y);
+                let (delta, px, py) = (*delta, *x, *y);
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
                 if self.preset_dropdown.mouse_wheel(&delta, px, py, ui) {
                     if self.preset_dropdown.take_change() {

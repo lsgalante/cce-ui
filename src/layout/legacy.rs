@@ -104,7 +104,7 @@ impl Column {
             spacing: CONTROL_GAP,
         };
         f(&mut row);
-        self.y = self.y + h;
+        self.y += h;
     }
 }
 
@@ -223,7 +223,7 @@ impl Section {
         let max_cols = if is_child {
             1
         } else {
-            ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0).min(2.0) as usize
+            ((usable_w + gap) / (min_col_width + gap)).floor().clamp(1.0, 2.0) as usize
         };
         let content_start_y = top + pad + 19.0;
         let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
@@ -315,15 +315,11 @@ impl Section {
 
             let new_bottom = y + total_h;
             self.content_y = new_bottom;
-            for h in &mut self.grid.col_heights {
-                *h = new_bottom;
-            }
+            self.grid.col_heights.fill(new_bottom);
         } else {
             let max_h = self.grid.max_height();
             if self.content_y > max_h {
-                for h in &mut self.grid.col_heights {
-                    *h = self.content_y;
-                }
+                self.grid.col_heights.fill(self.content_y);
             }
 
             let col = self.grid.next_column();
@@ -351,18 +347,14 @@ impl Section {
         let y = max_h;
         pc.rect([0.18, 0.18, 0.27, 1.0], x, y, self.cw - 2.0 * pad, 1.0);
         self.content_y = max_h + 8.0;
-        for h in &mut self.grid.col_heights {
-            *h = self.content_y;
-        }
+        self.grid.col_heights.fill(self.content_y);
     }
 
     pub fn rect(&mut self, pc: &mut dyn RenderTarget, color: [f32; 4], x_off: f32, w: f32, h: f32) {
         let max_h = self.grid.max_height().max(self.content_y);
         pc.rect(color, self.ax(x_off), max_h, w, h);
         self.content_y = max_h + h;
-        for col_h in &mut self.grid.col_heights {
-            *col_h = self.content_y;
-        }
+        self.grid.col_heights.fill(self.content_y);
     }
 
     pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
@@ -387,9 +379,7 @@ impl Section {
         F: FnMut(usize, f32, f32),
     {
         let max_h = self.grid.max_height().max(self.content_y);
-        for col_h in &mut self.grid.col_heights {
-            *col_h = max_h;
-        }
+        self.grid.col_heights.fill(max_h);
         self.content_y = max_h;
 
         let cols = self.row_layout(count, gap);
@@ -398,9 +388,7 @@ impl Section {
         }
         self.content_y += h;
 
-        for col_h in &mut self.grid.col_heights {
-            *col_h = self.content_y;
-        }
+        self.grid.col_heights.fill(self.content_y);
     }
 
     pub fn finish(&mut self, pc: &mut dyn RenderTarget) -> f32 {
@@ -993,9 +981,7 @@ impl LayoutStrategy for AdaptiveGrid {
                 let y = grid.max_height();
                 let x = grid.left;
                 let allocated_w = grid.width;
-                for col_h in &mut grid.col_heights {
-                    *col_h = y + wh + grid.gap;
-                }
+                grid.col_heights.fill(y + wh + grid.gap);
                 (x, y, allocated_w, wh)
             } else if num_cols_spanned == 1 {
                 let col = grid.next_column();
@@ -1407,7 +1393,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let max_cols = if is_child {
             1
         } else {
-            ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0).min(2.0) as usize
+            ((usable_w + gap) / (min_col_width + gap)).floor().clamp(1.0, 2.0) as usize
         };
         // Under relief styling the content stands off the well's top wall by
         // the same inset it keeps from the side walls (`margin_x`, which is
@@ -1545,9 +1531,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         self.pc.text_with_bounds(text, x, y, font_size, color, bounds);
         let new_bottom = y + font_size + 4.0;
         self.content_y = new_bottom;
-        for h in &mut self.grid.col_heights {
-            *h = new_bottom;
-        }
+        self.grid.col_heights.fill(new_bottom);
     }
 
     pub fn widget<T: WidgetHost + 'static>(&mut self, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
@@ -1582,15 +1566,11 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
 
             let new_bottom = y + total_h;
             self.content_y = new_bottom;
-            for h in &mut self.grid.col_heights {
-                *h = new_bottom;
-            }
+            self.grid.col_heights.fill(new_bottom);
         } else {
             let max_h = self.grid.max_height();
             if self.content_y > max_h {
-                for h in &mut self.grid.col_heights {
-                    *h = self.content_y;
-                }
+                self.grid.col_heights.fill(self.content_y);
             }
 
             let col = self.grid.next_column();
@@ -1624,18 +1604,14 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let y = max_h;
         self.pc.rect([0.18, 0.18, 0.27, 1.0], x, y, self.cw - 2.0 * pad, 1.0);
         self.content_y = max_h + 8.0;
-        for h in &mut self.grid.col_heights {
-            *h = self.content_y;
-        }
+        self.grid.col_heights.fill(self.content_y);
     }
 
     pub fn rect(&mut self, color: [f32; 4], x_off: f32, w: f32, h: f32) {
         let max_h = self.grid.max_height().max(self.content_y);
         self.pc.rect(color, self.ax(x_off), max_h, w, h);
         self.content_y = max_h + h;
-        for col_h in &mut self.grid.col_heights {
-            *col_h = self.content_y;
-        }
+        self.grid.col_heights.fill(self.content_y);
     }
 
     pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
@@ -1703,9 +1679,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         F: FnMut(usize, f32, f32),
     {
         let max_h = self.grid.max_height().max(self.content_y);
-        for col_h in &mut self.grid.col_heights {
-            *col_h = max_h;
-        }
+        self.grid.col_heights.fill(max_h);
         self.content_y = max_h;
 
         let cols = self.row_layout(count, gap);
@@ -1714,9 +1688,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         }
         self.content_y += h;
 
-        for col_h in &mut self.grid.col_heights {
-            *col_h = self.content_y;
-        }
+        self.grid.col_heights.fill(self.content_y);
     }
 
     pub fn vstack(&mut self, spacing: f32) -> VStack<'_, 'a, P> {
@@ -1761,9 +1733,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             self.content_y = self.grid.max_height();
         } else {
             self.content_y = new_bottom;
-            for h in &mut self.grid.col_heights {
-                *h = new_bottom;
-            }
+            self.grid.col_heights.fill(new_bottom);
         }
     }
 
@@ -1866,9 +1836,7 @@ impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
 
         let new_bottom = y + total_h;
         self.context.content_y = new_bottom;
-        for h in &mut self.context.grid.col_heights {
-            *h = new_bottom;
-        }
+        self.context.grid.col_heights.fill(new_bottom);
         self.context.spacing(self.spacing);
     }
 
@@ -1880,9 +1848,7 @@ impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
         F: FnMut(&mut SectionContext<'a, P>, usize, f32, f32),
     {
         let max_h = self.context.grid.max_height().max(self.context.content_y);
-        for col_h in &mut self.context.grid.col_heights {
-            *col_h = max_h;
-        }
+        self.context.grid.col_heights.fill(max_h);
         self.context.content_y = max_h;
 
         let cols = self.context.row_layout_for(needs, gap);
@@ -1893,9 +1859,7 @@ impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
 
         let new_bottom = max_h + h;
         self.context.content_y = new_bottom;
-        for col_h in &mut self.context.grid.col_heights {
-            *col_h = new_bottom;
-        }
+        self.context.grid.col_heights.fill(new_bottom);
         self.context.spacing(self.spacing);
     }
 
@@ -1904,9 +1868,7 @@ impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
         F: FnMut(&mut SectionContext<'a, P>, usize, f32, f32),
     {
         let max_h = self.context.grid.max_height().max(self.context.content_y);
-        for col_h in &mut self.context.grid.col_heights {
-            *col_h = max_h;
-        }
+        self.context.grid.col_heights.fill(max_h);
         self.context.content_y = max_h;
 
         let cols = self.context.row_layout(count, gap);
@@ -1917,9 +1879,7 @@ impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
 
         let new_bottom = max_h + h;
         self.context.content_y = new_bottom;
-        for col_h in &mut self.context.grid.col_heights {
-            *col_h = new_bottom;
-        }
+        self.context.grid.col_heights.fill(new_bottom);
         self.context.spacing(self.spacing);
     }
 }

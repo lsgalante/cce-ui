@@ -488,7 +488,7 @@ mod tests {
         assert_eq!(key_for(&text, Action::Click), None);
     }
 
-    fn node<'a>(update: &'a TreeUpdate, id: NodeId) -> &'a Node {
+    fn node(update: &TreeUpdate, id: NodeId) -> &Node {
         &update.nodes.iter().find(|(n, _)| *n == id).expect("node in the update").1
     }
 

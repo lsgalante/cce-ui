@@ -247,7 +247,7 @@ impl MenuBar {
     }
 
     fn bg_color(&self) -> [f32; 4] {
-        self.color.unwrap_or_else(|| colors::sidebar_bg_color())
+        self.color.unwrap_or_else(colors::sidebar_bg_color)
     }
 
     /// Position the embedded strip inside `rect` — the legacy `set_rect` body, minus the
@@ -953,8 +953,8 @@ impl Input for MenuBar {
                 }
 
                 if let Some((dx, dy, dw, dh)) = self.context_popover_rect(rect) {
-                    if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
-                        if state == ElementState::Pressed {
+                    if px >= dx && px < dx + dw && py >= dy && py < dy + dh
+                        && state == ElementState::Pressed {
                             let di = ((py - dy) / DROPDOWN_ITEM_H) as usize;
                             if di < self.context_options.len() {
                                 self.context_selected = di;
@@ -967,7 +967,6 @@ impl Input for MenuBar {
                                 return true;
                             }
                         }
-                    }
                 }
 
                 if !self.context_options.is_empty() {

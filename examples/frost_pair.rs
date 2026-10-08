@@ -62,7 +62,7 @@ impl Application for FrostPair {
 
     fn display_list(&mut self, size: LogicalSize, scale: f64) -> Option<DisplayList> {
         cce_ui::scale::set_scale_factor(scale as f32);
-        let (w, h) = (size.width as f32, size.height as f32);
+        let (w, h) = (size.width, size.height);
         let mut pc = PaintCtx::new();
         pc.plate_spec(&PlateSpec {
             rect: Rect { x: 0.0, y: 0.0, width: w, height: h },

@@ -33,18 +33,18 @@ pub const KEY_REPEAT_DELAY: std::time::Duration = std::time::Duration::from_mill
 pub const KEY_REPEAT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
 fn is_repeatable_key(key: &Key) -> bool {
-    match key {
-        Key::Named(NamedKey::Backspace) |
-        Key::Named(NamedKey::Delete) |
-        Key::Named(NamedKey::ArrowLeft) |
-        Key::Named(NamedKey::ArrowRight) |
-        Key::Named(NamedKey::ArrowUp) |
-        Key::Named(NamedKey::ArrowDown) |
-        Key::Named(NamedKey::Home) |
-        Key::Named(NamedKey::End) |
-        Key::Character(_) => true,
-        _ => false,
-    }
+    matches!(
+        key,
+        Key::Named(NamedKey::Backspace)
+            | Key::Named(NamedKey::Delete)
+            | Key::Named(NamedKey::ArrowLeft)
+            | Key::Named(NamedKey::ArrowRight)
+            | Key::Named(NamedKey::ArrowUp)
+            | Key::Named(NamedKey::ArrowDown)
+            | Key::Named(NamedKey::Home)
+            | Key::Named(NamedKey::End)
+            | Key::Character(_)
+    )
 }
 
 /// The modifier keys as the keyboard last reported them.
@@ -373,8 +373,7 @@ impl Driver {
             let is_widget = t.app.ui_context().is_some_and(|ctx| ctx.is_widget_at(lx, ly));
             if (!is_widget
                 && t.app.csd_titlebar_move()
-                && ly >= CSD_BORDER
-                && ly < 32.0
+                && (CSD_BORDER..32.0).contains(&ly)
                 && lx < site.size.width - 70.0)
                 || t.app.is_movable_root_plate_at(lx, ly)
             {
@@ -983,7 +982,7 @@ mod tests {
             if state == ElementState::Pressed { self.press_msg } else { None }
         }
         fn handle_mouse_wheel(&mut self, delta: &MouseScrollDelta, _: LogicalPosition, _: &mut bool) {
-            self.seen.push(Seen::Wheel(delta.clone()));
+            self.seen.push(Seen::Wheel(*delta));
         }
         fn handle_key_input(&mut self, event: &KeyEvent, _: &mut bool) -> Option<u32> {
             self.seen.push(Seen::Key(event.logical_key.clone(), event.repeat));

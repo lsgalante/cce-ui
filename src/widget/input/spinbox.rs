@@ -50,9 +50,9 @@ pub struct SpinRelief {
     pub rect: Rect,
     pub radius: f32,
     pub depth: f32,
-    /// Where the -/+ run begins (an x), and the engraved seam dividing - from
-    /// + as `(top, bottom, width, host)` — `None` when the button zone has no
-    /// area, and the field is the well alone.
+    /// Where the -/+ run begins (an x), and the engraved seam dividing the minus from the
+    /// plus as `(top, bottom, width, host)` — `None` when the button zone has no area, and
+    /// the field is the well alone.
     pub run: Option<(f32, ((f32, f32), (f32, f32), f32, Rect))>,
 }
 

@@ -171,7 +171,7 @@ impl StyledLabel {
         let mut buffer = crate::backend::text::get_text_buffer(fs, &final_text, size, Some(family));
         if is_vert {
             let bar_thickness = crate::backend::text::vertical_text().unwrap_or(24) as f32;
-            buffer.set_size(fs, Some(bar_thickness * scale as f32), None);
+            buffer.set_size(fs, Some(bar_thickness * scale), None);
             for line in &mut buffer.lines {
                 line.set_align(Some(cosmic_text::Align::Center));
             }

@@ -73,6 +73,25 @@ jobs:
             exit 1
           fi
 
+  # Clippy over every target and feature, warnings as errors. The few lints the
+  # crate allows are house style, listed with their reasons in Cargo.toml's
+  # [lints.clippy]; anything else is fixed. Linux only: src/web and src/mac are
+  # cfg'd out here, as in the test job.
+  clippy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
   # The browser half (src/web, the wasm examples) is cfg'd out of the Linux
   # build above, so nothing else compiles it. scripts/check-wasm type-checks
   # the library, its features and the four wasm examples.

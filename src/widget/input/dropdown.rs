@@ -580,7 +580,7 @@ impl Dropdown {
             content.y + content.height
         };
 
-        let is_ramp = self.parent_snapshot.map_or(false, |s| s.is_ramp);
+        let is_ramp = self.parent_snapshot.is_some_and(|s| s.is_ramp);
 
         if is_ramp {
             if let Some(snap) = self.parent_snapshot {

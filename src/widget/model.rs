@@ -131,7 +131,7 @@ pub trait Layout {
     }
 
     /// Republish value-embedded legacy children into the ctx registry (Paginator's ButtonStrip
-    /// + Pages). Legacy value-owning containers re-registered their children on EVERY `tick` and
+    /// and Pages). Legacy value-owning containers re-registered their children on EVERY `tick` and
     /// `layout` because the children's addresses move with the owning struct (host struct moves,
     /// `Vec` reallocation) — and the registration is load-bearing: the spatial grid is rebuilt
     /// from registered widgets, and it is the registered ButtonStrip (whose
@@ -359,7 +359,7 @@ impl EventCtx<'_> {
     /// `focus::clear_if_matches(self)` — MenuBar releases focus when its dropdowns close).
     pub fn release_focus(&mut self) {
         if let Some(ptr) = self.self_ptr {
-            unsafe { crate::widget::focus::clear_if_matches(&mut *ptr) };
+            unsafe { crate::widget::focus::clear_if_matches(&*ptr) };
         }
     }
 

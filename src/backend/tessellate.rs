@@ -1750,7 +1750,7 @@ pub fn tessellate_display_list(
                             }
                             // Contiguity: only the last feature-receiving plate (or
                             // one with no features yet) may take another.
-                            batches[*bi].plate.as_ref().map_or(false, |p| p.host[1] == 0.0)
+                            batches[*bi].plate.as_ref().is_some_and(|p| p.host[1] == 0.0)
                                 || last_feature_plate == Some(*bi)
                         })
                         .map(|(_, &(bi, _))| bi)
@@ -2635,73 +2635,57 @@ pub fn extra_quad_vertices(
     verts
 }
 
-fn get_child_widget_for_quad<'a>(
-    w: &'a dyn crate::widget::WidgetHost,
+fn get_child_widget_for_quad(
+    w: &dyn crate::widget::WidgetHost,
     qx: f32, qy: f32, qw: f32, qh: f32,
-) -> &'a dyn crate::widget::WidgetHost {
+) -> &dyn crate::widget::WidgetHost {
     if let Some(pbg) = w.as_any().downcast_ref::<crate::widget::ParametersBg>() {
-        for s_opt in &pbg.sliders {
-            if let Some(s) = s_opt {
-                let (sx, sy, sww, shh) = s.rect();
-                if qx >= sx - 0.1 && qx + qw <= sx + sww + 0.1 && qy >= sy - 0.1 && qy + qh <= sy + shh + 0.1 {
-                    return s;
-                }
+        for s in pbg.sliders.iter().flatten() {
+            let (sx, sy, sww, shh) = s.rect();
+            if qx >= sx - 0.1 && qx + qw <= sx + sww + 0.1 && qy >= sy - 0.1 && qy + qh <= sy + shh + 0.1 {
+                return s;
             }
         }
-        for f_opt in &pbg.float3s {
-            if let Some(f) = f_opt {
-                let (fx, fy, fww, fhh) = f.rect();
-                if qx >= fx - 0.1 && qx + qw <= fx + fww + 0.1 && qy >= fy - 0.1 && qy + qh <= fy + fhh + 0.1 {
-                    return f;
-                }
+        for f in pbg.float3s.iter().flatten() {
+            let (fx, fy, fww, fhh) = f.rect();
+            if qx >= fx - 0.1 && qx + qw <= fx + fww + 0.1 && qy >= fy - 0.1 && qy + qh <= fy + fhh + 0.1 {
+                return f;
             }
         }
-        for sb_opt in &pbg.spinboxes {
-            if let Some(sb) = sb_opt {
-                let (sx, sy, sww, shh) = sb.rect();
-                if qx >= sx - 0.1 && qx + qw <= sx + sww + 0.1 && qy >= sy - 0.1 && qy + qh <= sy + shh + 0.1 {
-                    return sb;
-                }
+        for sb in pbg.spinboxes.iter().flatten() {
+            let (sx, sy, sww, shh) = sb.rect();
+            if qx >= sx - 0.1 && qx + qw <= sx + sww + 0.1 && qy >= sy - 0.1 && qy + qh <= sy + shh + 0.1 {
+                return sb;
             }
         }
-        for btn_opt in &pbg.buttons {
-            if let Some(btn) = btn_opt {
-                let (bx, by, bww, bhh) = btn.rect();
-                if qx >= bx - 0.1 && qx + qw <= bx + bww + 0.1 && qy >= by - 0.1 && qy + qh <= by + bhh + 0.1 {
-                    return btn;
-                }
+        for btn in pbg.buttons.iter().flatten() {
+            let (bx, by, bww, bhh) = btn.rect();
+            if qx >= bx - 0.1 && qx + qw <= bx + bww + 0.1 && qy >= by - 0.1 && qy + qh <= by + bhh + 0.1 {
+                return btn;
             }
         }
-        for ch_opt in &pbg.choices {
-            if let Some(ch) = ch_opt {
-                let (cx, cy, cww, chh) = ch.rect();
-                if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
-                    return ch;
-                }
+        for ch in pbg.choices.iter().flatten() {
+            let (cx, cy, cww, chh) = ch.rect();
+            if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
+                return ch;
             }
         }
-        for t_opt in &pbg.texts {
-            if let Some(t) = t_opt {
-                let (tx, ty, tww, thh) = t.rect();
-                if qx >= tx - 0.1 && qx + qw <= tx + tww + 0.1 && qy >= ty - 0.1 && qy + qh <= ty + thh + 0.1 {
-                    return t;
-                }
+        for t in pbg.texts.iter().flatten() {
+            let (tx, ty, tww, thh) = t.rect();
+            if qx >= tx - 0.1 && qx + qw <= tx + tww + 0.1 && qy >= ty - 0.1 && qy + qh <= ty + thh + 0.1 {
+                return t;
             }
         }
-        for cb_opt in &pbg.toggles {
-            if let Some(cb) = cb_opt {
-                let (cx, cy, cww, chh) = cb.rect();
-                if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
-                    return cb;
-                }
+        for cb in pbg.toggles.iter().flatten() {
+            let (cx, cy, cww, chh) = cb.rect();
+            if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
+                return cb;
             }
         }
-        for c_opt in &pbg.colors {
-            if let Some(c) = c_opt {
-                let (cx, cy, cww, chh) = c.rect();
-                if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
-                    return c;
-                }
+        for c in pbg.colors.iter().flatten() {
+            let (cx, cy, cww, chh) = c.rect();
+            if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
+                return c;
             }
         }
     }

@@ -745,10 +745,8 @@ impl Input for ColorSelector {
                     for ch in text.chars() {
                         match ch {
                             '#' => {
-                                if state.buffer.is_empty() {
-                                    state.insert_text("#");
-                                    handled = true;
-                                } else if state.cursor_idx == 0 && !state.buffer.starts_with('#') {
+                                // A "#" only leads the value.
+                                if state.buffer.is_empty() || (state.cursor_idx == 0 && !state.buffer.starts_with('#')) {
                                     state.insert_text("#");
                                     handled = true;
                                 }

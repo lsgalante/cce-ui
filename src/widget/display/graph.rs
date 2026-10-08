@@ -621,7 +621,7 @@ impl Graph {
 
     pub fn zoom_by_factor(&mut self, factor: f32) {
         let new_w = self.node_w * factor;
-        if new_w >= 40.0 && new_w <= 400.0 {
+        if (40.0..=400.0).contains(&new_w) {
             self.scale_by(factor);
         }
     }
@@ -1224,7 +1224,7 @@ impl Input for Graph {
             }
             Event::MouseWheel { delta, x: px, y: py, .. } => {
                 let _ = (px, py); // hit-gated by the adapter
-                let ctrl = ectx.ui.as_deref().map_or(false, |ui| ui.ctrl_pressed);
+                let ctrl = ectx.ui.as_deref().is_some_and(|ui| ui.ctrl_pressed);
                 if ctrl {
                     match delta {
                         MouseScrollDelta::LineDelta(_x, y) => {

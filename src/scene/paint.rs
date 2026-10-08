@@ -2040,7 +2040,7 @@ mod tests {
             .items
             .iter()
             .find_map(|it| match &it.prim {
-                Prim::Plate { radii, .. } => Some(radii.clone()),
+                Prim::Plate { radii, .. } => Some(*radii),
                 _ => None,
             })
             .expect("plate_spec emits a Prim::Plate");
@@ -2143,7 +2143,7 @@ mod tests {
         ctx.rounded_rect(r(0.0, 0.0, 1.0, 1.0), 2.0, (true, false, true, false), [0.0; 4]);
         ctx.border(r(0.0, 0.0, 10.0, 10.0), (2.0, 2.0, 2.0, 2.0), [0.1; 4], [0.9; 4], 1.5);
         ctx.bevel(r(0.0, 0.0, 10.0, 10.0), (2.0, 2.0, 2.0, 2.0), &Material::opaque([0.3; 4]), 2.0);
-        ctx.arc(5.0, 5.0, 4.0, 1.0, 0.0, 3.14, [0.0; 4]);
+        ctx.arc(5.0, 5.0, 4.0, 1.0, 0.0, std::f32::consts::PI, [0.0; 4]);
         ctx.vector(0.0, 0.0, 10.0, 0.0, 1.0, [0.0; 4], Cap::Arrow);
         ctx.circle(5.0, 5.0, 3.0, [0.0; 4]);
         ctx.text("hi", 1.0, 2.0, 12.0, [255, 255, 255]);

@@ -378,7 +378,7 @@ impl Application for RampPopup {
         needs_rebuild: &mut bool,
     ) {
         let ev = Event::MouseWheel {
-            delta: delta.clone(),
+            delta: *delta,
             x: pos.x,
             y: pos.y,
             local_x: pos.x,

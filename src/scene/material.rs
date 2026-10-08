@@ -735,8 +735,8 @@ mod tests {
         assert!(retired("frost radius=(f64)3.0 compression=(f64)0.4 refraction=(f64)0.1").is_empty());
         assert_eq!(load("frost backdrop_compression=(f64)0.2"), (true, frosted(0.4, 0.1, 3.0)), "the old knob name inside the block is ignored; unset knobs keep their last value");
         assert_eq!(retired("frost backdrop_compression=(f64)0.2"), vec!["style.surface.plate.frost.backdrop_compression"]);
-        assert_eq!(load("frost").0, true, "a bare `frost` is frosted");
-        assert_eq!(load("frost (bool)false").0, false);
+        assert!(load("frost").0, "a bare `frost` is frosted");
+        assert!(!load("frost (bool)false").0);
         // `from_style` is the RECIPE, `plate_blur` the switch: the retired
         // keys flip neither — the switch stays off and the radius stays 3.
         assert_eq!(load("blur (bool)true\n radius (f64)2.0"), (false, frosted(0.4, 0.1, 3.0)), "the retired spelling frosts nothing and moves nothing");

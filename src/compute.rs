@@ -107,7 +107,7 @@ pub(crate) fn check_job(
     if bindings.len() > MAX_BINDINGS {
         return Err(format!("{} bindings; a job may carry at most {MAX_BINDINGS}", bindings.len()));
     }
-    if groups.iter().any(|&g| g == 0) {
+    if groups.contains(&0) {
         return Err(format!("workgroup count {groups:?} has a zero"));
     }
     if passes == 0 {
@@ -148,7 +148,7 @@ pub(crate) fn slot_for(binding: usize, swapped: bool, ping_pong: Option<(usize, 
 /// from whichever buffer the LAST pass wrote, every other one from its own.
 pub(crate) fn result_slot(binding: usize, passes: u32, ping_pong: Option<(usize, usize)>) -> usize {
     match ping_pong {
-        Some((a, b)) if binding == b && passes % 2 == 0 => a,
+        Some((a, b)) if binding == b && passes.is_multiple_of(2) => a,
         _ => binding,
     }
 }

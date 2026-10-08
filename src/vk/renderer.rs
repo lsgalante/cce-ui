@@ -1133,9 +1133,7 @@ impl VkRenderer {
         let data = window_info_data(self.extent, self.clip_corner_radius(), relief);
         self.relief_uploaded = relief;
         // Every pixel shades differently now: no image may be patched.
-        for age in &mut self.image_ages {
-            *age = ImageAge::Unknown;
-        }
+        self.image_ages.fill(ImageAge::Unknown);
         self.profile_gen = crate::layout::bevel_profile_generation();
         self.roll_profile_gen = crate::layout::roll_profile_generation();
         if let Some(allocation) = self.window_info.allocation.as_mut() {

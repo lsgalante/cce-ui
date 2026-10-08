@@ -89,7 +89,7 @@ impl Application for ProbeApp {
             depth: cce_ui::layout::bevel_width(),
         });
         let face = Some(Material::opaque([0.18, 0.22, 0.32, 1.0]));
-        pc.control_plate(&ControlPlate::control(r(570.0, 60.0, 140.0, 36.0), 8.0, PlateStance::Raised, face.clone()));
+        pc.control_plate(&ControlPlate::control(r(570.0, 60.0, 140.0, 36.0), 8.0, PlateStance::Raised, face));
         pc.control_plate(&ControlPlate::control(r(730.0, 60.0, 140.0, 36.0), 8.0, PlateStance::Raised, None));
         pc.control_plate(&ControlPlate::control(r(890.0, 60.0, 140.0, 36.0), 8.0, PlateStance::Flush, None));
         pc.control_plate(&ControlPlate::control(r(1050.0, 60.0, 140.0, 36.0), 8.0, PlateStance::Flat, face));

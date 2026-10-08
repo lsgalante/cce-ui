@@ -149,6 +149,7 @@ impl Float3 {
     }
 
     /// And back: a direction of the view's, in the vector's space.
+    #[allow(clippy::wrong_self_convention)] // a transform's inverse, beside `to_view`
     fn from_view(&self, p: [f32; 3]) -> [f32; 3] {
         [0, 1, 2].map(|k| self.view[0][k] * p[0] + self.view[1][k] * p[1] + self.view[2][k] * p[2])
     }
@@ -619,8 +620,8 @@ impl Adapted<Float3> {
 }
 
 impl Layout for Float3 {
-    /// The Slider convention: the label eats into the assigned rect, the host sizes the row
-    /// for it ([`Float3::preferred_height`]).
+    // The Slider convention: the label eats into the assigned rect, the host sizes the row
+    // for it ([`Float3::preferred_height`]).
 
     /// The three rows alone: the adapter adds the detached-label strip itself
     /// (`Adapted::preferred_height`), as it does for every non-inflating widget.
@@ -1002,7 +1003,7 @@ mod tests {
             let mut pc = PaintCtx::new();
             f.paint_ball(&mut pc);
             pc.finish().items.into_iter().find_map(|i| match i.prim {
-                crate::scene::paint::Prim::Vector { x2, y2, thickness, .. } if thickness == 2.0 => Some((x2, y2)),
+                crate::scene::paint::Prim::Vector { x2, y2, thickness: 2.0, .. } => Some((x2, y2)),
                 _ => None,
             }).expect("the vector's stroke")
         };
@@ -1036,8 +1037,8 @@ mod tests {
 
         // The rings are circles of latitude about the vector: every point
         // on one is the same angle from it, whichever way it points.
-        for dir in [[0.0, 0.0, 1.0], [0.3, 0.5, 0.4], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]] {
-            let l = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2] as f32).sqrt();
+        for dir in [[0.0f32, 0.0, 1.0], [0.3, 0.5, 0.4], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]] {
+            let l = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
             let d = dir.map(|c: f32| c / l);
             for degrees in RING_ANGLES {
                 let ring = Float3::ring(dir, degrees, 24);
@@ -1067,7 +1068,7 @@ mod tests {
                 .items
                 .into_iter()
                 .filter_map(|i| match i.prim {
-                    crate::scene::paint::Prim::Vector { x1, y1, thickness, .. } if thickness == 1.0 => Some((x1, y1)),
+                    crate::scene::paint::Prim::Vector { x1, y1, thickness: 1.0, .. } => Some((x1, y1)),
                     _ => None,
                 })
                 .collect()

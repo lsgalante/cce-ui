@@ -597,7 +597,7 @@ impl ImageStage {
             let staging = self.staging_for(device, allocator, total);
             let mapped = staging.allocation.as_mut().unwrap().mapped_slice_mut().unwrap();
             for (item, &at) in run.iter().zip(&offsets) {
-                mapped[at..at + item.pixels.len()].copy_from_slice(&item.pixels);
+                mapped[at..at + item.pixels.len()].copy_from_slice(item.pixels);
             }
             staging.buffer
         };

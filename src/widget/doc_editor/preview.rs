@@ -1010,6 +1010,6 @@ mod tests {
                 Context::Normal
             ]
         );
-        assert_eq!(style_line("let x;", Context::Code, false).segs[0].look.mono, true);
+        assert!(style_line("let x;", Context::Code, false).segs[0].look.mono);
     }
 }

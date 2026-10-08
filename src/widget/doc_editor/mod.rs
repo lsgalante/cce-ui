@@ -168,9 +168,7 @@ impl DocEditor {
 
     /// Drop every layout (fonts or the theme changed).
     pub fn invalidate(&mut self) {
-        for l in &mut self.layouts {
-            *l = None;
-        }
+        self.layouts.fill(None);
         self.tops_dirty = true;
     }
 
@@ -244,9 +242,7 @@ impl DocEditor {
                 }
             }
         } else {
-            for l in &mut self.layouts {
-                *l = None;
-            }
+            self.layouts.fill(None);
         }
         self.ctx = ctx;
         let props = preview::properties(self.buf.lines(), &self.ctx);

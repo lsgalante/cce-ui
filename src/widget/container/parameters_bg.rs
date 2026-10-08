@@ -966,60 +966,44 @@ impl ParametersBg {
     /// in the roster since the same day, having had no hover before.
     fn hover_controls(&mut self, px: f32, py: f32, ui: &mut UiContext) -> bool {
         let mut changed = false;
-        for s_opt in &mut self.sliders {
-            if let Some(s) = s_opt {
-                if s.on_cursor_moved(px, py, ui) {
-                    changed = true;
-                }
+        for s in self.sliders.iter_mut().flatten() {
+            if s.on_cursor_moved(px, py, ui) {
+                changed = true;
             }
         }
-        for sb_opt in &mut self.spinboxes {
-            if let Some(sb) = sb_opt {
-                if sb.on_cursor_moved(px, py, ui) {
-                    changed = true;
-                }
+        for sb in self.spinboxes.iter_mut().flatten() {
+            if sb.on_cursor_moved(px, py, ui) {
+                changed = true;
             }
         }
-        for f_opt in &mut self.float3s {
-            if let Some(f) = f_opt {
-                if f.on_cursor_moved(px, py, ui) {
-                    changed = true;
-                }
+        for f in self.float3s.iter_mut().flatten() {
+            if f.on_cursor_moved(px, py, ui) {
+                changed = true;
             }
         }
-        for b_opt in &mut self.buttons {
-            if let Some(b) = b_opt {
-                if b.on_cursor_moved(px, py, ui) {
-                    changed = true;
-                }
+        for b in self.buttons.iter_mut().flatten() {
+            if b.on_cursor_moved(px, py, ui) {
+                changed = true;
             }
         }
-        for d_opt in &mut self.choices {
-            if let Some(d) = d_opt {
-                if d.on_cursor_moved(px, py, ui) {
-                    changed = true;
-                }
+        for d in self.choices.iter_mut().flatten() {
+            if d.on_cursor_moved(px, py, ui) {
+                changed = true;
             }
         }
-        for tb_opt in &mut self.texts {
-            if let Some(tb) = tb_opt {
-                if tb.on_cursor_moved(px, py, ui) {
-                    changed = true;
-                }
+        for tb in self.texts.iter_mut().flatten() {
+            if tb.on_cursor_moved(px, py, ui) {
+                changed = true;
             }
         }
-        for cb_opt in &mut self.toggles {
-            if let Some(cb) = cb_opt {
-                if cb.on_cursor_moved(px, py, ui) {
-                    changed = true;
-                }
+        for cb in self.toggles.iter_mut().flatten() {
+            if cb.on_cursor_moved(px, py, ui) {
+                changed = true;
             }
         }
-        for c_opt in &mut self.colors {
-            if let Some(c) = c_opt {
-                if c.on_cursor_moved(px, py, ui) {
-                    changed = true;
-                }
+        for c in self.colors.iter_mut().flatten() {
+            if c.on_cursor_moved(px, py, ui) {
+                changed = true;
             }
         }
         // Ramp rows: a move can drag a key — re-serialize the curve
@@ -1422,23 +1406,19 @@ impl ParametersBg {
     /// ([`Paint::popover`]); the raw `children`'s popovers are the adapter's recursion.
     /// The ramp rows' field dropdowns count too.
     fn choices_popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
-        for d_opt in &self.choices {
-            if let Some(d) = d_opt {
-                if let Some(r) = d.popover_rect() {
-                    return Some(r);
-                }
+        for d in self.choices.iter().flatten() {
+            if let Some(r) = d.popover_rect() {
+                return Some(r);
             }
         }
-        for rp_opt in &self.ramps {
-            if let Some(rp) = rp_opt {
-                let ramp = rp.inner();
-                if let Some(r) = ramp
-                    .preset_dropdown
-                    .popover_rect()
-                    .or_else(|| ramp.line_type_dropdown.popover_rect())
-                {
-                    return Some(r);
-                }
+        for rp in self.ramps.iter().flatten() {
+            let ramp = rp.inner();
+            if let Some(r) = ramp
+                .preset_dropdown
+                .popover_rect()
+                .or_else(|| ramp.line_type_dropdown.popover_rect())
+            {
+                return Some(r);
             }
         }
         None
@@ -2206,7 +2186,7 @@ impl Paint for ParametersBg {
         // section's well spans many rows, so it never qualifies.
         let hover_rect = self.hover_row.and_then(|i| self.get_param_rects().get(i).copied()).filter(|r| r.3 > 0.0);
         let hovered = |x: f32, y: f32, w: f32, h: f32| {
-            hover_rect.map_or(false, |(rx, ry, rw, rh)| {
+            hover_rect.is_some_and(|(rx, ry, rw, rh)| {
                 x >= rx - 0.5 && y >= ry - 0.5 && x + w <= rx + rw + 0.5 && y + h <= ry + rh + 0.5
             })
         };
@@ -2327,16 +2307,12 @@ impl Paint for ParametersBg {
 
     /// The dropdown rows' popovers; the raw children's are the adapter's recursion.
     fn draw_popover(&self, _rect: Rect, pc: &mut dyn crate::layout::RenderTarget) {
-        for d_opt in &self.choices {
-            if let Some(d) = d_opt {
-                d.render_popover(pc);
-            }
+        for d in self.choices.iter().flatten() {
+            d.render_popover(pc);
         }
-        for rp_opt in &self.ramps {
-            if let Some(rp) = rp_opt {
-                rp.inner().preset_dropdown.render_popover(pc);
-                rp.inner().line_type_dropdown.render_popover(pc);
-            }
+        for rp in self.ramps.iter().flatten() {
+            rp.inner().preset_dropdown.render_popover(pc);
+            rp.inner().line_type_dropdown.render_popover(pc);
         }
     }
 }
@@ -2503,18 +2479,14 @@ impl Input for ParametersBg {
         // in the host tree), and without it every params-pane dropdown opened
         // at zero drawn extent: logically open, invisible, reporting a sliver
         // popover rect — and the next click toggled it closed again.
-        for c_opt in &mut self.choices {
-            if let Some(d) = c_opt {
-                if d.tick(dt, &mut dummy) {
-                    changed = true;
-                }
+        for d in self.choices.iter_mut().flatten() {
+            if d.tick(dt, &mut dummy) {
+                changed = true;
             }
         }
-        for cb_opt in &mut self.toggles {
-            if let Some(cb) = cb_opt {
-                if cb.tick(dt, &mut dummy) {
-                    changed = true;
-                }
+        for cb in self.toggles.iter_mut().flatten() {
+            if cb.tick(dt, &mut dummy) {
+                changed = true;
             }
         }
         // Slider rows tick their wheel-glide inertia — fold a coasting value
@@ -2706,13 +2678,12 @@ impl Input for ParametersBg {
                             }
                             return true;
                         }
-                    } else if state == ElementState::Released {
-                        if self.scrollbar_dragging {
+                    } else if state == ElementState::Released
+                        && self.scrollbar_dragging {
                             self.scrollbar_dragging = false;
                             self.activity.bump();
                             return true;
                         }
-                    }
                 }
 
                 // A press on a section's title box collapses/expands it. Checked before the
@@ -2793,14 +2764,12 @@ impl Input for ParametersBg {
                     }
                     if let Some(rp) = rp_opt {
                         let ramp = rp.inner();
-                        if ramp.preset_dropdown.popover_rect().is_some()
-                            || ramp.line_type_dropdown.popover_rect().is_some()
-                        {
-                            if rp.mouse_input(button, state, px, py, ui) {
+                        if (ramp.preset_dropdown.popover_rect().is_some()
+                            || ramp.line_type_dropdown.popover_rect().is_some())
+                            && rp.mouse_input(button, state, px, py, ui) {
                                 self.display_params[i].1 = rp.inner().spec_string();
                                 return true;
                             }
-                        }
                     }
                 }
 
@@ -3456,8 +3425,8 @@ impl Input for ParametersBg {
                                 }
                             }
                         }
-                    } else if p.2.starts_with("spinbox") {
-                        if owner == Some(i) {
+                    } else if p.2.starts_with("spinbox")
+                        && owner == Some(i) {
                             if let Some(sb) = &mut self.spinboxes[i] {
                                 // The widget's own wheel arm: one step per
                                 // notch, fractions carried between events.
@@ -3474,7 +3443,6 @@ impl Input for ParametersBg {
                                 }
                             }
                         }
-                    }
                 }
 
                 // The legacy tail's `self.hit_test(px, py, ctx)`: occlusion via the adapter's
@@ -3485,7 +3453,7 @@ impl Input for ParametersBg {
                         && px <= self.rect.x + self.rect.width
                         && py >= self.rect.y
                         && py <= self.rect.y + self.rect.height;
-                    let in_popover = self.own_popover_rect().map_or(false, |(rx, ry, rw, rh)| {
+                    let in_popover = self.own_popover_rect().is_some_and(|(rx, ry, rw, rh)| {
                         px >= rx && px <= rx + rw && py >= ry && py <= ry + rh
                     });
                     if in_rect || in_popover {
@@ -3619,7 +3587,7 @@ fn parse_spinbox_range(ptype: &str) -> (i32, i32, i32) {
 fn parse_vec_value(val_str: &str, min: f32, max: f32, n: usize) -> Vec<f32> {
     let mut out = vec![0.5; n];
     let parts: Vec<&str> = val_str
-        .split(|c| c == ':' || c == ',' || c == ' ')
+        .split([':', ',', ' '])
         .filter(|s| !s.is_empty())
         .collect();
     for i in 0..n {
@@ -3907,8 +3875,7 @@ fn apply_code_action(
 fn get_cursor_line_col(buffer: &str, cursor_idx: usize) -> (usize, usize) {
     let mut cur_line = 0;
     let mut cur_col = 0;
-    let mut count = 0;
-    for c in buffer.chars() {
+    for (count, c) in buffer.chars().enumerate() {
         if count == cursor_idx {
             return (cur_line, cur_col);
         }
@@ -3918,7 +3885,6 @@ fn get_cursor_line_col(buffer: &str, cursor_idx: usize) -> (usize, usize) {
         } else {
             cur_col += 1;
         }
-        count += 1;
     }
     (cur_line, cur_col)
 }
@@ -4641,7 +4607,7 @@ mod tests {
 
         // Every corner hands off to a straight run — no arc dangles. (Within a stroke width:
         // runs and arcs are anchored on opposite ink sides at the concave corner.)
-        let ends: Vec<(f32, f32)> = runs.iter().flat_map(|r| run_ends(r)).collect();
+        let ends: Vec<(f32, f32)> = runs.iter().flat_map(run_ends).collect();
         for arc in &arcs {
             for (ax, ay) in arc_ends(arc) {
                 let nearest = ends
@@ -4714,7 +4680,7 @@ mod tests {
 
         // Section to section stays far wider, so the blocks still read apart.
         assert_eq!(title_top(2) - content_bottom(1), SECTION_GAP, "section -> next section");
-        assert!(SECTION_GAP > 2.0 * CHANNEL, "sections separate wider than any channel");
+        const { assert!(SECTION_GAP > 2.0 * CHANNEL, "sections separate wider than any channel") };
     }
 
     #[test]
@@ -4825,7 +4791,7 @@ mod tests {
         ParamController::set_display_params(&mut *p, &rows);
         WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 200.0);
         let hovered = |p: &Adapted<ParametersBg>| -> Vec<usize> {
-            p.sliders.iter().enumerate().filter(|(_, s)| s.as_ref().map_or(false, |s| s.inner().hovered())).map(|(i, _)| i).collect()
+            p.sliders.iter().enumerate().filter(|(_, s)| s.as_ref().is_some_and(|s| s.inner().hovered())).map(|(i, _)| i).collect()
         };
         assert!(hovered(&p).is_empty());
 
@@ -4922,7 +4888,7 @@ mod tests {
             _ => None,
         };
         let at_rest = prims(&p, &ctx);
-        assert!(at_rest.iter().all(|pr| carve(pr).map_or(true, |(_, t)| t.is_none())), "nothing is tinted at rest");
+        assert!(at_rest.iter().all(|pr| carve(pr).is_none_or(|(_, t)| t.is_none())), "nothing is tinted at rest");
         assert_eq!(label_of(&p, "Count"), ParametersBg::LABEL);
 
         let (x, y, w, h) = p.get_param_rects()[1];

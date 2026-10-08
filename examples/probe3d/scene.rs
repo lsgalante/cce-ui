@@ -152,7 +152,7 @@ fn traced_scene() -> (Vec<RtTriangle>, Vec<RtMaterial>) {
     let mut add = |verts: Vec<Vertex3D>, albedo: [f32; 3], emission: [f32; 3]| {
         let m = mats.len() as u32;
         mats.push(RtMaterial { albedo, emission });
-        for t in verts.chunks_exact(3) {
+        for t in verts.as_chunks::<3>().0 {
             tris.push(RtTriangle { p0: t[0].position, p1: t[1].position, p2: t[2].position, material: m });
         }
     };

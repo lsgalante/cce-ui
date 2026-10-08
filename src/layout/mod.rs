@@ -213,7 +213,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("control_label_margin") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = CONTROL_LABEL_MARGIN.write() {
@@ -222,7 +222,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("nested_section_label_alignment") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<u8>() {
                     if let Ok(mut lock) = NESTED_SECTION_LABEL_ALIGNMENT.write() {
@@ -231,7 +231,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("nested_section_label_offset") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = NESTED_SECTION_LABEL_OFFSET.write() {
@@ -240,7 +240,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("plate_padding") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = PLATE_PADDING.write() {
@@ -249,7 +249,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("page_margin") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = PAGE_MARGIN.write() {
@@ -258,7 +258,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("grid_min_col_width") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = GRID_MIN_COL_WIDTH.write() {
@@ -267,7 +267,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("grid_gap") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = GRID_GAP.write() {
@@ -276,7 +276,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("column_gap") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = COLUMN_GAP.write() {
@@ -285,7 +285,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("control_panel_padding") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = CONTROL_PANEL_PADDING.write() {
@@ -294,7 +294,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("control_panel_gap") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = CONTROL_PANEL_GAP.write() {
@@ -303,7 +303,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("section_padding") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SECTION_PADDING.write() {
@@ -312,7 +312,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("scrollbar_width") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
@@ -321,7 +321,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("scrollbar_inset") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SCROLLBAR_INSET.write() {
@@ -330,7 +330,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("tree_opacity") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TREE_OPACITY.write() {
@@ -339,7 +339,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("tree_blur") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TREE_BLUR.write() {
@@ -348,7 +348,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("spinbox_height") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SPINBOX_HEIGHT.write() {
@@ -357,7 +357,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("spinbox_button_padding") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SPINBOX_BUTTON_PADDING.write() {
@@ -366,7 +366,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("spinbox_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SPINBOX_CORNER_RADIUS.write() {
@@ -375,7 +375,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("textbox_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TEXTBOX_CORNER_RADIUS.write() {
@@ -384,7 +384,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("textbox_line_wrap") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 let wrap = val_str == "true" || val_str == "1" || val_str == "1.0";
                 if let Ok(mut lock) = TEXTBOX_LINE_WRAP.write() {
@@ -392,7 +392,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("touchpad_natural_scroll") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 let enabled = val_str == "true" || val_str == "1" || val_str == "1.0";
                 if let Ok(mut lock) = TOUCHPAD_NATURAL_SCROLL.write() {
@@ -400,7 +400,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("textbox_multiline_border_width") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TEXTBOX_MULTILINE_BORDER_WIDTH.write() {
@@ -409,7 +409,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("list_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = LIST_CORNER_RADIUS.write() {
@@ -418,7 +418,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("tree_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TREE_CORNER_RADIUS.write() {
@@ -427,7 +427,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("font_selector_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = FONT_SELECTOR_CORNER_RADIUS.write() {
@@ -436,7 +436,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("dropdown_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = DROPDOWN_CORNER_RADIUS.write() {
@@ -445,7 +445,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("toggle_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TOGGLE_CORNER_RADIUS.write() {
@@ -454,7 +454,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("plate_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = PLATE_CORNER_RADIUS.write() {
@@ -463,7 +463,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("plate_opacity") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = PLATE_OPACITY.write() {
@@ -472,7 +472,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("page_opacity") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = PAGE_OPACITY.write() {
@@ -481,7 +481,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("layer_opacity") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = LAYER_OPACITY.write() {
@@ -493,7 +493,7 @@ pub fn reload_config() {
 
             if let Some(rest) = trimmed.strip_prefix("toggle_height") {
 
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TOGGLE_HEIGHT.write() {
@@ -502,7 +502,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("color_selector_height") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = COLOR_SELECTOR_HEIGHT.write() {
@@ -511,7 +511,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("font_selector_height") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = FONT_SELECTOR_HEIGHT.write() {
@@ -520,7 +520,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("color_selector_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = rest.trim_start_matches([' ', '=']);
                 let rest = rest.trim();
                 let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
                     &rest[1..rest.len() - 1]
@@ -533,7 +533,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("menubar_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = rest.trim_start_matches([' ', '=']);
                 let rest = rest.trim();
                 let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
                     &rest[1..rest.len() - 1]
@@ -553,7 +553,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("statusbar_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = rest.trim_start_matches([' ', '=']);
                 let rest = rest.trim();
                 let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
                     &rest[1..rest.len() - 1]
@@ -573,7 +573,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("section_label_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = rest.trim_start_matches([' ', '=']);
                 let rest = mod_rest(rest);
                 let font = rest.trim().to_string();
                 if let Ok(mut lock) = SECTION_LABEL_FONT.write() {
@@ -581,7 +581,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("nested_section_label_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = rest.trim_start_matches([' ', '=']);
                 let rest = mod_rest(rest);
                 let font = rest.trim().to_string();
                 if let Ok(mut lock) = NESTED_SECTION_LABEL_FONT.write() {
@@ -589,7 +589,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("breadcrumb_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = rest.trim_start_matches([' ', '=']);
                 let rest = mod_rest(rest);
                 let font = rest.trim().to_string();
                 if let Ok(mut lock) = BREADCRUMB_FONT.write() {
@@ -597,7 +597,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("button_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = rest.trim_start_matches([' ', '=']);
                 let rest = mod_rest(rest);
                 let font = rest.trim().to_string();
                 if let Ok(mut lock) = BUTTON_FONT.write() {
@@ -605,7 +605,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("color_selector_preview_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_CORNER_RADIUS.write() {
@@ -614,7 +614,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("color_selector_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = COLOR_SELECTOR_CORNER_RADIUS.write() {
@@ -623,7 +623,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("color_selector_preview_margin") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_MARGIN.write() {
@@ -632,7 +632,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_x") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = PAGINATOR_TAB_PADDING_X.write() {
@@ -641,7 +641,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("button_padding") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = BUTTON_PADDING.write() {
@@ -649,7 +649,7 @@ pub fn reload_config() {
                     }
                 }
             } else if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_y") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = BUTTON_PADDING.write() {
@@ -658,7 +658,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("button_height") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = BUTTON_HEIGHT.write() {
@@ -667,7 +667,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("button_strip_spacing") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = BUTTON_STRIP_SPACING.write() {
@@ -676,7 +676,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("textbox_height") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TEXTBOX_HEIGHT.write() {
@@ -685,7 +685,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("dropdown_height") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = DROPDOWN_HEIGHT.write() {
@@ -694,7 +694,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("slider_height") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SLIDER_HEIGHT.write() {
@@ -703,7 +703,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("rangeslider_height") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = RANGESLIDER_HEIGHT.write() {
@@ -712,7 +712,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("button_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = BUTTON_CORNER_RADIUS.write() {
@@ -721,7 +721,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("slider_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SLIDER_CORNER_RADIUS.write() {
@@ -730,7 +730,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("rangeslider_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = RANGESLIDER_CORNER_RADIUS.write() {
@@ -739,7 +739,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("toggle_border_width") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TOGGLE_BORDER_WIDTH.write() {
@@ -852,7 +852,7 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("list_justification") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<u8>() {
                     if let Ok(mut lock) = LIST_JUSTIFICATION.write() {
@@ -1012,7 +1012,7 @@ pub fn nested_section_label_alignment() -> u8 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("nested_section_label_alignment") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<u8>() {
                         if let Ok(mut lock) = NESTED_SECTION_LABEL_ALIGNMENT.write() {
@@ -1042,7 +1042,7 @@ pub fn nested_section_label_offset() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("nested_section_label_offset") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = NESTED_SECTION_LABEL_OFFSET.write() {
@@ -1106,7 +1106,7 @@ pub fn grid_min_col_width() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("grid_min_col_width") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = GRID_MIN_COL_WIDTH.write() {
@@ -1136,7 +1136,7 @@ pub fn grid_gap() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("grid_gap") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = GRID_GAP.write() {
@@ -1237,7 +1237,7 @@ pub fn param_labels_inline() -> bool {
         .read()
         .unwrap()
         .get_string("param_label_layout")
-        .map_or(true, |v| v.trim() != "stacked")
+        .is_none_or(|v| v.trim() != "stacked")
 }
 
 pub fn section_padding() -> f32 {
@@ -1252,7 +1252,7 @@ pub fn section_padding() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("section_padding") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = SECTION_PADDING.write() {
@@ -1283,7 +1283,7 @@ pub fn spinbox_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("spinbox_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = SPINBOX_HEIGHT.write() {
@@ -1311,7 +1311,7 @@ pub fn toggle_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("toggle_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = TOGGLE_HEIGHT.write() {
@@ -1576,7 +1576,7 @@ mod ramp_sampling_tests {
         assert!((sample_ramp_keys(&keys, true, 0.4) - 1.0).abs() < 1e-6);
         for i in 0..=100 {
             let v = sample_ramp_keys(&keys, true, i as f32 / 100.0);
-            assert!(v <= 1.0 + 1e-6 && v >= 0.1 - 1e-6, "overshoot {v}");
+            assert!((0.1 - 1e-6..=1.0 + 1e-6).contains(&v), "overshoot {v}");
         }
         let near = sample_ramp_keys(&keys, true, 0.39);
         assert!(near > 0.99, "flat at the extremum: {near}");
@@ -1795,7 +1795,7 @@ pub fn toggle_border_width() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("toggle_border_width") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = TOGGLE_BORDER_WIDTH.write() {
@@ -1869,7 +1869,7 @@ pub fn plate_opacity() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("plate_opacity") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = PLATE_OPACITY.write() {
@@ -1897,7 +1897,7 @@ pub fn page_opacity() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("page_opacity") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = PAGE_OPACITY.write() {
@@ -1925,7 +1925,7 @@ pub fn layer_opacity() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("layer_opacity") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = LAYER_OPACITY.write() {
@@ -1956,7 +1956,7 @@ pub fn color_selector_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("color_selector_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = COLOR_SELECTOR_HEIGHT.write() {
@@ -1984,7 +1984,7 @@ pub fn font_selector_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("font_selector_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = FONT_SELECTOR_HEIGHT.write() {
@@ -2013,7 +2013,7 @@ pub fn color_selector_font() -> String {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("color_selector_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = rest.trim_start_matches([' ', '=']);
                     let rest = rest.trim();
                     let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
                         &rest[1..rest.len() - 1]
@@ -2508,7 +2508,7 @@ pub fn list_justification() -> u8 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("list_justification") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<u8>() {
                         if let Ok(mut lock) = LIST_JUSTIFICATION.write() {
@@ -2540,7 +2540,7 @@ pub fn section_label_font() -> String {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("section_label_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = rest.trim_start_matches([' ', '=']);
                     let rest = rest.trim();
                     let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
                         &rest[1..rest.len() - 1]
@@ -2578,7 +2578,7 @@ pub fn nested_section_label_font() -> String {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("nested_section_label_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = rest.trim_start_matches([' ', '=']);
                     let rest = rest.trim();
                     let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
                         &rest[1..rest.len() - 1]
@@ -2616,7 +2616,7 @@ pub fn breadcrumb_font() -> String {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("breadcrumb_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = rest.trim_start_matches([' ', '=']);
                     let rest = rest.trim();
                     let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
                         &rest[1..rest.len() - 1]
@@ -2654,7 +2654,7 @@ pub fn button_font() -> String {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("button_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = rest.trim_start_matches([' ', '=']);
                     let rest = rest.trim();
                     let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
                         &rest[1..rest.len() - 1]
@@ -2760,7 +2760,7 @@ pub fn spinbox_button_padding() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("spinbox_button_padding") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = SPINBOX_BUTTON_PADDING.write() {
@@ -2782,7 +2782,7 @@ pub fn scrollbar_width() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("scrollbar_width") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
@@ -2824,7 +2824,7 @@ pub fn scrollbar_inset() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("scrollbar_inset") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = SCROLLBAR_INSET.write() {
@@ -2846,7 +2846,7 @@ pub fn tree_opacity() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("tree_opacity") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = TREE_OPACITY.write() {
@@ -2874,7 +2874,7 @@ pub fn tree_blur() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("tree_blur") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = TREE_BLUR.write() {
@@ -3198,7 +3198,7 @@ pub fn color_selector_preview_margin() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("color_selector_preview_margin") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_MARGIN.write() {
@@ -3228,7 +3228,7 @@ pub fn paginator_tab_padding_x() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_x") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = PAGINATOR_TAB_PADDING_X.write() {
@@ -3257,7 +3257,7 @@ pub fn button_padding() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("button_padding") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = BUTTON_PADDING.write() {
@@ -3271,7 +3271,7 @@ pub fn button_padding() -> f32 {
                 for line in content.lines() {
                     let trimmed = line.trim();
                     if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_y") {
-                        let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                        let rest = rest.trim_start_matches([' ', '=', '"']);
                         let val_str = rest.trim_end_matches('"').trim();
                         if let Ok(val) = val_str.parse::<f32>() {
                             if let Ok(mut lock) = BUTTON_PADDING.write() {
@@ -3300,7 +3300,7 @@ pub fn button_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("button_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = BUTTON_HEIGHT.write() {
@@ -3322,7 +3322,7 @@ pub fn ramp_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("ramp_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = RAMP_HEIGHT.write() {
@@ -3356,7 +3356,7 @@ pub fn button_strip_spacing() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("button_strip_spacing") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = BUTTON_STRIP_SPACING.write() {
@@ -3392,7 +3392,7 @@ pub fn textbox_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("textbox_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = TEXTBOX_HEIGHT.write() {
@@ -3420,7 +3420,7 @@ pub fn dropdown_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("dropdown_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = DROPDOWN_HEIGHT.write() {
@@ -3448,7 +3448,7 @@ pub fn slider_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("slider_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = SLIDER_HEIGHT.write() {
@@ -3476,7 +3476,7 @@ pub fn progressbar_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("progressbar_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = PROGRESSBAR_HEIGHT.write() {
@@ -3504,7 +3504,7 @@ pub fn rangeslider_height() -> f32 {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("rangeslider_height") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let rest = rest.trim_start_matches([' ', '=', '"']);
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
                         if let Ok(mut lock) = RANGESLIDER_HEIGHT.write() {

@@ -1637,7 +1637,7 @@ impl Application for BevelPopup {
                     .and_then(|o| o.as_f64())
                     .map(|f| (f as f32).clamp(0.0, 1.0))
             })
-            .unwrap_or_else(|| cce_ui::color::root_plate_opacity());
+            .unwrap_or_else(cce_ui::color::root_plate_opacity);
         Self {
             profile_dropdown: Owned::new(Dropdown::new(
                 Shape::ALL.iter().map(|s| s.label().to_string()).collect(),
@@ -2028,7 +2028,7 @@ impl Application for BevelPopup {
         needs_rebuild: &mut bool,
     ) {
         let ev = Event::MouseWheel {
-            delta: delta.clone(),
+            delta: *delta,
             x: pos.x,
             y: pos.y,
             local_x: pos.x,

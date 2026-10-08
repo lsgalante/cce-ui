@@ -28,7 +28,7 @@ fn test_plate_root_canonical_spelling() {
     "##;
     crate::color::reload_colors(content);
     assert_eq!(crate::color::root_plate_corner_radius(), 17.0, "canonical read; legacy ignored");
-    assert_eq!(crate::color::root_plate_menubar_blur(), true);
+    assert!(crate::color::root_plate_menubar_blur());
 
     // A legacy-only spelling no longer feeds the getter: the value from
     // the canonical load above stands.
@@ -75,14 +75,14 @@ fn test_root_plate_menubar_statusbar_styling() {
     crate::color::reload_colors(content);
 
     // Verify values are parsed correctly through the root_plate_* getters.
-    assert_eq!(crate::color::root_plate_menubar_blur(), true);
+    assert!(crate::color::root_plate_menubar_blur());
     
     let dd_color = crate::color::dropdown_background_color();
     assert!((dd_color[0] - crate::color::srgb_to_linear(8.0 / 255.0)).abs() < 0.0001);
     
     let placeholder_color = crate::color::textbox_placeholder_text_color();
     assert_eq!(placeholder_color, [0x60, 0x60, 0x6a]);
-    assert_eq!(crate::color::root_plate_statusbar_blur(), false);
+    assert!(!crate::color::root_plate_statusbar_blur());
 
     // Colors are in sRGB converted to linear, let's verify text colors
     let menubar_txt = crate::color::root_plate_menubar_text_color();

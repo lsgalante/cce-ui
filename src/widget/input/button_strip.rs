@@ -432,8 +432,8 @@ impl crate::widget::Paint for ButtonStrip {
                 );
             }
 
-            if self.vertical {
-                if i < self.tab_text_quads.len() {
+            if self.vertical
+                && i < self.tab_text_quads.len() {
                     let min_y = self.y;
                     let max_y = self.y + self.h;
                     let has_icon = self.icon_of(i).is_some();
@@ -458,7 +458,6 @@ impl crate::widget::Paint for ButtonStrip {
                         }
                     }
                 }
-            }
         }
 
         // Own labels (horizontal button text).

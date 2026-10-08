@@ -620,7 +620,7 @@ impl Application for DemoApp {
         needs_rebuild: &mut bool,
     ) {
         let (px, py) = (pos.x, pos.y);
-        let ev = Event::MouseWheel { delta: delta.clone(), x: px, y: py, local_x: px, local_y: py };
+        let ev = Event::MouseWheel { delta: *delta, x: px, y: py, local_x: px, local_y: py };
         let mut changed = false;
         // Wheel is hit-scoped per widget (the slider nudges its value under the
         // cursor); roots that miss return false.

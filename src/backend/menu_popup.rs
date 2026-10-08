@@ -99,7 +99,7 @@ fn popup_enabled() -> bool {
 /// except in forced-scale mode, where the compositor believes scale 1 and
 /// the app's logical px are `forced` of its own.
 fn forced() -> f32 {
-    crate::scale::forced_scale().map(|f| f as f32).unwrap_or(1.0)
+    crate::scale::forced_scale().unwrap_or(1.0)
 }
 
 impl<A: Application> EngineState<A> {
