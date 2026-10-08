@@ -75,6 +75,7 @@ static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 /// A fresh image id from the process-wide counter, for a renderer that
 /// uploads into its own table directly (`ImageStage::upload_now`) — never
 /// one a queued upload also holds.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // only the Vulkan renderer uploads directly
 pub(crate) fn next_image_id() -> u32 {
     NEXT_ID.fetch_add(1, Ordering::Relaxed)
 }

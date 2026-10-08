@@ -146,8 +146,10 @@ pub(crate) struct LitUniforms {
     ground: [f32; 4],
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // the Vulkan renderer's; WebGPU has no lit pass yet
 pub(crate) const LIT_UNIFORM_SIZE: usize = std::mem::size_of::<LitUniforms>();
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // the Vulkan renderer's; WebGPU has no lit pass yet
 fn unit4(v: [f32; 3]) -> [f32; 4] {
     let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     if l > 0.0 {
@@ -157,6 +159,7 @@ fn unit4(v: [f32; 3]) -> [f32; 4] {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // the Vulkan renderer's; WebGPU has no lit pass yet
 fn pad(v: [f32; 3]) -> [f32; 4] {
     [v[0], v[1], v[2], 0.0]
 }
@@ -164,6 +167,7 @@ fn pad(v: [f32; 3]) -> [f32; 4] {
 /// The staged lit draws' uniform blocks, in order. A texture not resident
 /// in the renderer is bound as its white fallback, so "textured" with no
 /// texture yet draws the plain base colour.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // the Vulkan renderer's; WebGPU has no lit pass yet
 pub(crate) fn lit_uniforms(
     draws: &[LitDraw],
     light: &LitLight,
