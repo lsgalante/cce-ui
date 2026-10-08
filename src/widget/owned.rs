@@ -154,6 +154,8 @@ impl<W: WidgetHost + 'static> WidgetHost for Owned<W> {
     fn blocks_root_plate_drag(&self) -> bool { self.widget.blocks_root_plate_drag() }
     fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) { self.widget.corner_style() }
     fn focus_role(&self) -> FocusRole { self.widget.focus_role() }
+    fn a11y_role(&self) -> Option<accesskit::Role> { self.widget.a11y_role() }
+    fn a11y_value(&self) -> Option<String> { self.widget.a11y_value() }
     fn corner_radii(&self) -> CornerRadii { self.widget.corner_radii() }
 }
 

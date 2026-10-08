@@ -1705,6 +1705,10 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `compute.rs` — what a compute job is, apart from the device that runs it: `Kernel`,
   `Binding`, the job rules and naga's parse (see "Compute jobs run in the browser too").
   `vk::ComputeDevice` and `web::ComputeDevice` run them.
+- `a11y.rs` — the accessibility tree: `tree_update(&UiContext, title, scale)` is AccessKit's
+  `TreeUpdate` for a window's registered widgets (role, name, value, bounds, actions,
+  focus); `WidgetHost::a11y_role` / `a11y_value` are what a widget says about itself. No
+  platform adapter yet (`docs/rfc-accessibility-locale.md`, phases 1–2).
 - `ime.rs` — input-method composition shared between the editing widget and the shell:
   `Preedit`, the composition and its generation, the reported caret, the reset request
   (see "Input-method composition is one model for every shell").

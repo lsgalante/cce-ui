@@ -4,6 +4,7 @@
 // Wayland shell's, which macOS replaces with `mac` (AppKit). Everything else
 // builds for the browser too: `scripts/check-wasm` is the check, and
 // `scripts/check-mac` the macOS one.
+pub mod a11y;
 pub mod color;
 pub mod compute;
 pub mod widget;

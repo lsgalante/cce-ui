@@ -575,6 +575,18 @@ pub trait WidgetHost {
         FocusRole::None
     }
 
+    /// An explicit accessibility role, overriding the guess `crate::a11y::role_for` makes
+    /// from the widget's type and focus role. Default `None`.
+    fn a11y_role(&self) -> Option<accesskit::Role> {
+        None
+    }
+
+    /// The widget's value for assistive technology: a field's text, a slider's number, a
+    /// check box's "true" / "false". Default `None`.
+    fn a11y_value(&self) -> Option<String> {
+        None
+    }
+
     fn corner_radii(&self) -> CornerRadii {
         let (r, (tl, tr, br, bl)) = self.corner_style();
         CornerRadii::new(

@@ -79,6 +79,14 @@ One `cce_core::locale()`: `LC_ALL`, else `LC_CTYPE`, else `LANG`, turned from PO
 
 ### Phase 1 — an accessibility tree the toolkit can produce
 
+**Progress (2026-10-08):** the tree for retained widgets is `crate::a11y::tree_update`
+(AccessKit's `TreeUpdate`, § 5): a window node carrying the HiDPI scale, and a node per
+registered visible widget with its role (`WidgetHost::a11y_role`, else `a11y::role_for` from
+type and focus role), label, value (`a11y_value`, the widget's `value_string`: toggled for a
+check box or switch, numeric for a slider, spin button or progress bar), logical bounds,
+focus and click actions, children in reading order, and the context's focus. Still to come
+in this phase: the hook for immediate-mode apps, and action IDs for context-menu rows.
+
 - A node per registered widget: **role** (from `type_name` and `FocusRole` first, then an
   explicit `Input::a11y_role()` a widget can override: button, checkbox, toggle-button,
   slider, spin-button, text-input, combo-box, list, tree, table, menu), **name** (the
@@ -131,11 +139,46 @@ Phase 0 is an afternoon. Phase 1 is the real design work, and everything after i
 on it; it is additive, and the tree costs nothing for an app nobody inspects. Phases 3 and
 4 are independent of 1 and 2 and can go in parallel. Phase 5 waits on phase 1's ID rule.
 
-## 5. Open questions
+## 5. Decision: AccessKit (2026-10-08)
 
-- AccessKit, or our own AT-SPI server? Decide by building phase 2 against AccessKit for one
-  app (cce-data-editor: plate navigation already on, a tree list, text fields, a menubar)
-  and measuring what it costs in dependencies and in frame time.
+The tree is AccessKit's, and so are the platform adapters. AccessKit is a schema for an
+accessibility tree (the `accesskit` crate: pure data, one required dependency, `uuid`, so it
+builds for every target cce-ui does) plus adapters that publish it, each pushed to by the
+toolkit. Phase 1 produces its `TreeUpdate` directly; there is no schema of our own to
+translate.
+
+Why, against writing our own AT-SPI server:
+- **It is the problem it was built for**: "toolkits that render their own user interface
+  elements". egui, Bevy, Slint, GPUI, Masonry/Xilem, Freya, Vizia, KAS and Servo use it.
+- **Linux alone would be three crates' worth of work** (`accesskit_consumer`,
+  `accesskit_atspi_common`, `accesskit_unix`, ~115 KB compressed): the AT-SPI object
+  interfaces (accessible, component, action, value, text, editable text, selection, table),
+  their events and cache, tree diffing and text navigation.
+- **macOS comes with it** (`accesskit_macos`, onto the AppKit shell's view). Our own server
+  would cover Linux only.
+- **No cost without a screen reader**: `Adapter::update_if_active` builds nothing until an
+  assistive tool connects. Its handlers run on another thread, which `AppSender` already
+  serves.
+- MIT or Apache-2.0, like this crate.
+
+What it costs, accepted:
+- `accesskit_unix` needs zbus 5.19 or later (cce-ui has none today), so it goes in the
+  Wayland shell and behind a feature if its weight shows.
+- Pre-1.0: its crates release together with breaking minor versions every few months.
+- Editable text is exposed in its model (text runs with per-character positions), which
+  phase 4's direction-aware carets must feed.
+
+Unchanged by the choice: the browser still needs our hidden-ARIA mirror (AccessKit's web
+adapter is planned, not released), and on Wayland a window's screen position is unknown to
+any toolkit, so a screen reader's pointer features are approximate there for GTK as much as
+for us.
+
+How it is proven: phase 1's tree, then `accesskit_unix` in the Wayland shell for one app
+(cce-data-editor: plate navigation on, a tree list, text fields, a menubar), measured in
+dependencies and frame time and listened to with Orca (`at-spi2-core` is installed; a
+screen reader is not).
+
+## 6. Open questions
 - Should the compositor expose its own UI (window titles, overview, the grid) to AT-SPI?
   It draws natively, so it would need its own tree.
 - Do immediate-mode apps get the hook or get ported? The status bar and the notifier are

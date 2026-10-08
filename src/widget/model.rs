@@ -476,6 +476,13 @@ pub trait Input {
         None
     }
 
+    /// What this widget is to assistive technology, when the toolkit's guess from its type
+    /// and [`focus_role`](Input::focus_role) is not it (`crate::a11y::role_for`). Default
+    /// `None`: the guess stands.
+    fn a11y_role(&self) -> Option<accesskit::Role> {
+        None
+    }
+
     /// Set the widget's value from a config string. Returns whether it parsed and changed.
     fn set_value_string(&mut self, _val: &str) -> bool {
         false
@@ -1278,6 +1285,14 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     }
     fn focus_role(&self) -> FocusRole {
         Input::focus_role(&self.inner)
+    }
+
+    fn a11y_role(&self) -> Option<accesskit::Role> {
+        Input::a11y_role(&self.inner)
+    }
+
+    fn a11y_value(&self) -> Option<String> {
+        Input::value_string(&self.inner)
     }
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
         Paint::solid_border(&self.inner)
