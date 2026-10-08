@@ -471,6 +471,8 @@ pub fn derive_damage(frame: &mut BuiltFrame, record: &mut FrameRecord, texts: &[
         return;
     }
     frame.damage = Some((x0 as u32, y0 as u32, (x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32));
+    // The switch lives with the Vulkan renderer, which the browser build does not have.
+    #[cfg(not(target_arch = "wasm32"))]
     if crate::vk::present_debug() {
         eprintln!("[vk] derived damage {}x{}+{}+{} of {pw}x{ph}", x1 - x0, y1 - y0, x0, y0);
     }
@@ -628,16 +630,41 @@ mod damage_tests {
             scale: 1.0,
             physical: (400, 200),
         };
+        // A family the font system holds in both an upright and an italic face, so the two
+        // really are different pictures. Asked for a generic family that resolves to nothing
+        // installed (a macOS runner's "monospace"), the per-glyph fallback can draw both
+        // styles with one upright face and no fake-italic flag: the same picture, and no
+        // damage is then the right answer, not a failure.
+        let family = {
+            use cosmic_text::fontdb::Style;
+            let fs = crate::geometry_font_system().lock().unwrap();
+            let mut styles: std::collections::HashMap<String, (bool, bool)> = Default::default();
+            for f in fs.db().faces() {
+                if let Some((name, _)) = f.families.first() {
+                    let e = styles.entry(name.clone()).or_default();
+                    match f.style {
+                        Style::Normal => e.0 = true,
+                        Style::Italic => e.1 = true,
+                        Style::Oblique => {}
+                    }
+                }
+            }
+            let mut both: Vec<String> = styles.into_iter().filter(|(_, (n, i))| *n && *i).map(|(k, _)| k).collect();
+            both.sort();
+            both.into_iter().next()
+        };
+        let Some(family) = family else {
+            eprintln!("skipping: no font family here has both an upright and an italic face");
+            return;
+        };
         let key = |attrs: TextAttrs| {
             let mut fs = crate::geometry_font_system().lock().unwrap();
-            let buffer = crate::backend::text::shared_text_buffer(&mut fs, "The quick brown fox", 14.0, Some("monospace"), attrs);
+            let buffer = crate::backend::text::shared_text_buffer(&mut fs, "The quick brown fox", 14.0, Some(&family), attrs);
             let t = DlText { buffer, x: 10.0, y: 10.0, color: cosmic_text::Color::rgb(255, 255, 255), bounds: None, clip_circle: None, clip_rrect: None };
             FrameSig::of(&frame, &[t]).texts[0].0
         };
         let upright = TextAttrs::default();
         assert_eq!(key(upright), key(upright), "an unchanged item is no damage");
-        // Italic is a different face or, with none installed, the fake-italic
-        // flag: a different picture either way.
-        assert_ne!(key(upright), key(TextAttrs { italic: true, ..upright }));
+        assert_ne!(key(upright), key(TextAttrs { italic: true, ..upright }), "{family}: italic is another face");
     }
 }

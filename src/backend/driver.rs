@@ -153,7 +153,7 @@ pub struct Driver {
     /// When the last input event of any kind arrived — what makes a redraw
     /// interactive, which is the redraw the runner's warm-down is for
     /// (`shell::Pacer`).
-    pub last_input: Option<std::time::Instant>,
+    pub last_input: Option<Instant>,
     pub pressed_key: Option<PressedKey>,
     /// The pointer's last position, window-logical (popup events translated).
     pub cursor_pos: (f32, f32),
@@ -288,7 +288,7 @@ impl Driver {
     /// window can misroute (e.g. a divider press falling through to the
     /// movable-root plate window drag).
     fn note_input(&mut self) {
-        self.last_input = Some(std::time::Instant::now());
+        self.last_input = Some(Instant::now());
     }
 
     pub fn pointer_enter<A: Application>(&mut self, t: Turn<'_, A>, pos: LogicalPosition) {

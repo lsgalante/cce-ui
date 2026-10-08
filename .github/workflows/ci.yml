@@ -55,6 +55,12 @@ jobs:
       - name: Test (all features)
         run: cargo test --all-features
 
+      # The path tracer's GPU tests are #[ignore]d for machines without a
+      # device; lavapipe has one, and its compute tier is what every Vulkan
+      # device without RT cores (and WebGPU) runs.
+      - name: Path tracer GPU tests (compute tier)
+        run: CCE_VK_RT=compute cargo test --lib vk::rt -- --ignored
+
       # The GPU tests skip with a note when no Vulkan device opens, and a
       # skipped test passes. Fail instead if they skipped here, so losing
       # lavapipe does not quietly drop the only rendered checks.
