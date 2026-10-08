@@ -7,6 +7,7 @@ pub mod spreadsheet;
 pub mod scroll_box;
 pub mod paginator;
 pub mod treelist;
+pub mod dialog;
 pub mod group;
 
 pub use container_layout::{ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout, ColumnsLayout, MosaicLayout, ReverseMosaicLayout};
@@ -18,4 +19,5 @@ pub use spreadsheet::{SheetColumn, Spreadsheet};
 pub use scroll_box::ScrollBox;
 pub use paginator::Paginator;
 pub use treelist::{TreeList, TreeElement};
+pub use dialog::Dialog;
 pub use group::{Group, GroupFrame};

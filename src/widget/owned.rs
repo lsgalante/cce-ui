@@ -159,6 +159,8 @@ impl<W: WidgetHost + 'static> WidgetHost for Owned<W> {
     fn a11y_value(&self) -> Option<String> { self.widget.a11y_value() }
     fn a11y_range(&self) -> Option<(f64, f64, f64)> { self.widget.a11y_range() }
     fn a11y_set_value(&mut self, value: f64) -> bool { self.widget.a11y_set_value(value) }
+    fn a11y_items(&self) -> Vec<crate::a11y::A11yItem> { self.widget.a11y_items() }
+    fn a11y_select_item(&mut self, idx: usize) -> bool { self.widget.a11y_select_item(idx) }
     fn corner_radii(&self) -> CornerRadii { self.widget.corner_radii() }
 }
 

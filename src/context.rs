@@ -63,6 +63,14 @@ fn warn_unowned(type_name: &'static str) {
     }
 }
 
+/// One open modal: who opened it, what is inside it, and where focus was before.
+#[derive(Debug, Clone)]
+struct ModalScope {
+    owner: WidgetId,
+    members: Vec<WidgetId>,
+    restore: Option<WidgetId>,
+}
+
 pub struct UiContext {
     /// The widget tree + registry, consolidated into one generational store (Phase 1b of the
     /// core rebuild). Replaces the former `layout_tree` + `widget_registry` maps; see
@@ -73,6 +81,10 @@ pub struct UiContext {
     pub focused_widget: Option<WidgetId>,
     /// Open-popover registrations, id-keyed like focus (Phase 6bc slice 2).
     pub active_popovers: Vec<WidgetId>,
+    /// Open modals, innermost last ([`UiContext::open_modal`]): while one is open the Tab
+    /// walk visits only its members, and every widget outside it reads as covered, so no
+    /// press or hover reaches what lies behind.
+    modals: Vec<ModalScope>,
     /// Memo for `is_coordinate_covered` at a single cursor position: the ids of
     /// every widget whose popover rect contains it. That query scans the entire
     /// registry, and `hit_test` calls it — so dispatching one PointerMove to N
@@ -115,6 +127,7 @@ impl UiContext {
             tree: crate::scene::WidgetTree::new(),
             focused_widget: None,
             active_popovers: Vec::new(),
+            modals: Vec::new(),
             covered_cache: std::cell::RefCell::new((None, Vec::new())),
             hover_state: HoverState::new(),
             cursor_pos: (0.0, 0.0),
@@ -591,6 +604,59 @@ impl UiContext {
         }
     }
 
+    /// Open a modal owned by `owner` (a `Dialog`) around `members`: the Tab walk is trapped
+    /// among them (and their embedded children), every widget outside reads as covered
+    /// ([`UiContext::is_coordinate_covered`], which every hit test and hover asks), and focus
+    /// moves to the first stop inside, remembering where it was. Modals nest; the innermost
+    /// rules. Opening one already open replaces its members and keeps its focus memory.
+    pub fn open_modal(&mut self, owner: WidgetId, members: Vec<WidgetId>) {
+        self.invalidate_coverage_cache();
+        if let Some(scope) = self.modals.iter_mut().find(|m| m.owner == owner) {
+            scope.members = members;
+            return;
+        }
+        let restore = self.focused_widget;
+        self.modals.push(ModalScope { owner, members, restore });
+        match self.focus_stops().first() {
+            Some(&first) => self.set_focused_id(first),
+            None => self.clear_focus(),
+        }
+    }
+
+    /// Close the modal `owner` opened, giving focus back to what had it before (if that is
+    /// still registered and reachable), else to nothing.
+    pub fn close_modal(&mut self, owner: WidgetId) {
+        let Some(i) = self.modals.iter().position(|m| m.owner == owner) else { return };
+        let scope = self.modals.remove(i);
+        self.invalidate_coverage_cache();
+        let inside = |ctx: &Self, id: WidgetId| ctx.tree.is_registered(id) && ctx.in_modal_scope(id);
+        match scope.restore.filter(|&id| inside(self, id)) {
+            Some(id) => self.set_focused_id(id),
+            None => self.clear_focus(),
+        }
+    }
+
+    /// The owner of the innermost open modal.
+    pub fn modal_owner(&self) -> Option<WidgetId> {
+        self.modals.last().map(|m| m.owner)
+    }
+
+    /// Whether `id` may take input: true with no modal open; with one, true for the modal's
+    /// owner, its members and anything under them in the tree.
+    pub fn in_modal_scope(&self, id: WidgetId) -> bool {
+        let Some(scope) = self.modals.last() else { return true };
+        let mut at = Some(id);
+        // Bounded: a malformed parent chain must not hang the walk.
+        for _ in 0..64 {
+            let Some(cur) = at else { return false };
+            if cur == scope.owner || scope.members.contains(&cur) {
+                return true;
+            }
+            at = self.tree.parent_id(cur);
+        }
+        false
+    }
+
     pub fn clear_if_matches(&mut self, w: &dyn WidgetHost) {
         if self.focused_widget == Some(w.base().id()) {
             self.focused_widget = None;
@@ -613,7 +679,7 @@ impl UiContext {
                 continue;
             }
             let w = unsafe { &*ptr };
-            if w.focus_role() == crate::widget::FocusRole::None || !w.visible() {
+            if w.focus_role() == crate::widget::FocusRole::None || !w.visible() || !self.in_modal_scope(id) {
                 continue;
             }
             let (x, y, width, height) = w.rect();
@@ -957,12 +1023,17 @@ impl UiContext {
     /// Whether `(px, py)` is covered by an open popover or a popover-carrying widget other
     /// than `query_id` (the querying widget excludes itself). Every widget has a base id
     /// now (the flip) — the old `WidgetId(0)` no-base sentinel is gone.
-    /// Is `(px, py)` covered by some widget's popover rect other than `query_id`?
+    /// Is `(px, py)` covered by some widget's popover rect other than `query_id` — or does
+    /// `query_id` lie behind an open modal ([`UiContext::open_modal`]), where everything is?
     ///
     /// The covering set depends only on the point, so it is computed once and
     /// memoized; `query_id` is applied afterwards as an exclusion. See the
     /// `covered_at` field for why the previous per-call registry scan mattered.
     pub fn is_coordinate_covered(&self, query_id: WidgetId, px: f32, py: f32) -> bool {
+        // Behind an open modal everything is covered, wherever the point is.
+        if !self.in_modal_scope(query_id) {
+            return true;
+        }
         let mut cache = self.covered_cache.borrow_mut();
         if cache.0 != Some((px, py)) {
             cache.1.clear();

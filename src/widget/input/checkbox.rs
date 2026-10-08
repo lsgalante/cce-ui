@@ -29,7 +29,7 @@ const PLATE_SHARE: f32 = 0.6;
 /// plate in it ([`Checkbox::box_plate`]): both fields with relief on; off,
 /// as the toggle's — a well is its frame, the hairline every well falls back
 /// to (lit by `hovered` / `focused`), and the plate a lit face in it.
-fn paint_box(ctx: &mut PaintCtx, well: &Field, plate: Option<&Field>, hovered: bool, focused: bool) {
+pub(crate) fn paint_box(ctx: &mut PaintCtx, well: &Field, plate: Option<&Field>, hovered: bool, focused: bool) {
     if crate::layout::control_relief() {
         ctx.field(well);
         if let Some(plate) = plate {

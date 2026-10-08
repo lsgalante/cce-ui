@@ -498,6 +498,19 @@ pub trait Input {
         None
     }
 
+    /// The parts of this widget a screen reader should see as nodes of their own, under the
+    /// widget's node: a radio group's radio buttons. `rect` is the widget's content rect.
+    /// Default none.
+    fn a11y_items(&self, _rect: Rect) -> Vec<crate::a11y::A11yItem> {
+        Vec::new()
+    }
+
+    /// An assistive tool clicked item `idx` of [`a11y_items`](Input::a11y_items): do what a
+    /// press on it does, reported as a change. Returns whether anything changed.
+    fn a11y_select_item(&mut self, _idx: usize) -> bool {
+        false
+    }
+
     /// Set the value an assistive tool asked for (AT-SPI's `SetCurrentValue`), clamped to
     /// [`a11y_range`](Input::a11y_range), and mark it changed as a typed value would be, so
     /// the host's `take_change` reports it. Returns whether it changed. Default: not
@@ -1328,6 +1341,14 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
 
     fn a11y_set_value(&mut self, value: f64) -> bool {
         Input::a11y_set_value(&mut self.inner, value)
+    }
+
+    fn a11y_items(&self) -> Vec<crate::a11y::A11yItem> {
+        Input::a11y_items(&self.inner, self.content_rect())
+    }
+
+    fn a11y_select_item(&mut self, idx: usize) -> bool {
+        Input::a11y_select_item(&mut self.inner, idx)
     }
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
         Paint::solid_border(&self.inner)

@@ -1189,6 +1189,19 @@ widget does not fit one of them, say so rather than stretching a word.
   within `snap` of the plate's edge take the edge one padding in and corners
   on the plate's corner follow it concentrically: on a narrow pane a group is
   that pane's inset lining, on a wide one a lasso. A group never hits.
+- **A dialog is a raised plate around a lasso** (`widget::Dialog`, since
+  2026-10-08). Like a group it owns nothing: the host lays its members out,
+  and its plate is their padded hull with a title band above, in the menu's
+  material. `open(ctx, members)` makes it MODAL through the context
+  (`UiContext::open_modal`): the Tab walk is trapped among the members, every
+  widget outside reads as covered (`is_coordinate_covered`, which every hit
+  test and hover asks) so nothing behind takes a press, focus moves in and is
+  given back on `close`, and the members are linked as its children, so the
+  accessibility tree nests them under a modal `Dialog` node. Paint the dialog,
+  not its members (it paints them on its plate), after everything it covers;
+  `set_backdrop` dims the window. Escape is the host's to read. Hide the
+  members while it is closed, or they are stops nobody can see. The demo's
+  Options… dialog is the pattern.
 - **Segments are plates or floors sharing one silhouette, parted by seams.**
   A seam is a `Groove` cut across the shared surface, dying into its rolled
   edge: Breadcrumb segments, ButtonStrip segments, the ColorSelector's
@@ -1232,7 +1245,8 @@ What this buys, and where the code is heading:
   A Checkbox and a Toggle light the rim of their field, as every field is
   lit.
   Roles today: Button, Checkbox, Toggle, Dropdown, FontSelector, ButtonStrip
-  (arrows move the selection between its segment plates) and Breadcrumb
+  (arrows move the selection between its segment plates), RadioGroup (one
+  stop; arrows move the choice, which follows them) and Breadcrumb
   (arrows walk its visible segments, Enter navigates) are plates; TextBox,
   Spinbox, ColorSelector, KeybindRecorder, TreeList, Slider (a band, but
   entered and adjusted in place — arrows step it, Enter opens the readout)
@@ -1717,7 +1731,8 @@ cce-system-interface) to confirm behavior, not just the test suite.
   window's `TreeUpdate` — its registered widgets (role, name, value, bounds, actions, focus;
   `WidgetHost::a11y_role` / `a11y_value` are what a widget says about itself), the nodes an
   app without widgets declares (`Application::accessibility`, `AppNodes`), and an open context
-  menu. `backend::a11y_unix` publishes it over AT-SPI (the `a11y` feature; see
+  menu; a widget's parts of its own (a radio group's radio buttons) are `A11yItem`s
+  (`Input::a11y_items`). `backend::a11y_unix` publishes it over AT-SPI (the `a11y` feature; see
   `docs/rfc-accessibility-locale.md`, phase 2).
 - `ime.rs` — input-method composition shared between the editing widget and the shell:
   `Preedit`, the composition and its generation, the reported caret, the reset request

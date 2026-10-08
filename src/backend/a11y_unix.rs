@@ -74,6 +74,8 @@ pub enum Acted {
 ///   (`WidgetHost::a11y_set_value`), marked changed for the app's `take_change`. An app
 ///   that drains changes in `tick` sees it this turn; one that drains them only in its
 ///   input handlers sees it at the next input.
+/// - **Click** on a widget's item (a radio button, `a11y::A11yItem`) does what a press on it
+///   does (`WidgetHost::a11y_select_item`) and puts the keyboard on its widget.
 /// - **Click** on an open context menu's row presses it where it is drawn, so the menu runs
 ///   the row's action exactly as a pointer would.
 ///
@@ -92,6 +94,22 @@ pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> Acted {
         }
         let (x, y) = (cm::x() + cm::w() * 0.5, cm::row_y(row) + cm::ROW_H * 0.5);
         cm::mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, x, y, app.ui_context_mut());
+        return Acted::Changed;
+    }
+    if let Some((id, idx)) = crate::a11y::item_of(request.target_node) {
+        // A click on a widget's item (a radio button): what a press on it does, and the
+        // keyboard goes to its widget, as after a press.
+        if request.action != Action::Click {
+            return Acted::Nothing;
+        }
+        let Some(ctx) = app.ui_context_mut() else { return Acted::Nothing };
+        if !ctx.get_widget_mut(id).is_some_and(|w| w.a11y_select_item(idx)) {
+            return Acted::Nothing;
+        }
+        if ctx.focused_widget != Some(id) {
+            ctx.set_focused_id(id);
+            app.focus_stepped();
+        }
         return Acted::Changed;
     }
     let Some(id) = crate::a11y::widget_of(request.target_node) else { return Acted::Nothing };

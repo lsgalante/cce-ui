@@ -602,6 +602,16 @@ pub trait WidgetHost {
         false
     }
 
+    /// The parts a screen reader sees as nodes of their own (`Input::a11y_items`).
+    fn a11y_items(&self) -> Vec<crate::a11y::A11yItem> {
+        Vec::new()
+    }
+
+    /// An assistive tool clicked one of them (`Input::a11y_select_item`).
+    fn a11y_select_item(&mut self, _idx: usize) -> bool {
+        false
+    }
+
     fn corner_radii(&self) -> CornerRadii {
         let (r, (tl, tr, br, bl)) = self.corner_style();
         CornerRadii::new(
@@ -677,14 +687,14 @@ pub use self::owned::Owned;
 pub use self::core::{Widget, focus, hover_animation, clipboard, context_menu, clear_widget_references};
 pub use self::core::focus::link_parent_child;
 pub use self::input::{
-    Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, Slider, RangeSlider,
+    Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, RadioGroup, Slider, RangeSlider,
     ColorSelector, Finger, Trackpad, get_font_db, ActiveThumb, FontSelector,
     BevelPreview, bevel_ease, parse_bevel_knobs, RampPreview,
     ButtonStrip, KeybindRecorder, Ramp, RampKey, ColorRamp, ColorRampKey,
     format_ramp_spec, parse_ramp_spec
 };
 pub use self::container::{
-    Group, GroupFrame,
+    Dialog, Group, GroupFrame,
     ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     ContentBg, ParametersBg,

@@ -41,7 +41,37 @@ pub const WINDOW: NodeId = NodeId(0);
 
 /// The widget a node is, when it is a widget's ([`node_id`]'s inverse).
 pub fn widget_of(node: NodeId) -> Option<WidgetId> {
-    (node.0 > 0 && node.0 < APP_BASE).then(|| WidgetId((node.0 - 1) as usize))
+    (node.0 > 0 && node.0 < ITEM_BASE).then(|| WidgetId((node.0 - 1) as usize))
+}
+
+/// A part of a widget a screen reader sees as a node of its own, under the widget's node:
+/// a radio group's radio buttons (`Input::a11y_items`). A click on it is
+/// `Input::a11y_select_item`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct A11yItem {
+    pub role: Role,
+    pub label: String,
+    /// Where it is, in window px.
+    pub rect: crate::scene::layout::Rect,
+    /// Its checked state, for a radio button or a check item.
+    pub toggled: Option<bool>,
+    /// Whether the keyboard is on it: the widget's focus, given to this item.
+    pub focused: bool,
+}
+
+/// Where widgets' items begin: `ITEM_BASE + (widget id << 16) + index`, below the apps' own
+/// nodes and above every widget's.
+const ITEM_BASE: u64 = 1 << 60;
+
+/// The node of item `idx` of widget `id` ([`A11yItem`]).
+pub fn item_id(id: WidgetId, idx: usize) -> NodeId {
+    NodeId(ITEM_BASE + ((id.0 as u64) << 16) + (idx as u64 & 0xffff))
+}
+
+/// The widget and item a node is, when it is an item's ([`item_id`]'s inverse).
+pub fn item_of(node: NodeId) -> Option<(WidgetId, usize)> {
+    (node.0 >= ITEM_BASE && node.0 < APP_BASE)
+        .then(|| (WidgetId(((node.0 - ITEM_BASE) >> 16) as usize), ((node.0 - ITEM_BASE) & 0xffff) as usize))
 }
 
 /// The context-menu row a node is, when it is one ([`menu_row_id`]'s inverse).
@@ -188,6 +218,8 @@ pub fn widget_node(w: &dyn WidgetHost, children: Vec<NodeId>) -> Node {
 pub fn key_for(w: &dyn WidgetHost, action: Action) -> Option<NamedKey> {
     let role = role_for(w.type_name(), w.focus_role(), w.a11y_role());
     match (action, role) {
+        // A radio group is clicked through its radio buttons (`A11yItem`), not as a whole.
+        (Action::Click, Role::RadioGroup) => None,
         (Action::Click, _) if w.focus_role() == FocusRole::Plate => Some(NamedKey::Space),
         (Action::Increment, Role::Slider) if w.type_name() != "Slider2D" => Some(NamedKey::ArrowRight),
         (Action::Decrement, Role::Slider) if w.type_name() != "Slider2D" => Some(NamedKey::ArrowLeft),
@@ -255,10 +287,34 @@ pub fn window_tree(ctx: Option<&UiContext>, app: AppNodes, title: &str, scale: f
 
     let mut nodes = Vec::with_capacity(widgets.len() + 1);
     let mut top: Vec<(WidgetId, f32, f32)> = Vec::new();
+    // The keyboard's node: a focused widget's, or its focused item's.
+    let mut item_focus: Option<NodeId> = None;
     for (id, w) in &widgets {
-        let children: Vec<NodeId> =
-            ctx.tree.child_ids(*id).into_iter().filter(|c| shown.contains(c)).map(node_id).collect();
-        nodes.push((node_id(*id), widget_node(*w, children)));
+        // The widget's own items come first, then its linked children.
+        let mut children: Vec<NodeId> = Vec::new();
+        for (i, item) in w.a11y_items().into_iter().enumerate() {
+            let nid = item_id(*id, i);
+            let mut node = Node::new(item.role);
+            node.set_label(item.label);
+            let r = item.rect;
+            node.set_bounds(Rect::new(r.x as f64, r.y as f64, (r.x + r.width) as f64, (r.y + r.height) as f64));
+            if let Some(on) = item.toggled {
+                node.set_toggled(Toggled::from(on));
+            }
+            node.add_action(Action::Click);
+            if item.focused && ctx.focused_widget == Some(*id) {
+                item_focus = Some(nid);
+            }
+            nodes.push((nid, node));
+            children.push(nid);
+        }
+        children.extend(ctx.tree.child_ids(*id).into_iter().filter(|c| shown.contains(c)).map(node_id));
+        let mut node = widget_node(*w, children);
+        // The open modal is said to be one: a reader keeps to it.
+        if ctx.modal_owner() == Some(*id) {
+            node.set_modal();
+        }
+        nodes.push((node_id(*id), node));
         let parented = ctx.tree.parent_id(*id).is_some_and(|p| shown.contains(&p));
         if !parented {
             let (x, y, _, _) = w.rect();
@@ -284,6 +340,7 @@ pub fn window_tree(ctx: Option<&UiContext>, app: AppNodes, title: &str, scale: f
 
     let mut focus = app
         .focus
+        .or(item_focus)
         .or_else(|| ctx.focused_widget.filter(|id| shown.contains(id)).map(node_id))
         .unwrap_or(WINDOW);
     if let Some(menu_focus) = push_context_menu(&mut nodes) {
@@ -355,6 +412,47 @@ fn push_context_menu(nodes: &mut Vec<(NodeId, Node)>) -> Option<NodeId> {
 mod tests {
     use super::*;
     use crate::widget::{Button, Checkbox, Owned, RangeSlider, Slider, Spinbox, TextBox};
+
+    /// An open dialog is a modal `Dialog` node holding its members; a radio group in it is a
+    /// `RadioGroup` of `RadioButton` items, the chosen one checked and, with the group
+    /// focused, the keyboard's node.
+    #[test]
+    fn a_dialog_is_modal_and_a_radio_group_is_its_radio_buttons() {
+        use crate::widget::{Dialog, RadioGroup};
+        let mut ctx = UiContext::new();
+        let mut size = Owned::new(RadioGroup::new(["Small", "Medium", "Large"]).with_selected(1));
+        size.set_rect(120.0, 120.0, 200.0, 100.0);
+        let mut ok = Owned::new(Button::new(120.0, 240.0, 80.0, 24.0).with_label("OK"));
+        let mut dialog = Owned::new(Dialog::new().with_label("Size"));
+        ctx.register_host(&mut dialog);
+        ctx.register_host(&mut size);
+        ctx.register_host(&mut ok);
+        dialog.open(&mut ctx, vec![size.base().id(), ok.base().id()]);
+
+        let update = tree_update(&ctx, "App", 1.0);
+        let d = node(&update, node_id(dialog.base().id()));
+        assert_eq!((d.role(), d.label(), d.is_modal()), (Role::Dialog, Some("Size"), true));
+        assert_eq!(d.children(), &[node_id(size.base().id()), node_id(ok.base().id())]);
+        assert_eq!(node(&update, WINDOW).children(), &[node_id(dialog.base().id())], "the members hang from it");
+
+        let g = node(&update, node_id(size.base().id()));
+        assert_eq!(g.role(), Role::RadioGroup);
+        assert!(!g.supports_action(Action::Click), "clicked through its buttons");
+        let buttons: Vec<(Option<&str>, Option<Toggled>)> = g
+            .children()
+            .iter()
+            .map(|c| node(&update, *c))
+            .inspect(|b| assert!(b.role() == Role::RadioButton && b.supports_action(Action::Click)))
+            .map(|b| (b.label(), b.toggled()))
+            .collect();
+        assert_eq!(
+            buttons,
+            [(Some("Small"), Some(Toggled::False)), (Some("Medium"), Some(Toggled::True)), (Some("Large"), Some(Toggled::False))]
+        );
+        assert_eq!(update.focus, item_id(size.base().id(), 1), "the dialog's first stop, on its chosen button");
+        assert_eq!(item_of(item_id(size.base().id(), 2)), Some((size.base().id(), 2)));
+        assert_eq!(widget_of(item_id(size.base().id(), 2)), None, "an item is not a widget");
+    }
 
     /// A node offers the actions the Linux adapter can carry out, and each by the key a
     /// keyboard user presses: Space on a plate, Right / Left on a slider or a range,

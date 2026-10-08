@@ -1,5 +1,6 @@
 pub mod button;
 pub mod checkbox;
+pub mod radio_group;
 pub mod slider;
 pub mod slider2d;
 pub mod spinbox;
@@ -16,6 +17,7 @@ pub mod ramp_preview;
 
 pub use button::{Button, ButtonKind, PageButton};
 pub use checkbox::{Checkbox, Toggle};
+pub use radio_group::RadioGroup;
 pub use slider::{Slider, RangeSlider, ActiveThumb};
 pub use slider2d::Slider2D;
 pub use spinbox::Spinbox;

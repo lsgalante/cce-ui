@@ -15,7 +15,11 @@
 //!    `UiContext::propagate_event` per widget root. The router owns press hit-gating,
 //!    Enter/Leave synthesis, drag-target recording, and KeyInput-to-focused delivery;
 //!    the app keeps only state-gated `take_*` plumbing.
-//! 4. **No embedded bases.** Widgets are app-owned values (all [`Adapted`]); the window
+//! 4. **A modal dialog is a lasso.** The Options dialog's members are ordinary widgets the app
+//!    owns and lays out; [`Dialog`] is the plate under them, and opening it traps the Tab
+//!    walk among them and covers the window behind (`UiContext::open_modal`). Closed, its
+//!    members are hidden, so they are neither Tab stops nor in the accessibility tree.
+//! 5. **No embedded bases.** Widgets are app-owned values (all [`Adapted`]); the window
 //!    plate is prims, not a root plate container; popovers draw INTO the frame (there is no popup
 //!    surface); app state — not any widget tree — is the source of truth.
 
@@ -27,8 +31,8 @@ use cce_ui::scene::layout::{
 };
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
 use cce_ui::widget::{
-    Adapted, Button, Dropdown, ImageView, WidgetHost, WidgetId, ElementState, Event, KeyEvent,
-    MouseButton, MouseScrollDelta, Slider, TextBox, Toggle,
+    Adapted, Button, Dialog, Dropdown, ImageView, RadioGroup, WidgetHost, WidgetId, ElementState, Event,
+    KeyEvent, MouseButton, MouseScrollDelta, NamedKey, Slider, TextBox, Toggle,
 };
 
 #[derive(Debug, Clone)]
@@ -44,6 +48,10 @@ const TITLE_FONT_SIZE: f32 = 15.0;
 const STATUS_FONT_SIZE: f32 = 12.0;
 /// Vertical padding on each side of the status band's text line.
 const STATUS_BAND_PAD: f32 = 5.0;
+/// The Options dialog's choices.
+const TEXT_SIZES: [&str; 3] = ["Small", "Medium", "Large"];
+/// Its buttons' width.
+const DIALOG_BUTTON_W: f32 = 88.0;
 fn text_leaf_height(font_size: f32) -> f32 {
     (font_size * 1.2).ceil()
 }
@@ -61,12 +69,20 @@ pub(crate) struct DemoApp {
     // upload/free stay app-side): Contain letterboxes, Stretch fills.
     image_contain: Owned<Adapted<ImageView>>,
     image_stretch: Owned<Adapted<ImageView>>,
+    // The Options dialog: a button that opens it, the plate, and what stands on it.
+    options_button: Owned<Adapted<Button>>,
+    dialog: Owned<Adapted<Dialog>>,
+    text_size: Owned<Adapted<RadioGroup>>,
+    dialog_cancel: Owned<Adapted<Button>>,
+    dialog_ok: Owned<Adapted<Button>>,
 
     // ── App state: the source of truth. Widgets are re-asserted from it every rebuild
     // (`set_toggled` below); `take_*` changes flow back into it, never the reverse.
     toggle_on: bool,
     clicks: u32,
     status: String,
+    /// The text size chosen in the Options dialog (an index into `TEXT_SIZES`).
+    text_size_choice: usize,
 
     ui_context: cce_ui::context::UiContext,
     width: u32,
@@ -74,6 +90,8 @@ pub(crate) struct DemoApp {
     scale_factor: f64,
     needs_rebuild: bool,
     widgets_registered: bool,
+    /// Set while `open_dialog` lays the members out before the dialog is open.
+    dialog_pending: bool,
     title_rect: Rect,
     status_rect: Rect,
 }
@@ -82,7 +100,9 @@ impl DemoApp {
     /// The widget root ids, in paint order — what the router dispatches over.
     /// `propagate_event` takes a `WidgetId` and resolves it through the registry, so the
     /// event paths need no raw pointers and no unsafe self-alias.
-    fn root_ids(&self) -> [WidgetId; 7] {
+    fn root_ids(&self) -> [WidgetId; 12] {
+        // While the dialog is open the rest are still dispatched to: the context answers
+        // every one of them "covered", so none takes a press or a hover.
         [
             self.button.id(),
             self.toggle.id(),
@@ -91,7 +111,65 @@ impl DemoApp {
             self.theme_dropdown.id(),
             self.image_contain.id(),
             self.image_stretch.id(),
+            self.options_button.id(),
+            self.dialog.id(),
+            self.text_size.id(),
+            self.dialog_cancel.id(),
+            self.dialog_ok.id(),
         ]
+    }
+
+    /// The dialog's members, in the order Tab walks them.
+    fn dialog_members(&self) -> Vec<WidgetId> {
+        vec![self.text_size.id(), self.dialog_cancel.id(), self.dialog_ok.id()]
+    }
+
+    /// Lay the dialog's members out in the middle of the window, shown while it is open.
+    fn layout_dialog(&mut self) {
+        let open = self.dialog.inner().is_open() || self.dialog_pending;
+        for w in [&mut *self.text_size as &mut dyn WidgetHost, &mut *self.dialog_cancel, &mut *self.dialog_ok] {
+            w.set_visible(open);
+        }
+        if !open {
+            return;
+        }
+        let gap = cce_ui::layout::control_gap();
+        let group_h = self.text_size.intrinsic_size().map_or(0.0, |s| s.height);
+        let (button_w, button_h) = (DIALOG_BUTTON_W, 28.0);
+        let content_w = 2.0 * button_w + gap;
+        let content_h = group_h + gap * 2.0 + button_h;
+        let (pad, top) = (self.dialog.inner().padding(), self.dialog.inner().headroom());
+        let x = (self.width as f32 - content_w) * 0.5;
+        let y = (self.height as f32 - (top + content_h + pad)) * 0.5 + top;
+        self.text_size.set_rect(x, y, content_w, group_h);
+        let by = y + group_h + gap * 2.0;
+        self.dialog_cancel.set_rect(x, by, button_w, button_h);
+        self.dialog_ok.set_rect(x + button_w + gap, by, button_w, button_h);
+        let window = Rect { x: 0.0, y: 0.0, width: self.width as f32, height: self.height as f32 };
+        self.dialog.set_backdrop(Some(window));
+        self.dialog.fit(&self.ui_context);
+    }
+
+    /// Open the Options dialog on the size the app holds.
+    fn open_dialog(&mut self) {
+        self.text_size.inner_mut().set_selected(self.text_size_choice);
+        self.dialog_pending = true;
+        self.layout_dialog();
+        self.dialog_pending = false;
+        let members = self.dialog_members();
+        self.dialog.open(&mut self.ui_context, members);
+        self.needs_rebuild = true;
+    }
+
+    /// Close it: `keep` takes the choice into the app, else it is dropped.
+    fn close_dialog(&mut self, keep: bool) {
+        if keep {
+            self.text_size_choice = self.text_size.inner().selected();
+            self.status = format!("Text size: {}", TEXT_SIZES[self.text_size_choice]);
+        }
+        self.dialog.close(&mut self.ui_context);
+        self.layout_dialog();
+        self.needs_rebuild = true;
     }
 
     /// The widget roots as pointers, for the one genuinely pointer-consuming path left:
@@ -108,12 +186,30 @@ impl DemoApp {
         ctx.register_host(&mut self.theme_dropdown);
         ctx.register_host(&mut self.image_contain);
         ctx.register_host(&mut self.image_stretch);
+        ctx.register_host(&mut self.options_button);
+        ctx.register_host(&mut self.dialog);
+        ctx.register_host(&mut self.text_size);
+        ctx.register_host(&mut self.dialog_cancel);
+        ctx.register_host(&mut self.dialog_ok);
+        self.layout_dialog();
     }
 
     /// `take_*` plumbing: translate widget changes into app state. Runs after any routed
     /// dispatch; every check is STATE-gated, so it does not matter which propagate call
     /// consumed the event (see the KeyInput note in `handle_key_input`).
     fn drain_widget_changes(&mut self) {
+        if self.options_button.take_click() {
+            self.open_dialog();
+        }
+        if self.dialog_ok.take_click() {
+            self.close_dialog(true);
+        }
+        if self.dialog_cancel.take_click() {
+            self.close_dialog(false);
+        }
+        if self.text_size.take_change() {
+            self.needs_rebuild = true;
+        }
         if self.button.take_click() {
             self.clicks += 1;
             self.status = format!("Button clicked {} time(s)", self.clicks);
@@ -187,6 +283,13 @@ impl Application for DemoApp {
             image_stretch: Owned::new(ImageView::new()
                 .with_image(gradient_id, GRADIENT_W, GRADIENT_H)
                 .with_fit(FitMode::Stretch)),
+            options_button: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Options…")),
+            dialog: Owned::new(Dialog::new().with_label("Text size")),
+            text_size: Owned::new(RadioGroup::new(TEXT_SIZES).with_selected(1)),
+            dialog_cancel: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel")),
+            dialog_ok: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("OK")),
+            text_size_choice: 1,
+            dialog_pending: false,
             toggle_on: false,
             clicks: 0,
             status: "Ready.".to_string(),
@@ -281,6 +384,7 @@ impl Application for DemoApp {
             let button = arena.insert(LayoutBox::leaf(Style::row().shrink(1.0), LSize::new(120.0, CONTROL_H)));
             let toggle = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(64.0, CONTROL_H)));
             let dropdown = arena.insert(LayoutBox::leaf(Style::row().shrink(1.0), LSize::new(150.0, CONTROL_H)));
+            let options = arena.insert(LayoutBox::leaf(Style::row().shrink(1.0), LSize::new(DIALOG_BUTTON_W, CONTROL_H)));
             let slider = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 24.0)));
             let name_box = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 30.0)));
             // ImageView row: same texture through two fit modes side by side.
@@ -300,6 +404,7 @@ impl Application for DemoApp {
             arena.append_child(controls, button);
             arena.append_child(controls, toggle);
             arena.append_child(controls, dropdown);
+            arena.append_child(controls, options);
             arena.append_child(root, slider);
             arena.append_child(root, name_box);
             arena.append_child(root, images);
@@ -321,6 +426,8 @@ impl Application for DemoApp {
             self.toggle.set_rect(t.x, t.y, t.width, t.height);
             let d = r(dropdown);
             self.theme_dropdown.set_rect(d.x, d.y, d.width, d.height);
+            let o = r(options);
+            self.options_button.set_rect(o.x, o.y, o.width, o.height);
             let s = r(slider);
             self.slider.set_rect(s.x, s.y, s.width, s.height);
             let n = r(name_box);
@@ -331,6 +438,7 @@ impl Application for DemoApp {
             self.image_stretch.set_rect(is.x, is.y, is.width, is.height);
             self.title_rect = r(title);
             self.status_rect = r(status);
+            self.layout_dialog();
 
             self.needs_rebuild = false;
             self.ui_context.rebuild_spatial_grid();
@@ -417,6 +525,7 @@ impl Application for DemoApp {
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.image_contain, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.image_stretch, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.theme_dropdown, &mut pc);
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.options_button, &mut pc);
 
         // The dropdown popover — geometry and labels last, on top of everything, exactly
         // where it hit-tests. Labels carry bounds equal to the popover rect: that clips
@@ -427,6 +536,10 @@ impl Application for DemoApp {
             // dropdown's expanded inset-plate surface) with its own bounds.
             self.theme_dropdown.render_popover(&mut pc);
         }
+
+        // The dialog over everything: its backdrop, its plate, and its members on the plate
+        // (it paints them; they are never painted on their own).
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.dialog, &mut pc);
 
         Some(pc.finish())
     }
@@ -535,6 +648,16 @@ impl Application for DemoApp {
                     return Some(DemoMessage::Exit);
                 }
             }
+        }
+
+        // Escape cancels the open dialog, as its Cancel does.
+        if self.dialog.inner().is_open()
+            && event.state == ElementState::Pressed
+            && event.logical_key == cce_ui::widget::Key::Named(NamedKey::Escape)
+        {
+            self.close_dialog(false);
+            *needs_rebuild = true;
+            return None;
         }
 
         // KeyInput MUST short-circuit: the router delivers keys to the ctx-focused

@@ -188,6 +188,21 @@ cce-list, cce-weather, the demo and cce-relief ring their second stop; cce-fonts
 two stops were its picker buttons, registered outside picker mode and never drawn, and are
 now registered only in it; cce-text-editor has no stops and is unchanged.
 
+**A modal dialog and a radio group (2026-10-08).** `widget::Dialog` is a raised plate (the
+menu's material) around a lasso of members the host lays out; opening it makes it modal
+through the context (`UiContext::open_modal` / `close_modal`): the Tab walk is trapped among
+its members, every widget outside reads as covered so neither a press nor a hover reaches
+it, focus moves in and is given back on close, and a reader sees a modal `Dialog` node
+holding the members. `widget::RadioGroup` is one Tab stop whose arrows move the choice;
+each option is the check box's well at a full corner, the chosen one holding a lit bead.
+To a reader it is a radio group of radio buttons, each clickable, which needed a way for a
+widget to show parts of itself as nodes (`Input::a11y_items`, `a11y::A11yItem`, clicked
+through `Input::a11y_select_item`). The demo's Options… dialog holds a radio group and
+OK / Cancel; in a shadow: Tab cycles its three stops only, a click behind it does nothing,
+Escape cancels, Space on OK keeps the choice; over AT-SPI the dialog holds the group's
+three radio buttons, and a click on one chooses it. The tooltip that doubles as the
+accessible description is not done: no tooltips yet, by decision.
+
 - `plate_navigation` defaults to true; an app that routes Tab itself (a terminal, a web
   view) opts OUT.
 - A modal dialog widget that traps focus, a tooltip that doubles as the accessible
