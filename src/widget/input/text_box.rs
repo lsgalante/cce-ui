@@ -1753,7 +1753,7 @@ impl Paint for TextBox {
             font: font_fam.clone(),
             attrs: self.font_attrs,
             scale_bits: scale.to_bits(),
-            vertical: crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed),
+            vertical: crate::backend::text::vertical_text().is_some(),
             wrap,
         };
         if self.prep_key.as_ref() != Some(&key) {

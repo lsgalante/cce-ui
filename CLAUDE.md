@@ -52,7 +52,7 @@ cargo run   -p cce-ui                            # run the demo/reference app (n
 ```
 
 Tests are headless unit tests colocated in `#[cfg(test)]` modules — concentrated in `src/scene/*`
-(the arena/layout/paint/anim engine) and `src/color.rs`, `src/layout.rs`, plus a
+(the arena/layout/paint/anim engine) and `src/color/`, `src/layout/`, plus a
 scattering of widgets (`text_box`, `slider`, `dropdown`, `treelist`, …). When touching the scene
 engine, that module's tests are the fast feedback loop; run `cargo test -p cce-ui scene::` before
 anything else.
@@ -856,7 +856,7 @@ the seam with the arrow at the trigger's usual right-hand place, and its left si
 narrower than its right.) A textpick row's TextBox ends where its picker begins, so its
 text stops at the well. Never grouped into a host
 plate (its profile is not a monotonic step); the overlay's host-box slot carries `split`.
-The legacy banded path and flat hosts (`layout.rs`'s bridge) draw the two-box form.
+The legacy banded path and flat hosts (`layout::bridge`) draw the two-box form.
 
 **Every flush control wears the run's edge** (since 2026-10-02): `PaintCtx::inset_plate`
 — the one flush control plate, which `ControlPlate`'s Flush stance, every widget and the
@@ -1511,7 +1511,7 @@ lock or screensaver surface, the desktop grid overlay — says so with a
 
 **Spacing is a ladder, and an app never names a number.** Three rungs, each a
 config key read through the style registry (so a nested KDL key works and
-live-reloads), each with a getter in `layout.rs`:
+live-reloads), each with a getter in `layout`:
 
 | rung | inset from the rim | gap between siblings |
 |---|---|---|
@@ -1638,9 +1638,29 @@ cce-system-interface) to confirm behavior, not just the test suite.
 
 ## Module map (where things live)
 
-- `src/layout.rs` (largest file, ~6.9k lines) — fonts + sizing; many `*_font_parsed()` getters and
-  the `read_preferred_fonts` / font-family resolution used by the cosmic-text path.
-- `color.rs` — color model and named colors (`colors` re-export module in `lib.rs`).
+- `layout/` — the style getters and the code that was filed beside them, one module whose
+  `mod.rs` re-exports every submodule, so `crate::layout::…` paths are unchanged (split
+  2026-10-07 from one 7.4k-line file):
+  - `src/layout/mod.rs` (~4.4k lines) — the sizing constants and the style getters/setters
+    (heights, radii, fonts — many `*_font_parsed()` — gaps, the relief and bevel profile
+    state), `reload_config`, and `read_preferred_fonts` / font-family resolution used by the
+    cosmic-text path. It names no widget: what does is in the two modules below.
+  - `registry.rs` — the style registry (config flattened to one map of keys), its test overlay,
+    the font-string helpers.
+  - `bridge.rs` — the flat-host render bridge: `RenderTarget`, `PopoverCollector`,
+    `render_widget`, `render_popovers`, the carve types that cross it.
+  - `src/layout/legacy.rs` (~2k lines) — the legacy layout engines (`Column`, `Section`, `Grid`,
+    the `LayoutStrategy` family, `PageLayoutBuilder`, `VStack`), still used by
+    cce-system-interface, cce-files and cce-gallery. New layout is `scene::layout`.
+- `color/` — the colour model and named colours (`colors` re-export module in `lib.rs`),
+  split the same way: `mod.rs` the constants, statics and getters; `load.rs` reading the
+  config into them (and `retired_surface_keys`); `math.rs` sRGB/linear, OKLab and the
+  perceptual fade; `materials.rs` the named materials and rung bindings; `chords.rs` the
+  tree/list search keys (input.kdl chords with a legacy colour-file fallback).
+- **Vertical text** is `backend::text::set_vertical_text(Some(bar_thickness))` /
+  `vertical_text()` — the status bar's mode when it stands on a screen edge: labels stack
+  their characters and text shapes at a 1.05 line height. Process-wide on purpose (a property
+  of the app); it was two bare `pub static`s at the crate root until 2026-10-07.
 - **`config`, `input`, `motion`, `units`, `relief_spec`, `ipc`** — re-exported from
   `cce-core` (see "The GUI-free half is cce-core"), as are `color`'s hex/sRGB helpers,
   `scene::paint::DropletSpec` and the ramp spec functions (`widget::{format,parse}_ramp_spec`,

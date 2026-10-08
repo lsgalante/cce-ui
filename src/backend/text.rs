@@ -75,6 +75,29 @@ fn buffer_tick() -> u64 {
     })
 }
 
+/// Vertical text, for a process whose window is a vertical bar (the status bar on a
+/// screen edge): while it is on, a [`TextLabel`](crate::widget::display::TextLabel) stacks
+/// its characters one per line, centred in a column `bar_thickness` px wide, and text is
+/// shaped at a looser 1.05 line height. Process-wide because it is a property of the app,
+/// not of one window or one label, and shaping may run on any thread. It was two bare
+/// `pub static`s at the crate root (`IS_VERTICAL`, `BAR_THICKNESS`) until 2026-10-07.
+pub fn set_vertical_text(bar_thickness: Option<u32>) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if let Some(t) = bar_thickness {
+        VERTICAL_BAR_THICKNESS.store(t, Relaxed);
+    }
+    VERTICAL_TEXT.store(bar_thickness.is_some(), Relaxed);
+}
+
+/// The vertical bar's thickness while vertical text is on (see [`set_vertical_text`]).
+pub fn vertical_text() -> Option<u32> {
+    use std::sync::atomic::Ordering::Relaxed;
+    VERTICAL_TEXT.load(Relaxed).then(|| VERTICAL_BAR_THICKNESS.load(Relaxed))
+}
+
+static VERTICAL_TEXT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static VERTICAL_BAR_THICKNESS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(24);
+
 /// The cached buffer for `text` under `key`, and its vertical offset.
 fn buffer_cache_get(text: &str, key: &BufferKey<'_>) -> Option<(Rc<Buffer>, f32)> {
     BUFFER_CACHE.with(|cache| {
@@ -417,7 +440,7 @@ pub(crate) fn shared_text_buffer(
     };
 
     let physical_size = font_size * scale;
-    let is_vertical = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
+    let is_vertical = vertical_text().is_some();
     let key = BufferKey {
         size_milli: (physical_size * 1000.0).round() as u32,
         font: family_name,
@@ -630,7 +653,7 @@ pub(crate) fn shared_laid_out_buffer(
     let key = BufferKey {
         size_milli: (physical_size * 1000.0).round() as u32,
         font: family,
-        is_vertical: crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed),
+        is_vertical: vertical_text().is_some(),
         attrs: text_attrs,
         scale_bits: scale.to_bits(),
         layout: Some(layout),

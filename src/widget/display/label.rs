@@ -164,13 +164,13 @@ impl StyledLabel {
     pub fn new_with_family(fs: &mut cosmic_text::FontSystem, text: &str, size: f32, color: [f32; 4], family: &str) -> Self {
         let scale = crate::scale::scale_factor();
         let mut final_text = text.to_string();
-        let is_vert = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
+        let is_vert = crate::backend::text::vertical_text().is_some();
         if is_vert {
             final_text = text.chars().map(|c| c.to_string()).collect::<Vec<_>>().join("\n");
         }
         let mut buffer = crate::backend::text::get_text_buffer(fs, &final_text, size, Some(family));
         if is_vert {
-            let bar_thickness = crate::BAR_THICKNESS.load(std::sync::atomic::Ordering::Relaxed) as f32;
+            let bar_thickness = crate::backend::text::vertical_text().unwrap_or(24) as f32;
             buffer.set_size(fs, Some(bar_thickness * scale as f32), None);
             for line in &mut buffer.lines {
                 line.set_align(Some(cosmic_text::Align::Center));
@@ -190,7 +190,7 @@ impl StyledLabel {
         // Vertical text is boxed: the per-char-newline `final_text` wrapped to the bar
         // thickness and centered — the same set_size + center-align the buffer path applied.
         let prim_layout = if is_vert {
-            let bar_thickness = crate::BAR_THICKNESS.load(std::sync::atomic::Ordering::Relaxed) as f32;
+            let bar_thickness = crate::backend::text::vertical_text().unwrap_or(24) as f32;
             Some(crate::scene::paint::TextLayout {
                 // Effectively unbounded height (the legacy vertical path used height None);
                 // align_v Top means no vertical offset, so only set_size's height sees this.
@@ -220,7 +220,7 @@ impl StyledLabel {
     /// (Phase 6ak): the source text, size, family, and — for vertical bars — the box layout.
     /// `x, y` are the draw position; vertical labels pin `y` to 0 (as `draw` did).
     pub fn into_prim(self, x: f32, y: f32) -> LabelPrim {
-        let is_vert = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
+        let is_vert = crate::backend::text::vertical_text().is_some();
         LabelPrim {
             text: self.src_text,
             size: self.src_size,
@@ -248,7 +248,7 @@ impl StyledLabel {
 
     pub fn draw(self, text_items: &mut Vec<TextItem>, x: f32, y: f32) -> f32 {
         let w = self.w;
-        let is_vert = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
+        let is_vert = crate::backend::text::vertical_text().is_some();
         text_items.push(TextItem {
             buffer: self.buffer,
             x,

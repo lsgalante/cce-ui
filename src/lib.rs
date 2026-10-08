@@ -55,8 +55,6 @@ pub mod colors {
 pub use cosmic_text;
 
 
-pub static IS_VERTICAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub static BAR_THICKNESS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(24);
 
 /// `CCE_SCROLL_DEBUG=1` traces the wheel pipeline to stderr: raw coalesced
 /// axis input (runner), routing decisions (ParametersBg), slider gate/value
