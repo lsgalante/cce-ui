@@ -272,6 +272,55 @@ pub fn create_font_system_with_system_fonts() -> cosmic_text::FontSystem {
     build_font_system(true)
 }
 
+/// Rescan the font directories — the CCE fonts dir, the fallback faces and the
+/// system's (fontconfig's) — for fonts installed or removed since `fs` was
+/// loaded, and bring every `FontSystem` in the process up to date with them:
+/// `fs` now, the rest (the engine's renderer among them) the next time they
+/// shape or draw. Without it a database is the disk as it was at startup.
+///
+/// A font picker's refresh: it reads every font file's metadata, so it takes
+/// a moment and does not belong in a frame loop. Returns whether anything
+/// changed.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn rescan_fonts(fs: &mut cosmic_text::FontSystem) -> bool {
+    use cosmic_text::fontdb::{Database, Source};
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+    // Each font file once, in the order the database loaded it.
+    fn files(db: &Database) -> Vec<PathBuf> {
+        let mut seen = HashSet::new();
+        db.faces()
+            .filter(|f| !crate::backend::text::is_alias_face(f))
+            .filter_map(|f| match &f.source {
+                Source::File(p) | Source::SharedFile(p, _) => Some(p.clone()),
+                _ => None,
+            })
+            .filter(|p| seen.insert(p.clone()))
+            .collect()
+    }
+    // The same discovery `build_font_system` makes.
+    let mut bundled = Database::new();
+    bundled.load_fonts_dir(fonts_dir());
+    load_fallback_fonts(&mut bundled);
+    let mut all = bundled.clone();
+    all.load_system_fonts();
+    let now = files(&all);
+    let now_set: HashSet<PathBuf> = now.iter().cloned().collect();
+
+    // `fs` as every earlier change leaves it, so the delta is against that.
+    crate::backend::text::sync_font_set(fs);
+    let before: HashSet<PathBuf> = files(fs.db()).into_iter().collect();
+    let added: Vec<PathBuf> = now.into_iter().filter(|p| !before.contains(p)).collect();
+    let removed: HashSet<PathBuf> = before.difference(&now_set).cloned().collect();
+    let rescan = crate::backend::text::Rescan::new(added, removed, files(&bundled).into_iter().collect());
+    if rescan.is_empty() {
+        return false;
+    }
+    crate::backend::text::push_rescan(rescan);
+    crate::backend::text::sync_font_set(fs);
+    true
+}
+
 /// Targeted script-fallback faces loaded alongside the bundled house fonts.
 /// The bundled set covers Latin; anything else shaped to tofu unless
 /// `$CCE_LOAD_SYSTEM_FONTS` pulled in the entire system set. Probing a short

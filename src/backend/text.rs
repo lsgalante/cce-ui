@@ -146,26 +146,66 @@ fn buffer_cache_put(text: &str, key: &BufferKey<'_>, buffer: Rc<Buffer>, voff: f
 const FACE_ALIAS_PREFIX: &str = "cce-face:";
 
 /// One [`face_family`] alias: the face at `path`#`index`, named `cce-face:<n>`
-/// for its place `n` in [`FACE_ALIASES`].
+/// for its place `n` in [`FONT_OPS`].
 struct FaceAlias {
     path: std::path::PathBuf,
     index: u32,
 }
 
-/// Every face alias handed out, in the order they were. Process-wide, and only
-/// ever appended to: each `FontSystem` pushes them into its database in this
-/// order (see [`sync_face_aliases`]), so two databases loaded alike give every
-/// alias the same fontdb ID. They must — the shaped-buffer cache is shared by
+/// A font-directory rescan ([`crate::rescan_fonts`]): what changed on disk,
+/// as fixed lists rather than a scan each database makes for itself, so every
+/// database applies the same change however long after the others. A change,
+/// not the whole set: a database built after the rescan already has it, and
+/// replaying it there is a no-op rather than a drop of whatever arrived since.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // only `rescan_fonts` makes one, and the browser has no font dirs
+pub(crate) struct Rescan {
+    /// Font files new on disk, in a system-fonts build's load order.
+    added: Vec<std::path::PathBuf>,
+    /// Font files gone from disk.
+    removed: std::collections::HashSet<std::path::PathBuf>,
+    /// The files a bundled-only build loads ([`crate::create_font_system`]):
+    /// the CCE fonts dir and the fallback faces.
+    bundled: std::collections::HashSet<std::path::PathBuf>,
+}
+
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // only `rescan_fonts` makes one, and the browser has no font dirs
+impl Rescan {
+    pub(crate) fn new(
+        added: Vec<std::path::PathBuf>,
+        removed: std::collections::HashSet<std::path::PathBuf>,
+        bundled: std::collections::HashSet<std::path::PathBuf>,
+    ) -> Self {
+        Rescan { added, removed, bundled }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty()
+    }
+}
+
+/// A change every `FontSystem` makes to its database, in one order.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // only `rescan_fonts` makes one, and the browser has no font dirs
+enum FontOp {
+    Alias(FaceAlias),
+    Rescan(std::sync::Arc<Rescan>),
+}
+
+/// Every change to the font set, in the order made. Process-wide, and only
+/// ever appended to: each `FontSystem` replays it into its database in this
+/// order (see [`sync_font_ops`]), so two databases loaded alike give every
+/// face the same fontdb ID. They must — the shaped-buffer cache is shared by
 /// every `FontSystem` on the thread, and a buffer the app's measuring system
-/// shaped is rasterized by the engine's with the face IDs it carries.
-static FACE_ALIASES: std::sync::Mutex<Vec<FaceAlias>> = std::sync::Mutex::new(Vec::new());
+/// shaped is rasterized by the engine's with the face IDs it carries. A
+/// rescan rides the same log for that reason: applied at a different point
+/// relative to the aliases in two databases, it would number them apart.
+static FONT_OPS: std::sync::Mutex<Vec<FontOp>> = std::sync::Mutex::new(Vec::new());
 
 thread_local! {
-    /// Database address → how many of [`FACE_ALIASES`] it has been synced
-    /// with, and the ID and alias number of the last face pushed — checked
-    /// before it is trusted, since a dropped `FontSystem`'s address can be
-    /// reused by a fresh one.
-    static FACE_ALIASES_SYNCED: std::cell::RefCell<
+    /// Database address → how many of [`FONT_OPS`] it has applied, and the ID
+    /// and op number of the last alias it pushed — checked before it is
+    /// trusted, since a dropped `FontSystem`'s address can be reused by a
+    /// fresh one.
+    static FONT_OPS_SYNCED: std::cell::RefCell<
         std::collections::HashMap<usize, (usize, Option<(cosmic_text::fontdb::ID, usize)>)>,
     > = std::cell::RefCell::new(std::collections::HashMap::new());
 }
@@ -188,75 +228,145 @@ thread_local! {
 /// falls back as an unknown family's would.
 pub fn face_family(path: impl AsRef<std::path::Path>, index: u32) -> String {
     let path = path.as_ref();
-    let mut aliases = FACE_ALIASES.lock().unwrap_or_else(|e| e.into_inner());
-    let n = match aliases.iter().position(|a| a.path == path && a.index == index) {
+    let mut ops = FONT_OPS.lock().unwrap_or_else(|e| e.into_inner());
+    let n = match ops.iter().position(|op| matches!(op, FontOp::Alias(a) if a.path == path && a.index == index)) {
         Some(n) => n,
         None => {
-            aliases.push(FaceAlias { path: path.to_path_buf(), index });
-            aliases.len() - 1
+            ops.push(FontOp::Alias(FaceAlias { path: path.to_path_buf(), index }));
+            ops.len() - 1
         }
     };
     format!("{FACE_ALIAS_PREFIX}{n}")
 }
 
-/// Push the [`face_family`] aliases `fs` does not have yet into its database,
-/// in their order. Cheap when there is nothing new: a map lookup and one face
-/// check.
-fn sync_face_aliases(fs: &mut FontSystem) {
+/// Record a rescan for every `FontSystem` to apply (see [`FontOp`]), and drop
+/// this thread's caches that a family appearing or vanishing makes stale:
+/// the shaped buffers (a family that fell back before resolves now, and a
+/// removed face's ID must not reach the glyph pass) and the per-family face
+/// lookups.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // only `rescan_fonts` makes one, and the browser has no font dirs
+pub(crate) fn push_rescan(rescan: Rescan) {
+    FONT_OPS.lock().unwrap_or_else(|e| e.into_inner()).push(FontOp::Rescan(std::sync::Arc::new(rescan)));
+    BUFFER_CACHE.with(|c| c.borrow_mut().clear());
+    BUFFER_COUNT.with(|c| c.set(0));
+    MONO_FAMILY_CACHE.with(|c| c.borrow_mut().clear());
+    FAMILY_FACES_CACHE.with(|c| c.borrow_mut().clear());
+}
+
+/// Bring `fs` up to date with every font-set change made so far — the face
+/// aliases and the rescans ([`crate::rescan_fonts`]). The text backend does
+/// this itself before it shapes or draws; call it before reading a database
+/// directly (a font picker listing its faces) after a rescan.
+pub fn sync_font_set(fs: &mut FontSystem) {
+    sync_font_ops(fs);
+}
+
+pub(crate) fn is_alias_face(face: &cosmic_text::fontdb::FaceInfo) -> bool {
+    face.families.first().is_some_and(|(fam, _)| fam.starts_with(FACE_ALIAS_PREFIX))
+}
+
+/// Replay the [`FONT_OPS`] `fs` has not applied yet into its database, in
+/// their order. Cheap when there is nothing new: a map lookup and one face
+/// check. Every op is idempotent, so a database the record cannot vouch for
+/// (never seen, or a reused address) replays the whole log safely.
+fn sync_font_ops(fs: &mut FontSystem) {
+    let ops = FONT_OPS.lock().unwrap_or_else(|e| e.into_inner());
+    replay_font_ops(fs, &ops);
+}
+
+/// [`sync_font_ops`] against a given log (the tests keep their own, so their
+/// rescans reach no other test's databases).
+fn replay_font_ops(fs: &mut FontSystem, ops: &[FontOp]) {
     use cosmic_text::fontdb::{Language, Source};
-    let aliases = FACE_ALIASES.lock().unwrap_or_else(|e| e.into_inner());
-    if aliases.is_empty() {
+    if ops.is_empty() {
         return;
     }
     let key = fs.db() as *const cosmic_text::fontdb::Database as usize;
-    let is_alias = |id: cosmic_text::fontdb::ID, n: usize| {
-        let name = format!("{FACE_ALIAS_PREFIX}{n}");
-        fs.db().face(id).is_some_and(|f| f.families.first().is_some_and(|(fam, _)| *fam == name))
+    let alias_name = |n: usize| format!("{FACE_ALIAS_PREFIX}{n}");
+    let is_alias = |fs: &FontSystem, id: cosmic_text::fontdb::ID, n: usize| {
+        fs.db().face(id).is_some_and(|f| f.families.first().is_some_and(|(fam, _)| *fam == alias_name(n)))
     };
-    let synced = FACE_ALIASES_SYNCED.with(|m| m.borrow().get(&key).copied());
+    let synced = FONT_OPS_SYNCED.with(|m| m.borrow().get(&key).copied());
     let (mut done, mut last) = match synced {
-        Some((done, last)) if last.map_or(done == 0, |(id, n)| is_alias(id, n)) => (done, last),
-        // Unknown (or a reused address): count the aliases already present.
-        _ => {
-            let present: std::collections::HashSet<&str> = fs
-                .db()
-                .faces()
-                .filter_map(|f| f.families.first().map(|(fam, _)| fam.as_str()))
-                .filter(|fam| fam.starts_with(FACE_ALIAS_PREFIX))
-                .collect();
-            let done = (0..aliases.len()).take_while(|n| present.contains(format!("{FACE_ALIAS_PREFIX}{n}").as_str())).count();
-            let last = done.checked_sub(1).and_then(|n| {
-                let name = format!("{FACE_ALIAS_PREFIX}{n}");
-                fs.db().faces().find(|f| f.families.first().is_some_and(|(fam, _)| *fam == name)).map(|f| (f.id, n))
-            });
-            (done, last)
-        }
+        Some((done, last)) if last.map_or(true, |(id, n)| is_alias(fs, id, n)) => (done, last),
+        _ => (0, None),
     };
-    if done == aliases.len() && synced.is_some() {
+    if done == ops.len() {
         return;
     }
-    for (n, alias) in aliases.iter().enumerate().skip(done) {
-        let source = fs
-            .db()
-            .faces()
-            .find(|f| {
-                f.index == alias.index
-                    && matches!(&f.source, Source::File(p) | Source::SharedFile(p, _) if *p == alias.path)
-            })
-            .cloned();
-        if let Some(mut face) = source {
-            let name = format!("{FACE_ALIAS_PREFIX}{n}");
-            face.families = vec![(name.clone(), Language::English_UnitedStates)];
-            fs.db_mut().push_face_info(face);
-            last = fs
-                .db()
-                .faces()
-                .find(|f| f.families.first().is_some_and(|(fam, _)| *fam == name))
-                .map(|f| (f.id, n));
+    // Replaying from the start: the aliases already present, so none is
+    // pushed twice. (Past a trusted count none can be.)
+    let mut present: std::collections::HashMap<String, cosmic_text::fontdb::ID> = if done == 0 {
+        fs.db().faces().filter(|f| is_alias_face(f)).map(|f| (f.families[0].0.clone(), f.id)).collect()
+    } else {
+        Default::default()
+    };
+    for (n, op) in ops.iter().enumerate().skip(done) {
+        match op {
+            FontOp::Alias(alias) => {
+                let name = alias_name(n);
+                if let Some(&id) = present.get(&name) {
+                    last = Some((id, n));
+                } else {
+                    let source = fs
+                        .db()
+                        .faces()
+                        .find(|f| {
+                            f.index == alias.index
+                                && matches!(&f.source, Source::File(p) | Source::SharedFile(p, _) if *p == alias.path)
+                        })
+                        .cloned();
+                    if let Some(mut face) = source {
+                        face.families = vec![(name.clone(), Language::English_UnitedStates)];
+                        fs.db_mut().push_face_info(face);
+                        if let Some(f) = fs.db().faces().find(|f| f.families.first().is_some_and(|(fam, _)| *fam == name)) {
+                            present.insert(name, f.id);
+                            last = Some((f.id, n));
+                        }
+                    }
+                }
+            }
+            FontOp::Rescan(rescan) => apply_rescan(fs, rescan),
         }
         done = n + 1;
     }
-    FACE_ALIASES_SYNCED.with(|m| m.borrow_mut().insert(key, (done, last)));
+    FONT_OPS_SYNCED.with(|m| m.borrow_mut().insert(key, (done, last)));
+}
+
+/// One rescan, into one database: the faces of removed files are dropped,
+/// and added files are loaded — in the rescan's order, so databases alike stay
+/// alike. A bundled-only database (one holding nothing outside the bundled
+/// set) takes only added bundled files: a rescan does not hand the system's
+/// fonts to an app that never loaded them. Alias faces stay even when their
+/// file goes — they mark how far a database has synced; one whose file is
+/// gone simply no longer resolves.
+fn apply_rescan(fs: &mut FontSystem, rescan: &Rescan) {
+    use cosmic_text::fontdb::Source;
+    let mut present = std::collections::HashSet::new();
+    let mut gone = Vec::new();
+    let mut has_system = false;
+    for f in fs.db().faces() {
+        if is_alias_face(f) {
+            continue;
+        }
+        let (Source::File(p) | Source::SharedFile(p, _)) = &f.source else { continue };
+        if rescan.removed.contains(p) {
+            gone.push(f.id);
+            continue;
+        }
+        has_system |= !rescan.bundled.contains(p);
+        present.insert(p.clone());
+    }
+    let db = fs.db_mut();
+    for id in gone {
+        db.remove_face(id);
+    }
+    for p in &rescan.added {
+        if !present.contains(p) && (has_system || rescan.bundled.contains(p)) {
+            let _ = db.load_font_file(p);
+            present.insert(p.clone());
+        }
+    }
 }
 
 fn find_cased_family(fs: &FontSystem, name: &str) -> Option<String> {
@@ -453,7 +563,7 @@ pub(crate) fn shared_text_buffer(
         return buf;
     }
     // Before any family resolves: a face alias must be in this database first.
-    sync_face_aliases(fs);
+    sync_font_ops(fs);
 
     let line_height = if is_vertical {
         physical_size * 1.05
@@ -724,7 +834,7 @@ pub struct DlText {
 pub(crate) fn collect_dl_text(fs: &mut FontSystem, dl: &crate::scene::paint::DisplayList, out: &mut Vec<DlText>) {
     // A cached buffer may have been shaped by another `FontSystem` (the app's
     // measuring one); the glyph pass rasterizes its face-alias IDs with this one.
-    sync_face_aliases(fs);
+    sync_font_ops(fs);
     for item in &dl.items {
         if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, alpha, font, bounds, attrs, layout } = &item.prim {
             let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
@@ -1005,6 +1115,85 @@ mod text_cache_tests {
         let two_b = shaped_from(&mut two, &fam_b);
         assert_eq!((one_a.1.as_path(), one_b.1.as_path()), (a.as_path(), b.as_path()));
         assert_eq!((one_a.0, one_b.0), (two_a.0, two_b.0), "the same IDs in both systems");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A rescan rides the alias log: two databases loaded alike — one synced
+    /// after every change, one only at the end — give the new file's face and
+    /// the aliases either side of it the same IDs; a removed file's face goes
+    /// from both while its alias stays; a database built after the rescan
+    /// replays it as a no-op; and a bundled-only one takes no system file.
+    /// (A log of the test's own: through the real one its rescans would
+    /// reach every other test's databases.)
+    #[test]
+    fn a_rescan_keeps_databases_alike() {
+        use cosmic_text::fontdb::{Database, Source};
+        use std::collections::HashSet;
+        use std::path::{Path, PathBuf};
+        use std::sync::Arc;
+        let src = {
+            let fs = crate::geometry_font_system().lock().unwrap();
+            let found = fs.db().faces().find_map(|f| match &f.source {
+                Source::File(p) | Source::SharedFile(p, _) if f.index == 0 && p.extension().is_some_and(|e| e == "ttf") => Some(p.clone()),
+                _ => None,
+            });
+            found.expect("a .ttf in the font set")
+        };
+        let dir = std::env::temp_dir().join(format!("cce-ui-rescan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, b) = (dir.join("a.ttf"), dir.join("b.ttf"));
+        std::fs::copy(&src, &a).unwrap();
+        std::fs::copy(&src, &b).unwrap();
+        let system = |file: &Path| {
+            let mut db = Database::new();
+            db.load_font_file(file).unwrap();
+            FontSystem::new_with_locale_and_db("en-US".into(), db)
+        };
+        let faces = |fs: &FontSystem| {
+            fs.db()
+                .faces()
+                .map(|f| {
+                    let (Source::File(p) | Source::SharedFile(p, _)) = &f.source else { unreachable!() };
+                    (f.id, f.families[0].0.clone(), p.clone())
+                })
+                .collect::<Vec<_>>()
+        };
+        // (is an alias, file) per face, in database order.
+        let names = |fs: &FontSystem| faces(fs).into_iter().map(|(_, fam, p)| (fam.starts_with(FACE_ALIAS_PREFIX), p)).collect::<Vec<_>>();
+        let alias = |path: &Path| FontOp::Alias(FaceAlias { path: path.to_path_buf(), index: 0 });
+        let rescan = |added: Vec<PathBuf>, removed: &[&Path], bundled: &[&Path]| {
+            let set = |ps: &[&Path]| ps.iter().map(|p| p.to_path_buf()).collect::<HashSet<_>>();
+            FontOp::Rescan(Arc::new(Rescan::new(added, set(removed), set(bundled))))
+        };
+
+        let (mut eager, mut lazy) = (system(&a), system(&a));
+        let mut ops = vec![alias(&a)];
+        replay_font_ops(&mut eager, &ops);
+        ops.push(rescan(vec![b.clone()], &[], &[]));
+        replay_font_ops(&mut eager, &ops);
+        ops.push(alias(&b));
+        replay_font_ops(&mut eager, &ops);
+        replay_font_ops(&mut lazy, &ops);
+        assert_eq!(
+            names(&eager),
+            [(false, a.clone()), (true, a.clone()), (false, b.clone()), (true, b.clone())],
+            "the new file lands between the aliases"
+        );
+        assert_eq!(faces(&eager), faces(&lazy), "the same IDs in both");
+
+        ops.push(rescan(Vec::new(), &[&a], &[]));
+        replay_font_ops(&mut eager, &ops);
+        replay_font_ops(&mut lazy, &ops);
+        assert_eq!(names(&eager), [(true, a.clone()), (false, b.clone()), (true, b.clone())], "the removed file's face goes, its alias stays");
+        assert_eq!(faces(&eager), faces(&lazy), "the same IDs in both");
+
+        let mut later = system(&b);
+        replay_font_ops(&mut later, &ops);
+        assert_eq!(names(&later), [(false, b.clone()), (true, b.clone())], "built after the rescan: nothing dropped or doubled");
+
+        let mut bundled_only = system(&a);
+        replay_font_ops(&mut bundled_only, &[rescan(vec![b.clone()], &[], &[&a])]);
+        assert_eq!(names(&bundled_only), [(false, a.clone())], "a bundled-only database takes no system file");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
