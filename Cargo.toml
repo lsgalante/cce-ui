@@ -15,6 +15,11 @@ markdown = ["dep:cce-vault"]
 # `widget::doc_editor` (DocEditor): the line-buffer document editor with
 # Markdown live preview (cce-notes' editing mode). No extra dependencies.
 doc_editor = []
+# Publish each window's accessibility tree to screen readers through AT-SPI
+# (accesskit_unix, in the Wayland shell; rfc-accessibility-locale phase 2). An
+# app must still opt in at run time (`Application::publishes_accessibility`, or
+# CCE_A11Y=1), since a workspace build turns a feature on for every app at once.
+a11y = ["dep:accesskit_unix"]
 
 [dependencies]
 # The GUI-free half: config, input, motion, units, ipc and the spec parsers,
@@ -78,6 +83,7 @@ wayland-protocols = { version = "0.31", features = ["client", "unstable"] }
 wayland-backend = "0.3"
 wayland-scanner = "0.31"
 xkeysym = "0.2"
+accesskit_unix = { version = "0.24", optional = true }
 
 # The AppKit shell (`src/mac`): the window, its CAMetalLayer, the run loop.
 [target.'cfg(target_os = "macos")'.dependencies]

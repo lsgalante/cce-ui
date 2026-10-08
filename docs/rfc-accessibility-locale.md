@@ -117,6 +117,30 @@ focus and click actions, children in reading order, and the context's focus.
 
 ### Phase 2 — speak to the platform
 
+**Progress (2026-10-08): Linux works, on one app.** `backend::a11y_unix` runs `accesskit_unix`
+in the Wayland shell behind the `a11y` feature (23 crates, zbus among them; nothing without
+it), for an app that returns true from `Application::publishes_accessibility` or any app run
+with `CCE_A11Y=1`. The adapter's callbacks only post into the runner's calloop loop; the
+loop publishes the whole tree when a reader connects (an idle window renders nothing, and
+AccessKit wants it by the next refresh), after every frame (`update_if_active`: nothing is
+built while no reader is connected), and answers `Focus` on a widget (`UiContext::
+set_focused_id`) and `Click` on a context-menu row (a press where it is drawn). The window's
+keyboard enter / leave is AccessKit's window focus, so a node reads FOCUSED only while the
+window has the keyboard. Widgets parked off-screen or without a size are left out.
+`CCE_A11Y_DEBUG=1` logs each connection, action, publish (with its build time) and focus change.
+
+Proven on cce-data-editor in a shadow session through `pyatspi`'s `Atspi` (no screen reader
+is installed), with the session's `org.a11y.Status IsEnabled` set for the run: the app is
+listed with toolkit `cce-ui`; its frame holds buttons, combo boxes, entries, spin buttons
+with values, a check box, the menu bar and the tree with their roles; `grab_focus` on a
+button focuses it in the window (its ring drawn) and reads back FOCUSED; Tab steps are
+republished. A tree of 21 nodes builds in 50–100 µs in a debug build.
+
+What it showed is the apps' to fix, not the adapter's: most of the data editor's controls
+have no label (an unlabelled field is an empty name to a reader), and its inactive editors
+are registered and visible though not drawn. Next: a widget `Click` (activate), the macOS
+adapter onto the AppKit view, and listening with Orca.
+
 - **Wayland / Linux:** AT-SPI over D-Bus. AccessKit's Unix adapter is the likely carrier
   (evaluate it first; the alternative is a small AT-SPI server of our own). The compositor
   needs nothing new: AT-SPI is a session-bus protocol between the app and the reader.

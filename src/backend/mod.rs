@@ -9,6 +9,8 @@ pub mod text;
 pub mod touch;
 // The Wayland shell: native, but for macOS.
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
+pub mod a11y_unix;
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod dnd;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod menu_popup;

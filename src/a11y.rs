@@ -39,6 +39,16 @@ use crate::widget::{FocusRole, WidgetHost, WidgetId};
 /// The window's node, the root every widget hangs from.
 pub const WINDOW: NodeId = NodeId(0);
 
+/// The widget a node is, when it is a widget's ([`node_id`]'s inverse).
+pub fn widget_of(node: NodeId) -> Option<WidgetId> {
+    (node.0 > 0 && node.0 < APP_BASE).then(|| WidgetId((node.0 - 1) as usize))
+}
+
+/// The context-menu row a node is, when it is one ([`menu_row_id`]'s inverse).
+pub fn menu_row_of(node: NodeId) -> Option<usize> {
+    (node.0 > MENU.0).then(|| (node.0 - MENU.0 - 1) as usize)
+}
+
 /// The open context menu's node, and the first of its rows' (`MENU + 1 + row`): far above any
 /// widget's id.
 pub const MENU: NodeId = NodeId(1 << 62);
@@ -160,6 +170,15 @@ pub fn widget_node(w: &dyn WidgetHost, children: Vec<NodeId>) -> Node {
     node
 }
 
+/// Whether a widget is on screen: visible, with a size, and not parked. Apps park a widget
+/// they are not showing far off the window (x or y below -9000, the toolkit's sentinel —
+/// cce-data-editor's per-type value editors) instead of hiding it; a reader must not see
+/// those either.
+fn shown_on_screen(w: &dyn WidgetHost) -> bool {
+    let (x, y, width, height) = w.rect();
+    w.visible() && width > 0.0 && height > 0.0 && x > -9000.0 && y > -9000.0
+}
+
 /// A check box's or switch's value string as a state: what `value_string` writes for one.
 fn truth(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
@@ -203,7 +222,7 @@ pub fn window_tree(ctx: Option<&UiContext>, app: AppNodes, title: &str, scale: f
         .tree
         .iter_registered()
         .map(|(id, ptr)| (id, unsafe { &*ptr } as &dyn WidgetHost))
-        .filter(|(_, w)| w.visible())
+        .filter(|(_, w)| shown_on_screen(*w))
         .collect();
     let shown: std::collections::HashSet<WidgetId> = widgets.iter().map(|(id, _)| *id).collect();
 
@@ -432,6 +451,33 @@ mod tests {
         assert_eq!(node(&update, clock).value(), Some("12:30"));
         assert_eq!(update.focus, button, "the app's focus");
         assert!(bar != WINDOW && bar != MENU && bar.0 > node_id(WidgetId(usize::MAX >> 4)).0, "its own id range");
+    }
+
+    #[test]
+    fn parked_and_sizeless_widgets_are_not_on_screen() {
+        let mut ctx = UiContext::new();
+        let mut parked = Owned::new(Button::new(-10_000.0, 0.0, 80.0, 24.0).with_label("Parked"));
+        let mut empty = Owned::new(Button::new(10.0, 10.0, 0.0, 0.0).with_label("Empty"));
+        let mut shown = Owned::new(Button::new(10.0, 10.0, 80.0, 24.0).with_label("Shown"));
+        ctx.register_host(&mut parked);
+        ctx.register_host(&mut empty);
+        ctx.register_host(&mut shown);
+        let update = tree_update(&ctx, "", 1.0);
+        assert_eq!(node(&update, WINDOW).children(), &[node_id(shown.base().id())][..]);
+    }
+
+    #[test]
+    fn a_node_id_names_back_what_it_was_made_from() {
+        for id in [WidgetId(0), WidgetId(1), WidgetId(123_456)] {
+            assert_eq!(widget_of(node_id(id)), Some(id));
+        }
+        for row in [0, 1, 40] {
+            assert_eq!(menu_row_of(menu_row_id(row)), Some(row));
+            assert_eq!(widget_of(menu_row_id(row)), None, "a menu row is no widget");
+        }
+        assert_eq!(widget_of(WINDOW), None);
+        assert_eq!((widget_of(MENU), menu_row_of(MENU)), (None, None));
+        assert_eq!((widget_of(AppNodes::id(5)), menu_row_of(AppNodes::id(5))), (None, None), "an app's own node is neither");
     }
 
     #[test]

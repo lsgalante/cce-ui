@@ -63,6 +63,9 @@ fn debug_clock_ms() -> u128 {
 }
 
 pub struct EngineState<A: Application> {
+    /// The session's accessibility publisher, for an app that publishes its tree
+    /// (`backend::a11y_unix`).
+    pub a11y: Option<crate::backend::a11y_unix::Publisher>,
     pub registry_state: RegistryState,
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShell,
@@ -556,6 +559,11 @@ impl<A: Application> EngineState<A> {
             self.damage_owed = false;
         }
         self.sync_text_input();
+        // The tree after the frame that may have changed it; nothing is built while no
+        // screen reader is connected.
+        if let (Some(publisher), Some(app)) = (self.a11y.as_mut(), self.inner.as_mut()) {
+            publisher.publish(app, crate::scale::scale_factor() as f64);
+        }
     }
 
     /// Bring the text input in step with the frame just built: enabled at
@@ -1324,6 +1332,9 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         _raw_modifiers: &[u32],
         _keysyms: &[xkeysym::Keysym],
     ) {
+        if let Some(publisher) = self.a11y.as_mut() {
+            publisher.window_focus(true);
+        }
         let (driver, t) = self.turn();
         driver.keyboard_focus(t, true);
     }
@@ -1336,6 +1347,9 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         _surface: &wl_surface::WlSurface,
         _serial: u32,
     ) {
+        if let Some(publisher) = self.a11y.as_mut() {
+            publisher.window_focus(false);
+        }
         let (driver, t) = self.turn();
         driver.keyboard_focus(t, false);
     }
@@ -1892,6 +1906,9 @@ pub fn run<A: Application>() {
     // loop outlives a reconnect while the EngineState does not.
     let (drop_tx, drop_rx) =
         calloop::channel::channel::<crate::backend::dnd::DroppedData>();
+    // The accessibility adapter's callbacks (`backend::a11y_unix`), from its own thread;
+    // registered once, as the loop outlives a reconnect.
+    let (a11y_tx, a11y_rx) = calloop::channel::channel::<crate::backend::a11y_unix::Event>();
     let mut event_loop = match EventLoop::try_new() {
         Ok(l) => l,
         Err(e) => {
@@ -1932,6 +1949,32 @@ pub fn run<A: Application>() {
         })
         .unwrap();
 
+    event_loop
+        .handle()
+        .insert_source(a11y_rx, |event, _metadata, app_state: &mut EngineState<A>| {
+            use crate::backend::a11y_unix::{act, Event};
+            let calloop::channel::Event::Msg(event) = event else { return };
+            let (Some(publisher), Some(app)) = (app_state.a11y.as_mut(), app_state.inner.as_mut()) else { return };
+            match event {
+                // Published from here, not at the next frame: an idle window renders none,
+                // and AccessKit wants the tree by the next refresh.
+                Event::Activated => {
+                    if crate::backend::a11y_unix::debug() {
+                        eprintln!("[a11y] a screen reader connected");
+                    }
+                    publisher.publish(app, crate::scale::scale_factor() as f64)
+                }
+                Event::Deactivated => {}
+                Event::Action(request) => {
+                    if act(app, &request) {
+                        app_state.redraw = true;
+                        publisher.publish(app, crate::scale::scale_factor() as f64);
+                    }
+                }
+            }
+        })
+        .unwrap();
+
     let mut app: Option<A> = None;
     let mut sources_registered = false;
     let mut attempt: u32 = 0;
@@ -1939,7 +1982,7 @@ pub fn run<A: Application>() {
     loop {
         let started = std::time::Instant::now();
         let (returned_app, end) =
-            run_session(&mut event_loop, sender.clone(), drop_tx.clone(), app.take(), !sources_registered);
+            run_session(&mut event_loop, sender.clone(), drop_tx.clone(), a11y_tx.clone(), app.take(), !sources_registered);
         app = returned_app;
         sources_registered = true;
 
@@ -1990,6 +2033,7 @@ fn run_session<'l, A: Application>(
     event_loop: &mut EventLoop<'l, EngineState<A>>,
     sender: calloop::channel::Sender<A::Message>,
     drop_tx: calloop::channel::Sender<crate::backend::dnd::DroppedData>,
+    a11y_tx: calloop::channel::Sender<crate::backend::a11y_unix::Event>,
     existing_app: Option<A>,
     register_app_sources: bool,
 ) -> (Option<A>, SessionEnd) {
@@ -2020,6 +2064,7 @@ fn run_session<'l, A: Application>(
     let text_input_manager: Option<ZwpTextInputManagerV3> = globals.bind(&qh, 1..=1, ()).ok();
 
     let mut engine_state = EngineState {
+        a11y: None,
         data_device_manager: DataDeviceManagerState::bind(&globals, &qh).ok(),
         data_devices: Vec::new(),
         drag_mime: None,
@@ -2107,6 +2152,9 @@ fn run_session<'l, A: Application>(
         Some(app) => app,
         None => A::create(AppSender::from(engine_state.sender.clone())),
     };
+    if crate::backend::a11y_unix::wanted(&inner) {
+        engine_state.a11y = crate::backend::a11y_unix::Publisher::start(a11y_tx);
+    }
     let settings = inner.settings();
     crate::scale::set_app_id(settings.app_id.clone());
     engine_state.is_status_bar = settings.app_id.starts_with("cce-status");

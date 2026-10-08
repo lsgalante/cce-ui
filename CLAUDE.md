@@ -1564,10 +1564,12 @@ the ladder should be supplying, and the audit counts them.
 
 ## Accessibility and locale are on the roadmap (read `docs/rfc-accessibility-locale.md`)
 
-There is no accessibility support yet (no AT-SPI, AccessKit, NSAccessibility or ARIA), no
-message catalogue, and the editors assume left-to-right text (`TextBox`
-assumes monospace too). The RFC has the measured state and a phased plan. Until it lands,
-two rules keep the retrofit cheap:
+Accessibility reaches Linux screen readers only, and only for an app that opts in: the
+widget tree is published over AT-SPI through AccessKit (`backend::a11y_unix`, the `a11y`
+feature, `Application::publishes_accessibility` or `CCE_A11Y=1`; phase 2, proven on
+cce-data-editor). There is nothing yet on macOS or in the browser, no message catalogue,
+and the editors assume left-to-right text (`TextBox` assumes monospace too). The RFC has
+the measured state and a phased plan. Until it lands, two rules keep the retrofit cheap:
 
 - **A new widget declares what it is**: its `focus_role`, and a label that names it to a
   person (not to a host).
@@ -1711,7 +1713,8 @@ cce-system-interface) to confirm behavior, not just the test suite.
   window's `TreeUpdate` — its registered widgets (role, name, value, bounds, actions, focus;
   `WidgetHost::a11y_role` / `a11y_value` are what a widget says about itself), the nodes an
   app without widgets declares (`Application::accessibility`, `AppNodes`), and an open context
-  menu. No platform adapter yet (`docs/rfc-accessibility-locale.md`, phase 2).
+  menu. `backend::a11y_unix` publishes it over AT-SPI (the `a11y` feature; see
+  `docs/rfc-accessibility-locale.md`, phase 2).
 - `ime.rs` — input-method composition shared between the editing widget and the shell:
   `Preedit`, the composition and its generation, the reported caret, the reset request
   (see "Input-method composition is one model for every shell").
@@ -2192,6 +2195,11 @@ All opt-in, all read once, all quiet when unset — set one and run any client.
   its grouping window (correctly — the carve's shading is baked into the plate's earlier
   draw).
 - `CCE_PRESENT_DEBUG=1` — swapchain present/acquire tracing.
+- `CCE_A11Y=1` — publish the accessibility tree over AT-SPI for an app that has not opted in
+  (`Application::publishes_accessibility`; needs the `a11y` feature). `CCE_A11Y_DEBUG=1` logs
+  each reader connection, action, publish (node count, focus, build time) and window-focus
+  change. A shadow window holds no keyboard until `ctl focus-window <app_id>`, and nothing
+  reads FOCUSED until it does. See `docs/rfc-accessibility-locale.md`, phase 2.
 - `CCE_UI_MENU_POPUP=0` — keep the context menu in the window instead of its popup
   surface (see "The context menu draws in its own popup surface").
 - `CCE_VK_DEVICE=<substring>` — force a physical device; `CCE_VK_RT=0` disables ray tracing.

@@ -334,6 +334,13 @@ pub trait Application: Sized + 'static {
         None
     }
     
+    /// Publish this app's accessibility tree to screen readers (AT-SPI on Wayland), with
+    /// cce-ui built with its `a11y` feature. Default false while the adapter is proven
+    /// (`docs/rfc-accessibility-locale.md`, phase 2); `CCE_A11Y=1` turns it on for any app.
+    fn publishes_accessibility(&self) -> bool {
+        false
+    }
+
     /// What the app shows that its [`ui_context`](Self::ui_context) does not: the nodes of
     /// an accessibility tree, for an app that draws without widgets (a status bar module, a
     /// terminal, a map) or draws parts of its window itself. Pushed as AccessKit nodes into
