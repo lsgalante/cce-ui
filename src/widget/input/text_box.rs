@@ -104,6 +104,9 @@ pub struct TextBox {
     /// face of `font_family`.
     pub font_attrs: crate::scene::paint::TextAttrs,
     pub placeholder: Option<String>,
+    /// A search box (`with_search`): its menu offers Clear. Known by this flag, never by
+    /// its placeholder's text, which is translated.
+    pub is_search: bool,
     pub editor_state: TextEditorState,
     /// Edit history for the current editing session (cleared by
     /// `begin_editing`): a typed run is one step, a deleted run one, a
@@ -214,6 +217,7 @@ impl TextBox {
             font_family: style_family.clone(),
             font_attrs: crate::scene::paint::TextAttrs::default(),
             placeholder: None,
+            is_search: false,
             editor_state,
             history: History::new(),
             scroll_y: 0.0,
@@ -1676,6 +1680,14 @@ impl Adapted<TextBox> {
 
     pub fn with_password(mut self, is_password: bool) -> Self {
         self.is_password = is_password;
+        self
+    }
+
+    /// A search box: the toolkit's "Search..." placeholder, in the user's language, and a
+    /// menu with Clear.
+    pub fn with_search(mut self) -> Self {
+        self.is_search = true;
+        self.placeholder = Some(crate::l10n::tr("search-placeholder"));
         self
     }
 

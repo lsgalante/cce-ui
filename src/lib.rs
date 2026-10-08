@@ -35,6 +35,7 @@ pub mod mcp;
 pub use cce_core::motion;
 /// The user's locale (`locale::locale()`), what every font system is built with.
 pub use cce_core::locale;
+pub mod l10n;
 pub mod text_input;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vk;

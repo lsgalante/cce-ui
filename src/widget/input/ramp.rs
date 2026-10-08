@@ -154,7 +154,7 @@ impl Ramp {
         // does not survive the renderer rebuild a reconnect performs, and the
         // widget outlives the renderer (see `Button::icon_name`).
         let del_button =
-            Button::new(0.0, 0.0, 22.0, 22.0).with_icon_name("x", "Delete");
+            Button::new(0.0, 0.0, 22.0, 22.0).with_icon_name("x", &crate::l10n::tr("ramp-delete-key"));
         // Short names on purpose: the strip's columns are narrow, and these
         // render inside param rows too ("Bevel (Raised)" used to clip).
         // Labeled: the dropdowns draw their own detached labels, sitting on

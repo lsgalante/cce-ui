@@ -1585,8 +1585,12 @@ the ladder should be supplying, and the audit counts them.
 Accessibility reaches Linux screen readers only, and only for an app that opts in: the
 widget tree is published over AT-SPI through AccessKit (`backend::a11y_unix`, the `a11y`
 feature, `Application::publishes_accessibility` or `CCE_A11Y=1`; phase 2, proven on
-cce-data-editor). There is nothing yet on macOS or in the browser, no message catalogue,
-and right-to-left text is edited where it is drawn (carets, clicks and selections follow
+cce-data-editor). There is nothing yet on macOS or in the browser. The toolkit's own words
+are translatable (`crate::l10n`, phase 5): `tr("id")` looks a message up in
+`locale/en-US/cce-ui.ftl`'s English or a translation `<tag>/cce-ui.ftl` (`cce_core::l10n`
+for where), and a new string the toolkit shows goes there, never into the source;
+`every_message_the_toolkit_names_is_in_its_english` holds the two to each other. And
+right-to-left text is edited where it is drawn (carets, clicks and selections follow
 it, a right-to-left paragraph is set against the right, the `DocEditor` draws styled runs
 in bidi order, a multiline `TextBox` wraps by shaped width — phase 4). The RFC has
 the measured state and a phased plan. Until it lands, two rules keep the retrofit cheap:
@@ -1736,6 +1740,8 @@ cce-system-interface) to confirm behavior, not just the test suite.
   menu; a widget's parts of its own (a radio group's radio buttons) are `A11yItem`s
   (`Input::a11y_items`). `backend::a11y_unix` publishes it over AT-SPI (the `a11y` feature; see
   `docs/rfc-accessibility-locale.md`, phase 2).
+- `l10n.rs` — the toolkit's catalogue (`tr`, `tr_args`, `catalog`) over `cce_core::l10n`;
+  its English is `locale/en-US/cce-ui.ftl`.
 - `ime.rs` — input-method composition shared between the editing widget and the shell:
   `Preedit`, the composition and its generation, the reported caret, the reset request
   (see "Input-method composition is one model for every shell").

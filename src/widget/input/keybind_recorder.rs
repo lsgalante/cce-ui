@@ -109,9 +109,9 @@ impl Paint for KeybindRecorder {
 impl KeybindRecorder {
     fn paint_text(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (display_text, color) = if self.recording {
-            ("[ Press Keys... ]".to_string(), [135, 135, 153])
+            (crate::l10n::tr("keybind-recording"), [135, 135, 153])
         } else if self.value.is_empty() {
-            ("None".to_string(), [127, 127, 127])
+            (crate::l10n::tr("keybind-none"), [127, 127, 127])
         } else {
             (self.value.clone(), [221, 221, 226])
         };

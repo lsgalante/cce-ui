@@ -441,7 +441,7 @@ pub fn layout_line(text: &str, line: &preview::Line, active: bool, width: f32, t
         };
         let label = |text: &str, x: f32| label_in(text, x, th.dim);
         match show {
-            PropShow::Header => decos.push(label("Properties", 0.0)),
+            PropShow::Header => decos.push(label(&crate::l10n::tr("doc-properties"), 0.0)),
             PropShow::Close => {
                 height = (row_h * 0.75).round();
                 decos.push(Deco::Quad(Rect { x: 0.0, y: (height / 2.0).round(), width, height: 1.0 }, th.rule));
@@ -460,7 +460,7 @@ pub fn layout_line(text: &str, line: &preview::Line, active: bool, width: f32, t
                 } else if *empty {
                     // Fainter than any value: text colour has no alpha.
                     let d = th.dim;
-                    decos.push(label_in("Empty", content_x, [d[0] * 0.45, d[1] * 0.45, d[2] * 0.5, d[3]]));
+                    decos.push(label_in(&crate::l10n::tr("doc-empty"), content_x, [d[0] * 0.45, d[1] * 0.45, d[2] * 0.5, d[3]]));
                 }
             }
         }

@@ -1188,13 +1188,15 @@ impl UiContext {
         }
 
         use crate::widget::ContextAction as CA;
-        let row = |label: &str, action: CA| (label.to_string(), Some(action));
+        use crate::l10n::{tr, tr_args};
+        // Each row's label in the user's language; what it does is its action, not its words.
+        let row = |label: String, action: CA| (label, Some(action));
         let mut rows: Vec<(String, Option<CA>)> = vec![(header, None)];
         let mut header_count = 1;
 
         if let Some((file, key)) = config_info {
-            rows.push((format!("File: {}", file), None));
-            rows.push((format!("Key: {}", key), None));
+            rows.push((tr_args("menu-config-file", &[("file", &file)]), None));
+            rows.push((tr_args("menu-config-key", &[("key", &key)]), None));
             header_count = 3;
         }
 
@@ -1206,21 +1208,23 @@ impl UiContext {
                     .is_some_and(|tb| tb.is_password)
             };
             if !is_password {
-                rows.extend([row("Cut", CA::Cut), row("Copy", CA::Copy)]);
+                rows.extend([row(tr("menu-cut"), CA::Cut), row(tr("menu-copy"), CA::Copy)]);
             }
-            rows.extend([row("Paste", CA::Paste), row("Select All", CA::SelectAll)]);
+            rows.extend([row(tr("menu-paste"), CA::Paste), row(tr("menu-select-all"), CA::SelectAll)]);
+            // A search box says so (`with_search`); an English "Search..." placeholder is the
+            // older sign, still read for the apps that set one themselves.
             let is_search = unsafe {
                 if let Some(tb) = (*target).as_any().downcast_ref::<crate::widget::input::TextBox>() {
-                    tb.placeholder.as_deref() == Some("Search...")
+                    tb.is_search || tb.placeholder.as_deref() == Some("Search...")
                 } else {
                     false
                 }
             };
             if is_search {
-                rows.push(row("Clear", CA::ClearText));
+                rows.push(row(tr("menu-clear"), CA::ClearText));
             }
         } else if name == "Breadcrumb" {
-            rows.push(row("Copy Path", CA::CopyPath));
+            rows.push(row(tr("menu-copy-path"), CA::CopyPath));
         } else if name == "Ramp" {
             let collapsed = unsafe {
                 (*target)
@@ -1229,10 +1233,12 @@ impl UiContext {
                     .map(|r| r.controls_collapsed)
                     .unwrap_or(false)
             };
-            rows.push(row(if collapsed { "✓ Collapse controls" } else { "Collapse controls" }, CA::ToggleRampControls));
-            rows.extend([row("Copy", CA::Copy), row("Paste", CA::Paste)]);
+            let label = tr("menu-collapse-controls");
+            let label = if collapsed { format!("{}{label}", crate::widget::context_menu::MARK_CHECK) } else { label };
+            rows.push((label, Some(CA::ToggleRampControls)));
+            rows.extend([row(tr("menu-copy"), CA::Copy), row(tr("menu-paste"), CA::Paste)]);
         } else {
-            rows.extend([row("Copy", CA::Copy), row("Paste", CA::Paste)]);
+            rows.extend([row(tr("menu-copy"), CA::Copy), row(tr("menu-paste"), CA::Paste)]);
         }
 
         let scroll_y = crate::widget::hover_animation::get_scroll_offset();

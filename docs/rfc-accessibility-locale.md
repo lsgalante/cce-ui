@@ -272,6 +272,29 @@ editors on most platforms do.
 
 ### Phase 5 — translatable strings
 
+**Done (2026-10-08).** `cce_core::l10n` (the `l10n` feature, off by default so the compositor
+does not carry it; fluent-bundle and its seven crates) is a catalogue per domain in Project
+Fluent's format: the domain's English built in (`Catalog::new(domain, include_str!(…))`),
+a translation found on first use for the user's locale chain (`ja-JP`, then `ja`) as
+`<tag>/<domain>.ftl` under `CCE_LOCALE_DIR`, `$XDG_DATA_HOME/cce/locale` and each
+`$XDG_DATA_DIRS/*/cce/locale`, and a message looked up most specific first, then English,
+then its own id (a gap shows). Placeables are not wrapped in isolation marks, which the
+renderer would draw. A page reads no files (`Catalog::add_translation`); a suite reads no
+directory.
+
+cce-ui's words are its `locale/en-US/cce-ui.ftl` (27 messages): the standard context menu
+(Cut, Copy, Paste, Select All, Clear, Copy Path, the ramp's Collapse controls, the config
+header's File / Key rows), the tree list's rows, the plate dock's, the search placeholder,
+the copy and ramp-delete buttons, the keybind recorder's prompt and empty value, and the
+`DocEditor`'s Properties table — through `crate::l10n::tr` / `tr_args`.
+`every_message_the_toolkit_names_is_in_its_english` scans the source for every id looked up
+and holds them to the file both ways. One identity-by-text went with it: the standard menu
+knew a search box by its placeholder being "Search..."; a search box says so now
+(`TextBox::with_search`), the English placeholder read only for the apps that set it
+themselves. Checked in a shadow: the demo under `LANG=de_DE.UTF-8` with a German
+`cce-ui.ftl` shows its text box's menu as Ausschneiden, Kopieren, Einfügen, Alles auswählen.
+No translation ships yet; an app's own words are its own domain, adopted at its own pace.
+
 - The toolkit's ~20 strings through a small catalogue keyed by message ID, in `cce-core`
   so services can use it too. Fluent is the candidate format.
 - Apps adopt it at their own pace. Only phase 1's rule — actions keyed by ID, never by

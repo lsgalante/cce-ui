@@ -1,4 +1,5 @@
 use crate::widget::*;
+use crate::l10n::tr;
 use crate::widget::container::scroll_box::ScrollBox;
 use crate::widget::display::TextLabel;
 use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
@@ -201,7 +202,7 @@ impl TreeList {
         Adapted::new(TreeList {
             base: Widget::new(),
             scroll_box,
-            search_box: TextBox::new(String::new()).with_placeholder("Search...").with_update_on_type(true),
+            search_box: TextBox::new(String::new()).with_search().with_update_on_type(true),
             add_key_btn: Button::new(0.0, 0.0, 80.0, 26.0).with_label("+ Add Key"),
             add_key_popover_open: false,
             add_key_popover_box: TextBox::new(String::new()).with_placeholder("new.key.path").with_multiline(false),
@@ -543,9 +544,9 @@ impl TreeList {
                             use crate::widget::ContextAction as CA;
                             let rows = vec![
                                 (path.clone(), None),
-                                if collapsed { ("Expand".to_string(), Some(CA::ExpandNode)) } else { ("Collapse".to_string(), Some(CA::CollapseNode)) },
-                                ("Expand All".to_string(), Some(CA::ExpandAll)),
-                                ("Collapse All".to_string(), Some(CA::CollapseAll)),
+                                if collapsed { (tr("tree-expand"), Some(CA::ExpandNode)) } else { (tr("tree-collapse"), Some(CA::CollapseNode)) },
+                                (tr("tree-expand-all"), Some(CA::ExpandAll)),
+                                (tr("tree-collapse-all"), Some(CA::CollapseAll)),
                             ];
 
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
@@ -566,9 +567,9 @@ impl TreeList {
                             use crate::widget::ContextAction as CA;
                             let rows = vec![
                                 (path.clone(), None),
-                                ("Copy Key".to_string(), Some(CA::CopyKey)),
-                                ("Copy Value".to_string(), Some(CA::CopyValue)),
-                                ("Delete".to_string(), Some(CA::DeleteKey)),
+                                (tr("tree-copy-key"), Some(CA::CopyKey)),
+                                (tr("tree-copy-value"), Some(CA::CopyValue)),
+                                (tr("tree-delete"), Some(CA::DeleteKey)),
                             ];
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
                             // SAFETY: as above — our own adapter, live while its event is routed.

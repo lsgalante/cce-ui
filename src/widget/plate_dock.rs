@@ -110,16 +110,16 @@ pub fn draw_corner_dot(
 /// appends its own rows after these and owns dispatch.
 pub fn standard_menu(state: PlateDockState, can_detach: bool) -> Vec<(String, PlateDockAction)> {
     if state.detached {
-        return vec![("Reattach".to_string(), PlateDockAction::Reattach)];
+        return vec![(crate::l10n::tr("dock-reattach"), PlateDockAction::Reattach)];
     }
     let mut rows = Vec::new();
     if state.collapsed {
-        rows.push(("Expand".to_string(), PlateDockAction::Expand));
+        rows.push((crate::l10n::tr("dock-expand"), PlateDockAction::Expand));
     } else {
-        rows.push(("Collapse".to_string(), PlateDockAction::Collapse));
+        rows.push((crate::l10n::tr("dock-collapse"), PlateDockAction::Collapse));
     }
     if can_detach {
-        rows.push(("Detach".to_string(), PlateDockAction::Detach));
+        rows.push((crate::l10n::tr("dock-detach"), PlateDockAction::Detach));
     }
     rows
 }
