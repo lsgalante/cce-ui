@@ -2105,7 +2105,7 @@ fn run_session<'l, A: Application>(
     // worker threads that are still holding the original.
     let inner = match existing_app {
         Some(app) => app,
-        None => A::new(&qh, engine_state.sender.clone()),
+        None => A::create(AppSender::from(engine_state.sender.clone())),
     };
     let settings = inner.settings();
     crate::scale::set_app_id(settings.app_id.clone());

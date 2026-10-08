@@ -520,12 +520,13 @@ Key methods (see the trait def in `backend/app.rs`):
   `AppSender` is cce-ui's own handle — `send`, `Clone`, `Send`, and `From` both ways
   with `calloop::channel::Sender` for a client that still stores calloop's type — so
   the constructor names no window system, which is what lets a second shell (macOS,
-  the browser) run the same `Application`. The legacy `new(qh, sender)` still works:
-  the runner calls `new`, whose default forwards to `create`, so a client implements
-  ONE of the two and moves when it likes (no client ever used `qh`). Implementing
-  neither panics at startup naming the app. `new` is removed once no client
-  implements it, the way `VkRenderer::new` went. `register_sources` stays a
-  calloop-only hook: it is the Wayland shell's, not part of the portable contract.
+  the browser) run the same `Application`. `create` is REQUIRED (since 2026-10-08):
+  the legacy `new(qh, sender)`, whose queue handle no client ever used, is gone, and
+  so is the default that panicked at startup when an app implemented neither, so a
+  missing constructor is a compile error. An app that keeps calloop's sender converts
+  on the first line (`let tx: calloop::channel::Sender<_> = sender.into();`).
+  `register_sources` stays a calloop-only hook: it is the Wayland shell's, not part of
+  the portable contract.
 - **Draw**: `view` / `view_rounded_quads` / `view_vectors` / `overlay_quads` push legacy
   primitive tuples; `text_items()` returns text; `custom_vertices()` appends raw vertices (e.g.
   graph geometry). `display_list()` is the new opt-in path (see below).

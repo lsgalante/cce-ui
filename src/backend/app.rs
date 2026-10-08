@@ -5,8 +5,6 @@
 
 use cosmic_text::FontSystem;
 use crate::widget::{MouseButton, ElementState, MouseScrollDelta, KeyEvent};
-#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
-use wayland_client::QueueHandle;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::vk::VkRenderer;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
@@ -206,30 +204,15 @@ impl<M> From<AppSender<M>> for calloop::channel::Sender<M> {
 pub trait Application: Sized + 'static {
     type Message: Send + Clone + 'static;
 
-    /// Build the app. Implement this or the legacy [`new`](Self::new), not
-    /// both: the runner calls `new`, whose default forwards here. `create`
-    /// takes no Wayland type, so it is the constructor another shell can
-    /// call; `new` goes once no client implements it.
+    /// Build the app. `sender` posts messages to [`update`](Self::update) from any thread, and
+    /// waking the loop if it sleeps; it converts into calloop's `Sender` for an app that keeps
+    /// that type (`let tx: calloop::channel::Sender<_> = sender.into();`). It names no window
+    /// system, so every shell (Wayland, AppKit, the browser) builds the app the same way.
     ///
-    /// Implementing neither panics at startup, naming the app: the price of
-    /// letting clients move one at a time.
-    fn create(sender: AppSender<Self::Message>) -> Self {
-        let _ = sender;
-        panic!(
-            "{}: implement Application::create (or the legacy Application::new)",
-            std::any::type_name::<Self>()
-        )
-    }
-
-    /// The legacy constructor, from before the runner had a second shell in
-    /// view: the session's Wayland queue handle (no client ever used it) and
-    /// its calloop sender. Prefer [`create`](Self::create); the default here
-    /// forwards to it. Native only: it names the Wayland queue.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
-    fn new(qh: &QueueHandle<EngineState<Self>>, sender: calloop::channel::Sender<Self::Message>) -> Self {
-        let _ = qh;
-        Self::create(AppSender::from(sender))
-    }
+    /// Required since 2026-10-07: the legacy `new(qh, sender)` — whose Wayland queue handle no
+    /// client ever used — and the default that panicked when neither was implemented are gone,
+    /// so an app without a constructor is a compile error rather than a crash at startup.
+    fn create(sender: AppSender<Self::Message>) -> Self;
     fn settings(&self) -> WindowSettings;
     /// Return `Some(..)` to run on a wlr-layer-shell surface (overlay/panel)
     /// instead of an xdg toplevel. Defaults to `None` (a normal window).
