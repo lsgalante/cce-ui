@@ -19,6 +19,8 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      CCE_FONTS_DIR: /usr/share/fonts/truetype/liberation
     steps:
       - uses: actions/checkout@v5
 
@@ -26,11 +28,17 @@ jobs:
       # links, found through pkg-config (wayland-sys, smithay-client-toolkit).
       # mesa-vulkan-drivers: lavapipe, a software Vulkan device, so the GPU
       # tests (vk::compute, vk::plate_probe) run instead of skipping.
+      # fonts-liberation: a known face set (sans, serif, mono, each with its
+      # italic) for the text tests, handed over as CCE_FONTS_DIR below. With
+      # none, the font system fell back to whatever the runner image carries,
+      # and the tests that need a second face or a fallback glyph failed —
+      # which kept this workflow red from 2026-10-07 on.
       - name: Install system packages
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            pkg-config libwayland-dev libxkbcommon-dev libvulkan1 mesa-vulkan-drivers
+            pkg-config libwayland-dev libxkbcommon-dev libvulkan1 mesa-vulkan-drivers \
+            fonts-liberation
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -58,3 +66,39 @@ jobs:
             echo "::error::the Vulkan tests skipped: no device opened on the runner"
             exit 1
           fi
+
+  # The browser half (src/web, the wasm examples) is cfg'd out of the Linux
+  # build above, so nothing else compiles it. scripts/check-wasm type-checks
+  # the library, its features and the four wasm examples.
+  wasm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # An env RUSTFLAGS replaces .cargo/config.toml's rustflags, which is
+      # where the wasm target gets web-sys's unstable WebGPU bindings.
+      RUSTFLAGS: -D warnings --cfg=web_sys_unstable_apis
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/check-wasm
+
+  # The AppKit shell (src/mac) and the MoltenVK path, built — and linked — on
+  # a real Mac, where on Linux scripts/check-mac can only type-check them. ash
+  # loads Vulkan at run time, so the build needs no MoltenVK; the GPU tests
+  # skip with a note on a runner without one.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (all targets)
+        run: cargo build --all-targets
+      - name: Build (all features)
+        run: cargo build --lib --all-features
+      - name: Test
+        run: cargo test
