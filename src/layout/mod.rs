@@ -23,7 +23,7 @@ pub use bridge::*;
 mod section;
 pub use section::*;
 mod form;
-pub use form::{line_height as form_line_height, text_width as form_text_width, Form, Group as FormGroup};
+pub use form::{lay_row, line_height as form_line_height, text_width as form_text_width, Cell, Form, Group as FormGroup};
 /// The height every text-bearing control falls back to when its own
 /// `style.control.<name>.height` is unset: button, toggle (and the checkbox
 /// row), dropdown, textbox (and the keybind recorder), spinbox, font selector,
@@ -821,6 +821,15 @@ pub fn plate_gap() -> f32 {
 /// strategy's `Default` carried as a literal.
 pub fn control_gap() -> f32 {
     registry_float("control_gap").unwrap_or(CONTROL_GAP)
+}
+
+/// Gap inside a list row, in logical px (`style.control.list_gap`) — the rung below the
+/// controls: what a scrolling list's row puts between its cells (a row's buttons, its glyph
+/// and its name) and between its content and the list's wall. A row is one control's height,
+/// so the control gap (one control height) would part it into islands. Unset, it is
+/// [`CONTROL_TEXT_INSET`], the inset text keeps from a control's wall.
+pub fn list_gap() -> f32 {
+    registry_float("list_gap").unwrap_or(CONTROL_TEXT_INSET)
 }
 
 /// Roll-off width for the wall where a bar (menubar / status bar / the demo's

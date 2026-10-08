@@ -363,6 +363,7 @@ pub(super) fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, 
                 "style.surface.plate.padding" => "plate_padding",
                 "style.surface.plate.gap" => "plate_gap",
                 "style.control.gap" => "control_gap",
+                "style.control.list_gap" => "list_gap",
                 // The context menu's own radius (`menu_corner_radius`): a
                 // popover's corner is control-scale, not pane-scale.
                 "style.surface.menu.corner_radius" => "menu_corner_radius",

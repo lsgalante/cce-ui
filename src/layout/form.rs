@@ -233,6 +233,50 @@ impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
     }
 }
 
+/// One cell of [`lay_row`]: its width (its own, or the least it takes when it grows), its
+/// height, and whether it grows into the row's slack.
+#[derive(Debug, Clone, Copy)]
+pub struct Cell {
+    pub width: f32,
+    pub height: f32,
+    pub grow: bool,
+}
+
+impl Cell {
+    /// A cell of its own width.
+    pub fn fixed(width: f32, height: f32) -> Self {
+        Cell { width, height, grow: false }
+    }
+    /// A cell that takes the row's slack.
+    pub fn grow(height: f32) -> Self {
+        Cell { width: 0.0, height, grow: true }
+    }
+}
+
+/// A list row's cells laid across `rect` by `scene::layout`: `list_gap` in from the row's
+/// ends and between cells, each centred on the row's height. For what a scrolling list draws
+/// per visible row — its buttons, its glyph, its name — where a `Form` (one tree for a whole
+/// section) does not reach.
+pub fn lay_row(rect: Rect, cells: &[Cell]) -> Vec<Rect> {
+    let gap = crate::layout::list_gap();
+    let mut arena = Arena::new();
+    let style = Style::row().gap(gap).cross_align(CrossAlign::Center).width(Length::Fixed(rect.width)).height(Length::Fixed(rect.height));
+    let style = Style { padding: crate::scene::layout::Edges { left: gap, right: gap, top: 0.0, bottom: 0.0 }, ..style };
+    let row = arena.insert(LayoutBox::container(style));
+    let ids: Vec<NodeId> = cells
+        .iter()
+        .map(|c| {
+            let st = if c.grow { Style::default().grow(1.0) } else { Style::default() };
+            let id = arena.insert(LayoutBox::leaf(st, Size::new(c.width, c.height)));
+            arena.append_child(row, id);
+            id
+        })
+        .collect();
+    measure(&mut arena, row);
+    arrange(&mut arena, row, rect);
+    ids.into_iter().map(|id| arena.value(id).map(|b| b.rect).unwrap_or(Rect::ZERO)).collect()
+}
+
 /// How tall a section's text line is at `size`: the size and the 4 px a line has always had
 /// below it.
 pub fn line_height(size: f32) -> f32 {
@@ -332,6 +376,21 @@ mod tests {
         let r = seen.borrow();
         assert!((r[1].height - (300.0 - 40.0 - gap)).abs() < 1e-3, "{r:?}");
         assert_eq!(bottom, 300.0);
+    }
+
+    /// A row's cells stand `list_gap` apart and in from its ends, each centred on its height,
+    /// and a growing cell takes what the fixed ones leave.
+    #[test]
+    fn a_list_rows_cells_are_a_list_gap_apart() {
+        let g = crate::layout::list_gap();
+        let rect = Rect { x: 10.0, y: 100.0, width: 300.0, height: 30.0 };
+        let r = lay_row(rect, &[Cell::fixed(24.0, 24.0), Cell::fixed(24.0, 24.0), Cell::grow(16.0), Cell::fixed(50.0, 24.0)]);
+        assert_eq!(r[0].x, 10.0 + g);
+        assert_eq!(r[1].x, r[0].x + 24.0 + g);
+        assert_eq!(r[2].x, r[1].x + 24.0 + g);
+        assert!((r[3].x + 50.0 - (310.0 - g)).abs() < 1e-3, "{r:?}");
+        assert!((r[2].width - (300.0 - 2.0 * g - 3.0 * g - 98.0)).abs() < 1e-3, "{r:?}");
+        assert_eq!((r[0].y, r[2].y), (103.0, 107.0), "centred on the row");
     }
 
     /// Text is cut where its piece ends: a line in a column at the content box's edge, a value

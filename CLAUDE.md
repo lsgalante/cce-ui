@@ -1588,6 +1588,7 @@ live-reloads), each with a getter in `layout`:
 | root plate | `root_plate_inset()` = `bevel_width` + `style.surface.plate.root.padding` | `root_plate_gap()` (`…root.gap`) |
 | pane plate | `plate_padding()` (`style.surface.plate.padding`) | `plate_gap()` (`…plate.gap`, unset = the root gap) |
 | controls | — (inside a pane or root inset) | `control_gap()` (`style.control.gap`, unset = `CONTROL_GAP`) |
+| inside a list row | `list_gap()` from the list's wall | `list_gap()` (`style.control.list_gap`, unset = `CONTROL_TEXT_INSET`) |
 
 The root inset carries the roll because the padding is a run of FLAT face —
 the same run the gap leaves between two panes — and the face only begins
@@ -1880,6 +1881,13 @@ cce-system-interface) to confirm behavior, not just the test suite.
     `text`, `spacing`) and a hidden one-or-two-column grid that widgets fell into unless
     their type name said otherwise, and every page added insets of its own (`+ 14`,
     `- 28`, `44.0`); the 14 settings pages moved onto the form and the cursor went.
+    What a scrolling list draws per visible row — its buttons, a glyph, its name — a
+    `Form` (one tree per section) does not reach; `lay_row(rect, &[Cell])` lays one
+    row's cells by `scene::layout`, `list_gap()` apart and in from its ends, centred on
+    its height, a growing cell taking the slack. `list_gap` is the ladder's rung below
+    the controls: a row is one control tall, so the control gap would part it into
+    islands. The settings app's lists and its process table (columns as wide as their
+    content, COMMAND taking the slack) are laid out so.
 - `color/` — the colour model and named colours (`colors` re-export module in `lib.rs`),
   split the same way: `mod.rs` the constants, statics and getters; `load.rs` reading the
   config into them (and `retired_surface_keys`); `math.rs` sRGB/linear, OKLab and the
