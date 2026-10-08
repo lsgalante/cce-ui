@@ -112,6 +112,11 @@ pub async fn run<A: Application>(canvas: HtmlCanvasElement, fonts: Fonts, sizing
     // Every font database the toolkit builds from here on — this one, its
     // own for widget geometry, and the measuring one — loads the page's.
     crate::page_fonts::provide(fonts.files, fonts.serif, fonts.sans_serif, fonts.monospace);
+    // A page has no environment: its locale is the browser's, and it must be
+    // decided before the first font system is built from it.
+    if let Some(lang) = web_sys::window().and_then(|w| w.navigator().language()) {
+        crate::locale::set_locale(&lang);
+    }
     let fs = crate::create_font_system();
 
     let mut renderer = WebRenderer::new(canvas.clone()).await?;

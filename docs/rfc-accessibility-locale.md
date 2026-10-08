@@ -65,7 +65,12 @@ the cheapest moment there will be.
 
 ## 3. The plan
 
-### Phase 0 — the locale comes from the user (small; do first)
+### Phase 0 — the locale comes from the user (small; do first) — DONE 2026-10-08
+
+Done as written below: `cce_core::locale` (re-exported as `cce_ui::locale`), used by all four
+constructors, and the browser shell sets it from `navigator.language` before the first font
+system. Tests: `locale::tests` in cce-core (the parsing and the environment's order) and
+`every_font_system_is_built_with_the_users_locale` in cce-ui.
 
 One `cce_core::locale()`: `LC_ALL`, else `LC_CTYPE`, else `LANG`, turned from POSIX form
 (`ja_JP.UTF-8`) into a BCP 47 tag (`ja-JP`), falling back to `en-US`; in the browser,

@@ -32,6 +32,8 @@ pub use cce_core::ipc;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod mcp;
 pub use cce_core::motion;
+/// The user's locale (`locale::locale()`), what every font system is built with.
+pub use cce_core::locale;
 pub mod text_input;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vk;
@@ -442,7 +444,7 @@ fn build_font_system(load_system_fonts: bool) -> cosmic_text::FontSystem {
     #[cfg(target_arch = "wasm32")]
     page_fonts::stand_in_for_missing(&mut db);
 
-    cosmic_text::FontSystem::new_with_locale_and_db("en-US".to_string(), db)
+    cosmic_text::FontSystem::new_with_locale_and_db(crate::locale::locale().to_string(), db)
 }
 
 /// The fonts a page hands the browser shell (`web::run`). A page has no font
@@ -563,5 +565,17 @@ pub(crate) mod page_fonts {
         if let Some(mono) = first(db, &MONO) {
             alias(db, "monospace", &mono);
         }
+    }
+}
+
+#[cfg(test)]
+mod locale_tests {
+    /// The font systems shape with the user's locale, not a literal: what
+    /// cosmic-text orders its fallback by (rfc-accessibility-locale, phase 0).
+    #[test]
+    fn every_font_system_is_built_with_the_users_locale() {
+        let want = crate::locale::locale();
+        assert_eq!(crate::create_font_system().locale(), want);
+        assert_eq!(crate::geometry_font_system().lock().unwrap().locale(), want);
     }
 }

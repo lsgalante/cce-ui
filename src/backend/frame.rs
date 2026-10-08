@@ -530,7 +530,7 @@ mod tests {
     }
 
     fn fonts() -> FontSystem {
-        FontSystem::new_with_locale_and_db("en-US".into(), cosmic_text::fontdb::Database::new())
+        FontSystem::new_with_locale_and_db(crate::locale::locale().into(), cosmic_text::fontdb::Database::new())
     }
 
     const SIZE: LogicalSize = LogicalSize { width: 100.0, height: 50.0 };

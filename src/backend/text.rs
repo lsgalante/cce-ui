@@ -1093,7 +1093,7 @@ mod text_cache_tests {
             let mut db = Database::new();
             db.load_font_file(&a).unwrap();
             db.load_font_file(&b).unwrap();
-            FontSystem::new_with_locale_and_db("en-US".into(), db)
+            FontSystem::new_with_locale_and_db(crate::locale::locale().into(), db)
         };
         let (mut one, mut two) = (system(), system());
         let (fam_a, fam_b) = (face_family(&a, 0), face_family(&b, 0));
@@ -1147,7 +1147,7 @@ mod text_cache_tests {
         let system = |file: &Path| {
             let mut db = Database::new();
             db.load_font_file(file).unwrap();
-            FontSystem::new_with_locale_and_db("en-US".into(), db)
+            FontSystem::new_with_locale_and_db(crate::locale::locale().into(), db)
         };
         let faces = |fs: &FontSystem| {
             fs.db()

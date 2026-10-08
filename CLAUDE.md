@@ -1564,8 +1564,8 @@ the ladder should be supplying, and the audit counts them.
 
 ## Accessibility and locale are on the roadmap (read `docs/rfc-accessibility-locale.md`)
 
-There is no accessibility support yet (no AT-SPI, AccessKit, NSAccessibility or ARIA), the
-locale is the literal `"en-US"`, and the editors assume left-to-right text (`TextBox`
+There is no accessibility support yet (no AT-SPI, AccessKit, NSAccessibility or ARIA), no
+message catalogue, and the editors assume left-to-right text (`TextBox`
 assumes monospace too). The RFC has the measured state and a phased plan. Until it lands,
 two rules keep the retrofit cheap:
 
@@ -1574,6 +1574,11 @@ two rules keep the retrofit cheap:
 - **An action is keyed by an ID, never by its label text.** A context-menu row's label is its
   identity today and hosts match on it, so translating any label breaks its action; do not
   add more code that matches on displayed text.
+
+Phase 0 is done (2026-10-08): every font system is built with `locale::locale()` (from
+`cce-core`): `LC_ALL`, else `LC_CTYPE`, else `LANG`, as a BCP 47 tag; in the browser,
+`navigator.language` through `locale::set_locale` before the first font system.
+`every_font_system_is_built_with_the_users_locale` is the test.
 
 ## The `scene/` core rebuild (read `docs/rfc-core-rebuild.md` before touching it)
 
