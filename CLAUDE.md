@@ -42,7 +42,8 @@ set outright.
 ## Build, test, run
 
 Use cargo directly (the `Makefile` wraps `cargo build --release` and
-`ccebuild install --no-build cce-ui`, which installs every bin: the demo, `cce-relief`, `cce-ramp`). Prefer `-p cce-ui` from anywhere in the workspace so you don't rebuild the compositor.
+`ccebuild install --no-build cce-ui`, which installs its one bin, the demo; the relief
+editors `cce-relief` and `cce-ramp` are the `cce-relief` crate since 2026-10-08). Prefer `-p cce-ui` from anywhere in the workspace so you don't rebuild the compositor.
 
 ```sh
 cargo build -p cce-ui                          # build the toolkit (+ demo binary)
@@ -607,6 +608,21 @@ same `Application`. Found when the status bar was rebuilt against 2724002: at ev
 its modules exited, the launcher's backoff grew while nobody was logged in, and the tray's
 StatusNotifierWatcher came back seconds after the next login — Dropbox, starting into the
 gap, reported no tray.
+
+### The toolkit names no app (since 2026-10-08)
+
+Nothing in cce-ui branches on WHICH app is running. The runner used to read the app id:
+anything whose `app_id` began `cce-status` lost its client-side move, resize and resize
+cursors, and had its input region pinned to its launch size. The status bar and its OSD
+now say so through the contract — `Application::standard_csd` returns false — and the
+input region went (the segments' menus grow the surface past it, and a row below the old
+region took the click before and after; checked in a shadow). The same sweep moved the
+designer's pane geometry (`SplitterLayout`, `CircularPaneLayout`) into cce-designer and
+the relief editors (`cce-relief`, `cce-ramp`, until then bins of this crate) into the
+`cce-relief` crate. When an app needs the runner to behave differently, add a defaulted
+`Application` hook; never test the app id. (Two widgets LAUNCH a DE app by name — the
+colour selector `cce-color-editor`, a default its host can replace, and the font selector
+`cce-fonts` — which is the DE's toolkit using the DE, not a branch on the app.)
 
 ### The runner works out each frame's damage (`backend::frame::derive_damage`, 2026-10-06)
 
@@ -1791,7 +1807,6 @@ cce-system-interface) to confirm behavior, not just the test suite.
     browse page is a `scene::layout` column now, and the container layouts
     (`widget::ContainerLayout`, the gallery's Layout exhibit) are a trait of their own,
     `layout` and `measure`, without the cursor. New layout is `scene::layout`.
-  - `panes.rs` — `SplitterLayout` and `CircularPaneLayout`, cce-designer's pane geometry.
 - `color/` — the colour model and named colours (`colors` re-export module in `lib.rs`),
   split the same way: `mod.rs` the constants, statics and getters; `load.rs` reading the
   config into them (and `retired_surface_keys`); `math.rs` sRGB/linear, OKLab and the
@@ -2160,7 +2175,7 @@ key nothing but the editor read. They live in that app's own
 `~/.config/cce/cce-relief/state.kdl` now, one `knobs` node per Save target
 (`shared`, a retargeted file's path, or `<path>#<key>` for a `(relief)`
 value — two materials must not seed each other's sliders; `knob_state` in
-`cce-relief.rs`). The registry keys `bevel_profile_knobs` /
+cce-relief's `src/main.rs`). The registry keys `bevel_profile_knobs` /
 `roll_profile_knobs` and their flatten arms are gone; a config that still
 carries a knob key seeds the editor once, off the raw file, and the next
 Save takes the key off under either spelling. The `(bevel)` type and
@@ -2177,7 +2192,7 @@ slider verbatim, a moved one converted through the same metric that seeded
 it — so a headless session never turns `(mm)0.3` into `(px)1.1339`, which
 it did until 2026-09-28), choosing a unit only for a height the config
 never had: `(mm)` when the metric is real, px otherwise
-(`height_len_for` in `cce-relief.rs`).
+(`height_len_for` in cce-relief's `src/main.rs`).
 
 **There is one roll width.** `style.surface.relief.width` is the run of every
 roll and wall: the root plate's perimeter (`PlateSpec::window`), a `PlateSpec`

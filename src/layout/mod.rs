@@ -76,8 +76,6 @@ mod bridge;
 pub use bridge::*;
 mod section;
 pub use section::*;
-mod panes;
-pub use panes::*;
 
 static SECTION_PADDING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SECTION_PADDING, |s| &mut s.layout.SECTION_PADDING);
 

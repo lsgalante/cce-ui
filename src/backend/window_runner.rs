@@ -201,12 +201,6 @@ pub struct EngineState<A: Application> {
     /// [`Application::display_list_text`]).
     pub(crate) dl_text_items: Vec<DlText>,
 
-    /// The app is the status bar (`app_id` `cce-status…`): no CSD move,
-    /// resize or resize cursors. Read from `settings()` once per session —
-    /// the checks it serves run on every pointer motion and press, and
-    /// `settings()` builds two `String`s each call.
-    pub(crate) is_status_bar: bool,
-
     /// Drag-and-drop destination state (see [`crate::backend::dnd`]). The
     /// manager is absent when the compositor exposes no wl_data_device_manager;
     /// every drop path then no-ops.
@@ -2135,7 +2129,6 @@ fn run_session<'l, A: Application>(
         touch_offset: (0.0, 0.0),
         touch_scroll_at: None,
         dl_text_items: Vec::new(),
-        is_status_bar: false,
     };
 
     if let Err(e) = event_queue.roundtrip(&mut engine_state) {
@@ -2160,7 +2153,6 @@ fn run_session<'l, A: Application>(
     }
     let settings = inner.settings();
     crate::scale::set_app_id(settings.app_id.clone());
-    engine_state.is_status_bar = settings.app_id.starts_with("cce-status");
     engine_state.logical_width = settings.width as f32;
     engine_state.logical_height = settings.height as f32;
     engine_state.inner = Some(inner);
@@ -2184,14 +2176,6 @@ fn run_session<'l, A: Application>(
     };
     surface.set_buffer_scale(buffer_scale);
     engine_state.committed_buffer_scale = buffer_scale;
-
-    if engine_state.is_status_bar {
-        let compositor = engine_state.compositor_state.wl_compositor();
-        let region = compositor.create_region(&qh, ());
-        region.add(0, 0, settings.width as i32, settings.height as i32);
-        surface.set_input_region(Some(&region));
-        region.destroy();
-    }
 
     let layer_settings = engine_state.inner.as_ref().unwrap().layer();
     if let Some(ls) = layer_settings {

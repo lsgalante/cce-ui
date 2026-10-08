@@ -174,9 +174,6 @@ pub struct Driver {
     /// the plate-navigation group jump, for apps that opt in.
     pub group_next_chord: String,
     pub group_prev_chord: String,
-    /// Whether the app is the status bar, asked once (see
-    /// [`is_status_bar`](Self::is_status_bar)).
-    status_bar: std::cell::OnceCell<bool>,
 }
 
 impl Default for Driver {
@@ -227,16 +224,7 @@ impl Driver {
             redo_chord: crate::input::app_chord("redo", "ctrl+shift+z"),
             group_next_chord: crate::input::app_chord("focus_next_group", "ctrl+tab"),
             group_prev_chord: crate::input::app_chord("focus_prev_group", "ctrl+shift+tab"),
-            status_bar: std::cell::OnceCell::new(),
         }
-    }
-
-    /// The app is the status bar (`app_id` `cce-status…`): no CSD move,
-    /// resize or resize cursors. Read from `settings()` once per session —
-    /// the checks it serves run on every pointer motion and press, and
-    /// `settings()` builds two `String`s each call.
-    fn is_status_bar<A: Application>(&self, app: &A) -> bool {
-        *self.status_bar.get_or_init(|| app.settings().app_id.starts_with("cce-status"))
     }
 
     /// Copy the modifiers into the app's widget context, where widgets read them.
@@ -263,8 +251,7 @@ impl Driver {
         if let Some(icon) = app.cursor_icon(lx, ly) {
             return icon;
         }
-        if self.is_status_bar(app)
-            || !app.standard_csd()
+        if !app.standard_csd()
             || !app.csd_resize_borders()
         {
             return CursorIcon::Default;
@@ -358,7 +345,6 @@ impl Driver {
         if site.can_grab
             && btn == MouseButton::Left
             && !site.on_popup
-            && !self.is_status_bar(t.app)
             && t.app.standard_csd()
         {
             // Resize borders off: the compositor's own band outside the
