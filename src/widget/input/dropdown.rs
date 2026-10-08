@@ -1389,7 +1389,7 @@ impl Input for Dropdown {
                 // An open dropdown always holds focus — the trigger press and `FocusIn`
                 // both claim it, and `FocusOut` closes it — so the `open` arm is reachable
                 // either way; it is spelled out so arrows and Escape stay live regardless.
-                if !self.open && !crate::widget::focus::is_focused_id(ectx.id) {
+                if !self.open && !ectx.is_focused() {
                     return false;
                 }
                 let handled = self.handle_key(key_event);
@@ -1580,19 +1580,19 @@ mod tests {
 
         // Nothing focused: the Return belongs to someone else, so it is declined and
         // the menu stays shut.
-        crate::widget::focus::clear_focus(None);
+        dummy.focused_widget = None;
         assert!(!dd.keyboard_input(&enter, &mut dummy));
         assert!(!dd.open);
 
         // Another widget focused: same — this is the settings-page case, where the
         // focused TextBox sits later in the reversed dispatch order.
         let other = Dropdown::new(opts, 0);
-        crate::widget::focus::set_focused_id(other.id(), None);
+        dummy.focused_widget = Some(other.id());
         assert!(!dd.keyboard_input(&enter, &mut dummy));
         assert!(!dd.open);
 
         // Focused: Enter opens it, and arms the hover on the selection as before.
-        crate::widget::focus::set_focused_id(dd.id(), None);
+        dummy.focused_widget = Some(dd.id());
         assert!(dd.keyboard_input(&enter, &mut dummy));
         assert!(dd.open);
         assert_eq!(dd.hovered_item, Some(0));
@@ -1600,7 +1600,7 @@ mod tests {
         // Once open the gate is out of the way, so Escape still closes it even if the
         // focus moved on (`FocusOut` closes it too, but the key path must not depend
         // on that having run).
-        crate::widget::focus::clear_focus(None);
+        dummy.focused_widget = None;
         let escape = crate::widget::KeyEvent {
             logical_key: Key::Named(NamedKey::Escape),
             ..enter.clone()

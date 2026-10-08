@@ -1652,6 +1652,16 @@ are GONE from the trait — events route through `handle_event`, and apps drain 
 through the concrete inherent `Adapted<W>` methods. See the RFC's blueprint notes before
 adding anything to this trait.
 
+### Global state has a plan (`docs/rfc-global-state.md`)
+
+About 300 statics and 18 thread-locals: style (≈200 `RwLock`s beside the style registry),
+interaction state (context menu, hover highlight, composition — per thread), properties of
+"the" window (scale, metric, scroll phase), and caches (fine). The RFC sorts them and
+phases the moves. Phase 1 is done: keyboard focus has ONE store, `UiContext::focused_widget`
+(the `widget::focus` thread-local is gone; a widget asks `EventCtx::is_focused`, claims with
+`request_focus`), and the context's dead hover and context-menu twins are deleted. Do not
+add a static for state that belongs to a window.
+
 ### The registry holds pointers, and knows when they die
 
 `UiContext`'s tree (`scene::tree::WidgetTree`) does not own its widgets: the app does, and

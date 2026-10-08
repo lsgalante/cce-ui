@@ -348,19 +348,36 @@ pub struct EventCtx<'a> {
 }
 
 impl EventCtx<'_> {
-    /// Make this widget the global focus target (legacy `focus::set_focused(self)`).
+    /// Make this widget the window's focus (`UiContext::focused_widget`). Recorded, not
+    /// dispatched: the widget is handling an event now and has its focus already; the
+    /// widget that held focus before is told (`unfocus`). Without a context (inside
+    /// `focus()` / `unfocus()`, whose caller is the context) there is nothing to record.
     pub fn request_focus(&mut self) {
-        if let Some(ptr) = self.self_ptr {
-            unsafe { crate::widget::focus::set_focused(&mut *ptr, self.ui.as_deref_mut()) };
+        let id = self.id;
+        let Some(ui) = self.ui.as_deref_mut() else { return };
+        if let Some(old) = ui.focused_widget.filter(|old| *old != id) {
+            if let Some(ptr) = ui.tree.get_ptr(old) {
+                // SAFETY: a registry-resolved live widget other than this one.
+                unsafe { (*ptr).unfocus() };
+            }
+        }
+        ui.focused_widget = Some(id);
+    }
+
+    /// Drop this widget's hold on the window's focus, if it has it (MenuBar releases focus
+    /// when its dropdowns close).
+    pub fn release_focus(&mut self) {
+        let id = self.id;
+        if let Some(ui) = self.ui.as_deref_mut() {
+            if ui.focused_widget == Some(id) {
+                ui.focused_widget = None;
+            }
         }
     }
 
-    /// Drop this widget's claim on the global focus if it holds it (legacy
-    /// `focus::clear_if_matches(self)` — MenuBar releases focus when its dropdowns close).
-    pub fn release_focus(&mut self) {
-        if let Some(ptr) = self.self_ptr {
-            unsafe { crate::widget::focus::clear_if_matches(&*ptr) };
-        }
+    /// Whether this widget holds the window's focus.
+    pub fn is_focused(&self) -> bool {
+        self.ui.as_deref().is_some_and(|ui| ui.focused_widget == Some(self.id))
     }
 
     /// Open the shared context menu on this widget (legacy `ctx.handle_right_click(self, …)`),

@@ -1,73 +1,13 @@
 use crate::widget::WidgetHost;
 
+/// Keyboard focus lives in the window's [`crate::context::UiContext`]
+/// (`focused_widget`, `set_focused_id`, `clear_focus`, `is_focused_id`, `has_focus`): ONE
+/// store, which the Tab walk, the accessibility tree and every widget read. Until
+/// 2026-10-08 this module kept a second, per-thread, that widgets claimed in `FocusIn`
+/// and apps set directly — kept in step by convention, and apt to disagree with the
+/// context on any path that skipped the event (`docs/rfc-global-state.md`, phase 1).
 pub mod focus {
     use super::WidgetHost;
-    use crate::widget::WidgetId;
-    use std::cell::Cell;
-
-    // Phase 6bc: the thread-local focus store keys by id, not pointer. Dispatching to the
-    // previous holder (`unfocus`) resolves through the caller's generational tree, so a
-    // stale id is skipped instead of dereferencing freed memory (the 6w settings UAF class).
-    thread_local! {
-        static FOCUSED_WIDGET: Cell<Option<WidgetId>> = const { Cell::new(None) };
-    }
-
-    /// Resolve `id` in `ctx`'s tree (when a ctx is in reach) and call `unfocus()` on it.
-    fn unfocus_via(ctx: Option<&mut crate::context::UiContext>, id: WidgetId) {
-        if let Some(ctx) = ctx {
-            if let Some(ptr) = ctx.tree.get_ptr(id) {
-                unsafe {
-                    (*ptr).unfocus();
-                }
-            }
-        }
-    }
-
-    pub fn set_focused(w: &mut dyn WidgetHost, ctx: Option<&mut crate::context::UiContext>) {
-        set_focused_id(w.base().id(), ctx);
-    }
-
-    pub fn set_focused_id(id: WidgetId, ctx: Option<&mut crate::context::UiContext>) {
-        let old = FOCUSED_WIDGET.with(|cell| cell.get());
-        if let Some(old_id) = old {
-            if old_id != id {
-                unfocus_via(ctx, old_id);
-                FOCUSED_WIDGET.with(|cell| cell.set(Some(id)));
-            }
-        } else {
-            FOCUSED_WIDGET.with(|cell| cell.set(Some(id)));
-        }
-    }
-
-    pub fn is_focused(w: &dyn WidgetHost) -> bool {
-        is_focused_id(w.base().id())
-    }
-
-    pub fn is_focused_id(id: WidgetId) -> bool {
-        FOCUSED_WIDGET.with(|cell| cell.get() == Some(id))
-    }
-
-    pub fn clear_focus(ctx: Option<&mut crate::context::UiContext>) {
-        if let Some(id) = FOCUSED_WIDGET.with(|cell| cell.take()) {
-            unfocus_via(ctx, id);
-        }
-    }
-
-    pub fn clear_if_matches(w: &dyn WidgetHost) {
-        clear_if_matches_id(w.base().id());
-    }
-
-    pub fn clear_if_matches_id(id: WidgetId) {
-        FOCUSED_WIDGET.with(|cell| {
-            if cell.get() == Some(id) {
-                cell.set(None);
-            }
-        });
-    }
-
-    pub fn has_focus() -> bool {
-        FOCUSED_WIDGET.with(|cell| cell.get().is_some())
-    }
 
     pub fn link_parent_child(parent: &mut dyn WidgetHost, child: &mut dyn WidgetHost, ctx: &mut crate::context::UiContext) {
         let parent_ptr = unsafe {
@@ -2096,7 +2036,8 @@ impl Widget {
 
 
 pub fn clear_widget_references(w: &dyn WidgetHost) {
-    focus::clear_if_matches(w);
+    // Focus needs no clearing: the context keeps an id, which a dropped widget's
+    // generation no longer resolves.
     context_menu::clear_if_matches(w);
 }
 

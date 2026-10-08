@@ -258,7 +258,7 @@ impl ScrollBox {
     /// box through the thread-local, and its own `unfocus` was a no-op) — so just release
     /// the current holder instead of storing a pointer to a non-WidgetHost.
     fn claim_focus(&self, ctx: &mut UiContext) {
-        focus::clear_focus(Some(ctx));
+        ctx.clear_focus();
     }
 
     pub fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {

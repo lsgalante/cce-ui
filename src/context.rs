@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use crate::widget::{WidgetHost, WidgetId, Key, NamedKey, MouseButton, ElementState, Event};
-use crate::widget::core::hover_animation::HoverState;
-use crate::widget::core::context_menu::ContextMenuState;
 
 pub struct SpatialGrid {
     pub cell_size: f32,
@@ -97,9 +95,7 @@ pub struct UiContext {
     /// `RefCell` because `hit_test` receives `&UiContext` — the memo is an
     /// implementation detail of a read-only query, not shared state.
     covered_cache: std::cell::RefCell<(Option<(f32, f32)>, Vec<WidgetId>)>,
-    pub hover_state: HoverState,
     pub cursor_pos: (f32, f32),
-    pub context_menu: ContextMenuState,
     pub active_grab: Option<WidgetId>,
     pub drag_start_pos: Option<(f32, f32)>,
     pub drag_target: Option<WidgetId>,
@@ -129,9 +125,7 @@ impl UiContext {
             active_popovers: Vec::new(),
             modals: Vec::new(),
             covered_cache: std::cell::RefCell::new((None, Vec::new())),
-            hover_state: HoverState::new(),
             cursor_pos: (0.0, 0.0),
-            context_menu: ContextMenuState::new(),
             active_grab: None,
             drag_start_pos: None,
             drag_target: None,
@@ -1074,42 +1068,13 @@ impl UiContext {
         cache.1.clear();
     }
 
-    // --- Hover State ---
+    // The hover highlight is `widget::hover_animation`'s (one store; the context's
+    // write-only copy went with the global-state RFC's phase 1). The cursor is the
+    // context's: the scroll box reads it.
     pub fn set_cursor_pos(&mut self, x: f32, y: f32) {
         self.cursor_pos = (x, y);
     }
 
-    pub fn reset_frame_registration(&mut self) {
-        self.hover_state.registered_this_frame = false;
-    }
-
-    pub fn set_scroll_offset(&mut self, offset: f32) {
-        self.hover_state.scroll_offset = offset;
-    }
-
-    pub fn get_scroll_offset(&self) -> f32 {
-        self.hover_state.scroll_offset
-    }
-
-    pub fn register_hovered(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {
-        self.hover_state.target_x = Some(x);
-        self.hover_state.target_y = Some(y);
-        self.hover_state.target_w = Some(w);
-        self.hover_state.target_h = Some(h);
-        self.hover_state.target_alpha = color[3];
-        self.hover_state.registered_this_frame = true;
-    }
-
-    pub fn post_render_check(&mut self) {
-        if !self.hover_state.registered_this_frame {
-            self.hover_state.target_alpha = 0.0;
-            let (cx, cy) = self.cursor_pos;
-            self.hover_state.target_x = Some(cx);
-            self.hover_state.target_y = Some(cy + self.hover_state.scroll_offset);
-            self.hover_state.target_w = Some(0.0);
-            self.hover_state.target_h = Some(0.0);
-        }
-    }
 
     // NOTE: the animated hover-highlight for this context previously lived here as
     // `tick_hover` / `get_hover_quad`, duplicating the live thread-local implementation in
