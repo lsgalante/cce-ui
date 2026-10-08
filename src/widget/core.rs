@@ -1974,9 +1974,8 @@ pub struct Widget {
 ///
 /// It does NOT catch a widget that was MOVED while registered (a `Vec` that
 /// reallocated, a struct returned by value): the token moves with it, and the stored
-/// pointer still names the old address. Registering from a live borrow just before the
-/// pass that uses it, as every app's rebuild does, is what keeps that case sound until
-/// the registry owns its widgets.
+/// pointer still names the old address. That is what [`Owned`](crate::widget::Owned) is
+/// for: a box whose ALLOCATION carries the token the registry watches instead.
 ///
 /// A clone is a different widget at a different address, so it gets a fresh token —
 /// not a share of the original's, which would keep a dropped original "alive".

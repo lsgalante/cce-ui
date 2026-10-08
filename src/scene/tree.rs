@@ -27,10 +27,12 @@
 //! ## What a pointer here is worth
 //!
 //! The tree does not own its widgets; the app does, and registers raw pointers to them. Each
-//! entry also keeps a watch on the widget's liveness token (`widget::core::Liveness`), and
-//! every accessor resolves a pointer only while that token exists — so a widget dropped
-//! without being unregistered reads back as absent rather than as a pointer to freed memory.
-//! A widget MOVED while registered is not caught (its token moves with it); see `Liveness`.
+//! entry keeps a watch on a liveness token beside the pointer, and every accessor resolves a
+//! pointer only while that token exists. For a widget in an [`Owned`](crate::widget::Owned)
+//! box (every app widget since cce-ui's phase 2) the pointer is the boxed widget and the token
+//! the box's own: the address cannot move, and the token dies when the box is freed. For any
+//! other widget it is the widget's address and its base's token (`widget::core::Liveness`),
+//! which catches a drop but not a move.
 
 use std::collections::HashMap;
 use std::sync::Weak;
@@ -112,8 +114,15 @@ impl WidgetTree {
     /// a watch on the widget's liveness token. After the call the tree resolves the pointer only
     /// while that widget has not been dropped.
     pub unsafe fn register(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
-        // SAFETY: the caller's contract — null, or a live widget.
-        let alive = unsafe { ptr.as_ref() }.map(|w| w.base().live.watch());
+        // SAFETY: the caller's contract — null, or a live widget. A widget in an `Owned` box
+        // names the boxed widget and the allocation's token instead of itself.
+        let (ptr, alive) = match unsafe { ptr.as_mut() } {
+            None => (ptr, None),
+            Some(w) => match w.stable_target() {
+                Some((inner, alive)) => (inner, Some(alive)),
+                None => (ptr, Some(w.base().live.watch())),
+            },
+        };
         let node = self.ensure_node(id);
         // `ensure_node` guarantees the node exists.
         let entry = self.arena.value_mut(node).unwrap();

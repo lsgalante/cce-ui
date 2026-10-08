@@ -909,8 +909,8 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         let id = self.base.id();
         if let Some(p) = parent {
             let p_id = p.base().id();
-            ctx.register_host(p);
-            ctx.register_host(self);
+            ctx.register_embedded(p);
+            ctx.register_embedded(self);
             ctx.tree.set_parent(id, Some(p_id));
         } else {
             ctx.tree.set_parent(id, None);

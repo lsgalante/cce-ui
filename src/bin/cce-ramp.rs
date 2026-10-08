@@ -13,6 +13,7 @@
 //! Architecture mirrors the reference `DemoApp` (`src/main.rs`): display-list
 //! frame, routed events, in-frame popovers.
 
+use cce_ui::widget::Owned;
 use cce_ui::engine::{Application, AppSender, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
@@ -32,12 +33,12 @@ enum RampMsg {
 }
 
 struct RampPopup {
-    ramp: Adapted<Ramp>,
+    ramp: Owned<Adapted<Ramp>>,
     /// Last spec printed to stdout — edits log their curve for copy/paste.
     last_spec: String,
     /// `--key` mode only; parked off-screen in the scratchpad.
-    save_button: Adapted<Button>,
-    cancel_button: Adapted<Button>,
+    save_button: Owned<Adapted<Button>>,
+    cancel_button: Owned<Adapted<Button>>,
     /// `--key <dotted.key>`: Save writes the spec as a `(ramp)` value at
     /// this key; the curve seeds from it. None = the stdout scratchpad.
     target_key: Option<String>,
@@ -124,10 +125,10 @@ impl Application for RampPopup {
 
         let last_spec = ramp.inner().spec_string();
         Self {
-            ramp,
+            ramp: Owned::new(ramp),
             last_spec,
-            save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
-            cancel_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel"),
+            save_button: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save")),
+            cancel_button: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel")),
             status: match &target_key {
                 Some(k) => format!("Edits are live in the curve; Save writes the {k} key."),
                 None => String::new(),

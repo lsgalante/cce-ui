@@ -489,7 +489,7 @@ impl TreeList {
                         self.edit_box.select_anchor = Some(0);
                         
                         let eb_id = self.edit_box.base().id();
-                        ui.register_host(&mut self.edit_box);
+                        ui.register_embedded(&mut self.edit_box);
                         ui.link_ids(host_id, eb_id);
                         
                         ui.set_focused(&mut self.edit_box);
@@ -696,14 +696,14 @@ impl Layout for TreeList {
         // opened, and the wheel died the same way). Registration alone keeps the ids
         // resolvable for focus, coverage, and the spatial grid.
         let _ = host_id;
-        ctx.register_host(&mut self.search_box);
+        ctx.register_embedded(&mut self.search_box);
 
-        ctx.register_host(&mut self.add_key_btn);
+        ctx.register_embedded(&mut self.add_key_btn);
 
-        ctx.register_host(&mut self.add_key_popover_box);
+        ctx.register_embedded(&mut self.add_key_popover_box);
 
         if self.editing_key_idx.is_some() {
-            ctx.register_host(&mut self.edit_box);
+            ctx.register_embedded(&mut self.edit_box);
         }
     }
 }

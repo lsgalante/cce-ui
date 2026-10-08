@@ -49,6 +49,20 @@ impl SpatialGrid {
     }
 }
 
+/// `register_host` was handed a widget outside an `Owned` box: say so once per widget type, on
+/// stderr (most apps install no logger), so a missed field shows up without failing anything.
+fn warn_unowned(type_name: &'static str) {
+    thread_local! {
+        static WARNED: std::cell::RefCell<std::collections::HashSet<&'static str>> = Default::default();
+    }
+    if WARNED.with(|w| w.borrow_mut().insert(type_name)) {
+        eprintln!(
+            "cce-ui: register_host: a {type_name} is registered outside an Owned box; it must \
+             not move while registered (hold it as cce_ui::widget::Owned<..>)"
+        );
+    }
+}
+
 pub struct UiContext {
     /// The widget tree + registry, consolidated into one generational store (Phase 1b of the
     /// core rebuild). Replaces the former `layout_tree` + `widget_registry` maps; see
@@ -766,13 +780,25 @@ impl UiContext {
     // walked an empty dummy context (provably inert). Section-level keyboard nav lives
     // app-side (settings' focused_section machinery).
 
-    /// Register a widget the app owns, by reference: the safe form of
-    /// [`register_widget`](Self::register_widget). `ctx.register_host(&mut self.button)`.
+    /// Register a widget the app owns, by reference: `ctx.register_host(&mut self.button)`.
     ///
-    /// The registry keeps a pointer to the widget and resolves it only while the widget has not
-    /// been dropped (see `widget::core::Liveness`); a widget MOVED after registering must be
-    /// registered again before the next pass reads it.
+    /// Hold the widget in an [`Owned`](crate::widget::Owned) box: the registry then points at
+    /// the boxed widget, which stays put however the field or `Vec` holding the `Owned` moves,
+    /// and stops resolving it when the `Owned` drops. A bare widget is registered at its own
+    /// address, which is only good until it moves — so that is logged, once per widget type.
     pub fn register_host(&mut self, w: &mut (dyn WidgetHost + 'static)) {
+        if w.stable_target().is_none() {
+            warn_unowned(w.type_name());
+        }
+        let id = w.base().id();
+        // SAFETY: derived from the live borrow we were handed.
+        unsafe { self.register_widget(id, w as *mut (dyn WidgetHost + 'static)) };
+    }
+
+    /// Register a widget that lives INSIDE another registered widget (a tree list's search box,
+    /// a paginator's menu): it is as stable as its parent's allocation, so no `Owned` of its own
+    /// is wanted and none is warned about.
+    pub(crate) fn register_embedded(&mut self, w: &mut (dyn WidgetHost + 'static)) {
         let id = w.base().id();
         // SAFETY: derived from the live borrow we were handed.
         unsafe { self.register_widget(id, w as *mut (dyn WidgetHost + 'static)) };

@@ -240,6 +240,14 @@ pub trait WidgetHost {
     /// implementor) always owns a base; test shims carry one via `impl_widget_base!`.
     fn base(&self) -> &Widget;
     fn base_mut(&mut self) -> &mut Widget;
+
+    /// Where the registry should point for this widget, and the token that says the address
+    /// still holds it — `Some` only for a widget whose address cannot move under the registry
+    /// ([`Owned`]). `None` (every other widget) registers the widget's own address, watched by
+    /// its base's liveness token, which catches a drop but not a move.
+    fn stable_target(&mut self) -> Option<(*mut (dyn WidgetHost + 'static), std::sync::Weak<()>)> {
+        None
+    }
     /// The widget's natural CONTENT height — the control below its detached label, if
     /// any. What a layout strategy allots; [`WidgetHost::layout`] places that content
     /// box at the origin it is given and hangs the label ([`WidgetHost::label_strip`])
@@ -625,6 +633,7 @@ impl EmbedImage {
 pub mod doc_editor;
 pub mod line_edit;
 pub mod model;
+pub mod owned;
 pub mod scroll_region;
 pub mod scroll_motion;
 pub mod side_swipe;
@@ -637,6 +646,7 @@ pub use self::scroll_region::{ScrollRegion, ScrollbarActivity};
 pub use self::side_swipe::{SideSwipe, SwipeDir};
 pub use self::scroll_motion::{Bounds, ScrollAxis, ScrollMotion, ScrollPhase, ScrollSettings, LINE_PX};
 pub use self::model::{Adapted, EventCtx, Input, Layout, Paint};
+pub use self::owned::Owned;
 pub use self::core::{Widget, focus, hover_animation, clipboard, context_menu, clear_widget_references};
 pub use self::core::focus::link_parent_child;
 pub use self::input::{

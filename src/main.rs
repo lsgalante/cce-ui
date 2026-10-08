@@ -19,6 +19,7 @@
 //!    plate is prims, not a root plate container; popovers draw INTO the frame (there is no popup
 //!    surface); app state — not any widget tree — is the source of truth.
 
+use cce_ui::widget::Owned;
 use cce_ui::engine::{Application, AppSender, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::arena::Arena;
 use cce_ui::scene::layout::{
@@ -51,15 +52,15 @@ pub(crate) struct DemoApp {
     // ── Widgets: app-owned values on the narrow-trait adapter. Their addresses must be
     // stable across frames (plain struct fields, not Vec elements): the UiContext
     // registry and the router's drag-target bookkeeping hold pointers to them.
-    button: Adapted<Button>,
-    toggle: Adapted<Toggle>,
-    slider: Adapted<Slider>,
-    name_box: Adapted<TextBox>,
-    theme_dropdown: Adapted<Dropdown>,
+    button: Owned<Adapted<Button>>,
+    toggle: Owned<Adapted<Toggle>>,
+    slider: Owned<Adapted<Slider>>,
+    name_box: Owned<Adapted<TextBox>>,
+    theme_dropdown: Owned<Adapted<Dropdown>>,
     // ImageView pair sharing ONE uploaded texture (the widget borrows ids —
     // upload/free stay app-side): Contain letterboxes, Stretch fills.
-    image_contain: Adapted<ImageView>,
-    image_stretch: Adapted<ImageView>,
+    image_contain: Owned<Adapted<ImageView>>,
+    image_stretch: Owned<Adapted<ImageView>>,
 
     // ── App state: the source of truth. Widgets are re-asserted from it every rebuild
     // (`set_toggled` below); `take_*` changes flow back into it, never the reverse.
@@ -165,27 +166,27 @@ impl Application for DemoApp {
         Self {
             // Relief styling (raised buttons/toggles/dropdowns, recessed
             // wells) is the `control_relief` config default — no opt-in.
-            button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Click me"),
-            toggle: Toggle::new(),
+            button: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Click me")),
+            toggle: Owned::new(Toggle::new()),
             // Slider `value` is NORMALIZED 0..1; `with_range` only scales the readout
             // (`get_scaled_value`). Wheel nudging is an explicit opt-in.
-            slider: Slider::new()
+            slider: Owned::new(Slider::new()
                 .with_range(0.0, 100.0)
                 .with_value(0.4)
-                .with_scroll(true),
-            name_box: TextBox::new(String::new())
-                .with_placeholder("Type a name..."),
-            theme_dropdown: Dropdown::new(
+                .with_scroll(true)),
+            name_box: Owned::new(TextBox::new(String::new())
+                .with_placeholder("Type a name...")),
+            theme_dropdown: Owned::new(Dropdown::new(
                 vec!["Forest".into(), "Ocean".into(), "Ember".into()],
                 0,
-            ),
-            image_contain: ImageView::new()
+            )),
+            image_contain: Owned::new(ImageView::new()
                 .with_image(gradient_id, GRADIENT_W, GRADIENT_H)
                 .with_fit(FitMode::Contain { max_upscale: 4.0 })
-                .with_bg([0.10, 0.10, 0.16, 1.0]),
-            image_stretch: ImageView::new()
+                .with_bg([0.10, 0.10, 0.16, 1.0])),
+            image_stretch: Owned::new(ImageView::new()
                 .with_image(gradient_id, GRADIENT_W, GRADIENT_H)
-                .with_fit(FitMode::Stretch),
+                .with_fit(FitMode::Stretch)),
             toggle_on: false,
             clicks: 0,
             status: "Ready.".to_string(),

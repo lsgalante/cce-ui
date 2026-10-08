@@ -1570,27 +1570,50 @@ adding anything to this trait.
 ### The registry holds pointers, and knows when they die
 
 `UiContext`'s tree (`scene::tree::WidgetTree`) does not own its widgets: the app does, and
-registers raw pointers to them. Each widget's `Widget` base carries a `Liveness` token, and every
-entry keeps a watch on it; every accessor (`get_ptr`, `children_ptrs`, `iter_registered`, …)
-resolves a pointer only while its widget exists. A widget dropped without `unregister_widget`
-reads back as absent instead of as freed memory. A clone gets a token of its own.
+registers raw pointers to them. Every entry keeps a watch on a liveness token beside its pointer,
+and every accessor (`get_ptr`, `children_ptrs`, `iter_registered`, …) resolves a pointer only
+while that token exists.
 
-What it does NOT catch is a widget MOVED while registered (a `Vec` that reallocated, a struct
-returned by value): the token moves with it. Register from a live borrow before the pass that
-reads it, as the apps' rebuilds do. The sound end state is a registry that owns its widgets.
+**App widgets live in `Owned` boxes** (`widget::Owned<W>`, since 2026-10-07). An `Owned` keeps
+the widget in a heap allocation of its own and carries a token for that ALLOCATION. Moving the
+`Owned` (a `Vec` reallocating, a struct returned by value) does not move the widget, and the token
+dies only when the box is freed. `Owned` is itself a `WidgetHost`, forwarding every method, and
+reports the boxed widget through `WidgetHost::stable_target`. So `register_host(&mut self.x)`,
+`set_focused`, `render_widget` and `link_parent_child` all record the boxed widget and the box's
+token without the caller doing anything. `Deref`/`DerefMut` reach the widget, so
+`self.x.set_text(..)` reads as before. Fields are `Owned<Adapted<X>>`, and are built with
+`Owned::new(..)` or `.into()`.
+
+A widget registered OUTSIDE an `Owned` falls back to its own address and its base's `Liveness`
+token. That catches a drop but not a move, so `register_host` prints once per widget type to
+stderr: `cce-ui: register_host: a <Type> is registered outside an Owned box`. A clean run of every
+app prints none. The toolkit's own embedded children (a tree list's fields, a paginator's menu)
+sit inside their parent's allocation and register through the crate-private
+`register_embedded`, which does not warn.
+
+Two shapes the sweep met:
+- A widget used only as a paint STAMP and never registered (the designer dialog's
+  toggle/slider/dropdown stamps) stays a bare `Adapted`.
+- A roster that compares widget ADDRESSES compares the boxed widget, which is what the registry
+  holds. The designer's `get_dyn` hands out the inner widget for that reason; its `get_dyn_mut`
+  hands out the `Owned`, so registering through it records the box.
 
 The pointer-taking entry points say so:
 - `WidgetTree::register`, `UiContext::register_widget`, `set_focused_ptr`,
   `show_context_menu` and `handle_right_click` are `unsafe fn`.
 - `Adapted::set_parent` takes its parent by reference.
-- **Register a widget with `register_host(&mut w)`.** Every app moved to it, and so did
-  the toolkit's own paths that hold a borrow (`render_widget`, the paginator, the tree list).
+- **Register a widget with `register_host(&mut w)`.** Every app uses it.
 - `register_widget` remains for the paths that only have a pointer: `link_parent_child`,
   whose trait objects are not `'static`, and tests that exercise raw pointers.
-- The demo's `register_roots` is the pattern to copy. The `roots()` helpers that returned
-  `[*mut dyn WidgetHost; N]` for a registration loop are gone.
+- The demo's `register_roots` is the pattern to copy.
 
-`a_dropped_widget_is_never_handed_out` and `a_clone_has_a_liveness_of_its_own` are the tests.
+What is still open is the ALIASING model. The registry derefs its pointers while the app holds
+the `Owned`, so a `&mut` reached through the registry and one reached through the field can
+coexist. The end state for that is a registry that owns its widgets and lends them out.
+
+`a_dropped_widget_is_never_handed_out`, `a_clone_has_a_liveness_of_its_own`,
+`an_owned_widget_survives_its_vec_reallocating` and
+`swapping_the_widget_out_of_its_box_never_leaves_a_dangling_entry` are the tests.
 
 **Runtime verification matters here.** Several scene changes are "compiles + tests pass; runtime
 verification pending" per the RFC — the headless tests can't catch paint/event regressions. When

@@ -64,6 +64,7 @@
 //! DE-wide loader are unchanged — free-form specs from cce-designer or a
 //! hand-edited config still load everywhere.
 
+use cce_ui::widget::Owned;
 use cce_ui::engine::{Application, AppSender, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::layout::RELIEF_PROFILE_IDENTITY_SPEC as IDENTITY_SPEC;
 use cce_ui::scene::layout::Rect;
@@ -390,9 +391,9 @@ const GROOVE_FLOOR: f32 = 0.45;
 /// One profile section's shape state: the three knob sliders plus whether
 /// the profile has diverged from the analytic default.
 struct ProfileKnobs {
-    shoulder: Adapted<Slider>,
-    base: Adapted<Slider>,
-    bias: Adapted<Slider>,
+    shoulder: Owned<Adapted<Slider>>,
+    base: Owned<Adapted<Slider>>,
+    bias: Owned<Adapted<Slider>>,
     /// False until a knob moves or config installed a real (non-identity)
     /// profile for this section: the DE renders its analytic profile and
     /// Save writes the identity sentinel.
@@ -422,9 +423,9 @@ impl ProfileKnobs {
                 .with_scroll(true)
         };
         let mut this = Self {
-            shoulder: knob(s, "Shoulder"),
-            base: knob(b, "Base"),
-            bias: knob(c, "Bias"),
+            shoulder: Owned::new(knob(s, "Shoulder")),
+            base: Owned::new(knob(b, "Base")),
+            bias: Owned::new(knob(c, "Bias")),
             custom: installed,
             last_spec: String::new(),
         };
@@ -466,17 +467,17 @@ impl ProfileKnobs {
 
 struct BevelPopup {
     /// Which SHAPE the section shows; the curve it edits follows from it.
-    profile_dropdown: Adapted<Dropdown>,
+    profile_dropdown: Owned<Adapted<Dropdown>>,
     /// Which wall of the rect the section is through — see [`Edge`].
-    edge_dropdown: Adapted<Dropdown>,
+    edge_dropdown: Owned<Adapted<Dropdown>>,
     /// The carve wall — what `carve_slope` renders on every
     /// recess/boss/ridge in the DE.
     wall: ProfileKnobs,
     /// The plate perimeter roll — `roll_slope`'s descent profile.
     edge: ProfileKnobs,
-    depth_slider: Adapted<Slider>,
-    width_slider: Adapted<Slider>,
-    height_slider: Adapted<Slider>,
+    depth_slider: Owned<Adapted<Slider>>,
+    width_slider: Owned<Adapted<Slider>>,
+    height_slider: Owned<Adapted<Slider>>,
     /// The wall height as the Save target spelled it when this window
     /// opened — value AND unit — or `None` for a config with no height. The
     /// unit Save writes back in (`height_len`); the value is what an
@@ -487,15 +488,15 @@ struct BevelPopup {
     /// strength (`Light` above) — `scene::material::Finish`'s spec /
     /// shininess / curvature. Applied live to the DE finish, or to the pane
     /// rung's bound material when config binds one.
-    spec_slider: Adapted<Slider>,
-    shine_slider: Adapted<Slider>,
-    curv_slider: Adapted<Slider>,
+    spec_slider: Owned<Adapted<Slider>>,
+    shine_slider: Owned<Adapted<Slider>>,
+    curv_slider: Owned<Adapted<Slider>>,
     /// The Frost column: the pane material's recipe — compression,
     /// refraction, blur radius (`scene::material::Frost`). Same live target.
-    comp_slider: Adapted<Slider>,
-    refr_slider: Adapted<Slider>,
-    radius_slider: Adapted<Slider>,
-    save_button: Adapted<Button>,
+    comp_slider: Owned<Adapted<Slider>>,
+    refr_slider: Owned<Adapted<Slider>>,
+    radius_slider: Owned<Adapted<Slider>>,
+    save_button: Owned<Adapted<Button>>,
     /// The material the Save target binds its pane rung to, if any — read
     /// from the `--config` file (this process's own config is not the
     /// target's), else this process's binding. `material_frosted` says
@@ -505,7 +506,7 @@ struct BevelPopup {
     material_frosted: bool,
     /// Cancel = discard-and-close: edits are live only in THIS process, so
     /// with nothing persisted, closing IS the discard (same as Escape).
-    cancel_button: Adapted<Button>,
+    cancel_button: Owned<Adapted<Button>>,
     /// Set by the cancel click in `drain_widget_changes` (no exit access
     /// there); `handle_mouse_input` turns it into `BevelMsg::Exit`.
     exit_requested: bool,
@@ -1638,47 +1639,47 @@ impl Application for BevelPopup {
             })
             .unwrap_or_else(|| cce_ui::color::root_plate_opacity());
         Self {
-            profile_dropdown: Dropdown::new(
+            profile_dropdown: Owned::new(Dropdown::new(
                 Shape::ALL.iter().map(|s| s.label().to_string()).collect(),
                 0,
             )
-            .with_label("Shape"),
-            edge_dropdown: Dropdown::new(
+            .with_label("Shape")),
+            edge_dropdown: Owned::new(Dropdown::new(
                 Edge::ALL.iter().map(|e| e.label().to_string()).collect(),
                 0,
             )
-            .with_label("Edge"),
+            .with_label("Edge")),
             wall: ProfileKnobs::new(wall_seed, cce_ui::layout::bevel_profile_slopes().is_some()),
             edge: ProfileKnobs::new(edge_seed, cce_ui::layout::roll_profile_slopes().is_some()),
-            depth_slider: Slider::new()
+            depth_slider: Owned::new(Slider::new()
                 .with_label("Light")
                 .with_range(dmin, dmax)
                 .with_value(((depth - dmin) / (dmax - dmin)).clamp(0.0, 1.0))
                 .with_readout(true)
                 .with_decimals(2)
-                .with_scroll(true),
-            width_slider: Slider::new()
+                .with_scroll(true)),
+            width_slider: Owned::new(Slider::new()
                 .with_label("Width")
                 .with_range(wmin, wmax)
                 .with_value(((width - wmin) / (wmax - wmin)).clamp(0.0, 1.0))
                 .with_readout(true)
                 .with_decimals(1)
-                .with_scroll(true),
-            height_slider: Slider::new()
+                .with_scroll(true)),
+            height_slider: Owned::new(Slider::new()
                 .with_label("Height")
                 .with_range(hmin, hmax)
                 .with_value(((height - hmin) / (hmax - hmin)).clamp(0.0, 1.0))
                 .with_readout(true)
                 .with_decimals(1)
-                .with_scroll(true),
-            spec_slider: material_slider("Specular", spec0, SPEC_RANGE, 2),
-            shine_slider: material_slider("Shininess", shine0, SHINE_RANGE, 0),
-            curv_slider: material_slider("Curvature", curv0, CURV_RANGE, 2),
-            comp_slider: material_slider("Compression", comp0, COMP_RANGE, 2),
-            refr_slider: material_slider("Refraction", refr0, REFR_RANGE, 2),
-            radius_slider: material_slider("Blur radius", radius0, RADIUS_RANGE, 1),
-            save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
-            cancel_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel"),
+                .with_scroll(true)),
+            spec_slider: Owned::new(material_slider("Specular", spec0, SPEC_RANGE, 2)),
+            shine_slider: Owned::new(material_slider("Shininess", shine0, SHINE_RANGE, 0)),
+            curv_slider: Owned::new(material_slider("Curvature", curv0, CURV_RANGE, 2)),
+            comp_slider: Owned::new(material_slider("Compression", comp0, COMP_RANGE, 2)),
+            refr_slider: Owned::new(material_slider("Refraction", refr0, REFR_RANGE, 2)),
+            radius_slider: Owned::new(material_slider("Blur radius", radius0, RADIUS_RANGE, 1)),
+            save_button: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save")),
+            cancel_button: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel")),
             material_target,
             material_frosted,
             exit_requested: false,

@@ -161,7 +161,7 @@ impl Layout for Paginator {
     }
 
     fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
-        ctx.register_host(&mut self.sidebar_menu);
+        ctx.register_embedded(&mut self.sidebar_menu);
         ctx.link_ids(host_id, self.sidebar_menu.id());
     }
 }
