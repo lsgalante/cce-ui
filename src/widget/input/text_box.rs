@@ -389,14 +389,21 @@ impl TextBox {
         let buffer = shared(fs, &render_text, self.font_size, font_fam, attrs);
         let run = crate::backend::text::shaped_run(&buffer, &render_text, scale);
         let total_w = run.width;
-        // A right-to-left line that fits is set against the right; one that does not starts
-        // at the left and scrolls, as any overflowing line does.
+        // A right-to-left line that fits is set against the right. One that does not
+        // overflows to the LEFT, its start being at the right: shown and not being edited,
+        // it is scrolled to its right end, where a left-to-right line shows its left (until
+        // 2026-10-08 it showed its left end too, which is the END of a right-to-left line).
+        // While editing, the caret is followed (`scroll_to_cursor`) as for any line.
         let room = f32::from_bits(key.room_bits);
-        let shift = if crate::backend::text::paragraph_rtl(&render_text) && total_w < room { room - total_w } else { 0.0 };
+        let rtl = crate::backend::text::paragraph_rtl(&render_text);
+        let shift = if rtl && total_w < room { room - total_w } else { 0.0 };
         self.glyph_positions = run.stops.iter().map(|s| s.1 + shift).collect();
         self.glyph_shift = shift;
         self.glyph_run = Some(run);
         self.total_text_width = total_w;
+        if rtl && total_w > room && !self.editing && key.wrap.is_none() && !self.multiline {
+            self.scroll_x = total_w - room;
+        }
     }
 
     pub fn char_width(&self) -> f32 {
@@ -2265,6 +2272,32 @@ mod tests {
         assert!((widest - room).abs() < 0.01, "Hebrew ends at the right: {:?}", lines[1]);
         let labels = tb.inner().value_labels();
         assert!(labels[1].x > labels[0].x + 50.0, "the Hebrew line is drawn shifted: {} vs {}", labels[1].x, labels[0].x);
+    }
+
+    /// A one-line box shows the START of an overflowing line: the left end of English, the
+    /// right end of Hebrew, whose characters run from the right. Editing follows the caret.
+    #[test]
+    fn an_overflowing_right_to_left_line_shows_its_start() {
+        let mut fs = crate::create_font_system();
+        let long = "שלום עולם ".repeat(8);
+        let mut tb = TextBox::new(long).with_multiline(false);
+        tb.set_rect(10.0, 10.0, 120.0, 28.0);
+        tb.prepare_text(&mut fs);
+        let room = 120.0 - 2.0 * tb.inner().pad();
+        let total = tb.inner().total_text_width;
+        if total <= room {
+            return; // nothing shaped
+        }
+        assert!((tb.inner().scroll_x - (total - room)).abs() < 0.01, "scrolled to the right end: {} of {}", tb.inner().scroll_x, total - room);
+        // The first character's stop lies in view.
+        let first = tb.inner().glyph_positions[0];
+        let x = first - tb.inner().scroll_x;
+        assert!((0.0..=room + 0.5).contains(&x), "the line's first character is shown: {x}");
+
+        let mut english = TextBox::new("hello there ".repeat(8)).with_multiline(false);
+        english.set_rect(10.0, 10.0, 120.0, 28.0);
+        english.prepare_text(&mut fs);
+        assert_eq!(english.inner().scroll_x, 0.0, "English shows its left end");
     }
 
     /// A multiline box wraps by the shaped width of what it holds, not a count of chars:

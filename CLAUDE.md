@@ -1794,12 +1794,24 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `layout/` — the style getters and the code that was filed beside them, one module whose
   `mod.rs` re-exports every submodule, so `crate::layout::…` paths are unchanged (split
   2026-10-07 from one 7.4k-line file):
-  - `src/layout/mod.rs` (~4.4k lines) — the sizing constants and the style getters/setters
+  - `src/layout/mod.rs` (~2.6k lines) — the sizing constants and the style getters/setters
     (heights, radii, fonts — many `*_font_parsed()` — gaps, the relief and bevel profile
     state), `reload_config`, and `read_preferred_fonts` / font-family resolution used by the
     cosmic-text path. It names no widget: what does is in the modules below.
   - `registry.rs` — the style registry (config flattened to one map of keys), its test overlay,
-    the font-string helpers.
+    the font-string helpers. **A layout style key has one home, the registry** (since
+    2026-10-08): its getter reads `registry_float` / `registry_string` / `registry_bool`
+    with the default, its setter writes the registry (a test's write lands in the
+    per-thread overlay), and a font's parse is cached against the string it came from
+    (`parsed_font`). About fifty keys also had a slot of their own, filled by a second scan
+    of the same flattened lines by prefix (so `button_height` matched a longer key too),
+    and thirty-five getters re-read and re-parsed the whole `config.kdl` once each on
+    first use; a `(mm)` length never reached a slot. Do not add a slot for a config key.
+    One thing it changed on screen: those first-use scans ran after an app's own setter and
+    overwrote it, so cce-system-interface's `set_grid_gap(root_plate_gap())` lost to the
+    config's `layout { grid_gap 18 }` — the compositor's window-tiling gap, which reaches the
+    toolkit because the flatten strips `layout.` off keys it does not map. Its multi-column
+    pages now stand their sections the root gap apart, as the app asks (kept by choice).
   - `bridge.rs` — the flat-host render bridge: `RenderTarget`, `PopoverCollector`,
     `render_widget`, `render_popovers`, the carve types that cross it.
   - `section.rs` — a settings page's sections: `PageFlow` places them (a masonry of

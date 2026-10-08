@@ -148,9 +148,11 @@ colour, a config key that did nothing). The per-thread test overlays are as they
 Checked: the suite passes repeatedly; the demo and the settings app, run against the real
 config, draw identically to the pixel before and after.
 
-Not done: some keys are still parsed twice in one reload, into the registry and into a
-slot; they are now one snapshot, so they cannot disagree, but one of the two copies could
-go per key.
+The keys parsed twice were folded in on 2026-10-08: every layout key's getter reads the
+registry alone and its setter writes it, so the ~50 slots that duplicated registry keys, the
+reload's prefix scan that filled them, and the 35 getters that each re-parsed `config.kdl`
+on first use are gone (`a_style_key_lives_in_the_registry_alone`). The colour slots are a
+system of their own, filled from the raw KDL rather than the registry, and stay.
 
 `Style` (every colour, radius, font and size, and the registry's flattened config) built
 whole by a reload and published as an `Arc`; getters read the current snapshot; tests

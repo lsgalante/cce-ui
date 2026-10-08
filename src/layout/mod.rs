@@ -2,70 +2,16 @@
 // This module's part of the one style snapshot (`crate::style`): every slot below,
 // with its default. Each slot's `static` handle stands where its lock did.
 crate::style::style_slots! {
-    SECTION_PADDING: f32 = 8.0;
-    SPINBOX_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
-    SPINBOX_BUTTON_PADDING: f32 = 0.0;
-    COLOR_SELECTOR_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
-    TEXTBOX_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
-    FONT_SELECTOR_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
-    SLIDER_HEIGHT: f32 = DEFAULT_TRACK_HEIGHT;
-    PROGRESSBAR_HEIGHT: f32 = DEFAULT_TRACK_HEIGHT;
-    RANGESLIDER_HEIGHT: f32 = DEFAULT_TRACK_HEIGHT;
-    TOGGLE_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
-    COLOR_SELECTOR_FONT: String = String::new();
-    COLOR_SELECTOR_PREVIEW_MARGIN: f32 = 0.0;
-    MENUBAR_FONT: String = String::new();
-    MENUBAR_FONT_CACHED: Option<(String, f32)> = None;
-    STATUSBAR_FONT: String = String::new();
-    STATUSBAR_FONT_CACHED: Option<(String, f32)> = None;
-    SECTION_LABEL_FONT: String = String::new();
-    NESTED_SECTION_LABEL_FONT: String = String::new();
-    BREADCRUMB_FONT: String = String::new();
-    BUTTON_FONT: String = String::new();
-    PAGINATOR_TAB_PADDING_X: f32 = 10.0;
-    BUTTON_PADDING: f32 = 14.0;
-    BUTTON_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
-    RAMP_HEIGHT: f32 = 32.0;
-    BUTTON_STRIP_SPACING: f32 = 8.0;
-    SCROLLBAR_WIDTH: f32 = 4.0;
-    SCROLLBAR_INSET: f32 = 16.0;
-    COLUMN_GAP: Option<f32> = None;
-    CONTROL_PANEL_PADDING: Option<f32> = None;
-    CONTROL_PANEL_GAP: Option<f32> = None;
-    TREE_OPACITY: f32 = 1.0;
-    TREE_BLUR: f32 = 0.0;
-    PLATE_PADDING: f32 = 20.0;
-    DROPDOWN_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
-    NESTED_SECTION_LABEL_ALIGNMENT: u8 = 0;
-    TOUCHPAD_NATURAL_SCROLL: bool = false;
-    TOGGLE_BORDER_WIDTH: f32 = 1.0;
-    FONT_SELECTOR_FONT: String = String::new();
-    FONT_SELECTOR_FONT_CACHED: Option<(String, f32)> = None;
-    BUTTON_STRIP_FONT: String = String::new();
-    BUTTON_STRIP_FONT_CACHED: Option<(String, f32)> = None;
-    CONTROL_LABEL_FONT: String = String::new();
-    CONTROL_LABEL_FONT_CACHED: Option<(String, f32)> = None;
-    CONTROL_LABEL_FONT_DETACHED: String = String::new();
-    CONTROL_LABEL_FONT_DETACHED_CACHED: Option<(String, f32)> = None;
-    CONTROL_LABEL_MARGIN: f32 = 6.0;
-    LIST_FONT: String = String::new();
-    LIST_FONT_CACHED: Option<(String, f32)> = None;
-    TREE_FONT: String = String::new();
-    TREE_FONT_CACHED: Option<(String, f32)> = None;
-    GRAPH_FONT: String = String::new();
-    GRAPH_FONT_CACHED: Option<(String, f32)> = None;
-    GRAPH_NODE_FONT: String = String::new();
-    GRAPH_NODE_FONT_CACHED: Option<(String, f32)> = None;
-    LIST_JUSTIFICATION: u8 = 0;
-    PLATE_OPACITY: f32 = 1.0;
-    PAGE_OPACITY: f32 = 1.0;
-    LAYER_OPACITY: f32 = 1.0;
-    TEXTBOX_LINE_WRAP: bool = true;
-    TEXTBOX_MULTILINE_BORDER_WIDTH: f32 = 1.0;
-    NESTED_SECTION_LABEL_OFFSET: f32 = 0.0;
-    PAGE_MARGIN: Option<f32> = None;
-    GRID_MIN_COL_WIDTH: f32 = 260.0;
-    GRID_GAP: f32 = 8.0;
+    MENUBAR_FONT_CACHED: Option<(String, (String, f32))> = None;
+    STATUSBAR_FONT_CACHED: Option<(String, (String, f32))> = None;
+    FONT_SELECTOR_FONT_CACHED: Option<(String, (String, f32))> = None;
+    BUTTON_STRIP_FONT_CACHED: Option<(String, (String, f32))> = None;
+    CONTROL_LABEL_FONT_CACHED: Option<(String, (String, f32))> = None;
+    CONTROL_LABEL_FONT_DETACHED_CACHED: Option<(String, (String, f32))> = None;
+    LIST_FONT_CACHED: Option<(String, (String, f32))> = None;
+    TREE_FONT_CACHED: Option<(String, (String, f32))> = None;
+    GRAPH_FONT_CACHED: Option<(String, (String, f32))> = None;
+    GRAPH_NODE_FONT_CACHED: Option<(String, (String, f32))> = None;
     BEVEL_PROFILE: Option<[f32; BEVEL_PROFILE_SAMPLES]> = None;
     ROLL_PROFILE: Option<[f32; BEVEL_PROFILE_SAMPLES]> = None;
 }
@@ -76,38 +22,6 @@ mod bridge;
 pub use bridge::*;
 mod section;
 pub use section::*;
-
-static SECTION_PADDING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SECTION_PADDING, |s| &mut s.layout.SECTION_PADDING);
-
-/// Per-thread overrides for the style values tests pin, active only under
-/// `cfg(test)`.
-///
-/// These values are process-global by design: the toolkit reads them from
-/// config once and every widget sees the same style. That also makes them
-/// shared mutable state BETWEEN tests, and `cargo test` runs tests on
-/// parallel threads. `test_vstack_flow` pins a known font and margin so its
-/// pixel assertions do not depend on the developer's config — and for as
-/// long as it ran, every other test measuring text saw that font. That is
-/// the whole "cce-ui parallel test flake": `a_members_wide_label_is_in_the_hull`
-/// and two `layout::tests` siblings failing perhaps one run in three on a
-/// clean tree, always green at `--test-threads=1`, and blamed on innocent
-/// diffs for weeks.
-///
-/// A lock around the three known victims would have fixed those three. This
-/// fixes the class: a `set_*` is invisible to tests running beside it, and a
-/// future test that pins a style needs no lock and no discipline to remember.
-/// Production is untouched — `cfg(test)` is set only while compiling this
-/// crate's own unit tests, never for downstream crates.
-#[cfg(test)]
-mod test_style {
-    use std::cell::RefCell;
-    thread_local! {
-        pub static CONTROL_LABEL_MARGIN: RefCell<Option<f32>> = const { RefCell::new(None) };
-        pub static SECTION_PADDING: RefCell<Option<f32>> = const { RefCell::new(None) };
-        pub static CONTROL_LABEL_FONT: RefCell<Option<String>> = const { RefCell::new(None) };
-        pub static CONTROL_LABEL_FONT_DETACHED: RefCell<Option<String>> = const { RefCell::new(None) };
-    }
-}
 /// The height every text-bearing control falls back to when its own
 /// `style.control.<name>.height` is unset: button, toggle (and the checkbox
 /// row), dropdown, textbox (and the keybind recorder), spinbox, font selector,
@@ -153,72 +67,17 @@ pub const DETACHED_LABEL_INSET: f32 = 4.0;
 /// usage bar.
 pub const DEFAULT_TRACK_HEIGHT: f32 = 16.0;
 
-static SPINBOX_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SPINBOX_HEIGHT, |s| &mut s.layout.SPINBOX_HEIGHT);
-static SPINBOX_BUTTON_PADDING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SPINBOX_BUTTON_PADDING, |s| &mut s.layout.SPINBOX_BUTTON_PADDING);
-static COLOR_SELECTOR_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.COLOR_SELECTOR_HEIGHT, |s| &mut s.layout.COLOR_SELECTOR_HEIGHT);
-static TEXTBOX_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TEXTBOX_HEIGHT, |s| &mut s.layout.TEXTBOX_HEIGHT);
-static FONT_SELECTOR_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.FONT_SELECTOR_HEIGHT, |s| &mut s.layout.FONT_SELECTOR_HEIGHT);
-static SLIDER_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SLIDER_HEIGHT, |s| &mut s.layout.SLIDER_HEIGHT);
-static PROGRESSBAR_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.PROGRESSBAR_HEIGHT, |s| &mut s.layout.PROGRESSBAR_HEIGHT);
-static RANGESLIDER_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.RANGESLIDER_HEIGHT, |s| &mut s.layout.RANGESLIDER_HEIGHT);
-static TOGGLE_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TOGGLE_HEIGHT, |s| &mut s.layout.TOGGLE_HEIGHT);
-static COLOR_SELECTOR_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.COLOR_SELECTOR_FONT, |s| &mut s.layout.COLOR_SELECTOR_FONT);
-static COLOR_SELECTOR_PREVIEW_MARGIN: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.COLOR_SELECTOR_PREVIEW_MARGIN, |s| &mut s.layout.COLOR_SELECTOR_PREVIEW_MARGIN);
-static MENUBAR_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.MENUBAR_FONT, |s| &mut s.layout.MENUBAR_FONT);
-static MENUBAR_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.MENUBAR_FONT_CACHED, |s| &mut s.layout.MENUBAR_FONT_CACHED);
-static STATUSBAR_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.STATUSBAR_FONT, |s| &mut s.layout.STATUSBAR_FONT);
-static STATUSBAR_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.STATUSBAR_FONT_CACHED, |s| &mut s.layout.STATUSBAR_FONT_CACHED);
-static SECTION_LABEL_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.SECTION_LABEL_FONT, |s| &mut s.layout.SECTION_LABEL_FONT);
-static NESTED_SECTION_LABEL_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.NESTED_SECTION_LABEL_FONT, |s| &mut s.layout.NESTED_SECTION_LABEL_FONT);
-static BREADCRUMB_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.BREADCRUMB_FONT, |s| &mut s.layout.BREADCRUMB_FONT);
-static BUTTON_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_FONT, |s| &mut s.layout.BUTTON_FONT);
+static MENUBAR_FONT_CACHED: crate::style::StyleCell<Option<(String, (String, f32))>> = crate::style::StyleCell::new(|s| &s.layout.MENUBAR_FONT_CACHED, |s| &mut s.layout.MENUBAR_FONT_CACHED);
+static STATUSBAR_FONT_CACHED: crate::style::StyleCell<Option<(String, (String, f32))>> = crate::style::StyleCell::new(|s| &s.layout.STATUSBAR_FONT_CACHED, |s| &mut s.layout.STATUSBAR_FONT_CACHED);
 
-static PAGINATOR_TAB_PADDING_X: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.PAGINATOR_TAB_PADDING_X, |s| &mut s.layout.PAGINATOR_TAB_PADDING_X);
-static BUTTON_PADDING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_PADDING, |s| &mut s.layout.BUTTON_PADDING);
-static BUTTON_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_HEIGHT, |s| &mut s.layout.BUTTON_HEIGHT);
-static RAMP_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.RAMP_HEIGHT, |s| &mut s.layout.RAMP_HEIGHT);
-static BUTTON_STRIP_SPACING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_STRIP_SPACING, |s| &mut s.layout.BUTTON_STRIP_SPACING);
-static SCROLLBAR_WIDTH: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SCROLLBAR_WIDTH, |s| &mut s.layout.SCROLLBAR_WIDTH);
-static SCROLLBAR_INSET: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SCROLLBAR_INSET, |s| &mut s.layout.SCROLLBAR_INSET);
-static COLUMN_GAP: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.layout.COLUMN_GAP, |s| &mut s.layout.COLUMN_GAP);
-static CONTROL_PANEL_PADDING: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_PANEL_PADDING, |s| &mut s.layout.CONTROL_PANEL_PADDING);
-static CONTROL_PANEL_GAP: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_PANEL_GAP, |s| &mut s.layout.CONTROL_PANEL_GAP);
-static TREE_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TREE_OPACITY, |s| &mut s.layout.TREE_OPACITY);
-static TREE_BLUR: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TREE_BLUR, |s| &mut s.layout.TREE_BLUR);
-
-static PLATE_PADDING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.PLATE_PADDING, |s| &mut s.layout.PLATE_PADDING);
-static DROPDOWN_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.DROPDOWN_HEIGHT, |s| &mut s.layout.DROPDOWN_HEIGHT);
-static NESTED_SECTION_LABEL_ALIGNMENT: crate::style::StyleCell<u8> = crate::style::StyleCell::new(|s| &s.layout.NESTED_SECTION_LABEL_ALIGNMENT, |s| &mut s.layout.NESTED_SECTION_LABEL_ALIGNMENT);
-static TOUCHPAD_NATURAL_SCROLL: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.layout.TOUCHPAD_NATURAL_SCROLL, |s| &mut s.layout.TOUCHPAD_NATURAL_SCROLL);
-
-
-static TOGGLE_BORDER_WIDTH: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TOGGLE_BORDER_WIDTH, |s| &mut s.layout.TOGGLE_BORDER_WIDTH);
-static FONT_SELECTOR_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.FONT_SELECTOR_FONT, |s| &mut s.layout.FONT_SELECTOR_FONT);
-static FONT_SELECTOR_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.FONT_SELECTOR_FONT_CACHED, |s| &mut s.layout.FONT_SELECTOR_FONT_CACHED);
-static BUTTON_STRIP_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_STRIP_FONT, |s| &mut s.layout.BUTTON_STRIP_FONT);
-static BUTTON_STRIP_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_STRIP_FONT_CACHED, |s| &mut s.layout.BUTTON_STRIP_FONT_CACHED);
-static CONTROL_LABEL_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_FONT, |s| &mut s.layout.CONTROL_LABEL_FONT);
-static CONTROL_LABEL_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_FONT_CACHED, |s| &mut s.layout.CONTROL_LABEL_FONT_CACHED);
-static CONTROL_LABEL_FONT_DETACHED: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_FONT_DETACHED, |s| &mut s.layout.CONTROL_LABEL_FONT_DETACHED);
-static CONTROL_LABEL_FONT_DETACHED_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_FONT_DETACHED_CACHED, |s| &mut s.layout.CONTROL_LABEL_FONT_DETACHED_CACHED);
-static CONTROL_LABEL_MARGIN: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_MARGIN, |s| &mut s.layout.CONTROL_LABEL_MARGIN);
-static LIST_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.LIST_FONT, |s| &mut s.layout.LIST_FONT);
-static LIST_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.LIST_FONT_CACHED, |s| &mut s.layout.LIST_FONT_CACHED);
-static TREE_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.TREE_FONT, |s| &mut s.layout.TREE_FONT);
-static TREE_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.TREE_FONT_CACHED, |s| &mut s.layout.TREE_FONT_CACHED);
-static GRAPH_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.GRAPH_FONT, |s| &mut s.layout.GRAPH_FONT);
-static GRAPH_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.GRAPH_FONT_CACHED, |s| &mut s.layout.GRAPH_FONT_CACHED);
-static GRAPH_NODE_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.GRAPH_NODE_FONT, |s| &mut s.layout.GRAPH_NODE_FONT);
-static GRAPH_NODE_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.GRAPH_NODE_FONT_CACHED, |s| &mut s.layout.GRAPH_NODE_FONT_CACHED);
-static LIST_JUSTIFICATION: crate::style::StyleCell<u8> = crate::style::StyleCell::new(|s| &s.layout.LIST_JUSTIFICATION, |s| &mut s.layout.LIST_JUSTIFICATION);
-static PLATE_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.PLATE_OPACITY, |s| &mut s.layout.PLATE_OPACITY);
-static PAGE_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.PAGE_OPACITY, |s| &mut s.layout.PAGE_OPACITY);
-static LAYER_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.LAYER_OPACITY, |s| &mut s.layout.LAYER_OPACITY);
-static TEXTBOX_LINE_WRAP: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.layout.TEXTBOX_LINE_WRAP, |s| &mut s.layout.TEXTBOX_LINE_WRAP);
-static TEXTBOX_MULTILINE_BORDER_WIDTH: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TEXTBOX_MULTILINE_BORDER_WIDTH, |s| &mut s.layout.TEXTBOX_MULTILINE_BORDER_WIDTH);
-
-
-
+static FONT_SELECTOR_FONT_CACHED: crate::style::StyleCell<Option<(String, (String, f32))>> = crate::style::StyleCell::new(|s| &s.layout.FONT_SELECTOR_FONT_CACHED, |s| &mut s.layout.FONT_SELECTOR_FONT_CACHED);
+static BUTTON_STRIP_FONT_CACHED: crate::style::StyleCell<Option<(String, (String, f32))>> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_STRIP_FONT_CACHED, |s| &mut s.layout.BUTTON_STRIP_FONT_CACHED);
+static CONTROL_LABEL_FONT_CACHED: crate::style::StyleCell<Option<(String, (String, f32))>> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_FONT_CACHED, |s| &mut s.layout.CONTROL_LABEL_FONT_CACHED);
+static CONTROL_LABEL_FONT_DETACHED_CACHED: crate::style::StyleCell<Option<(String, (String, f32))>> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_FONT_DETACHED_CACHED, |s| &mut s.layout.CONTROL_LABEL_FONT_DETACHED_CACHED);
+static LIST_FONT_CACHED: crate::style::StyleCell<Option<(String, (String, f32))>> = crate::style::StyleCell::new(|s| &s.layout.LIST_FONT_CACHED, |s| &mut s.layout.LIST_FONT_CACHED);
+static TREE_FONT_CACHED: crate::style::StyleCell<Option<(String, (String, f32))>> = crate::style::StyleCell::new(|s| &s.layout.TREE_FONT_CACHED, |s| &mut s.layout.TREE_FONT_CACHED);
+static GRAPH_FONT_CACHED: crate::style::StyleCell<Option<(String, (String, f32))>> = crate::style::StyleCell::new(|s| &s.layout.GRAPH_FONT_CACHED, |s| &mut s.layout.GRAPH_FONT_CACHED);
+static GRAPH_NODE_FONT_CACHED: crate::style::StyleCell<Option<(String, (String, f32))>> = crate::style::StyleCell::new(|s| &s.layout.GRAPH_NODE_FONT_CACHED, |s| &mut s.layout.GRAPH_NODE_FONT_CACHED);
 
 /// Standard line height multiplier for text layout in cce-ui.
 pub const TEXT_LINE_HEIGHT_MULTIPLIER: f32 = 1.0;
@@ -247,615 +106,23 @@ pub fn reload_config() {
 
 fn reload_config_in_batch() {
     if let Some(content) = read_config() {
-        let mut menubar_font_changed = false;
-        let mut statusbar_font_changed = false;
-        let mut font_selector_font_changed = false;
-        let mut button_strip_font_changed = false;
-        let mut label_font_changed = false;
-        let mut label_font_detached_changed = false;
-        let mut list_font_changed = false;
-        let mut tree_font_changed = false;
-        let mut graph_font_changed = false;
-        let mut graph_node_font_changed = false;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            let mut key = String::new();
-            let mut val_str = "";
-            if let Some(eq_idx) = trimmed.find('=') {
-                key = trimmed[..eq_idx].trim().to_string();
-                val_str = trimmed[eq_idx + 1..].trim().trim_matches('"').trim();
-                if let Ok(mut registry) = get_style_registry().write() {
-                    if let Ok(f_val) = val_str.parse::<f32>() {
-                        registry.load_float(&key, f_val);
-                    } else if let Some(len) = crate::units::Len::parse(val_str) {
-                        // `(mm)2.0` arrived as the string `2mm`.
-                        registry.load_len(&key, len);
-                    } else {
-                        registry.load_string(&key, val_str.to_string());
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("control_label_margin") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = CONTROL_LABEL_MARGIN.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("nested_section_label_alignment") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<u8>() {
-                    if let Ok(mut lock) = NESTED_SECTION_LABEL_ALIGNMENT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("nested_section_label_offset") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = NESTED_SECTION_LABEL_OFFSET.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("plate_padding") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = PLATE_PADDING.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("page_margin") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = PAGE_MARGIN.write() {
-                        *lock = Some(val);
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("grid_min_col_width") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = GRID_MIN_COL_WIDTH.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("grid_gap") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = GRID_GAP.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("column_gap") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = COLUMN_GAP.write() {
-                        *lock = Some(val);
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("control_panel_padding") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = CONTROL_PANEL_PADDING.write() {
-                        *lock = Some(val);
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("control_panel_gap") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = CONTROL_PANEL_GAP.write() {
-                        *lock = Some(val);
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("section_padding") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = SECTION_PADDING.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("scrollbar_width") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("scrollbar_inset") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = SCROLLBAR_INSET.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("tree_opacity") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = TREE_OPACITY.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("tree_blur") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = TREE_BLUR.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("spinbox_height") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = SPINBOX_HEIGHT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("spinbox_button_padding") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = SPINBOX_BUTTON_PADDING.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("textbox_line_wrap") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                let wrap = val_str == "true" || val_str == "1" || val_str == "1.0";
-                if let Ok(mut lock) = TEXTBOX_LINE_WRAP.write() {
-                    *lock = wrap;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("touchpad_natural_scroll") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                let enabled = val_str == "true" || val_str == "1" || val_str == "1.0";
-                if let Ok(mut lock) = TOUCHPAD_NATURAL_SCROLL.write() {
-                    *lock = enabled;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("textbox_multiline_border_width") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = TEXTBOX_MULTILINE_BORDER_WIDTH.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("plate_opacity") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = PLATE_OPACITY.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("page_opacity") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = PAGE_OPACITY.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("layer_opacity") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = LAYER_OPACITY.write() {
-                        *lock = val;
-                    }
-                }
-            }
-
-
-            if let Some(rest) = trimmed.strip_prefix("toggle_height") {
-
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = TOGGLE_HEIGHT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("color_selector_height") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = COLOR_SELECTOR_HEIGHT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("font_selector_height") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = FONT_SELECTOR_HEIGHT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("color_selector_font") {
-                let rest = rest.trim_start_matches([' ', '=']);
-                let rest = rest.trim();
-                let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                    &rest[1..rest.len() - 1]
+        // Every flattened key goes into the registry, which is the one copy every getter
+        // reads (since 2026-10-08; until then about fifty keys were also scanned off the
+        // same lines into slots of their own, and read from there).
+        if let Ok(mut registry) = get_style_registry().write() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                let Some(eq_idx) = trimmed.find('=') else { continue };
+                let key = trimmed[..eq_idx].trim();
+                let val_str = trimmed[eq_idx + 1..].trim().trim_matches('"').trim();
+                if let Ok(f_val) = val_str.parse::<f32>() {
+                    registry.load_float(key, f_val);
+                } else if let Some(len) = crate::units::Len::parse(val_str) {
+                    // `(mm)2.0` arrived as the string `2mm`.
+                    registry.load_len(key, len);
                 } else {
-                    rest
-                };
-                let font = val_str.trim().to_string();
-                if let Ok(mut lock) = COLOR_SELECTOR_FONT.write() {
-                    *lock = font;
+                    registry.load_string(key, val_str.to_string());
                 }
-            }
-            if let Some(rest) = trimmed.strip_prefix("menubar_font") {
-                let rest = rest.trim_start_matches([' ', '=']);
-                let rest = rest.trim();
-                let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                    &rest[1..rest.len() - 1]
-                } else {
-                    rest
-                };
-                let font = val_str.trim().to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = MENUBAR_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    menubar_font_changed = true;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("statusbar_font") {
-                let rest = rest.trim_start_matches([' ', '=']);
-                let rest = rest.trim();
-                let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                    &rest[1..rest.len() - 1]
-                } else {
-                    rest
-                };
-                let font = val_str.trim().to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = STATUSBAR_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    statusbar_font_changed = true;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("section_label_font") {
-                let rest = rest.trim_start_matches([' ', '=']);
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                if let Ok(mut lock) = SECTION_LABEL_FONT.write() {
-                    *lock = font;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("nested_section_label_font") {
-                let rest = rest.trim_start_matches([' ', '=']);
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                if let Ok(mut lock) = NESTED_SECTION_LABEL_FONT.write() {
-                    *lock = font;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("breadcrumb_font") {
-                let rest = rest.trim_start_matches([' ', '=']);
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                if let Ok(mut lock) = BREADCRUMB_FONT.write() {
-                    *lock = font;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("button_font") {
-                let rest = rest.trim_start_matches([' ', '=']);
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                if let Ok(mut lock) = BUTTON_FONT.write() {
-                    *lock = font;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("color_selector_preview_margin") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_MARGIN.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_x") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = PAGINATOR_TAB_PADDING_X.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("button_padding") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = BUTTON_PADDING.write() {
-                        *lock = val;
-                    }
-                }
-            } else if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_y") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = BUTTON_PADDING.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("button_height") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = BUTTON_HEIGHT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("button_strip_spacing") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = BUTTON_STRIP_SPACING.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("textbox_height") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = TEXTBOX_HEIGHT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("dropdown_height") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = DROPDOWN_HEIGHT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("slider_height") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = SLIDER_HEIGHT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("rangeslider_height") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = RANGESLIDER_HEIGHT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("toggle_border_width") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = TOGGLE_BORDER_WIDTH.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if key == "control_label_font_detached" {
-                let font = val_str.to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    label_font_detached_changed = true;
-                }
-            }
-            if key == "control_label_font" {
-                let font = val_str.to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = CONTROL_LABEL_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    label_font_changed = true;
-                }
-            }
-            if key == "font_selector_font" {
-                let font = val_str.to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = FONT_SELECTOR_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    font_selector_font_changed = true;
-                }
-            }
-            if key == "button_strip_font" {
-                let font = val_str.to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = BUTTON_STRIP_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    button_strip_font_changed = true;
-                }
-            }
-            if key == "list_font" {
-                let font = val_str.to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = LIST_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    list_font_changed = true;
-                }
-            }
-            if key == "tree_font" {
-                let font = val_str.to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = TREE_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    tree_font_changed = true;
-                }
-            }
-            if key == "graph_font" {
-                let font = val_str.to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = GRAPH_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    graph_font_changed = true;
-                }
-            }
-            if key == "graph_node_font" {
-                let font = val_str.to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = GRAPH_NODE_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    graph_node_font_changed = true;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("list_justification") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<u8>() {
-                    if let Ok(mut lock) = LIST_JUSTIFICATION.write() {
-                        *lock = val;
-                    }
-                }
-            }
-        }
-        if menubar_font_changed {
-            if let Ok(mut lock) = MENUBAR_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if statusbar_font_changed {
-            if let Ok(mut lock) = STATUSBAR_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if label_font_detached_changed {
-            if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if font_selector_font_changed {
-            if let Ok(mut lock) = FONT_SELECTOR_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if button_strip_font_changed {
-            if let Ok(mut lock) = BUTTON_STRIP_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if label_font_changed {
-            if let Ok(mut lock) = CONTROL_LABEL_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-
-        if list_font_changed {
-            if let Ok(mut lock) = LIST_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if tree_font_changed {
-            if let Ok(mut lock) = TREE_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if graph_font_changed {
-            if let Ok(mut lock) = GRAPH_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if graph_node_font_changed {
-            if let Ok(mut lock) = GRAPH_NODE_FONT_CACHED.write() {
-                *lock = None;
             }
         }
         if let Ok(raw_kdl) = std::fs::read_to_string(crate::config::get_config_path()) {
@@ -911,21 +178,8 @@ pub fn install_wall_profile_spec(spec: Option<&str>) {
     }
 }
 
-fn mod_rest(rest: &str) -> &str {
-    let rest = rest.trim();
-    if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-        &rest[1..rest.len() - 1]
-    } else {
-        rest
-    }
-}
-
 pub fn control_label_margin() -> f32 {
-    #[cfg(test)]
-    if let Some(v) = test_style::CONTROL_LABEL_MARGIN.with(|c| *c.borrow()) {
-        return v;
-    }
-    *CONTROL_LABEL_MARGIN.read().unwrap()
+    registry_float("control_label_margin").unwrap_or(6.0)
 }
 
 pub(crate) fn control_label_strip() -> f32 {
@@ -938,11 +192,8 @@ pub fn label_margin() -> f32 {
 }
 
 pub fn set_control_label_margin(margin: f32) {
-    #[cfg(test)]
-    test_style::CONTROL_LABEL_MARGIN.with(|c| *c.borrow_mut() = Some(margin));
-    #[cfg(not(test))]
-    if let Ok(mut lock) = CONTROL_LABEL_MARGIN.write() {
-        *lock = margin;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("control_label_margin", margin);
     }
 }
 
@@ -951,63 +202,24 @@ pub fn set_label_margin(margin: f32) {
 }
 
 pub fn nested_section_label_alignment() -> u8 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("nested_section_label_alignment") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<u8>() {
-                        if let Ok(mut lock) = NESTED_SECTION_LABEL_ALIGNMENT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *NESTED_SECTION_LABEL_ALIGNMENT.read().unwrap()
+    registry_float("nested_section_label_alignment").map(|v| v as u8).unwrap_or(0)
 }
 
 pub fn set_nested_section_label_alignment(align: u8) {
-    if let Ok(mut lock) = NESTED_SECTION_LABEL_ALIGNMENT.write() {
-        *lock = align;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("nested_section_label_alignment", align as f32);
     }
 }
 
-static NESTED_SECTION_LABEL_OFFSET: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.NESTED_SECTION_LABEL_OFFSET, |s| &mut s.layout.NESTED_SECTION_LABEL_OFFSET);
-
 pub fn nested_section_label_offset() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("nested_section_label_offset") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = NESTED_SECTION_LABEL_OFFSET.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *NESTED_SECTION_LABEL_OFFSET.read().unwrap()
+    registry_float("nested_section_label_offset").unwrap_or(0.0)
 }
 
 pub fn set_nested_section_label_offset(offset: f32) {
-    if let Ok(mut lock) = NESTED_SECTION_LABEL_OFFSET.write() {
-        *lock = offset;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("nested_section_label_offset", offset);
     }
 }
-
 
 /// The pane rung's padding: from a pane plate's rim to its content, in
 /// logical px (`style.surface.plate.padding`). The second rung of the
@@ -1016,131 +228,81 @@ pub fn set_nested_section_label_offset(offset: f32) {
 /// between controls. Registry-backed (live-reloadable); the legacy flat
 /// `plate_padding = N` line still loads as a fallback.
 pub fn plate_padding() -> f32 {
-    registry_float("plate_padding").unwrap_or_else(|| *PLATE_PADDING.read().unwrap())
+    registry_float("plate_padding").unwrap_or(20.0)
 }
 
 pub fn set_plate_padding(padding: f32) {
-    if let Ok(mut lock) = PLATE_PADDING.write() {
-        *lock = padding;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("plate_padding", padding);
     }
 }
-
-static PAGE_MARGIN: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.layout.PAGE_MARGIN, |s| &mut s.layout.PAGE_MARGIN);
 
 /// Legacy: the page-level margin (`style.surface.page.margin`). Unset, it
 /// IS the pane rung's [`plate_padding`] — a page is a pane — so an app
 /// still reading it lands on the ladder. Set, it is honoured as before.
 pub fn page_margin() -> f32 {
-    registry_float("page_margin")
-        .or_else(|| *PAGE_MARGIN.read().unwrap())
-        .unwrap_or_else(plate_padding)
+    registry_float("page_margin").unwrap_or_else(plate_padding)
 }
 
 pub fn set_page_margin(margin: f32) {
-    if let Ok(mut lock) = PAGE_MARGIN.write() {
-        *lock = Some(margin);
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("page_margin", margin);
     }
 }
 
-static GRID_MIN_COL_WIDTH: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.GRID_MIN_COL_WIDTH, |s| &mut s.layout.GRID_MIN_COL_WIDTH);
-
 pub fn grid_min_col_width() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("grid_min_col_width") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = GRID_MIN_COL_WIDTH.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *GRID_MIN_COL_WIDTH.read().unwrap()
+    registry_float("grid_min_col_width").unwrap_or(260.0)
 }
 
 pub fn set_grid_min_col_width(width: f32) {
-    if let Ok(mut lock) = GRID_MIN_COL_WIDTH.write() {
-        *lock = width;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("grid_min_col_width", width);
     }
 }
 
-static GRID_GAP: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.GRID_GAP, |s| &mut s.layout.GRID_GAP);
-
 pub fn grid_gap() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("grid_gap") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = GRID_GAP.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *GRID_GAP.read().unwrap()
+    registry_float("grid_gap").unwrap_or(8.0)
 }
 
 pub fn set_grid_gap(gap: f32) {
-    if let Ok(mut lock) = GRID_GAP.write() {
-        *lock = gap;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("grid_gap", gap);
     }
 }
 
 /// Legacy: the inter-column gap (`style.layout.column.gap`). Unset, it is
 /// the root plate's [`root_plate_gap`] — columns are siblings on the plate.
 pub fn column_gap() -> f32 {
-    registry_float("column_gap")
-        .or_else(|| *COLUMN_GAP.read().unwrap())
-        .unwrap_or_else(root_plate_gap)
+    registry_float("column_gap").unwrap_or_else(root_plate_gap)
 }
 
 pub fn set_column_gap(gap: f32) {
-    if let Ok(mut lock) = COLUMN_GAP.write() {
-        *lock = Some(gap);
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("column_gap", gap);
     }
 }
 
 /// Legacy: a control panel's padding (`style.control.control_panel.padding`).
 /// Unset, it is the pane rung's [`plate_padding`] — a control panel is a pane.
 pub fn control_panel_padding() -> f32 {
-    registry_float("control_panel_padding")
-        .or_else(|| *CONTROL_PANEL_PADDING.read().unwrap())
-        .unwrap_or_else(plate_padding)
+    registry_float("control_panel_padding").unwrap_or_else(plate_padding)
 }
 
 pub fn set_control_panel_padding(padding: f32) {
-    if let Ok(mut lock) = CONTROL_PANEL_PADDING.write() {
-        *lock = Some(padding);
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("control_panel_padding", padding);
     }
 }
 
 /// Legacy: a control panel's gap (`style.control.control_panel.gap`).
 /// Unset, it is the pane rung's [`plate_gap`].
 pub fn control_panel_gap() -> f32 {
-    registry_float("control_panel_gap")
-        .or_else(|| *CONTROL_PANEL_GAP.read().unwrap())
-        .unwrap_or_else(plate_gap)
+    registry_float("control_panel_gap").unwrap_or_else(plate_gap)
 }
 
 pub fn set_control_panel_gap(gap: f32) {
-    if let Ok(mut lock) = CONTROL_PANEL_GAP.write() {
-        *lock = Some(gap);
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("control_panel_gap", gap);
     }
 }
 
@@ -1187,93 +349,32 @@ pub fn param_labels_inline() -> bool {
 }
 
 pub fn section_padding() -> f32 {
-    #[cfg(test)]
-    if let Some(v) = test_style::SECTION_PADDING.with(|c| *c.borrow()) {
-        return v;
-    }
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("section_padding") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = SECTION_PADDING.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *SECTION_PADDING.read().unwrap()
+    registry_float("section_padding").unwrap_or(8.0)
 }
 
 pub fn set_section_padding(padding: f32) {
-    #[cfg(test)]
-    test_style::SECTION_PADDING.with(|c| *c.borrow_mut() = Some(padding));
-    #[cfg(not(test))]
-    if let Ok(mut lock) = SECTION_PADDING.write() {
-        *lock = padding;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("section_padding", padding);
     }
 }
 
 pub fn spinbox_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("spinbox_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = SPINBOX_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *SPINBOX_HEIGHT.read().unwrap()
+    registry_float("spinbox_height").unwrap_or(DEFAULT_CONTROL_HEIGHT)
 }
 
 pub fn set_spinbox_height(height: f32) {
-    if let Ok(mut lock) = SPINBOX_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("spinbox_height", height);
     }
 }
 
 pub fn toggle_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("toggle_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = TOGGLE_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *TOGGLE_HEIGHT.read().unwrap()
+    registry_float("toggle_height").unwrap_or(DEFAULT_CONTROL_HEIGHT)
 }
 
 pub fn set_toggle_height(height: f32) {
-    if let Ok(mut lock) = TOGGLE_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("toggle_height", height);
     }
 }
 
@@ -1672,6 +773,37 @@ fn registry_float(slot: &str) -> Option<f32> {
     get_style_registry().read().unwrap().get_float(slot)
 }
 
+/// [`registry_float`] for a switch: a number is on when it is not zero (`set_*` writes
+/// 1 or 0), a word when it is `true`.
+fn registry_bool(key: &str) -> Option<bool> {
+    registry_float(key).map(|v| v != 0.0).or_else(|| registry_string(key).map(|v| v == "true"))
+}
+
+/// A configured font string parsed into (family, size; 12 when the string names none),
+/// cached against the string it was parsed from — a reload, a setter or a test's
+/// per-thread overlay that changes the string parses it again.
+fn parsed_font(cache: &crate::style::StyleCell<Option<(String, (String, f32))>>, font: String) -> (String, f32) {
+    if let Ok(c) = cache.read() {
+        if let Some((src, val)) = &*c {
+            if *src == font {
+                return val.clone();
+            }
+        }
+    }
+    let (family, size) = parse_font_string(&font);
+    let val = (family, size.unwrap_or(12.0));
+    if let Ok(mut c) = cache.write() {
+        *c = Some((font, val.clone()));
+    }
+    val
+}
+
+/// [`registry_float`] for a string key (a font), with the same guard discipline.
+fn registry_string(key: &str) -> Option<String> {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_string(key)
+}
+
 /// Gap between siblings INSIDE a pane plate, in logical px
 /// (`style.surface.plate.gap`) — the pane rung's twin of
 /// [`root_plate_gap`]. Unset, it is the root gap: one number reads as one
@@ -1732,30 +864,12 @@ pub fn set_toggle_corner_radius(radius: f32) {
 }
 
 pub fn toggle_border_width() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("toggle_border_width") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = TOGGLE_BORDER_WIDTH.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *TOGGLE_BORDER_WIDTH.read().unwrap()
+    registry_float("toggle_border_width").unwrap_or(1.0)
 }
 
 pub fn set_toggle_border_width(width: f32) {
-    if let Ok(mut lock) = TOGGLE_BORDER_WIDTH.write() {
-        *lock = width;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("toggle_border_width", width);
     }
 }
 
@@ -1789,7 +903,6 @@ pub fn set_slider_corner_radius(radius: f32) {
     }
 }
 
-
 pub fn plate_corner_radius() -> f32 {
     lazy_init_style_registry();
     let r = get_style_registry().read().unwrap();
@@ -1806,824 +919,260 @@ pub fn set_plate_corner_radius(radius: f32) {
 }
 
 pub fn plate_opacity() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("plate_opacity") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = PLATE_OPACITY.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *PLATE_OPACITY.read().unwrap()
+    registry_float("plate_opacity").unwrap_or(1.0)
 }
 
 pub fn set_plate_opacity(opacity: f32) {
-    if let Ok(mut lock) = PLATE_OPACITY.write() {
-        *lock = opacity;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("plate_opacity", opacity);
     }
 }
 
 pub fn page_opacity() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("page_opacity") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = PAGE_OPACITY.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *PAGE_OPACITY.read().unwrap()
+    registry_float("page_opacity").unwrap_or(1.0)
 }
 
 pub fn set_page_opacity(opacity: f32) {
-    if let Ok(mut lock) = PAGE_OPACITY.write() {
-        *lock = opacity;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("page_opacity", opacity);
     }
 }
 
 pub fn layer_opacity() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("layer_opacity") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = LAYER_OPACITY.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *LAYER_OPACITY.read().unwrap()
+    registry_float("layer_opacity").unwrap_or(1.0)
 }
 
 pub fn set_layer_opacity(opacity: f32) {
-    if let Ok(mut lock) = LAYER_OPACITY.write() {
-        *lock = opacity;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("layer_opacity", opacity);
     }
 }
 
-
-
-
 pub fn color_selector_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("color_selector_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = COLOR_SELECTOR_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *COLOR_SELECTOR_HEIGHT.read().unwrap()
+    registry_float("color_selector_height").unwrap_or(DEFAULT_CONTROL_HEIGHT)
 }
 
 pub fn set_color_selector_height(height: f32) {
-    if let Ok(mut lock) = COLOR_SELECTOR_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("color_selector_height", height);
     }
 }
 
 pub fn font_selector_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("font_selector_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = FONT_SELECTOR_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *FONT_SELECTOR_HEIGHT.read().unwrap()
+    registry_float("font_selector_height").unwrap_or(DEFAULT_CONTROL_HEIGHT)
 }
 
 pub fn set_font_selector_height(height: f32) {
-    if let Ok(mut lock) = FONT_SELECTOR_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("font_selector_height", height);
     }
 }
 
 pub fn color_selector_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let mut font = "monospace".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("color_selector_font") {
-                    let rest = rest.trim_start_matches([' ', '=']);
-                    let rest = rest.trim();
-                    let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                        &rest[1..rest.len() - 1]
-                    } else {
-                        rest
-                    };
-                    font = val_str.trim().to_string();
-                }
-            }
-        }
-        if let Ok(mut lock) = COLOR_SELECTOR_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = COLOR_SELECTOR_FONT.read().unwrap();
-    if lock.is_empty() {
-        "monospace".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("color_selector_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "monospace".to_string())
 }
 
 pub fn set_color_selector_font(font: &str) {
-    if let Ok(mut lock) = COLOR_SELECTOR_FONT.write() {
-        *lock = font.to_string();
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("color_selector_font", font.to_string());
     }
 }
 
 pub fn menubar_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let font = read_config_value("menubar_font").unwrap_or_else(|| "Berkeley Mono".to_string());
-        if let Ok(mut lock) = MENUBAR_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = MENUBAR_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("menubar_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn menubar_font_parsed() -> (String, f32) {
-    if let Ok(lock) = MENUBAR_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = menubar_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = MENUBAR_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
+    parsed_font(&MENUBAR_FONT_CACHED, menubar_font())
 }
 
 pub fn set_menubar_font(font: &str) {
-    if let Ok(mut lock) = MENUBAR_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = MENUBAR_FONT_CACHED.write() {
-        *lock = None;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("menubar_font", font.to_string());
     }
 }
 
 pub fn statusbar_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let font = read_config_value("statusbar_font").unwrap_or_else(|| "Berkeley Mono".to_string());
-        if let Ok(mut lock) = STATUSBAR_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = STATUSBAR_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("statusbar_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn statusbar_font_parsed() -> (String, f32) {
-    if let Ok(lock) = STATUSBAR_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = statusbar_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = STATUSBAR_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
+    parsed_font(&STATUSBAR_FONT_CACHED, statusbar_font())
 }
 
 pub fn set_statusbar_font(font: &str) {
-    if let Ok(mut lock) = STATUSBAR_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = STATUSBAR_FONT_CACHED.write() {
-        *lock = None;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("statusbar_font", font.to_string());
     }
 }
 
-
-
 pub fn font_selector_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let font = read_config_value("font_selector_font").unwrap_or_else(|| "Berkeley Mono".to_string());
-        if let Ok(mut lock) = FONT_SELECTOR_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = FONT_SELECTOR_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("font_selector_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn font_selector_font_parsed() -> (String, f32) {
-    if let Ok(lock) = FONT_SELECTOR_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = font_selector_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = FONT_SELECTOR_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
+    parsed_font(&FONT_SELECTOR_FONT_CACHED, font_selector_font())
 }
 
 pub fn set_font_selector_font(font: &str) {
-    if let Ok(mut lock) = FONT_SELECTOR_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = FONT_SELECTOR_FONT_CACHED.write() {
-        *lock = None;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("font_selector_font", font.to_string());
     }
 }
 
 // Button Strip Font
 pub fn button_strip_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let font = read_config_value("button_strip_font").unwrap_or_else(|| "Berkeley Mono".to_string());
-        if let Ok(mut lock) = BUTTON_STRIP_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = BUTTON_STRIP_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("button_strip_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn button_strip_font_parsed() -> (String, f32) {
-    if let Ok(lock) = BUTTON_STRIP_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = button_strip_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = BUTTON_STRIP_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
+    parsed_font(&BUTTON_STRIP_FONT_CACHED, button_strip_font())
 }
 
 pub fn set_button_strip_font(font: &str) {
-    if let Ok(mut lock) = BUTTON_STRIP_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = BUTTON_STRIP_FONT_CACHED.write() {
-        *lock = None;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("button_strip_font", font.to_string());
     }
 }
-
-
 
 // Control Label Font
 pub fn control_label_font() -> String {
-    #[cfg(test)]
-    if let Some(v) = test_style::CONTROL_LABEL_FONT.with(|c| c.borrow().clone()) {
-        return v;
-    }
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let font = read_config_value("control_label_font").unwrap_or_else(|| "Berkeley Mono".to_string());
-        if let Ok(mut lock) = CONTROL_LABEL_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = CONTROL_LABEL_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("control_label_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn control_label_font_parsed() -> (String, f32) {
-    // The parse cache is process-wide, so under test it would hand back one
-    // thread's pinned font to every other. Parsing is cheap; skip it there.
-    #[cfg(not(test))]
-    if let Ok(lock) = CONTROL_LABEL_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = control_label_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    #[cfg(not(test))]
-    if let Ok(mut lock) = CONTROL_LABEL_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
+    parsed_font(&CONTROL_LABEL_FONT_CACHED, control_label_font())
 }
 
 pub fn set_control_label_font(font: &str) {
-    #[cfg(test)]
-    test_style::CONTROL_LABEL_FONT.with(|c| *c.borrow_mut() = Some(font.to_string()));
-    #[cfg(not(test))]
-    if let Ok(mut lock) = CONTROL_LABEL_FONT.write() {
-        *lock = font.to_string();
-    }
-    #[cfg(not(test))]
-    if let Ok(mut lock) = CONTROL_LABEL_FONT_CACHED.write() {
-        *lock = None;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("control_label_font", font.to_string());
     }
 }
 
 // Control Label Font Detached
 pub fn control_label_font_detached() -> String {
-    #[cfg(test)]
-    if let Some(v) = test_style::CONTROL_LABEL_FONT_DETACHED.with(|c| c.borrow().clone()) {
-        return v;
-    }
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let font = read_config_value("control_label_font_detached").unwrap_or_else(|| "Berkeley Mono".to_string());
-        if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED.write() {
-            *lock = font;
-        }
-    });
-    let lock = CONTROL_LABEL_FONT_DETACHED.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("control_label_font_detached").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn control_label_font_detached_parsed() -> (String, f32) {
-    // The parse cache is process-wide, so under test it would hand back one
-    // thread's pinned font to every other. Parsing is cheap; skip it there.
-    #[cfg(not(test))]
-    if let Ok(lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = control_label_font_detached();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    #[cfg(not(test))]
-    if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
+    parsed_font(&CONTROL_LABEL_FONT_DETACHED_CACHED, control_label_font_detached())
 }
 
 pub fn set_control_label_font_detached(font: &str) {
-    #[cfg(test)]
-    test_style::CONTROL_LABEL_FONT_DETACHED.with(|c| *c.borrow_mut() = Some(font.to_string()));
-    #[cfg(not(test))]
-    if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED.write() {
-        *lock = font.to_string();
-    }
-    #[cfg(not(test))]
-    if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.write() {
-        *lock = None;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("control_label_font_detached", font.to_string());
     }
 }
-
-
 
 // List Font
 pub fn list_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let font = read_config_value("list_font").unwrap_or_else(|| "Berkeley Mono".to_string());
-        if let Ok(mut lock) = LIST_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = LIST_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("list_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn list_font_parsed() -> (String, f32) {
-    if let Ok(lock) = LIST_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = list_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = LIST_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
+    parsed_font(&LIST_FONT_CACHED, list_font())
 }
 
 pub fn set_list_font(font: &str) {
-    if let Ok(mut lock) = LIST_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = LIST_FONT_CACHED.write() {
-        *lock = None;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("list_font", font.to_string());
     }
 }
 
 // Tree Font
 pub fn tree_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let font = read_config_value("tree_font").unwrap_or_else(|| "Berkeley Mono".to_string());
-        if let Ok(mut lock) = TREE_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = TREE_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("tree_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn tree_font_parsed() -> (String, f32) {
-    if let Ok(lock) = TREE_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = tree_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = TREE_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
+    parsed_font(&TREE_FONT_CACHED, tree_font())
 }
 
 pub fn set_tree_font(font: &str) {
-    if let Ok(mut lock) = TREE_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = TREE_FONT_CACHED.write() {
-        *lock = None;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("tree_font", font.to_string());
     }
 }
 
 // Graph Font
 pub fn graph_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let font = read_config_value("graph_font").unwrap_or_else(|| "Berkeley Mono".to_string());
-        if let Ok(mut lock) = GRAPH_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = GRAPH_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("graph_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn graph_font_parsed() -> (String, f32) {
-    if let Ok(lock) = GRAPH_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = graph_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = GRAPH_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
+    parsed_font(&GRAPH_FONT_CACHED, graph_font())
 }
 
 pub fn set_graph_font(font: &str) {
-    if let Ok(mut lock) = GRAPH_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = GRAPH_FONT_CACHED.write() {
-        *lock = None;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("graph_font", font.to_string());
     }
 }
 
 // Graph Node Font
 pub fn graph_node_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let font = read_config_value("graph_node_font").unwrap_or_else(|| "Berkeley Mono".to_string());
-        if let Ok(mut lock) = GRAPH_NODE_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = GRAPH_NODE_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("graph_node_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn graph_node_font_parsed() -> (String, f32) {
-    if let Ok(lock) = GRAPH_NODE_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = graph_node_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = GRAPH_NODE_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
+    parsed_font(&GRAPH_NODE_FONT_CACHED, graph_node_font())
 }
 
 pub fn set_graph_node_font(font: &str) {
-    if let Ok(mut lock) = GRAPH_NODE_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = GRAPH_NODE_FONT_CACHED.write() {
-        *lock = None;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("graph_node_font", font.to_string());
     }
 }
 
 // List Justification
 pub fn list_justification() -> u8 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("list_justification") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<u8>() {
-                        if let Ok(mut lock) = LIST_JUSTIFICATION.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *LIST_JUSTIFICATION.read().unwrap()
+    registry_float("list_justification").map(|v| v as u8).unwrap_or(0)
 }
 
 pub fn set_list_justification(just: u8) {
-    if let Ok(mut lock) = LIST_JUSTIFICATION.write() {
-        *lock = just;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("list_justification", just as f32);
     }
 }
 
-
-
-
 pub fn section_label_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let mut font = "Berkeley Mono".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("section_label_font") {
-                    let rest = rest.trim_start_matches([' ', '=']);
-                    let rest = rest.trim();
-                    let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                        &rest[1..rest.len() - 1]
-                    } else {
-                        rest
-                    };
-                    font = val_str.trim().to_string();
-                }
-            }
-        }
-        if let Ok(mut lock) = SECTION_LABEL_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = SECTION_LABEL_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("section_label_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn set_section_label_font(font: &str) {
-    if let Ok(mut lock) = SECTION_LABEL_FONT.write() {
-        *lock = font.to_string();
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("section_label_font", font.to_string());
     }
 }
 
 pub fn nested_section_label_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let mut font = "Berkeley Mono".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("nested_section_label_font") {
-                    let rest = rest.trim_start_matches([' ', '=']);
-                    let rest = rest.trim();
-                    let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                        &rest[1..rest.len() - 1]
-                    } else {
-                        rest
-                    };
-                    font = val_str.trim().to_string();
-                }
-            }
-        }
-        if let Ok(mut lock) = NESTED_SECTION_LABEL_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = NESTED_SECTION_LABEL_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("nested_section_label_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn set_nested_section_label_font(font: &str) {
-    if let Ok(mut lock) = NESTED_SECTION_LABEL_FONT.write() {
-        *lock = font.to_string();
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("nested_section_label_font", font.to_string());
     }
 }
 
 pub fn breadcrumb_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let mut font = "Berkeley Mono".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("breadcrumb_font") {
-                    let rest = rest.trim_start_matches([' ', '=']);
-                    let rest = rest.trim();
-                    let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                        &rest[1..rest.len() - 1]
-                    } else {
-                        rest
-                    };
-                    font = val_str.trim().to_string();
-                }
-            }
-        }
-        if let Ok(mut lock) = BREADCRUMB_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = BREADCRUMB_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("breadcrumb_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn set_breadcrumb_font(font: &str) {
-    if let Ok(mut lock) = BREADCRUMB_FONT.write() {
-        *lock = font.to_string();
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("breadcrumb_font", font.to_string());
     }
 }
 
 pub fn button_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let mut font = "Berkeley Mono".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("button_font") {
-                    let rest = rest.trim_start_matches([' ', '=']);
-                    let rest = rest.trim();
-                    let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                        &rest[1..rest.len() - 1]
-                    } else {
-                        rest
-                    };
-                    font = val_str.trim().to_string();
-                }
-            }
-        }
-        if let Ok(mut lock) = BUTTON_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = BUTTON_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Berkeley Mono".to_string()
-    } else {
-        lock.clone()
-    }
+    registry_string("button_font").filter(|f| !f.is_empty()).unwrap_or_else(|| "Berkeley Mono".to_string())
 }
 
 pub fn set_button_font(font: &str) {
-    if let Ok(mut lock) = BUTTON_FONT.write() {
-        *lock = font.to_string();
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_string("button_font", font.to_string());
     }
 }
 
@@ -2697,47 +1246,11 @@ pub fn set_spinbox_corner_radius(radius: f32) {
 }
 
 pub fn spinbox_button_padding() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("spinbox_button_padding") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = SPINBOX_BUTTON_PADDING.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *SPINBOX_BUTTON_PADDING.read().unwrap()
+    registry_float("spinbox_button_padding").unwrap_or(0.0)
 }
 
 pub fn scrollbar_width() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("scrollbar_width") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *SCROLLBAR_WIDTH.read().unwrap()
+    registry_float("scrollbar_width").unwrap_or(4.0)
 }
 
 /// The thickness of a CENTRED scrollbar — one that rides the centre line of
@@ -2751,8 +1264,8 @@ pub fn centred_scrollbar_width() -> f32 {
 }
 
 pub fn set_scrollbar_width(width: f32) {
-    if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
-        *lock = width;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("scrollbar_width", width);
     }
 }
 
@@ -2761,86 +1274,32 @@ pub fn set_scrollbar_width(width: f32) {
 /// Framed inner lists keep their own tight 4px hug; this is for bars floating
 /// over a plate.
 pub fn scrollbar_inset() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("scrollbar_inset") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = SCROLLBAR_INSET.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *SCROLLBAR_INSET.read().unwrap()
+    registry_float("scrollbar_inset").unwrap_or(16.0)
 }
 
 pub fn tree_opacity() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("tree_opacity") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = TREE_OPACITY.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *TREE_OPACITY.read().unwrap()
+    registry_float("tree_opacity").unwrap_or(1.0)
 }
 
 pub fn set_tree_opacity(opacity: f32) {
-    if let Ok(mut lock) = TREE_OPACITY.write() {
-        *lock = opacity;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("tree_opacity", opacity);
     }
 }
 
 pub fn tree_blur() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("tree_blur") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = TREE_BLUR.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *TREE_BLUR.read().unwrap()
+    registry_float("tree_blur").unwrap_or(0.0)
 }
 
 pub fn set_tree_blur(blur: f32) {
-    if let Ok(mut lock) = TREE_BLUR.write() {
-        *lock = blur;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("tree_blur", blur);
     }
 }
 
 pub fn set_spinbox_button_padding(padding: f32) {
-    if let Ok(mut lock) = SPINBOX_BUTTON_PADDING.write() {
-        *lock = padding;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("spinbox_button_padding", padding);
     }
 }
 
@@ -2857,41 +1316,34 @@ pub fn set_textbox_corner_radius(radius: f32) {
 }
 
 pub fn textbox_line_wrap() -> bool {
-    lazy_init_style_registry();
-    *TEXTBOX_LINE_WRAP.read().unwrap()
+    registry_bool("textbox_line_wrap").unwrap_or(true)
 }
 
 pub fn set_textbox_line_wrap(wrap: bool) {
-    lazy_init_style_registry();
-    if let Ok(mut lock) = TEXTBOX_LINE_WRAP.write() {
-        *lock = wrap;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("textbox_line_wrap", if wrap { 1.0 } else { 0.0 });
     }
 }
 
 pub fn touchpad_natural_scroll() -> bool {
-    lazy_init_style_registry();
-    *TOUCHPAD_NATURAL_SCROLL.read().unwrap()
+    registry_bool("touchpad_natural_scroll").unwrap_or(false)
 }
 
 pub fn set_touchpad_natural_scroll(enabled: bool) {
-    lazy_init_style_registry();
-    if let Ok(mut lock) = TOUCHPAD_NATURAL_SCROLL.write() {
-        *lock = enabled;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("touchpad_natural_scroll", if enabled { 1.0 } else { 0.0 });
     }
 }
 
 pub fn textbox_multiline_border_width() -> f32 {
-    lazy_init_style_registry();
-    *TEXTBOX_MULTILINE_BORDER_WIDTH.read().unwrap()
+    registry_float("textbox_multiline_border_width").unwrap_or(1.0)
 }
 
 pub fn set_textbox_multiline_border_width(width: f32) {
-    lazy_init_style_registry();
-    if let Ok(mut lock) = TEXTBOX_MULTILINE_BORDER_WIDTH.write() {
-        *lock = width;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("textbox_multiline_border_width", width);
     }
 }
-
 
 pub fn list_corner_radius() -> f32 {
     lazy_init_style_registry();
@@ -3135,188 +1587,64 @@ pub fn set_dropdown_corner_radius(radius: f32) {
 }
 
 pub fn color_selector_preview_margin() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("color_selector_preview_margin") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_MARGIN.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *COLOR_SELECTOR_PREVIEW_MARGIN.read().unwrap()
+    registry_float("color_selector_preview_margin").unwrap_or(0.0)
 }
 
 pub fn set_color_selector_preview_margin(margin: f32) {
-    if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_MARGIN.write() {
-        *lock = margin;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("color_selector_preview_margin", margin);
     }
 }
 
-
-
 pub fn paginator_tab_padding_x() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_x") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = PAGINATOR_TAB_PADDING_X.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *PAGINATOR_TAB_PADDING_X.read().unwrap()
+    registry_float("paginator_tab_padding_x").unwrap_or(10.0)
 }
 
 pub fn set_paginator_tab_padding_x(padding: f32) {
-    if let Ok(mut lock) = PAGINATOR_TAB_PADDING_X.write() {
-        *lock = padding;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("paginator_tab_padding_x", padding);
     }
 }
 
 pub fn button_padding() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            let mut found = false;
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("button_padding") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = BUTTON_PADDING.write() {
-                            *lock = val;
-                            found = true;
-                        }
-                    }
-                }
-            }
-            if !found {
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_y") {
-                        let rest = rest.trim_start_matches([' ', '=', '"']);
-                        let val_str = rest.trim_end_matches('"').trim();
-                        if let Ok(val) = val_str.parse::<f32>() {
-                            if let Ok(mut lock) = BUTTON_PADDING.write() {
-                                *lock = val;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *BUTTON_PADDING.read().unwrap()
+    registry_float("button_padding")
+        .or_else(|| registry_float("paginator_tab_padding_y"))
+        .unwrap_or(14.0)
 }
 
 pub fn set_button_padding(padding: f32) {
-    if let Ok(mut lock) = BUTTON_PADDING.write() {
-        *lock = padding;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("button_padding", padding);
     }
 }
 
 pub fn button_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("button_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = BUTTON_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *BUTTON_HEIGHT.read().unwrap()
+    registry_float("button_height").unwrap_or(DEFAULT_CONTROL_HEIGHT)
 }
 
 pub fn ramp_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("ramp_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = RAMP_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *RAMP_HEIGHT.read().unwrap()
+    registry_float("ramp_height").unwrap_or(32.0)
 }
 
 pub fn set_ramp_height(height: f32) {
-    if let Ok(mut lock) = RAMP_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("ramp_height", height);
     }
 }
 
 pub fn set_button_height(height: f32) {
-    if let Ok(mut lock) = BUTTON_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("button_height", height);
     }
 }
 
 pub fn button_strip_spacing() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("button_strip_spacing") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = BUTTON_STRIP_SPACING.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *BUTTON_STRIP_SPACING.read().unwrap()
+    registry_float("button_strip_spacing").unwrap_or(8.0)
 }
 
 pub fn set_button_strip_spacing(spacing: f32) {
-    if let Ok(mut lock) = BUTTON_STRIP_SPACING.write() {
-        *lock = spacing;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("button_strip_spacing", spacing);
     }
 }
 
@@ -3329,146 +1657,54 @@ pub fn set_paginator_tab_padding_y(padding: f32) {
 }
 
 pub fn textbox_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("textbox_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = TEXTBOX_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *TEXTBOX_HEIGHT.read().unwrap()
+    registry_float("textbox_height").unwrap_or(DEFAULT_CONTROL_HEIGHT)
 }
 
 pub fn set_textbox_height(height: f32) {
-    if let Ok(mut lock) = TEXTBOX_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("textbox_height", height);
     }
 }
 
 pub fn dropdown_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("dropdown_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = DROPDOWN_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *DROPDOWN_HEIGHT.read().unwrap()
+    registry_float("dropdown_height").unwrap_or(DEFAULT_CONTROL_HEIGHT)
 }
 
 pub fn set_dropdown_height(height: f32) {
-    if let Ok(mut lock) = DROPDOWN_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("dropdown_height", height);
     }
 }
 
 pub fn slider_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("slider_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = SLIDER_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *SLIDER_HEIGHT.read().unwrap()
+    registry_float("slider_height").unwrap_or(DEFAULT_TRACK_HEIGHT)
 }
 
 pub fn set_slider_height(height: f32) {
-    if let Ok(mut lock) = SLIDER_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("slider_height", height);
     }
 }
 
 pub fn progressbar_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("progressbar_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = PROGRESSBAR_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *PROGRESSBAR_HEIGHT.read().unwrap()
+    registry_float("progressbar_height").unwrap_or(DEFAULT_TRACK_HEIGHT)
 }
 
 pub fn set_progressbar_height(height: f32) {
-    if let Ok(mut lock) = PROGRESSBAR_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("progressbar_height", height);
     }
 }
 
 pub fn rangeslider_height() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("rangeslider_height") {
-                    let rest = rest.trim_start_matches([' ', '=', '"']);
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = RANGESLIDER_HEIGHT.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *RANGESLIDER_HEIGHT.read().unwrap()
+    registry_float("rangeslider_height").unwrap_or(DEFAULT_TRACK_HEIGHT)
 }
 
 pub fn set_rangeslider_height(height: f32) {
-    if let Ok(mut lock) = RANGESLIDER_HEIGHT.write() {
-        *lock = height;
+    if let Ok(mut r) = get_style_registry().write() {
+        r.set_float("rangeslider_height", height);
     }
 }
-
-
 
 /// The DE's font families, from the shared config's `fonts { }` block:
 /// `(sans_serif, serif, monospace, terminal)`.
@@ -3881,30 +2117,34 @@ mod tests {
         assert!(bottom > 20.0);
     }
 
-
-    // The `Once`-initialised style getters below are checked against the
-    // statics their config pass fills, under whatever the live config says.
-    // None of them WRITES: these are process globals and the suite runs in
-    // parallel, so a set/restore window is visible to every other test — and
-    // a "restore" that writes a hardcoded literal (as these did) clobbers a
-    // non-default config permanently. What a getter here can actually get
-    // wrong is which static it reads, and that is what these pin.
-
+    /// These keys have ONE home, the style registry (since 2026-10-08): the setter writes
+    /// it, the getter reads it, an unset key is its default, and a length in other units
+    /// resolves through the metric — which the slot each used to have, filled by a scan
+    /// of `key = number` lines, ignored. Writes go to this thread's test overlay, so no
+    /// other test sees them.
     #[test]
-    fn test_nested_section_label_alignment() {
-        let align = nested_section_label_alignment();
-        assert_eq!(align, *super::NESTED_SECTION_LABEL_ALIGNMENT.read().unwrap());
+    fn a_style_key_lives_in_the_registry_alone() {
+        set_button_height(33.0);
+        assert_eq!(button_height(), 33.0);
+        set_nested_section_label_alignment(2);
+        assert_eq!(nested_section_label_alignment(), 2);
+        set_dropdown_height(31.0);
+        assert_eq!(dropdown_height(), 31.0);
 
-        let offset = nested_section_label_offset();
-        assert_eq!(offset, *super::NESTED_SECTION_LABEL_OFFSET.read().unwrap());
-        assert!(offset.is_finite(), "label offset {offset}");
-    }
+        set_section_label_font("Circe Slab A 12");
+        assert_eq!(section_label_font(), "Circe Slab A 12");
+        set_section_label_font("");
+        assert_eq!(section_label_font(), "Berkeley Mono", "an empty font falls back");
 
-    #[test]
-    fn test_dropdown_height() {
-        let h = dropdown_height();
-        assert_eq!(h, *super::DROPDOWN_HEIGHT.read().unwrap());
-        assert!(h.is_finite() && h > 0.0, "dropdown height {h}");
+        // `button_padding` reads `paginator_tab_padding_y` when it has none of its own.
+        get_style_registry().write().unwrap().set_float("paginator_tab_padding_y", 5.0);
+        assert_eq!(button_padding(), 5.0);
+        set_button_padding(9.0);
+        assert_eq!(button_padding(), 9.0, "its own wins");
+
+        let len = crate::units::Len::mm(5.0);
+        get_style_registry().write().unwrap().set_len("textbox_height", len);
+        assert_eq!(textbox_height(), len.to_px(), "a length in mm is honoured");
     }
 
     #[test]
@@ -3912,9 +2152,9 @@ mod tests {
         // A legacy key: set (by config or setter) it is honoured; unset it
         // lands on the ladder — the root plate's gap.
         let gap = column_gap();
-        match (registry_float("column_gap"), *super::COLUMN_GAP.read().unwrap()) {
-            (Some(v), _) | (None, Some(v)) => assert_eq!(gap, v),
-            (None, None) => assert_eq!(gap, root_plate_gap()),
+        match registry_float("column_gap") {
+            Some(v) => assert_eq!(gap, v),
+            None => assert_eq!(gap, root_plate_gap()),
         }
         assert!(gap.is_finite() && gap >= 0.0, "column gap {gap}");
     }
