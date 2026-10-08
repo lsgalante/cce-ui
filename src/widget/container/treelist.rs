@@ -540,18 +540,17 @@ impl TreeList {
                         TreeElement::Section { ref path, collapsed, .. } => {
                             self.right_clicked_section = Some(path.clone());
                             
-                            let mut options = vec![path.clone()];
-                            if collapsed {
-                                options.push("Expand".to_string());
-                            } else {
-                                options.push("Collapse".to_string());
-                            }
-                            options.push("Expand All".to_string());
-                            options.push("Collapse All".to_string());
-                            
+                            use crate::widget::ContextAction as CA;
+                            let rows = vec![
+                                (path.clone(), None),
+                                if collapsed { ("Expand".to_string(), Some(CA::ExpandNode)) } else { ("Collapse".to_string(), Some(CA::CollapseNode)) },
+                                ("Expand All".to_string(), Some(CA::ExpandAll)),
+                                ("Collapse All".to_string(), Some(CA::CollapseAll)),
+                            ];
+
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
                             // SAFETY: as above — our own adapter, live while its event is routed.
-                            if let Some(h) = host { unsafe { ui.show_context_menu(px, py - scroll_offset, options, 1, h) }; }
+                            if let Some(h) = host { unsafe { ui.show_context_menu_rows(px, py - scroll_offset, rows, 1, h) }; }
                             changed = true;
                         }
                         TreeElement::Leaf { original_idx, ref path, ref name, indent, ref val } => {
@@ -564,15 +563,16 @@ impl TreeList {
                                 original_idx,
                             });
                             
-                            let options = vec![
-                                path.clone(),
-                                "Copy Key".to_string(),
-                                "Copy Value".to_string(),
-                                "Delete".to_string(),
+                            use crate::widget::ContextAction as CA;
+                            let rows = vec![
+                                (path.clone(), None),
+                                ("Copy Key".to_string(), Some(CA::CopyKey)),
+                                ("Copy Value".to_string(), Some(CA::CopyValue)),
+                                ("Delete".to_string(), Some(CA::DeleteKey)),
                             ];
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
                             // SAFETY: as above — our own adapter, live while its event is routed.
-                            if let Some(h) = host { unsafe { ui.show_context_menu(px, py - scroll_offset, options, 1, h) }; }
+                            if let Some(h) = host { unsafe { ui.show_context_menu_rows(px, py - scroll_offset, rows, 1, h) }; }
                             changed = true;
                         }
                     }

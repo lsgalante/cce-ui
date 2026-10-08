@@ -16,6 +16,17 @@
 //! - **actions** — focus for every keyboard stop, click for every [`FocusRole::Plate`];
 //! - **focus** — the context's focused widget, else the window.
 //!
+//! An open context menu (`widget::context_menu`, one per thread, whatever app shows it) is a
+//! [`Role::Menu`] under the window, its rows items: a `✓` row a checkable item, a `●` / `○`
+//! row a radio item (toggled as marked), a slider row a slider with its number, a header a
+//! label; `-` separators are left out. While it is open the keyboard is in it, so the focus
+//! is its highlighted row, else the menu.
+//!
+//! An app that draws without a [`UiContext`] (the status bar, the terminal, the map…) says
+//! what it shows through [`Application::accessibility`](crate::backend::app::Application::accessibility),
+//! pushing AccessKit nodes into [`AppNodes`]; [`app_tree`] puts both halves and the menu
+//! under one window.
+//!
 //! Every call answers the whole tree. AccessKit's adapters compare it with the last one and
 //! raise events only for nodes that changed; sending changed nodes alone is an optimisation
 //! for later, with `backend::frame`'s damage diff as its model.
@@ -27,6 +38,53 @@ use crate::widget::{FocusRole, WidgetHost, WidgetId};
 
 /// The window's node, the root every widget hangs from.
 pub const WINDOW: NodeId = NodeId(0);
+
+/// The open context menu's node, and the first of its rows' (`MENU + 1 + row`): far above any
+/// widget's id.
+pub const MENU: NodeId = NodeId(1 << 62);
+
+/// The node of the open context menu's row `row`.
+pub fn menu_row_id(row: usize) -> NodeId {
+    NodeId(MENU.0 + 1 + row as u64)
+}
+
+/// Where an app's own nodes ([`AppNodes::id`]) begin: above every widget's, below the menu's.
+const APP_BASE: u64 = 1 << 61;
+
+/// The nodes an app declares itself, for what it draws without a [`UiContext`] — see
+/// [`Application::accessibility`](crate::backend::app::Application::accessibility). Ids come
+/// from [`AppNodes::id`], an app's own numbering; children are set on a node with
+/// `Node::set_children`, and only the nodes pushed with [`push_top`](Self::push_top) hang
+/// from the window.
+#[derive(Default)]
+pub struct AppNodes {
+    nodes: Vec<(NodeId, Node)>,
+    top: Vec<NodeId>,
+    focus: Option<NodeId>,
+}
+
+impl AppNodes {
+    /// The node id of the app's own node `n` (any number below 2^61).
+    pub fn id(n: u64) -> NodeId {
+        NodeId(APP_BASE + (n & (APP_BASE - 1)))
+    }
+
+    /// A node that hangs from another of the app's nodes (which lists it as a child).
+    pub fn push(&mut self, id: NodeId, node: Node) {
+        self.nodes.push((id, node));
+    }
+
+    /// A node directly under the window, in the order pushed (after the widgets').
+    pub fn push_top(&mut self, id: NodeId, node: Node) {
+        self.top.push(id);
+        self.nodes.push((id, node));
+    }
+
+    /// The node the keyboard is on, when it is one of the app's own.
+    pub fn set_focus(&mut self, id: NodeId) {
+        self.focus = Some(id);
+    }
+}
 
 /// A widget's node: its id, moved up one so no widget can be the window.
 pub fn node_id(id: WidgetId) -> NodeId {
@@ -114,6 +172,30 @@ fn truth(value: &str) -> Option<bool> {
 /// The whole tree of `ctx`'s registered, visible widgets under a window node named `title`,
 /// at HiDPI `scale` (see the module docs).
 pub fn tree_update(ctx: &UiContext, title: &str, scale: f64) -> TreeUpdate {
+    window_tree(Some(ctx), AppNodes::default(), title, scale)
+}
+
+/// An app's whole tree: its [`UiContext`]'s widgets if it has one, the nodes its
+/// [`Application::accessibility`](crate::backend::app::Application::accessibility) declares,
+/// and an open context menu, under a window named by its settings' title.
+pub fn app_tree<A: crate::backend::app::Application>(app: &mut A, scale: f64) -> TreeUpdate {
+    let mut own = AppNodes::default();
+    app.accessibility(&mut own);
+    let title = app.settings().title;
+    window_tree(app.ui_context(), own, &title, scale)
+}
+
+/// The tree of `ctx`'s widgets (if any) and `app`'s own nodes under one window. Focus, most
+/// specific first: an open menu's, else the app's own, else the context's, else the window.
+pub fn window_tree(ctx: Option<&UiContext>, app: AppNodes, title: &str, scale: f64) -> TreeUpdate {
+    let empty;
+    let ctx = match ctx {
+        Some(ctx) => ctx,
+        None => {
+            empty = UiContext::new();
+            &empty
+        }
+    };
     // The widgets, read once. Registered pointers name live widgets (the registry resolves
     // only those: `widget::Owned`, `widget::core::Liveness`), and nothing mutates them while
     // this borrows the context.
@@ -145,14 +227,82 @@ pub fn tree_update(ctx: &UiContext, title: &str, scale: f64) -> TreeUpdate {
         window.set_label(title);
     }
     window.set_transform(Affine::scale(scale));
-    window.set_children(top.iter().map(|(id, _, _)| node_id(*id)).collect::<Vec<_>>());
+    let mut children: Vec<NodeId> = top.iter().map(|(id, _, _)| node_id(*id)).collect();
+    children.extend(app.top.iter().copied());
+    nodes.extend(app.nodes);
+    if crate::widget::context_menu::is_visible() {
+        children.push(MENU);
+    }
+    window.set_children(children);
     nodes.push((WINDOW, window));
 
-    let focus = ctx.focused_widget.filter(|id| shown.contains(id)).map(node_id).unwrap_or(WINDOW);
+    let mut focus = app
+        .focus
+        .or_else(|| ctx.focused_widget.filter(|id| shown.contains(id)).map(node_id))
+        .unwrap_or(WINDOW);
+    if let Some(menu_focus) = push_context_menu(&mut nodes) {
+        focus = menu_focus;
+    }
     let mut tree = TreeInfo::new(WINDOW);
     tree.toolkit_name = Some("cce-ui".into());
     tree.toolkit_version = Some(env!("CARGO_PKG_VERSION").into());
     TreeUpdate { nodes, tree: Some(tree), tree_id: TreeId::ROOT, focus }
+}
+
+/// The open context menu and its rows, pushed onto `nodes`; the node the keyboard is on
+/// while it is open, or `None` when no menu is.
+fn push_context_menu(nodes: &mut Vec<(NodeId, Node)>) -> Option<NodeId> {
+    use crate::widget::context_menu as cm;
+    if !cm::is_visible() {
+        return None;
+    }
+    let (mx, my, mw, mh) = (cm::x() as f64, cm::y() as f64, cm::w() as f64, cm::h() as f64);
+    let headers = cm::header_count();
+    let mut menu = Node::new(Role::Menu);
+    menu.set_bounds(Rect::new(mx, my, mx + mw, my + mh));
+    let mut rows = Vec::new();
+    for (i, label) in cm::options().iter().enumerate() {
+        if label.trim() == "-" {
+            continue;
+        }
+        // `split_mark` answers the glyph a mark is drawn as: "check" for `✓`, "circle" /
+        // "circle-outline" for a radio row on / off.
+        let (mark, text) = cm::split_mark(label);
+        let role = if i < headers {
+            Role::Label
+        } else if cm::slider(i).is_some() {
+            Role::Slider
+        } else {
+            match mark {
+                Some("check") => Role::MenuItemCheckBox,
+                Some("circle") | Some("circle-outline") => Role::MenuItemRadio,
+                _ => Role::MenuItem,
+            }
+        };
+        let mut row = Node::new(role);
+        row.set_label(text.trim());
+        let y = cm::row_y(i) as f64;
+        row.set_bounds(Rect::new(mx, y, mx + mw, y + cm::ROW_H as f64));
+        match (role, mark) {
+            (Role::MenuItemCheckBox, _) => row.set_toggled(Toggled::True),
+            (Role::MenuItemRadio, Some(glyph)) => row.set_toggled(Toggled::from(glyph == "circle")),
+            _ => {}
+        }
+        if let Some(slider) = cm::slider(i) {
+            row.set_numeric_value(slider.value as f64);
+            row.set_min_numeric_value(slider.min as f64);
+            row.set_max_numeric_value(slider.max as f64);
+            row.set_numeric_value_step(slider.step as f64);
+        }
+        if i >= headers {
+            row.add_action(Action::Click);
+        }
+        rows.push(menu_row_id(i));
+        nodes.push((menu_row_id(i), row));
+    }
+    menu.set_children(rows);
+    nodes.push((MENU, menu));
+    Some(cm::hovered_item().filter(|&i| i >= headers).map(menu_row_id).unwrap_or(MENU))
 }
 
 #[cfg(test)]
@@ -222,6 +372,66 @@ mod tests {
         assert_eq!(update.nodes.len(), 1, "only the window");
         assert_eq!(update.focus, WINDOW);
         assert_eq!(node(&update, WINDOW).label(), None, "no title, no name");
+    }
+
+    #[test]
+    fn an_open_context_menu_is_a_menu_and_holds_the_keyboard() {
+        use crate::widget::context_menu as cm;
+        let ctx = UiContext::new();
+        let rows = vec![
+            "[TextBox]: Name".to_string(),
+            "✓ Wrap lines".to_string(),
+            "● Follow editor".to_string(),
+            "-".to_string(),
+            "Opacity".to_string(),
+            "Copy".to_string(),
+        ];
+        cm::show(40.0, 50.0, rows, 1, WidgetId(7));
+        cm::set_row_slider(4, cm::MenuSlider { value: 50.0, min: 0.0, max: 100.0, step: 5.0, decimals: 0, suffix: "%" });
+        let update = tree_update(&ctx, "", 1.0);
+        assert!(node(&update, WINDOW).children().contains(&MENU), "the menu hangs from the window");
+        let menu = node(&update, MENU);
+        assert_eq!(menu.role(), Role::Menu);
+        assert_eq!(menu.children(), &[menu_row_id(0), menu_row_id(1), menu_row_id(2), menu_row_id(4), menu_row_id(5)][..], "no separator");
+        let row = |i| node(&update, menu_row_id(i));
+        assert_eq!((row(0).role(), row(0).label()), (Role::Label, Some("[TextBox]: Name")));
+        assert_eq!((row(1).role(), row(1).label(), row(1).toggled()), (Role::MenuItemCheckBox, Some("Wrap lines"), Some(Toggled::True)));
+        assert_eq!((row(2).role(), row(2).toggled()), (Role::MenuItemRadio, Some(Toggled::True)));
+        assert_eq!((row(4).role(), row(4).numeric_value(), row(4).max_numeric_value()), (Role::Slider, Some(50.0), Some(100.0)));
+        assert_eq!(row(5).role(), Role::MenuItem);
+        assert!(row(5).supports_action(Action::Click) && !row(0).supports_action(Action::Click));
+        assert_eq!(update.focus, MENU, "nothing highlighted: the menu has the keyboard");
+        cm::set_hovered_item(Some(5));
+        assert_eq!(tree_update(&ctx, "", 1.0).focus, menu_row_id(5), "the highlight is the focus");
+        cm::hide();
+        let closed = tree_update(&ctx, "", 1.0);
+        assert!(!node(&closed, WINDOW).children().contains(&MENU) && closed.focus == WINDOW);
+    }
+
+    #[test]
+    fn an_app_without_widgets_declares_its_own_nodes() {
+        // A status-bar module: no UiContext, a clock it draws itself.
+        let mut own = AppNodes::default();
+        let (bar, clock, button) = (AppNodes::id(1), AppNodes::id(2), AppNodes::id(3));
+        let mut group = Node::new(Role::Group);
+        group.set_label("Status");
+        group.set_children(vec![clock, button]);
+        own.push_top(bar, group);
+        let mut label = Node::new(Role::Label);
+        label.set_value("12:30");
+        own.push(clock, label);
+        let mut b = Node::new(Role::Button);
+        b.set_label("Volume");
+        b.add_action(Action::Click);
+        own.push(button, b);
+        own.set_focus(button);
+
+        let update = window_tree(None, own, "Status bar", 1.0);
+        assert_eq!(node(&update, WINDOW).children(), &[bar][..], "only what was pushed to the top");
+        assert_eq!(node(&update, bar).children(), &[clock, button][..]);
+        assert_eq!(node(&update, clock).value(), Some("12:30"));
+        assert_eq!(update.focus, button, "the app's focus");
+        assert!(bar != WINDOW && bar != MENU && bar.0 > node_id(WidgetId(usize::MAX >> 4)).0, "its own id range");
     }
 
     #[test]

@@ -1571,9 +1571,11 @@ two rules keep the retrofit cheap:
 
 - **A new widget declares what it is**: its `focus_role`, and a label that names it to a
   person (not to a host).
-- **An action is keyed by an ID, never by its label text.** A context-menu row's label is its
-  identity today and hosts match on it, so translating any label breaks its action; do not
-  add more code that matches on displayed text.
+- **An action is keyed by an ID, never by its label text.** Give a context-menu row its
+  action with `context_menu::set_row_actions` (or build the menu with
+  `UiContext::show_context_menu_rows`); a press runs the row's action, and matching the
+  English label (`context_menu::legacy_action_for_label`) is only the fallback for menus that
+  set none. Do not add code that matches on displayed text.
 
 Phase 0 is done (2026-10-08): every font system is built with `locale::locale()` (from
 `cce-core`): `LC_ALL`, else `LC_CTYPE`, else `LANG`, as a BCP 47 tag; in the browser,
@@ -1705,10 +1707,11 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `compute.rs` — what a compute job is, apart from the device that runs it: `Kernel`,
   `Binding`, the job rules and naga's parse (see "Compute jobs run in the browser too").
   `vk::ComputeDevice` and `web::ComputeDevice` run them.
-- `a11y.rs` — the accessibility tree: `tree_update(&UiContext, title, scale)` is AccessKit's
-  `TreeUpdate` for a window's registered widgets (role, name, value, bounds, actions,
-  focus); `WidgetHost::a11y_role` / `a11y_value` are what a widget says about itself. No
-  platform adapter yet (`docs/rfc-accessibility-locale.md`, phases 1–2).
+- `a11y.rs` — the accessibility tree, in AccessKit's schema: `app_tree(&mut app, scale)` is a
+  window's `TreeUpdate` — its registered widgets (role, name, value, bounds, actions, focus;
+  `WidgetHost::a11y_role` / `a11y_value` are what a widget says about itself), the nodes an
+  app without widgets declares (`Application::accessibility`, `AppNodes`), and an open context
+  menu. No platform adapter yet (`docs/rfc-accessibility-locale.md`, phase 2).
 - `ime.rs` — input-method composition shared between the editing widget and the shell:
   `Preedit`, the composition and its generation, the reported caret, the reset request
   (see "Input-method composition is one model for every shell").

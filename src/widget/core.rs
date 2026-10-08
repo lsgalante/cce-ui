@@ -532,6 +532,34 @@ pub mod context_menu {
     pub const MARK_OFF: &str = "○ ";
 
     /// The glyph a label's leading mark names, and the label without it.
+    /// A row's action read off its English label: the fallback for a menu built without
+    /// [`set_row_actions`], as every menu was until 2026-10-08. It breaks the moment a label
+    /// is translated (`docs/rfc-accessibility-locale.md`), so the toolkit's own menus set
+    /// their actions and this serves only menus that do not.
+    pub fn legacy_action_for_label(label: &str) -> Option<crate::widget::ContextAction> {
+        use crate::widget::ContextAction as CA;
+        Some(match label {
+            "Cut" => CA::Cut,
+            "Copy" => CA::Copy,
+            "Paste" => CA::Paste,
+            "Select All" => CA::SelectAll,
+            "Undo" => CA::Undo,
+            "Redo" => CA::Redo,
+            "Clear" => CA::ClearText,
+            "Copy Key" => CA::CopyKey,
+            "Copy Value" => CA::CopyValue,
+            "Delete" => CA::DeleteKey,
+            "Expand" => CA::ExpandNode,
+            "Collapse" => CA::CollapseNode,
+            "Expand All" => CA::ExpandAll,
+            "Collapse All" => CA::CollapseAll,
+            "Copy Path" => CA::CopyPath,
+            // The Ramp toggle carries its check state in the label.
+            "✓ Collapse controls" | "Collapse controls" => CA::ToggleRampControls,
+            _ => return None,
+        })
+    }
+
     pub fn split_mark(label: &str) -> (Option<&'static str>, &str) {
         for (mark, glyph) in [(MARK_CHECK, "check"), (MARK_ON, "circle"), (MARK_OFF, "circle-outline")] {
             if let Some(rest) = label.strip_prefix(mark) {
@@ -664,6 +692,11 @@ pub mod context_menu {
         /// Rows that lead to a PAGE, parallel to `options` — see
         /// [`set_row_page`](Self::set_row_page). Emptied by every `show`.
         pub pages: Vec<bool>,
+        /// What each row DOES, parallel to `options` — see
+        /// [`set_row_actions`](Self::set_row_actions). A row's action is its identity; its
+        /// label is only what is shown, so a translated label still runs the action.
+        /// Emptied by every `show`.
+        pub actions: Vec<Option<crate::widget::ContextAction>>,
         /// On a page: the title of the plate it was turned to from, which
         /// the back band across its top reads as `‹ Title`. `None` on a menu
         /// that was opened rather than turned to.
@@ -735,6 +768,7 @@ pub mod context_menu {
                 header_count: 0,
                 sliders: Vec::new(),
                 pages: Vec::new(),
+                actions: Vec::new(),
                 back: None,
                 back_hovered: false,
                 turned: false,
@@ -802,6 +836,7 @@ pub mod context_menu {
             self.header_count = header_count;
             self.sliders = vec![None; self.options.len()];
             self.pages = vec![false; self.options.len()];
+            self.actions = vec![None; self.options.len()];
             self.back = None;
             self.back_hovered = false;
             self.turned = false;
@@ -814,6 +849,17 @@ pub mod context_menu {
 
         /// Make row `idx` lead to a PAGE — see [`PageTurn`]. It wears
         /// [`PAGE_MARK`] at its right end; the plate widens for it.
+        /// Give the rows their actions, parallel to `options` (a header or a row the host
+        /// handles itself is `None`); called after `show`, like `set_row_page`. A press on a
+        /// row runs its action on the menu's target. Rows with none fall back to matching
+        /// the label (`legacy_action_for_label`), which only works in English: build
+        /// menus with actions.
+        pub fn set_row_actions(&mut self, actions: Vec<Option<crate::widget::ContextAction>>) {
+            let n = self.options.len();
+            self.actions = actions;
+            self.actions.resize(n, None);
+        }
+
         pub fn set_row_page(&mut self, idx: usize) {
             if idx >= self.options.len() {
                 return;
@@ -1292,27 +1338,7 @@ pub mod context_menu {
                             if let Some(target_ptr) = ctx.tree.get_ptr(target_id) {
                                 unsafe {
                                     let target = &mut *target_ptr;
-                                    use crate::widget::ContextAction as CA;
-                                    let action = match opt.as_str() {
-                                        "Cut" => Some(CA::Cut),
-                                        "Copy" => Some(CA::Copy),
-                                        "Paste" => Some(CA::Paste),
-                                        "Select All" => Some(CA::SelectAll),
-                                        "Undo" => Some(CA::Undo),
-                                        "Redo" => Some(CA::Redo),
-                                        "Clear" => Some(CA::ClearText),
-                                        "Copy Key" => Some(CA::CopyKey),
-                                        "Copy Value" => Some(CA::CopyValue),
-                                        "Delete" => Some(CA::DeleteKey),
-                                        "Expand" => Some(CA::ExpandNode),
-                                        "Collapse" => Some(CA::CollapseNode),
-                                        "Expand All" => Some(CA::ExpandAll),
-                                        "Collapse All" => Some(CA::CollapseAll),
-                                        "Copy Path" => Some(CA::CopyPath),
-                                        // The Ramp toggle carries its check state in the label.
-                                        "✓ Collapse controls" | "Collapse controls" => Some(CA::ToggleRampControls),
-                                        _ => None,
-                                    };
+                                    let action = self.actions.get(idx).copied().flatten().or_else(|| legacy_action_for_label(&opt));
                                     if let Some(action) = action {
                                         let _ = target.context_action(action);
                                     }
@@ -1740,6 +1766,21 @@ pub mod context_menu {
     /// Make row `idx` of the shown menu lead to a page — see [`PageTurn`].
     /// Call after [`show`] / [`show_page`], which clear every row back to an
     /// action.
+    /// Give the open menu's rows their actions — see [`ContextMenuState::set_row_actions`].
+    pub fn set_row_actions(actions: Vec<Option<crate::widget::ContextAction>>) {
+        CONTEXT_MENU.with(|m| m.borrow_mut().set_row_actions(actions));
+    }
+
+    /// The action row `idx` of the open menu runs, if it was given one.
+    pub fn row_action(idx: usize) -> Option<crate::widget::ContextAction> {
+        CONTEXT_MENU.with(|m| m.borrow().actions.get(idx).copied().flatten())
+    }
+
+    /// How many of the open menu's first rows are headers (a title, `File:` / `Key:`).
+    pub fn header_count() -> usize {
+        CONTEXT_MENU.with(|m| m.borrow().header_count)
+    }
+
     pub fn set_row_page(idx: usize) {
         CONTEXT_MENU.with(|m| m.borrow_mut().set_row_page(idx));
     }
@@ -2620,6 +2661,78 @@ mod context_menu_page_tests {
         context_menu::constrain_to(0.0, 0.0, 2000.0, my + 10.0);
         assert!(context_menu::y() + context_menu::h() <= my + 10.0 + 0.01);
         assert!(context_menu::y() >= 0.0);
+        context_menu::hide();
+    }
+}
+
+#[cfg(test)]
+mod context_menu_action_tests {
+    use super::context_menu::{self, ROW_H};
+    use crate::context::UiContext;
+    use crate::widget::{ContextAction, ElementState, MouseButton, Owned, Widget, WidgetHost};
+
+    /// A widget that remembers the last action a menu ran on it.
+    struct Recorder {
+        base: Widget,
+        got: Option<ContextAction>,
+    }
+    impl WidgetHost for Recorder {
+        crate::impl_widget_base!(Recorder);
+        fn color(&self) -> [f32; 4] {
+            [0.0; 4]
+        }
+        fn context_action(&mut self, action: ContextAction) -> bool {
+            self.got = Some(action);
+            true
+        }
+    }
+
+    fn press_row(ctx: &mut UiContext, idx: usize) {
+        let (x, y) = (context_menu::x() + 10.0, context_menu::row_y(idx) + ROW_H * 0.5);
+        context_menu::mouse_input(MouseButton::Left, ElementState::Pressed, x, y, Some(ctx));
+    }
+
+    #[test]
+    fn a_row_runs_its_action_whatever_its_label_says() {
+        let mut ctx = UiContext::new();
+        let mut w = Owned::new(Recorder { base: Widget::new(), got: None });
+        ctx.register_host(&mut w);
+        let id = w.base().id();
+
+        // A label the English table has never seen: only the row's action can say what it is.
+        context_menu::show(0.0, 0.0, vec!["[Recorder]".into(), "Kopieren".into()], 1, id);
+        context_menu::set_row_actions(vec![None, Some(ContextAction::Copy)]);
+        press_row(&mut ctx, 1);
+        assert_eq!(w.got, Some(ContextAction::Copy));
+
+        // A row with an action and an English label that names ANOTHER: the action wins.
+        w.got = None;
+        context_menu::show(0.0, 0.0, vec!["[Recorder]".into(), "Paste".into()], 1, id);
+        context_menu::set_row_actions(vec![None, Some(ContextAction::SelectAll)]);
+        press_row(&mut ctx, 1);
+        assert_eq!(w.got, Some(ContextAction::SelectAll));
+
+        // A menu built without actions still works in English, through the fallback.
+        w.got = None;
+        context_menu::show(0.0, 0.0, vec!["[Recorder]".into(), "Paste".into()], 1, id);
+        press_row(&mut ctx, 1);
+        assert_eq!(w.got, Some(ContextAction::Paste));
+    }
+
+    #[test]
+    fn the_toolkits_own_menus_carry_their_actions() {
+        let mut ctx = UiContext::new();
+        let mut tb = Owned::new(crate::widget::TextBox::new(String::new()).with_label("Name"));
+        ctx.register_host(&mut tb);
+        let ptr = &mut *tb as &mut (dyn WidgetHost + 'static) as *mut (dyn WidgetHost + 'static);
+        // SAFETY: `tb` is live and registered for the whole test.
+        unsafe { ctx.handle_right_click(ptr, 5.0, 5.0) };
+        let options = context_menu::options();
+        let header = context_menu::header_count();
+        assert!(options.len() > header, "a text box's menu has rows");
+        for (i, label) in options.iter().enumerate().skip(header) {
+            assert!(context_menu::row_action(i).is_some(), "row {label:?} has no action of its own");
+        }
         context_menu::hide();
     }
 }

@@ -84,8 +84,23 @@ One `cce_core::locale()`: `LC_ALL`, else `LC_CTYPE`, else `LANG`, turned from PO
 registered visible widget with its role (`WidgetHost::a11y_role`, else `a11y::role_for` from
 type and focus role), label, value (`a11y_value`, the widget's `value_string`: toggled for a
 check box or switch, numeric for a slider, spin button or progress bar), logical bounds,
-focus and click actions, children in reading order, and the context's focus. Still to come
-in this phase: the hook for immediate-mode apps, and action IDs for context-menu rows.
+focus and click actions, children in reading order, and the context's focus.
+
+**Phase 1 is done (2026-10-08).** Also landed:
+- **An open context menu is in the tree**: a `Menu` under the window, its rows items — `✓` a
+  checkable item, `●` / `○` a radio item (toggled as marked), a slider row a slider with its
+  range, a header a label, separators left out — and while it is open the focus is its
+  highlighted row, else the menu.
+- **The hook for apps without widgets**: `Application::accessibility(&mut self, &mut
+  a11y::AppNodes)`, AccessKit nodes in an id range of the app's own (`AppNodes::id`), with
+  `push_top` / `push` / `set_focus`; `a11y::app_tree(&mut app, scale)` is an app's whole
+  tree (its widgets, its own nodes, the menu).
+- **Menu rows carry their actions**: `context_menu::set_row_actions` /
+  `UiContext::show_context_menu_rows` give each row a `ContextAction`, and a press runs it;
+  matching the English label (`legacy_action_for_label`) is only a fallback for menus built
+  without. The toolkit's own menus (a widget's standard menu, the tree list's) set theirs, so
+  translating their labels changes nothing they do. Apps that match labels themselves (the
+  designer's menus) move when they are next touched.
 
 - A node per registered widget: **role** (from `type_name` and `FocusRole` first, then an
   explicit `Input::a11y_role()` a widget can override: button, checkbox, toggle-button,

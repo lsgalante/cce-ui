@@ -1066,6 +1066,20 @@ impl UiContext {
         crate::widget::context_menu::show(x, y, options, header_count, id);
     }
 
+    /// [`show_context_menu`](Self::show_context_menu) with each row's action beside its
+    /// label (`None` for a header, or a row the host handles itself), so the label is only
+    /// what is shown and a translated menu still does what it did.
+    ///
+    /// # Safety
+    ///
+    /// As for `show_context_menu`: `target` is null or a live widget at the call.
+    pub unsafe fn show_context_menu_rows(&mut self, x: f32, y: f32, rows: Vec<(String, Option<crate::widget::ContextAction>)>, header_count: usize, target: *mut (dyn WidgetHost + 'static)) {
+        let (options, actions): (Vec<String>, Vec<Option<crate::widget::ContextAction>>) = rows.into_iter().unzip();
+        // SAFETY: the caller's contract, passed on.
+        unsafe { self.show_context_menu(x, y, options, header_count, target) };
+        crate::widget::context_menu::set_row_actions(actions);
+    }
+
     /// Open the shared config context menu for a right-click on `target`.
     ///
     /// # Safety
@@ -1102,19 +1116,18 @@ impl UiContext {
             }
         }
 
-        let mut options = Vec::new();
-        options.push(header);
+        use crate::widget::ContextAction as CA;
+        let row = |label: &str, action: CA| (label.to_string(), Some(action));
+        let mut rows: Vec<(String, Option<CA>)> = vec![(header, None)];
         let mut header_count = 1;
 
         if let Some((file, key)) = config_info {
-            options.push(format!("File: {}", file));
-            options.push(format!("Key: {}", key));
+            rows.push((format!("File: {}", file), None));
+            rows.push((format!("Key: {}", key), None));
             header_count = 3;
         }
 
         if name == "TextBox" {
-            // A password box has no Cut or Copy: its text never goes to the
-            // clipboard (`TextBox::clipboard_text`).
             let is_password = unsafe {
                 (*target)
                     .as_any()
@@ -1122,9 +1135,9 @@ impl UiContext {
                     .is_some_and(|tb| tb.is_password)
             };
             if !is_password {
-                options.extend(vec!["Cut".to_string(), "Copy".to_string()]);
+                rows.extend([row("Cut", CA::Cut), row("Copy", CA::Copy)]);
             }
-            options.extend(vec!["Paste".to_string(), "Select All".to_string()]);
+            rows.extend([row("Paste", CA::Paste), row("Select All", CA::SelectAll)]);
             let is_search = unsafe {
                 if let Some(tb) = (*target).as_any().downcast_ref::<crate::widget::input::TextBox>() {
                     tb.placeholder.as_deref() == Some("Search...")
@@ -1133,13 +1146,11 @@ impl UiContext {
                 }
             };
             if is_search {
-                options.push("Clear".to_string());
+                rows.push(row("Clear", CA::ClearText));
             }
         } else if name == "Breadcrumb" {
-            options.push("Copy Path".to_string());
+            rows.push(row("Copy Path", CA::CopyPath));
         } else if name == "Ramp" {
-            // The graph's menu: the controls-collapse toggle (check state in
-            // the label), then the spec-string clipboard pair.
             let collapsed = unsafe {
                 (*target)
                     .as_any()
@@ -1147,16 +1158,16 @@ impl UiContext {
                     .map(|r| r.controls_collapsed)
                     .unwrap_or(false)
             };
-            options.push(if collapsed { "✓ Collapse controls" } else { "Collapse controls" }.to_string());
-            options.extend(vec!["Copy".to_string(), "Paste".to_string()]);
+            rows.push(row(if collapsed { "✓ Collapse controls" } else { "Collapse controls" }, CA::ToggleRampControls));
+            rows.extend([row("Copy", CA::Copy), row("Paste", CA::Paste)]);
         } else {
-            options.extend(vec!["Copy".to_string(), "Paste".to_string()]);
+            rows.extend([row("Copy", CA::Copy), row("Paste", CA::Paste)]);
         }
 
         let scroll_y = crate::widget::hover_animation::get_scroll_offset();
         let adjusted_py = py - scroll_y;
         // SAFETY: the caller's contract, passed on.
-        unsafe { self.show_context_menu(px, adjusted_py, options, header_count, target) };
+        unsafe { self.show_context_menu_rows(px, adjusted_py, rows, header_count, target) };
     }
 
     pub fn hide_context_menu(&mut self) {

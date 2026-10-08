@@ -334,6 +334,15 @@ pub trait Application: Sized + 'static {
         None
     }
     
+    /// What the app shows that its [`ui_context`](Self::ui_context) does not: the nodes of
+    /// an accessibility tree, for an app that draws without widgets (a status bar module, a
+    /// terminal, a map) or draws parts of its window itself. Pushed as AccessKit nodes into
+    /// `nodes` (`crate::a11y::AppNodes`); the widgets and an open context menu are added
+    /// around them (`crate::a11y::app_tree`). Default: nothing.
+    fn accessibility(&mut self, nodes: &mut crate::a11y::AppNodes) {
+        let _ = nodes;
+    }
+
     fn ui_context(&self) -> Option<&crate::context::UiContext> {
         None
     }
