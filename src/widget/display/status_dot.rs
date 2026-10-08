@@ -79,11 +79,11 @@ mod tests {
         let mut dot = StatusDot::new(DotStatus::Warning);
         WidgetHost::set_rect(&mut dot, 5.0, 6.0, 10.0, 10.0);
         assert_eq!(
-            WidgetHost::all_rounded_quads(&dot, &UiContext::new()),
+            crate::widget::WidgetHostExt::all_rounded_quads(&dot, &UiContext::new()),
             vec![(5.0, 6.0, 10.0, 10.0, 5.0, [0.90, 0.60, 0.10, 1.0], (true, true, true, true))],
             "a disc: the rect at half-side radius",
         );
-        assert!(WidgetHost::extra_quads(&dot).is_empty(), "nothing on the plain path (apps read both)");
+        assert!(crate::widget::WidgetHostExt::extra_quads(&dot).is_empty(), "nothing on the plain path (apps read both)");
         // Drags pass through, as legacy declared.
         assert!(!crate::widget::WidgetHostExt::blocks_root_plate_drag(&dot));
         // State mutation through Deref, as call sites write it.

@@ -379,21 +379,6 @@ pub trait WidgetHost {
     // `Widget::hovered` flag, read/written directly by the defaults above; Button/Checkbox
     // keep inherent accessors for immediate-mode hosts.
 
-    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
-        // Focus/hover highlight color, folded from the zero-override `highlight_color` (6bd).
-        let is_focused = ctx.is_focused_id(self.base().id());
-        let hc = if is_focused {
-            colors::highlight_primary_color()
-        } else if self.base().hovered {
-            colors::HIGHLIGHT_SECONDARY
-        } else {
-            return None;
-        };
-        let b = self.base();
-        let hx = if b.row_w > 0.0 { b.row_x } else { b.x };
-        let hw = if b.row_w > 0.0 { b.row_w } else { b.w };
-        Some((hx, b.y, hw, b.h, hc))
-    }
 
 
     // `draggable`/`is_dragging` are GONE from the trait (the ControlPanel endgame
@@ -401,19 +386,7 @@ pub trait WidgetHost {
     // inherent `Adapted<W>` reads; index-driven rosters (TI, designer) route them
     // through per-slot matches like the other value drains.
 
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> { Vec::new() }
-    fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> { Vec::new() }
-    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> { Vec::new() }
     
-    fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut quads = self.extra_quads();
-        if let Some(hq) = self.highlight_quad(ctx) {
-            if hq.4 != colors::HIGHLIGHT_SECONDARY {
-                quads.push(hq);
-            }
-        }
-        quads
-    }
 
     /// Emit this widget's OWN primitives (non-recursive) into the single paint pass (Phase 3).
     /// The default composes the pieces the legacy recursive `all_*` emit for one node: rounded
@@ -427,10 +400,13 @@ pub trait WidgetHost {
         let color = self.color();
 
         if ui.tree.children_ptrs(self.base().id()).is_empty() {
-            // Leaf: emit its own rounded quads directly. For an ordinary widget this is just the
-            // rounded background; for widgets that override `all_rounded_quads` with custom
-            // geometry (e.g. Graph's nodes and edges) it captures that too. No recursion happens
-            // because there are no children.
+            // Leaf: its rounded background, from its colour and corner style, then the rounded
+            // quads its model paints. (Every production host overrides `paint_self`; this
+            // default serves a host without a model of its own.)
+            let (radius, corners) = self.corner_style();
+            if corners != (false, false, false, false) && color[3].abs() > 0.001 {
+                ctx.rounded_rect(rect, radius, corners, color);
+            }
             for (qx, qy, qw, qh, r, c, corners) in self.all_rounded_quads(ui) {
                 ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, r, corners, c);
             }
@@ -468,25 +444,6 @@ pub trait WidgetHost {
 
 
 
-    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
-        if !self.visible() {
-            return Vec::new();
-        }
-        let mut quads = Vec::new();
-        let (radius, (r1, r2, r3, r4)) = self.corner_style();
-        if r1 || r2 || r3 || r4 {
-            let (x, y, w, h) = self.rect();
-            let c = self.color();
-            if c[3].abs() > 0.001 {
-                quads.push((x, y, w, h, radius, c, (r1, r2, r3, r4)));
-            }
-        }
-        for &child_ptr in &ctx.tree.children_ptrs(self.base().id()) {
-            let widget = unsafe { &*child_ptr };
-            quads.extend(widget.all_rounded_quads(ctx));
-        }
-        quads
-    }
 
 
     // The per-widget text getters (text_labels / text_labels_with_bounds /
@@ -529,13 +486,6 @@ pub trait WidgetHost {
     // the tree link its per-tick `register_embedded_children` maintains.
 
 
-    /// Uniform corner radius + per-corner on-flags, in one read (6bd batch 2 — replaced the
-    /// separate `corner_radius`/`rounded_corners` getters). The radius is meaningful even with
-    /// every corner off: Menu/StatusBar report their parent's radius to children this way, so
-    /// the flags-off channel can't be folded into `corner_radii`.
-    fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) {
-        (12.0, (false, false, false, false))
-    }
 
 
 
@@ -688,6 +638,190 @@ pub trait WidgetHostExt: WidgetHost {
                 }
             }
         }
+    }
+
+    // ── The legacy tuple views ──────────────────────────────────────────────────
+    // What a widget paints, projected onto the pre-display-list surface: plain quads,
+    // rounded quads, arcs, circles, the shared highlight, the corner style. Hosts that
+    // still draw a widget through these rather than `paint_self` — the designer's render
+    // loop, the gallery, the display manager, the settings app's flat collector,
+    // cce-secrets, the flat-host bridge — read them here. They were `WidgetHost` methods
+    // until 2026-10-08, each implemented by `Adapted` from its widget's `Paint`; they are
+    // computed from the models now, the same way.
+
+    /// The rect the widget's model paints into: the host's rect below its detached label.
+    fn content_rect(&self) -> crate::scene::layout::Rect {
+        let b = self.base();
+        let top = if self.layout_model().inline_label() { 0.0 } else { b.label_offset() };
+        // Deliberately NOT clamped at zero: hosts under-size labeled sliders (label taller
+        // than the assigned rect), and the negative-height quads still rasterize.
+        crate::scene::layout::Rect { x: b.x, y: b.y + top, width: b.w, height: b.h - top }
+    }
+
+    /// Everything the widget's model paints into [`content_rect`](Self::content_rect), as prims.
+    fn painted_prims(&self) -> Vec<crate::scene::paint::Prim> {
+        let mut pc = crate::scene::paint::PaintCtx::new();
+        self.paint_model().paint(self.content_rect(), &mut pc);
+        pc.finish().items.into_iter().map(|item| item.prim).collect()
+    }
+
+    /// The container's children that pass its [`Layout::child_visible`] policy; empty for a
+    /// non-container.
+    fn visible_children(&self) -> Vec<*mut (dyn WidgetHost + 'static)> {
+        let model = self.layout_model();
+        if !model.has_container_children() {
+            return Vec::new();
+        }
+        model.container_children().into_iter().filter(|c| model.child_visible(*c)).collect()
+    }
+
+    /// The corner radius and which corners it rounds; 12 and none for a widget without a
+    /// corner style.
+    fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) {
+        self.paint_model().corner_style(self.content_rect()).unwrap_or((12.0, (false, false, false, false)))
+    }
+
+    /// The legacy hover/focus highlight over the row span: only for a widget that opts into
+    /// it ([`Paint::legacy_focus_highlight`], the TextBox) or forwards one
+    /// ([`Paint::forwarded_highlight`], the Paginator's ButtonStrip). Primary tint when
+    /// focused, secondary when hovered.
+    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
+        if let Some(forwarded) = self.paint_model().forwarded_highlight(ctx) {
+            return forwarded;
+        }
+        if !self.paint_model().legacy_focus_highlight() {
+            return None;
+        }
+        let b = self.base();
+        let hc = if ctx.is_focused_id(b.id()) {
+            colors::highlight_primary_color()
+        } else if b.hovered {
+            colors::HIGHLIGHT_SECONDARY
+        } else {
+            return None;
+        };
+        let hx = if b.row_w > 0.0 { b.row_x } else { b.x };
+        let hw = if b.row_w > 0.0 { b.row_w } else { b.w };
+        Some((hx, b.y, hw, b.h, hc))
+    }
+
+    /// The widget's own plain-quad prims.
+    fn own_plain_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        self.painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                crate::scene::paint::Prim::Quad { rect, color } => Some((rect.x, rect.y, rect.width, rect.height, color)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The plain-quad view: a widget's own plain quads, or the legacy view it serves
+    /// ([`Paint::legacy_plain_quads`]), or — for an aggregating container (the Paginator) —
+    /// its visible children's.
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        if self.paint_model().serves_legacy_plain_quads() {
+            return self.paint_model().legacy_plain_quads(self.content_rect());
+        }
+        if self.paint_model().aggregates_child_extra_quads() {
+            let mut out = Vec::new();
+            for child in self.visible_children() {
+                out.extend(unsafe { &*child }.extra_quads());
+            }
+            return out;
+        }
+        self.own_plain_quads()
+    }
+
+    /// Every plain quad the widget and its visible children draw, the opted-in highlight
+    /// included (not the hover tint), a rounded child's background left to
+    /// [`all_rounded_quads`](Self::all_rounded_quads). Empty for a widget serving the
+    /// legacy plain-quad view, which reaches flat hosts through `all_rounded_quads` only.
+    fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if self.paint_model().serves_legacy_plain_quads() {
+            return Vec::new();
+        }
+        let mut quads = if self.visible() { self.own_plain_quads() } else { Vec::new() };
+        if self.paint_model().legacy_focus_highlight() {
+            if let Some(hq) = self.highlight_quad(ctx) {
+                if hq.4 != colors::HIGHLIGHT_SECONDARY {
+                    quads.push(hq);
+                }
+            }
+        }
+        if self.visible() {
+            for child in self.visible_children() {
+                let widget = unsafe { &*child };
+                let (wx, wy, ww, wh) = widget.rect();
+                let has_rounded = widget.corner_style().1 != (false, false, false, false);
+                for (qx, qy, qw, qh, qc) in widget.all_quads(ctx) {
+                    if has_rounded
+                        && (qx - wx).abs() < 0.1
+                        && (qy - wy).abs() < 0.1
+                        && (qw - ww).abs() < 0.1
+                        && (qh - wh).abs() < 0.1
+                    {
+                        continue;
+                    }
+                    quads.push((qx, qy, qw, qh, qc));
+                }
+            }
+        }
+        quads
+    }
+
+    /// Every rounded quad the widget and its visible children draw.
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        let mut out: Vec<_> = self
+            .painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                crate::scene::paint::Prim::RoundedRect { rect, radius, corners, color } => {
+                    Some((rect.x, rect.y, rect.width, rect.height, radius, color, corners))
+                }
+                _ => None,
+            })
+            .collect();
+        for child in self.visible_children() {
+            out.extend(unsafe { &*child }.all_rounded_quads(ctx));
+        }
+        out
+    }
+
+    /// The widget's arc prims.
+    fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        self.painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                crate::scene::paint::Prim::Arc { cx, cy, radius, thickness, start, end, color } => {
+                    Some((cx, cy, radius, thickness, start, end, color))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The widget's circle prims.
+    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        self.painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                crate::scene::paint::Prim::Circle { cx, cy, radius, color } => Some((cx, cy, radius, color)),
+                _ => None,
+            })
+            .collect()
     }
 }
 

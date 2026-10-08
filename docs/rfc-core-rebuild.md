@@ -2073,6 +2073,13 @@ Constraint respected: **each crate still builds standalone** — the new core is
     radius, is-Ramp flag) at re-parent time instead of the pointer —
     same refresh cadence, no deref of potentially-dead memory; watch
     the one-frame rect lag on resize if reads move to snapshots.
+  - **WidgetHost 38 → 31 (the same day).** The legacy tuple views (`extra_quads`,
+    `extra_arcs`, `extra_circles`, `all_quads`, `all_rounded_quads`, `highlight_quad`,
+    `corner_style`) moved to `WidgetHostExt` too, computed from the paint model exactly as
+    `Adapted` did (its private `content_rect` / `painted_prims` / `visible_children` went
+    with them). Five apps still draw through them; moving those to `paint_self` is what
+    retires the views themselves, and it changes how some look (cce-secrets draws its
+    controls flat through them). Every app that reads them drew identically to the pixel.
   - **WidgetHost 57 → 38 (2026-10-08).** The trait had grown back past the blueprint's ~55
     with the keyboard and accessibility hooks, and most of what `Adapted` implemented was a
     one-line forward to a narrow trait. The narrow traits are dyn-compatible, so the host now

@@ -110,13 +110,13 @@ mod tests {
         let radius = crate::layout::slider_corner_radius();
         let all = (true, true, true, true);
         assert_eq!(
-            WidgetHost::all_rounded_quads(&bar, &crate::widget::UiContext::new()),
+            crate::widget::WidgetHostExt::all_rounded_quads(&bar, &crate::widget::UiContext::new()),
             vec![
                 (12.0, 30.0, 200.0, 8.0, radius, [0.4, 0.5, 0.6, 1.0], all),
                 (12.0, 30.0, 100.0, 8.0, radius.min(4.0), [0.1, 0.2, 0.3, 1.0], all),
             ],
         );
-        assert!(WidgetHost::extra_quads(&bar).is_empty(), "no plain quad leaks to flat hosts");
+        assert!(crate::widget::WidgetHostExt::extra_quads(&bar).is_empty(), "no plain quad leaks to flat hosts");
     }
 
     /// Recessed: no bg quad at all — the fill on the floor, then the carve.
@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(prims.len(), 2, "{prims:?}");
         assert!(matches!(prims[0], Prim::RoundedRect { .. }));
         assert!(matches!(prims[1], Prim::Recess { .. }));
-        assert!(WidgetHost::extra_quads(&bar).is_empty(), "no plain bg quad leaks to flat hosts");
+        assert!(crate::widget::WidgetHostExt::extra_quads(&bar).is_empty(), "no plain bg quad leaks to flat hosts");
     }
 
     #[test]

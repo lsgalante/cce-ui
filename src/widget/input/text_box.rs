@@ -2817,7 +2817,7 @@ mod tests {
         tb.select_anchor = Some(7); // starts at "Line 2"
         tb.cursor_idx = 13;        // ends at end of "Line 2"
 
-        let has_rounded = WidgetHost::corner_style(&tb).1 != (false, false, false, false);
+        let has_rounded = crate::widget::WidgetHostExt::corner_style(&tb).1 != (false, false, false, false);
         let has_highlight = if has_rounded {
             let rounded = tb.all_rounded_quads(&dummy);
             println!("Rounded quads: {:?}", rounded);

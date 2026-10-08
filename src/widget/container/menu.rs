@@ -22,10 +22,7 @@ use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::TextLabel;
-use crate::widget::{
-    Adapted, ButtonStrip, WidgetHost, ElementState, Event, EventCtx, Input, Key, Layout,
-    MenuController, MouseButton, NamedKey, PageSelector, Paint, DROPDOWN_ITEM_H,
-};
+use crate::widget::{Adapted, ButtonStrip, WidgetHost, ElementState, Event, EventCtx, Input, Key, Layout, MenuController, MouseButton, NamedKey, PageSelector, Paint, DROPDOWN_ITEM_H, WidgetHostExt};
 
 pub struct MenuBar {
     pub visible: bool,

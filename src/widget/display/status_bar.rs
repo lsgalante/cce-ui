@@ -232,9 +232,9 @@ mod tests {
         assert_eq!(bar.text, "world");
 
         // Parentless: cornerless plain bg through the plain-quad bridge, at STATUS_BG.
-        let extra = WidgetHost::extra_quads(&bar);
+        let extra = crate::widget::WidgetHostExt::extra_quads(&bar);
         assert_eq!(extra.len(), 1, "cornerless bg quad");
-        assert_eq!(WidgetHost::corner_style(&bar).1, (false, false, false, false));
+        assert_eq!(crate::widget::WidgetHostExt::corner_style(&bar).1, (false, false, false, false));
         assert!(!crate::widget::WidgetHostExt::blocks_root_plate_drag(&bar));
     }
 

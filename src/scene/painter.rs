@@ -369,14 +369,14 @@ mod tests {
             fn color(&self) -> [f32; 4] {
                 [0.2, 0.4, 0.6, 1.0]
             }
+            fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
+                Some((4.0, (true, true, true, true)))
+            }
         }
         impl WidgetHost for Rounded {
             crate::impl_widget_base!(Rounded);
             fn paint_model(&self) -> &dyn crate::widget::Paint {
                 self
-            }
-            fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) {
-                (4.0, (true, true, true, true))
             }
         }
         let mut ctx = UiContext::new();

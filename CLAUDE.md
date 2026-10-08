@@ -1671,7 +1671,7 @@ Modules:
 
 ### `WidgetHost` (formerly the `Element` god-trait)
 
-`WidgetHost` (`src/widget/mod.rs`) is the single 38-method host surface the machinery
+`WidgetHost` (`src/widget/mod.rs`) is the single 31-method host surface the machinery
 (context routing, paint walk, render loop, app dyn broadcasts) sees, produced by the RFC's 6bd
 shrink-then-rename of the old ~125-method `Element` god-trait. Its ONE production implementor
 is `Adapted<W>`; concrete widget behavior lives on the narrow `Layout`/`Paint`/`Input` traits
@@ -1681,7 +1681,7 @@ are GONE from the trait — events route through `handle_event`, and apps drain 
 through the concrete inherent `Adapted<W>` methods. See the RFC's blueprint notes before
 adding anything to this trait.
 
-**What a host's widget model answers is not a trait slot** (since 2026-10-08, 57 → 38).
+**What a host's widget model answers is not a trait slot** (since 2026-10-08, 57 → 31).
 The host hands out its widget as its narrow traits — `layout_model()`, `paint_model()`,
 `input_model()` / `input_model_mut()` (`Adapted` returns its inner widget; a test shim that
 implements `WidgetHost` directly gets `NoModel`'s defaults, or returns itself after
@@ -1690,7 +1690,13 @@ host, `dyn` included, carries what used to be one-line forwards: `focus_role`, `
 `blocks_root_plate_drag`, `wants_tick`, `is_scrollable`, the `a11y_*` reads and acts,
 `set_modifiers`, `context_action`, `color`, `solid_border`, `widget_font`,
 `clips_children`, `renders_own_subtree`, `z_index`, `preferred_height`, plus the pure
-derivations `label`, `corner_radii`, `mark_dirty`. Call them as before, with
+derivations `label`, `corner_radii`, `mark_dirty` — and the legacy tuple views
+(`extra_quads`, `extra_arcs`, `extra_circles`, `all_quads`, `all_rounded_quads`,
+`highlight_quad`, `corner_style`): what a widget paints projected onto the
+pre-display-list surface, computed from `paint_model().paint(content_rect())` the way
+`Adapted` computed them, for the hosts that still draw a widget through them rather than
+`paint_self` (the designer's render loop, the gallery, the display manager's greeter, the
+settings app's flat collector, cce-secrets, the flat-host bridge). Call them as before, with
 `cce_ui::widget::WidgetHostExt` in scope. A method stays ON the trait only when the host
 adds something the model cannot (visibility gating, the content rect, child recursion,
 registry state). `plate_bevel` is gone: nothing overrode it, so it was always `None`.

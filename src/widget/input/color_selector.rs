@@ -1094,7 +1094,7 @@ mod tests {
             !items.iter().any(|it| matches!(it.prim, Prim::Quad { color, .. } if color == [1.0; 4])),
             "no cell is a plain quad, so the legacy plain view cannot carry it"
         );
-        let plain = crate::widget::WidgetHost::extra_quads(&cs);
+        let plain = crate::widget::WidgetHostExt::extra_quads(&cs);
         assert!(plain.iter().all(|q| q.4 != [1.0, 1.0, 1.0, 1.0]), "the plain view has no white cells: {plain:?}");
     }
 

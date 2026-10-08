@@ -38,10 +38,8 @@ use crate::scene::paint::PaintCtx;
 use crate::widget::display::{Float3, TextLabel};
 use crate::scene::paint::Field;
 use crate::widget::input::{Button, ColorSelector, Dropdown, Ramp, Slider, Spinbox, TextBox, Toggle};
-use crate::widget::{
-    Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
-    MouseScrollDelta, NamedKey, Paint, ParamController, TextEditorState, UiContext,
-};
+use crate::widget::{Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
+    MouseScrollDelta, NamedKey, Paint, ParamController, TextEditorState, UiContext, WidgetHostExt};
 
 /// A text row, in either variant: plain (`"text"`), or with a completion
 /// picker (`"textpick:a,b,c"` — the Houdini-style attribute/group chooser: a
@@ -4728,7 +4726,7 @@ mod tests {
         let p = panel_with(&[("Size", "1.00", "slider:0:2")]);
         // The designer's plain path: extra_quads carries the row chrome (clipped), including
         // the slider background it reads via rect()+color()...
-        let extra = WidgetHost::extra_quads(&p);
+        let extra = crate::widget::WidgetHostExt::extra_quads(&p);
         assert!(!extra.is_empty(), "row chrome served through extra_quads");
         // ...but NOT the panel's own PARAM_BG plate (the host draws that from color()).
         let (x, y, w, h) = WidgetHost::rect(&p);
@@ -4737,7 +4735,7 @@ mod tests {
             "panel bg plate is the host's, not extra_quads'"
         );
         // The no-double-draw contract of the plain-quad hatch.
-        assert!(WidgetHost::all_quads(&p, &ctx).is_empty());
+        assert!(crate::widget::WidgetHostExt::all_quads(&p, &ctx).is_empty());
         // Per-label hatch: the walk's text prims carry the widget font and viewport bounds.
         let mut scratch = crate::scene::paint::PaintCtx::new();
         crate::scene::painter::append_widget_text(&ctx, &p, &mut scratch);

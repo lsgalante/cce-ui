@@ -2271,8 +2271,8 @@ mod tests {
 
         // The plain view (designer path) and the rounded view (render_widget path) describe
         // the same quads: the rounded view adds only the widget background entry up front.
-        let plain = WidgetHost::extra_quads(&g);
-        let rounded = WidgetHost::all_rounded_quads(&g, &ctx);
+        let plain = crate::widget::WidgetHostExt::extra_quads(&g);
+        let rounded = crate::widget::WidgetHostExt::all_rounded_quads(&g, &ctx);
         assert!(!plain.is_empty());
         assert_eq!(rounded.len(), plain.len() + 1);
         for ((px, py, pw, ph, pc), (rx, ry, rw, rh, _, rc, _)) in plain.iter().zip(rounded.iter().skip(1)) {
@@ -2293,6 +2293,6 @@ mod tests {
 
         // And `all_quads` stays empty so render_widget hosts (reading BOTH getters) never
         // draw the geometry twice — the legacy Graph override's contract.
-        assert!(WidgetHost::all_quads(&g, &ctx).is_empty());
+        assert!(crate::widget::WidgetHostExt::all_quads(&g, &ctx).is_empty());
     }
 }

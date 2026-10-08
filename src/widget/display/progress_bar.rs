@@ -106,7 +106,7 @@ mod tests {
         let mut bar = ProgressBar::new(0.5).with_recessed(false);
         WidgetHost::set_rect(&mut bar, 10.0, 20.0, 100.0, 8.0);
 
-        let quads = WidgetHost::all_rounded_quads(&bar, &ctx);
+        let quads = crate::widget::WidgetHostExt::all_rounded_quads(&bar, &ctx);
         let radius = crate::layout::slider_corner_radius();
         assert_eq!(quads.len(), 2, "track + fill");
         assert_eq!(quads[0], (10.0, 20.0, 100.0, 8.0, radius, colors::progress_bg(), (true, true, true, true)));
@@ -122,12 +122,12 @@ mod tests {
         let ctx = UiContext::new();
         let mut over = ProgressBar::new(2.0).with_recessed(false);
         WidgetHost::set_rect(&mut over, 0.0, 0.0, 100.0, 8.0);
-        let quads = WidgetHost::all_rounded_quads(&over, &ctx);
+        let quads = crate::widget::WidgetHostExt::all_rounded_quads(&over, &ctx);
         assert_eq!(quads[1].2, 100.0, "over-1 value fills the whole track");
 
         let mut empty = ProgressBar::new(0.0).with_recessed(false);
         WidgetHost::set_rect(&mut empty, 0.0, 0.0, 100.0, 8.0);
-        assert_eq!(WidgetHost::all_rounded_quads(&empty, &ctx).len(), 1, "zero value emits track only");
+        assert_eq!(crate::widget::WidgetHostExt::all_rounded_quads(&empty, &ctx).len(), 1, "zero value emits track only");
     }
 
     /// The recessed style draws no track of its own: the fill on the well floor, then
@@ -162,7 +162,7 @@ mod tests {
         assert_eq!(h, 8.0 + offset, "the rect is the block it was given");
         assert_eq!(y, 10.0, "origin is unchanged");
 
-        let quads = WidgetHost::all_rounded_quads(&bar, &ctx);
+        let quads = crate::widget::WidgetHostExt::all_rounded_quads(&bar, &ctx);
         assert_eq!(quads[0].1, 10.0 + offset, "track is painted below the label region");
         assert_eq!(quads[0].3, 8.0, "track keeps the assigned height");
 

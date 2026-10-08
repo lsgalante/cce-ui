@@ -19,10 +19,7 @@ use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::input::ButtonStrip;
-use crate::widget::{
-    Adapted, WidgetHost, Event, EventCtx, Input, Layout, MenuController, PageSelector, Paint,
-    UiContext, WidgetId,
-};
+use crate::widget::{Adapted, WidgetHost, Event, EventCtx, Input, Layout, MenuController, PageSelector, Paint, UiContext, WidgetId, WidgetHostExt};
 
 pub struct Paginator {
     /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
@@ -321,7 +318,7 @@ mod tests {
         // Legacy split: `extra_quads` is the children's chrome only; the sidebar background
         // (a rounded rect) lives in `all_rounded_quads` alone (layout-interface draws its
         // own backgrounds under `extra_quads`).
-        let extra = WidgetHost::extra_quads(&p);
+        let extra = crate::widget::WidgetHostExt::extra_quads(&p);
         let strip_extra = p.sidebar_menu.extra_quads();
         assert_eq!(extra.len(), strip_extra.len(), "children-only plain view (pages emit none)");
         let bg = colors::sidebar_bg_color();
@@ -329,7 +326,7 @@ mod tests {
             let r = crate::layout::plate_corner_radius();
             let bg_quad = (0.0, 0.0, 400.0, 300.0, r, bg, (true, true, true, true));
             assert!(!extra.iter().any(|q| q.4 == bg && q.2 == 400.0), "no own bg in extra_quads");
-            assert!(WidgetHost::all_rounded_quads(&p, &ctx).contains(&bg_quad), "own bg in all_rounded_quads");
+            assert!(crate::widget::WidgetHostExt::all_rounded_quads(&p, &ctx).contains(&bg_quad), "own bg in all_rounded_quads");
         }
 
         // The embedded strip + pages land in the registry on tick (the spatial grid feeds off

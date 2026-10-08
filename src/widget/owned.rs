@@ -160,15 +160,7 @@ impl<W: WidgetHost + 'static> WidgetHost for Owned<W> {
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { (**self).set_rect(x, y, w, h) }
     fn set_row_rect(&mut self, x: f32, w: f32) { (**self).set_row_rect(x, w) }
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool { (**self).hit_test(px, py, ctx) }
-    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> { (**self).highlight_quad(ctx) }
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> { (**self).extra_quads() }
-    fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> { (**self).extra_arcs() }
-    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> { (**self).extra_circles() }
-    fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> { (**self).all_quads(ctx) }
     fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) { (**self).paint_self(ui, ctx) }
-    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
-        (**self).all_rounded_quads(ctx)
-    }
     fn type_name(&self) -> &'static str { (**self).type_name() }
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> { (**self).popover_rect() }
     fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) { (**self).render_popover(pc) }
@@ -180,7 +172,6 @@ impl<W: WidgetHost + 'static> WidgetHost for Owned<W> {
     fn visible(&self) -> bool { (**self).visible() }
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool { (**self).tick(dt, ctx) }
     fn is_child_visible(&self, child_id: WidgetId) -> bool { (**self).is_child_visible(child_id) }
-    fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) { (**self).corner_style() }
     fn a11y_items(&self) -> Vec<crate::a11y::A11yItem> { (**self).a11y_items() }
 }
 
