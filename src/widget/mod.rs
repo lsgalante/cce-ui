@@ -695,7 +695,7 @@ pub use self::input::{
 };
 pub use self::container::{
     Dialog, Group, GroupFrame,
-    ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
+    ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     ContentBg, ParametersBg,
     ScrollBox, MenuBar, SheetColumn, Spreadsheet, Breadcrumb,

@@ -74,8 +74,10 @@ mod registry;
 pub use registry::*;
 mod bridge;
 pub use bridge::*;
-mod legacy;
-pub use legacy::*;
+mod section;
+pub use section::*;
+mod panes;
+pub use panes::*;
 
 static SECTION_PADDING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SECTION_PADDING, |s| &mut s.layout.SECTION_PADDING);
 
@@ -3501,30 +3503,6 @@ pub fn read_preferred_fonts() -> (String, String, String, String) {
     )
 }
 
-impl crate::widget::ContainerLayout for FlexLayout {
-    fn box_clone_container(&self) -> Box<dyn crate::widget::ContainerLayout> {
-        Box::new(self.clone())
-    }
-}
-
-impl crate::widget::ContainerLayout for ColumnLayout {
-    fn box_clone_container(&self) -> Box<dyn crate::widget::ContainerLayout> {
-        Box::new(self.clone())
-    }
-}
-
-impl crate::widget::ContainerLayout for AdaptiveGrid {
-    fn box_clone_container(&self) -> Box<dyn crate::widget::ContainerLayout> {
-        Box::new(self.clone())
-    }
-}
-
-impl crate::widget::ContainerLayout for RadialLayout {
-    fn box_clone_container(&self) -> Box<dyn crate::widget::ContainerLayout> {
-        Box::new(self.clone())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::widget::WidgetHost;
@@ -3827,27 +3805,26 @@ mod tests {
     /// derived from the getters instead, so the flow holds under any config.
     #[test]
     fn test_vstack_flow() {
-        // `Section` seats its first column one `margin_x` in from its left edge.
-        let first_col_x = 10.0 + 2.0 * section_padding() + Section::DEFAULT_MARGIN_X;
+        // A section's VStack seats every widget one content margin in from its left edge.
         let mut mock_pc = MockRenderTarget { rects: Vec::new() };
-        let mut sec = Section::new(&mut mock_pc, 10.0, 20.0, 200.0, "Test Section");
-        
+        let mut sec = SectionContext::new(&mut mock_pc, 10.0, 20.0, 200.0, "Test Section", false, false);
+        let first_col_x = sec.content_left();
+        let gap = sec.row_gap;
         let start_y = sec.ay();
-        let mut stack = sec.vstack(&mut mock_pc, 10.0);
+        let mut stack = sec.vstack(10.0);
 
         let mut dummy = crate::context::UiContext::new();
         let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
         stack.add_widget(&mut w1, 50.0, 30.0, &mut dummy);
 
-        // Standard margin should be applied
         assert_eq!(w1.x, first_col_x);
         assert_eq!(w1.y, start_y);
 
         let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
         stack.add_widget(&mut w2, 60.0, 40.0, &mut dummy);
 
-        // Second widget should start after first widget height + vstack spacing
-        assert_eq!(w2.y, start_y + 30.0 + 10.0);
+        // The next starts below the first, the stack's spacing and the row gap on.
+        assert_eq!(w2.y, start_y + 30.0 + 10.0 + gap);
 
         let mut base = crate::widget::Widget::new();
         base.label = Some("Test Label".to_string());
@@ -3855,10 +3832,9 @@ mod tests {
         stack.add_widget(&mut w3, 70.0, 50.0, &mut dummy);
 
         let offset = w3.base.label_offset();
-        
-        // Third widget has label, so its y should be shifted by offset
+        // A labelled widget's control sits below its label strip.
         assert!(offset > 0.0, "a labelled widget has a strip");
-        assert_eq!(w3.base.y, start_y + 30.0 + 10.0 + 40.0 + 10.0 + offset);
+        assert_eq!(w3.base.y, start_y + 30.0 + 10.0 + gap + 40.0 + 10.0 + gap + offset);
     }
 
     #[test]
@@ -3893,44 +3869,20 @@ mod tests {
     #[test]
     fn test_subsection() {
         let mut pc = PopoverCollector::new();
-        let mut subsec = Section::new_opt(&mut pc, 10.0, 20.0, 300.0, "Test Subsec", true);
+        let mut subsec = SectionContext::new(&mut pc, 10.0, 20.0, 300.0, "Test Subsec", false, true);
         assert_eq!(subsec.left, 10.0);
         assert_eq!(subsec.top, 20.0);
         assert_eq!(subsec.cw, 300.0);
         assert!(subsec.is_child);
-        
+
         let mut dummy = crate::context::UiContext::new();
         let mut w = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        subsec.widget(&mut pc, &mut w, 12.0, 100.0, 40.0, &mut dummy);
-        
-        let bottom = subsec.finish(&mut pc);
+        subsec.widget(&mut w, 12.0, 100.0, 40.0, &mut dummy);
+
+        let bottom = subsec.finish();
         assert!(bottom > 20.0);
     }
 
-    #[test]
-    fn test_radial_layout() {
-        let radial = Radial::new(100.0, 100.0, 1.5, 50.0);
-        
-        // Check first widget is centered at (100.0, 100.0)
-        let rect0 = radial.widget_rect(0, 40.0, 30.0);
-        assert_eq!(rect0, (100.0 - 20.0, 100.0 - 15.0, 40.0, 30.0));
-        
-        // Check Ring 1 (idx = 1) vs Ring 2 (idx = 7)
-        let rect1 = radial.widget_rect(1, 40.0, 30.0);
-        let rect7 = radial.widget_rect(7, 40.0, 30.0);
-        
-        let c1_x = rect1.0 + rect1.2 / 2.0;
-        let c1_y = rect1.1 + rect1.3 / 2.0;
-        let c7_x = rect7.0 + rect7.2 / 2.0;
-        let c7_y = rect7.1 + rect7.3 / 2.0;
-        
-        let d1 = ((c1_x - 100.0).powi(2) + (c1_y - 100.0).powi(2)).sqrt();
-        let d7 = ((c7_x - 100.0).powi(2) + (c7_y - 100.0).powi(2)).sqrt();
-        
-        // Ring 2 should be further out than Ring 1
-        assert!(d7 > d1);
-        assert!(d1 > 0.0);
-    }
 
     // The `Once`-initialised style getters below are checked against the
     // statics their config pass fills, under whatever the live config says.
@@ -4251,7 +4203,7 @@ mod tests {
     #[test]
     fn test_mosaic_layout() {
         use crate::widget::MosaicLayout;
-        use crate::layout::LayoutStrategy;
+        use crate::widget::ContainerLayout;
         
         let layout = MosaicLayout {
             gap: 10.0,
@@ -4283,7 +4235,7 @@ mod tests {
     #[test]
     fn test_reverse_mosaic_layout() {
         use crate::widget::ReverseMosaicLayout;
-        use crate::layout::LayoutStrategy;
+        use crate::widget::ContainerLayout;
         
         let layout = ReverseMosaicLayout {
             gap: 10.0,

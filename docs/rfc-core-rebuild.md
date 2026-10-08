@@ -327,6 +327,15 @@ Constraint respected: **each crate still builds standalone** — the new core is
 - **Phase 2 — Layout pass.** Add `Style` + measure/arrange (taffy). Migrate containers to
   emit `Style` instead of `LayoutStrategy`; delete `allocate` and render-twice measurement as
   containers move over.
+  - **`LayoutStrategy`, `allocate` and render-twice: DELETED 2026-10-08.** The last users were
+    cce-system-interface's pages (`PageLayoutBuilder` over `AdaptiveGrid`), cce-files' browse
+    page (`ColumnLayout`) and the gallery's container-layout exhibit. A section's slot never
+    depended on its own height, so `layout::section::PageFlow` places it first and the
+    section draws once, in place (`each_section_is_drawn_once`); the browse page is a
+    `scene::layout` column; `ContainerLayout` keeps only `layout` / `measure`. Section
+    CONTENT is still immediate-mode `SectionContext` — porting each page's content to box
+    trees is not done. Every settings page, cce-files (relief on and off, save mode) and the
+    gallery drew identically to the pixel before and after, live readings aside.
 - **Phase 3 — Paint unification.** Introduce `DisplayList` + `PaintCtx` (clip/transform);
   route the backend `render()` through the arena walk; retire the top-level `widgets` Vec and
   `render_widget`/`SectionContext`.

@@ -19,6 +19,42 @@ use std::collections::HashMap;
 ///
 /// Fixing it at the registry rather than per accessor covers every slot it
 /// holds in one place, including ones no test pins yet.
+/// The family fontconfig matches for `monospace` (`fc-match`), asked once.
+pub fn get_system_monospace_font() -> &'static str {
+    static MONOSPACE_FONT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    MONOSPACE_FONT.get_or_init(|| {
+        if let Ok(output) = std::process::Command::new("fc-match")
+            .args(["-f", "%{family}", "monospace"])
+            .output()
+        {
+            let name = String::from_utf8_lossy(&output.stdout);
+            let parsed = name.split(',').next().unwrap_or("monospace").trim();
+            if !parsed.is_empty() {
+                return parsed.to_string();
+            }
+        }
+        "monospace".to_string()
+    })
+}
+
+/// The family fontconfig matches for `sans-serif`, asked once.
+pub fn get_system_sans_serif_font() -> &'static str {
+    static SANS_SERIF_FONT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SANS_SERIF_FONT.get_or_init(|| {
+        if let Ok(output) = std::process::Command::new("fc-match")
+            .args(["-f", "%{family}", "sans-serif"])
+            .output()
+        {
+            let name = String::from_utf8_lossy(&output.stdout);
+            let parsed = name.split(',').next().unwrap_or("sans-serif").trim();
+            if !parsed.is_empty() {
+                return parsed.to_string();
+            }
+        }
+        "sans-serif".to_string()
+    })
+}
+
 #[cfg(test)]
 mod test_overlay {
     use std::cell::RefCell;

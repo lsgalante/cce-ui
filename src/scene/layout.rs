@@ -1,8 +1,9 @@
 //! Hand-rolled two-phase layout engine — Phase 2 of the core rebuild.
 //!
-//! The legacy toolkit computes layout *inline during paint*, smeared across `LayoutStrategy`, a
+//! The legacy toolkit computed layout *inline during paint*, smeared across `LayoutStrategy`, a
 //! child-driven `allocate` bump-cursor, and hand-written `set_rect` calls with absolute
-//! coordinates — with `SectionContext` literally rendering twice to measure. There is no layout
+//! coordinates — with `SectionContext` literally rendering twice to measure (both gone since
+//! 2026-10-08). There is no layout
 //! pass that is independent of paint, which is why animated/relayout-able UI is hard and why a
 //! widget can end up sized by two different owners (the breadcrumb bug).
 //!

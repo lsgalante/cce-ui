@@ -10,7 +10,7 @@ pub mod treelist;
 pub mod dialog;
 pub mod group;
 
-pub use container_layout::{ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout, ColumnsLayout, MosaicLayout, ReverseMosaicLayout};
+pub use container_layout::{ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout, ColumnsLayout, MosaicLayout, ReverseMosaicLayout};
 pub use content_bg::ContentBg;
 pub use parameters_bg::ParametersBg;
 pub use menu::MenuBar;

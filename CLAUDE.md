@@ -1771,14 +1771,27 @@ cce-system-interface) to confirm behavior, not just the test suite.
   - `src/layout/mod.rs` (~4.4k lines) — the sizing constants and the style getters/setters
     (heights, radii, fonts — many `*_font_parsed()` — gaps, the relief and bevel profile
     state), `reload_config`, and `read_preferred_fonts` / font-family resolution used by the
-    cosmic-text path. It names no widget: what does is in the two modules below.
+    cosmic-text path. It names no widget: what does is in the modules below.
   - `registry.rs` — the style registry (config flattened to one map of keys), its test overlay,
     the font-string helpers.
   - `bridge.rs` — the flat-host render bridge: `RenderTarget`, `PopoverCollector`,
     `render_widget`, `render_popovers`, the carve types that cross it.
-  - `src/layout/legacy.rs` (~2k lines) — the legacy layout engines (`Column`, `Section`, `Grid`,
-    the `LayoutStrategy` family, `PageLayoutBuilder`, `VStack`), still used by
-    cce-system-interface, cce-files and cce-gallery. New layout is `scene::layout`.
+  - `section.rs` — a settings page's sections: `PageFlow` places them (a masonry of
+    columns as wide as fit `grid_min_col_width`), `PageLayoutBuilder` draws each ONCE in
+    the slot the flow gives it and hands its height back, and `SectionContext` (with its
+    `VStack`) is what a section draws through — immediate-mode, a cursor down the content
+    box and a one- or two-column grid. cce-system-interface is its user. Since 2026-10-08:
+    until then it was `legacy.rs`, and every section was drawn TWICE, once into a
+    throwaway target to measure it, through the `LayoutStrategy` trait, whose `allocate`
+    took the height before the position. A section's position never depended on its own
+    height, so drawing once places everything where it was (all 14 settings pages
+    pixel-identical before and after in a scale-2 shadow, live readings aside).
+    `LayoutStrategy`, `ColumnLayout`, `AdaptiveGrid`, `FlexLayout`, `RadialLayout` and the
+    unused `Column` / `Row` / `Section` / `UiFrame` / `Radial` went with it; cce-files'
+    browse page is a `scene::layout` column now, and the container layouts
+    (`widget::ContainerLayout`, the gallery's Layout exhibit) are a trait of their own,
+    `layout` and `measure`, without the cursor. New layout is `scene::layout`.
+  - `panes.rs` — `SplitterLayout` and `CircularPaneLayout`, cce-designer's pane geometry.
 - `color/` — the colour model and named colours (`colors` re-export module in `lib.rs`),
   split the same way: `mod.rs` the constants, statics and getters; `load.rs` reading the
   config into them (and `retired_surface_keys`); `math.rs` sRGB/linear, OKLab and the
