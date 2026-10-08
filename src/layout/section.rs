@@ -10,13 +10,12 @@
 //! target to measure it, then for real — through the legacy `LayoutStrategy`, whose
 //! `allocate` took the height first; the flow's choices are the same, so the pages are too.
 //!
-//! What a section draws is immediate-mode: [`SectionContext`] keeps a cursor down its content
-//! box and a one- or two-column grid for the widgets that do not span it. Its geometry is the
-//! settings app's, and documented on each placer.
+//! What goes inside a section is a [`Form`](super::Form): a box-model tree the page declares,
+//! which the section lays out across its content box with `scene::layout` and paints
+//! ([`SectionContext::form`], [`SectionContext::place`]). Until 2026-10-08 it was a cursor
+//! down the content box with a one- or two-column grid, and every page added its own insets.
 
-use crate::widget::WidgetHostExt;
 use super::*;
-use crate::widget::WidgetHost;
 use crate::context::UiContext;
 
 fn estimate_label_width_helper(label: &str, font_size: f32, font_fam: &str) -> f32 {
@@ -291,6 +290,7 @@ pub struct SectionContext<'a, P> {
     pub pc: &'a mut P,
     pub left: f32,
     pub top: f32,
+    /// How far down the section's content reaches.
     pub content_y: f32,
     pub cw: f32,
     pub label_width: f32,
@@ -304,15 +304,12 @@ pub struct SectionContext<'a, P> {
     pub relief_tab: Option<(f32, f32, f32, f32)>,
     pub focused: bool,
     pub is_child: bool,
-    pub grid: Grid,
-    pub last_col: usize,
+    /// Where the content box starts.
     pub content_start_y: f32,
-    pub row_gap: f32,
 }
 
 impl<'a, P: RenderTarget> SectionContext<'a, P> {
     pub const DEFAULT_MARGIN_X: f32 = 12.0;
-    pub const DEFAULT_ROW_GAP: f32 = 8.0;
 
     fn estimate_label_width(label: &str, font_size: f32, font_fam: &str) -> f32 {
         estimate_label_width_helper(label, font_size, font_fam)
@@ -365,14 +362,6 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
 
         let pad = section_padding();
         let margin_x = 2.0 * pad + 12.0;
-        let usable_w = (cw - 2.0 * margin_x).max(1.0);
-        let min_col_width = 130.0;
-        let gap = 8.0;
-        let max_cols = if is_child {
-            1
-        } else {
-            ((usable_w + gap) / (min_col_width + gap)).floor().clamp(1.0, 2.0) as usize
-        };
         // Under relief styling the content stands off the well's top wall by
         // the same inset it keeps from the side walls (`margin_x`, which is
         // also what `finish` leaves below it), so a well reads as one even
@@ -385,7 +374,6 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         } else {
             top + pad + 19.0
         };
-        let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
 
         Self {
             pc,
@@ -399,21 +387,12 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             relief_tab,
             focused,
             is_child,
-            grid,
-            last_col: usize::MAX,
             content_start_y,
-            row_gap: Self::DEFAULT_ROW_GAP,
         }
     }
 
-    pub fn with_row_gap(mut self, gap: f32) -> Self {
-        self.row_gap = gap;
-        self
-    }
-
     /// The section's content-box top edge: the body well's top (the tab's
-    /// bottom) under relief styling, the outline's border line otherwise. Lets
-    /// a page place content at an exact inset from the well's walls.
+    /// bottom) under relief styling, the outline's border line otherwise.
     pub fn well_top(&self) -> f32 {
         if self.relief_style {
             self.relief_tab.map(|t| t.1 + t.3).unwrap_or(self.top)
@@ -422,297 +401,51 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         }
     }
 
-    pub fn set_row_gap(&mut self, gap: f32) {
-        self.row_gap = gap;
-    }
-
-    /// Horizontal inset of section CONTENT from the section's left edge.
-    ///
-    /// One number, used by every content placer in here — `row_layout`, the
-    /// column `Grid`, `widget`, `VStack` and `ax` (so `text`) — because they
-    /// share a section and have to line up inside it. The section's border is
-    /// drawn at `left + padding()` (see `finish`), so content clears the
-    /// border by `padding() + 12`.
+    /// Horizontal inset of section CONTENT from the section's left edge. The section's border
+    /// is drawn at `left + padding()` (see `finish`), so content clears the border by
+    /// `padding() + 12`.
     pub fn content_margin(&self) -> f32 {
         2.0 * self.padding() + 12.0
     }
 
-    /// Left edge of the content box: where a row, a widget or a `text(_, 12.0,
-    /// ..)` starts.
+    /// Left edge of the content box.
     pub fn content_left(&self) -> f32 {
         self.left + self.content_margin()
     }
 
-    /// Width of the content box — the section's width less the inset on both
-    /// sides. Nothing a section draws should extend past `content_left() +
-    /// content_width()`.
+    /// Width of the content box — the section's width less the inset on both sides.
     pub fn content_width(&self) -> f32 {
         (self.cw - 2.0 * self.content_margin()).max(0.0)
     }
 
-    /// `x_off` px into the content box's coordinate space, where 12.0 is the
-    /// content's own left edge — the offset 46 of the ~55 call sites in the
-    /// tree already pass, and the one that lines text up with the buttons and
-    /// widgets beside it.
-    ///
-    /// This used to add `padding()` only when `x_off >= 12.0`, which made the
-    /// mapping DISCONTINUOUS: asking for 11 instead of 12 moved the text 5px
-    /// LEFT rather than 1px, and silently dropped it out of alignment with
-    /// every row in the same section. `cce-mail` and two others sit on the
-    /// wrong side of that cliff today.
-    pub fn ax(&self, x_off: f32) -> f32 {
-        self.left + 2.0 * self.padding() + x_off
-    }
-
-    pub fn ay(&self) -> f32 {
-        self.content_y
-    }
-
-    pub fn spacing(&mut self, dy: f32) {
-        if self.grid.col_heights.len() >= 2 {
-            if self.last_col == usize::MAX {
-                for h in &mut self.grid.col_heights {
-                    *h += dy;
-                }
-            } else if self.last_col < self.grid.col_heights.len() {
-                self.grid.col_heights[self.last_col] += dy;
-            }
-            self.content_y = self.grid.max_height();
-        } else {
-            self.content_y += dy;
-            for h in &mut self.grid.col_heights {
-                *h += dy;
-            }
-        }
-    }
-
-    pub fn text(&mut self, text: &str, x_off: f32, y_off: f32, font_size: f32, color: [f32; 4]) {
-        let mut y = self.content_y + y_off;
+    /// A [`Form`](super::Form) across this section's content box, starting below whatever the
+    /// section already holds (the control gap after it). Declare the contents into it, then
+    /// hand it to [`place`](Self::place).
+    pub fn form<'w>(&self) -> super::Form<'w, P>
+    where
+        P: 'w,
+    {
+        let mut y = self.content_y;
         if y > self.content_start_y {
-            y += self.row_gap;
-        }
-        let x = self.ax(x_off);
-        // Bound it to the content box. A section's text was drawn unbounded,
-        // so a string wider than its section simply kept going — over the
-        // border, over whatever sat to the right, and off the window (the
-        // settings app's GPU names did all three). Rows and widgets have
-        // always been sized to the section; text was the one thing that could
-        // leave it. The vertical band is generous on purpose: it is the
-        // horizontal overrun that has to be cut, and a tight band would
-        // shave descenders.
-        let right = self.content_left() + self.content_width();
-        let bounds = if right > x {
-            Some([x, y - font_size, right, y + 2.0 * font_size])
-        } else {
-            None
-        };
-        self.pc.text_with_bounds(text, x, y, font_size, color, bounds);
-        let new_bottom = y + font_size + 4.0;
-        self.content_y = new_bottom;
-        self.grid.col_heights.fill(new_bottom);
-    }
-
-    pub fn widget<T: WidgetHost + 'static>(&mut self, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
-        if let Some(pref) = w.preferred_height() {
-            wh = pref;
+            y += crate::layout::control_gap();
         }
         let pad = self.padding();
-        let top_room = w.label_strip();
-        let total_h = wh + top_room;
-
-        let name = w.type_name();
-        let span_full = name == "Trackpad"
-            || name == "Canvas"
-            || name == "UsageBar"
-            || name == "ProgressBar"
-            || name == "ButtonStrip"
-            || name == "Spreadsheet"
-            || name == "Graph";
-
-        if span_full {
-            let margin_x = 2.0 * pad + 12.0;
-            let x = self.left + margin_x;
-            let clamped_w = (self.cw - 2.0 * margin_x).max(0.0);
-            let mut max_h = self.grid.max_height().max(self.content_y);
-            if max_h > self.content_start_y {
-                max_h += self.row_gap;
-            }
-            let y = max_h;
-
-            w.set_row_rect(self.left + pad, self.cw - 2.0 * pad);
-            render_widget(self.pc, w, x, y, clamped_w, total_h, ctx);
-
-            let new_bottom = y + total_h;
-            self.content_y = new_bottom;
-            self.grid.col_heights.fill(new_bottom);
-        } else {
-            let max_h = self.grid.max_height();
-            if self.content_y > max_h {
-                self.grid.col_heights.fill(self.content_y);
-            }
-
-            let col = self.grid.next_column();
-            self.last_col = col;
-            let x = self.grid.col_lefts[col];
-            let mut y = self.grid.col_heights[col];
-            if y > self.content_start_y {
-                y += self.row_gap;
-            }
-
-            let aligned_x = x;
-            let aligned_w = self.grid.col_width;
-
-            w.set_row_rect(aligned_x, aligned_w);
-            render_widget(self.pc, w, aligned_x, y, aligned_w, total_h, ctx);
-            self.grid.col_heights[col] = y + total_h;
-            self.content_y = self.grid.max_height();
-        }
+        super::Form::new(self.content_left(), y, self.content_width(), (self.left + pad, self.cw - 2.0 * pad))
     }
 
-    pub fn widget_full<T: WidgetHost + 'static>(&mut self, w: &mut T, wh: f32, ctx: &mut UiContext) {
-        let x_off = 12.0;
-        let ww = self.cw - 2.0 * (self.padding() + x_off); // cw - 40.0
-        self.widget(w, x_off, ww, wh, ctx);
-    }
-
-    pub fn separator(&mut self) {
-        let pad = self.padding();
-        let x = self.ax(pad);
-        let max_h = self.grid.max_height().max(self.content_y);
-        let y = max_h;
-        self.pc.rect([0.18, 0.18, 0.27, 1.0], x, y, self.cw - 2.0 * pad, 1.0);
-        self.content_y = max_h + 8.0;
-        self.grid.col_heights.fill(self.content_y);
-    }
-
-    pub fn rect(&mut self, color: [f32; 4], x_off: f32, w: f32, h: f32) {
-        let max_h = self.grid.max_height().max(self.content_y);
-        self.pc.rect(color, self.ax(x_off), max_h, w, h);
-        self.content_y = max_h + h;
-        self.grid.col_heights.fill(self.content_y);
-    }
-
-    pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
-        let margin_x = self.content_margin();
-        let usable_w = self.content_width();
-        if count == 0 {
-            return Vec::new();
-        }
-        let total_gap = gap * (count - 1) as f32;
-        let col_w = (usable_w - total_gap).max(0.0) / count as f32;
-
-        let mut cols = Vec::with_capacity(count);
-        for i in 0..count {
-            let x = self.left + margin_x + i as f32 * (col_w + gap);
-            cols.push((x, col_w));
-        }
-        cols
-    }
-
-    /// A row whose columns are sized to what goes IN them: each gets the width
-    /// it asked for in `needs`, and whatever is left over is shared equally.
-    ///
-    /// `row_layout` splits a row evenly and knows nothing about content, so it
-    /// hands "Reboot" and "Hibernate" the same width — one floats in slack
-    /// while the other is cut off, which is what a row of mismatched labels
-    /// looks like. Sharing the SLACK equally rather than sizing proportionally
-    /// is deliberate: proportional widths would make a two-character label a
-    /// sliver, where what is wanted is "everyone fits, then everyone gets the
-    /// same bonus".
-    ///
-    /// When the needs do not fit, every column is scaled by the same factor, so
-    /// the row still cannot overflow its section and the shortfall is shared
-    /// rather than landing entirely on the last column.
-    pub fn row_layout_for(&self, needs: &[f32], gap: f32) -> Vec<(f32, f32)> {
-        let count = needs.len();
-        if count == 0 {
-            return Vec::new();
-        }
-        let total_gap = gap * (count - 1) as f32;
-        let room = (self.content_width() - total_gap).max(0.0);
-        let total_need: f32 = needs.iter().map(|n| n.max(0.0)).sum();
-
-        let widths: Vec<f32> = if total_need <= room {
-            let extra = (room - total_need) / count as f32;
-            needs.iter().map(|n| n.max(0.0) + extra).collect()
-        } else if total_need > 0.0 {
-            let scale = room / total_need;
-            needs.iter().map(|n| n.max(0.0) * scale).collect()
-        } else {
-            vec![room / count as f32; count]
-        };
-
-        let mut cols = Vec::with_capacity(count);
-        let mut x = self.content_left();
-        for w in widths {
-            cols.push((x, w));
-            x += w + gap;
-        }
-        cols
-    }
-
-
-    pub fn row<F>(&mut self, count: usize, gap: f32, h: f32, mut f: F)
+    /// Lay a [`Form`](super::Form) out, paint it, and move the section past it.
+    pub fn place<'w>(&mut self, form: super::Form<'w, P>, ctx: &mut UiContext)
     where
-        F: FnMut(usize, f32, f32),
+        P: 'w,
     {
-        let max_h = self.grid.max_height().max(self.content_y);
-        self.grid.col_heights.fill(max_h);
-        self.content_y = max_h;
-
-        let cols = self.row_layout(count, gap);
-        for (i, &(x, w)) in cols.iter().enumerate() {
-            f(i, x, w);
-        }
-        self.content_y += h;
-
-        self.grid.col_heights.fill(self.content_y);
+        let bottom = form.paint(&mut *self.pc, ctx);
+        self.content_y = bottom;
     }
 
-    pub fn vstack(&mut self, spacing: f32) -> VStack<'_, 'a, P> {
-        VStack {
-            context: self,
-            spacing,
-        }
-    }
-
-    pub fn add_section<F>(&mut self, label: &str, focused: bool, mut render_fn: F)
-    where
-        F: FnMut(&mut SectionContext<'_, P>),
-    {
-        let pad = self.padding();
-        let (left, top, cw, is_side_by_side) = if self.grid.col_heights.len() >= 2 {
-            let col = self.grid.next_column();
-            self.last_col = col;
-            let x = self.grid.col_lefts[col];
-            let mut y = self.grid.col_heights[col];
-            if y > self.content_start_y {
-                y += self.row_gap;
-            }
-            (x, y, self.grid.col_width, true)
-        } else {
-            let left = self.ax(0.0) + pad;
-            let mut max_h = self.grid.max_height().max(self.content_y);
-            if max_h > self.content_start_y {
-                max_h += self.row_gap;
-            }
-            let top = max_h;
-            let cw = self.cw - 2.0 * pad;
-            (left, top, cw, false)
-        };
-
-        let mut sub_ctx = SectionContext::new(self.pc, left, top, cw, label, focused, true);
-        render_fn(&mut sub_ctx);
-        let new_bottom = sub_ctx.finish();
-
-        if is_side_by_side {
-            let col = self.last_col;
-            self.grid.col_heights[col] = new_bottom;
-            self.content_y = self.grid.max_height();
-        } else {
-            self.content_y = new_bottom;
-            self.grid.col_heights.fill(new_bottom);
-        }
+    /// How far below the last of its content the section's frame ends — what a page leaves
+    /// under a list that fills the rest of the page.
+    pub fn bottom_inset(&self) -> f32 {
+        if self.relief_style { self.content_margin() } else { self.padding() + 12.0 + 8.0 }
     }
 
     pub fn finish(self) -> f32 {
@@ -786,82 +519,6 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     }
 }
 
-
-pub struct VStack<'b, 'a, P> {
-    pub context: &'b mut SectionContext<'a, P>,
-    pub spacing: f32,
-}
-
-impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
-    pub fn add_widget<T: WidgetHost + 'static>(&mut self, w: &mut T, _ww: f32, wh: f32, ctx: &mut UiContext) {
-        let pad = self.context.padding();
-        let margin_x = 2.0 * pad + 12.0;
-        let x = self.context.left + margin_x;
-        let clamped_w = (self.context.cw - 2.0 * margin_x).max(0.0);
-
-        let mut max_h = self.context.grid.max_height().max(self.context.content_y);
-        if max_h > self.context.content_start_y {
-            max_h += self.context.row_gap;
-        }
-        let y = max_h;
-
-        let pref_h = w.preferred_height().unwrap_or(wh);
-        let top_room = w.label_strip();
-        let total_h = pref_h + top_room;
-
-        w.set_row_rect(self.context.left + pad, self.context.cw - 2.0 * pad);
-        render_widget(self.context.pc, w, x, y, clamped_w, total_h, ctx);
-
-        let new_bottom = y + total_h;
-        self.context.content_y = new_bottom;
-        self.context.grid.col_heights.fill(new_bottom);
-        self.context.spacing(self.spacing);
-    }
-
-    /// [`add_row`](Self::add_row) with per-column widths from `needs` — see
-    /// [`SectionContext::row_layout_for`]. For a row of buttons, `needs` is
-    /// each label's measured width plus the plate's own inset.
-    pub fn add_row_for<F>(&mut self, needs: &[f32], gap: f32, h: f32, mut f: F)
-    where
-        F: FnMut(&mut SectionContext<'a, P>, usize, f32, f32),
-    {
-        let max_h = self.context.grid.max_height().max(self.context.content_y);
-        self.context.grid.col_heights.fill(max_h);
-        self.context.content_y = max_h;
-
-        let cols = self.context.row_layout_for(needs, gap);
-        for (i, &(x, w)) in cols.iter().enumerate() {
-            self.context.content_y = max_h;
-            f(self.context, i, x, w);
-        }
-
-        let new_bottom = max_h + h;
-        self.context.content_y = new_bottom;
-        self.context.grid.col_heights.fill(new_bottom);
-        self.context.spacing(self.spacing);
-    }
-
-    pub fn add_row<F>(&mut self, count: usize, gap: f32, h: f32, mut f: F)
-    where
-        F: FnMut(&mut SectionContext<'a, P>, usize, f32, f32),
-    {
-        let max_h = self.context.grid.max_height().max(self.context.content_y);
-        self.context.grid.col_heights.fill(max_h);
-        self.context.content_y = max_h;
-
-        let cols = self.context.row_layout(count, gap);
-        for (i, &(x, w)) in cols.iter().enumerate() {
-            self.context.content_y = max_h;
-            f(self.context, i, x, w);
-        }
-
-        let new_bottom = max_h + h;
-        self.context.content_y = new_bottom;
-        self.context.grid.col_heights.fill(new_bottom);
-        self.context.spacing(self.spacing);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -922,7 +579,9 @@ mod tests {
         for _ in 0..2 {
             builder.add_section(&mut pc, "Section", false, |sec| {
                 tops.push(sec.top);
-                sec.spacing(40.0);
+                let mut form = sec.form();
+                form.column().draw(0.0, 40.0, false, |_, _, _| {});
+                sec.place(form, &mut UiContext::new());
             });
         }
         assert_eq!(tops.len(), 2, "one call per section");

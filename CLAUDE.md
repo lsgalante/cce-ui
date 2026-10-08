@@ -1826,7 +1826,7 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `layout/` — the style getters and the code that was filed beside them, one module whose
   `mod.rs` re-exports every submodule, so `crate::layout::…` paths are unchanged (split
   2026-10-07 from one 7.4k-line file):
-  - `src/layout/mod.rs` (~2.6k lines) — the sizing constants and the style getters/setters
+  - `src/layout/mod.rs` (~2.3k lines) — the sizing constants and the style getters/setters
     (heights, radii, fonts — many `*_font_parsed()` — gaps, the relief and bevel profile
     state), `reload_config`, and `read_preferred_fonts` / font-family resolution used by the
     cosmic-text path. It names no widget: what does is in the modules below.
@@ -1853,9 +1853,9 @@ cce-system-interface) to confirm behavior, not just the test suite.
     `render_widget`, `render_popovers`, the carve types that cross it.
   - `section.rs` — a settings page's sections: `PageFlow` places them (a masonry of
     columns as wide as fit `grid_min_col_width`), `PageLayoutBuilder` draws each ONCE in
-    the slot the flow gives it and hands its height back, and `SectionContext` (with its
-    `VStack`) is what a section draws through — immediate-mode, a cursor down the content
-    box and a one- or two-column grid. cce-system-interface is its user. Since 2026-10-08:
+    the slot the flow gives it and hands its height back, and `SectionContext` frames a
+    section (title tab, well) around what a page puts in it. cce-system-interface is its
+    user. Since 2026-10-08:
     until then it was `legacy.rs`, and every section was drawn TWICE, once into a
     throwaway target to measure it, through the `LayoutStrategy` trait, whose `allocate`
     took the height before the position. A section's position never depended on its own
@@ -1866,6 +1866,20 @@ cce-system-interface) to confirm behavior, not just the test suite.
     browse page is a `scene::layout` column now, and the container layouts
     (`widget::ContainerLayout`, the gallery's Layout exhibit) are a trait of their own,
     `layout` and `measure`, without the cursor. New layout is `scene::layout`.
+  - `form.rs` — what goes INSIDE a section, on `scene::layout` (since 2026-10-08): a page
+    asks the section for a `Form` (`SectionContext::form`), declares its contents into it
+    — retained widgets (`widget`, `widget_w`), text (`text`, `text_fill`, `lines`), rows
+    and columns, `block`s of text lines with no gap, `rule`s, `space`, pieces it paints
+    itself (`draw`), and one that takes the rest of the page (`fill`, with
+    `Form::fill_height`) — and hands it back (`SectionContext::place`), which solves the
+    tree across the content box and paints each piece where it landed, in declaration
+    order. The spacing is the ladder's: the form a `controls_column`, a row a
+    `controls_row`, both `control_gap` apart; a page states a size only where a piece has
+    one of its own (a list's height, a button's width). Until the same day a section
+    placed its contents with a cursor (`VStack`, `add_row` / `add_row_for`, `row_layout`,
+    `text`, `spacing`) and a hidden one-or-two-column grid that widgets fell into unless
+    their type name said otherwise, and every page added insets of its own (`+ 14`,
+    `- 28`, `44.0`); the 14 settings pages moved onto the form and the cursor went.
 - `color/` — the colour model and named colours (`colors` re-export module in `lib.rs`),
   split the same way: `mod.rs` the constants, statics and getters; `load.rs` reading the
   config into them (and `retired_surface_keys`); `math.rs` sRGB/linear, OKLab and the

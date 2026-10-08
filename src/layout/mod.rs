@@ -22,6 +22,8 @@ mod bridge;
 pub use bridge::*;
 mod section;
 pub use section::*;
+mod form;
+pub use form::{line_height as form_line_height, text_width as form_text_width, Form, Group as FormGroup};
 /// The height every text-bearing control falls back to when its own
 /// `style.control.<name>.height` is unset: button, toggle (and the checkbox
 /// row), dropdown, textbox (and the keybind recorder), spinbox, font selector,
@@ -1768,35 +1770,6 @@ mod tests {
 
     use super::*;
 
-    struct MockRenderTarget {
-        rects: Vec<([f32; 4], f32, f32, f32, f32)>,
-    }
-
-    impl RenderTarget for MockRenderTarget {
-        fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
-            self.rects.push((color, x, y, w, h));
-        }
-        fn text(&mut self, _content: &str, _x: f32, _y: f32, _size: f32, _color: [f32; 4]) {}
-    }
-
-    #[derive(Default)]
-    struct ProbeTarget {
-        rects: Vec<([f32; 4], f32, f32, f32, f32)>,
-        bounded: Vec<(String, f32, f32, Option<[f32; 4]>)>,
-    }
-
-    impl RenderTarget for ProbeTarget {
-        fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
-            self.rects.push((color, x, y, w, h));
-        }
-        fn text(&mut self, content: &str, x: f32, y: f32, _size: f32, _color: [f32; 4]) {
-            self.bounded.push((content.to_string(), x, y, None));
-        }
-        fn text_with_bounds(&mut self, content: &str, x: f32, y: f32, _size: f32, _color: [f32; 4], bounds: Option<[f32; 4]>) {
-            self.bounded.push((content.to_string(), x, y, bounds));
-        }
-    }
-
     /// A graph's wires and ports reach a flat host: `render_widget` hands
     /// its strokes to `RenderTarget::line` (and arcs and discs to `arc` and
     /// `circle`), where it used to drop them, so cce-files' Graph page drew
@@ -1869,121 +1842,10 @@ mod tests {
         assert!(pc.0.iter().any(|n| n == "chevron-down"), "the arrow reached the host: {:?}", pc.0);
     }
 
-    /// Everything a section places horizontally — text, button rows, widgets,
-    /// the column grid — must share ONE inset, or content does not line up
-    /// with the content beside it. Text used to sit `padding()` to the left of
-    /// every row in the same section.
-    #[test]
-    fn section_text_and_rows_share_one_inset() {
-        let mut pc = ProbeTarget::default();
-        let (left, cw) = (100.0f32, 320.0f32);
-        let sec: SectionContext<'_, ProbeTarget> =
-            SectionContext::new(&mut pc, left, 50.0, cw, "Probe", false, false);
 
-        let cols = sec.row_layout(2, 8.0);
-        assert_eq!(sec.ax(12.0), cols[0].0, "text at the conventional 12.0 must start where a row starts");
-        assert_eq!(sec.ax(12.0), sec.content_left());
 
-        // Symmetric: the right-hand inset from the section border matches the
-        // left-hand one.
-        let pad = sec.padding();
-        let (border_l, border_r) = (left + pad, left + cw - pad);
-        let row_right = cols[1].0 + cols[1].1;
-        assert_eq!(cols[0].0 - border_l, border_r - row_right);
-    }
 
-    /// Even division gives a long label and a short one the same box, so one
-    /// is clipped while the other floats in slack — the row of Suspend /
-    /// Hibernate / Reboot / Power Off that prompted this. `row_layout_for`
-    /// gives each column what it needs and shares the leftover equally.
-    #[test]
-    fn a_row_sized_for_content_fits_every_column() {
-        let mut pc = ProbeTarget::default();
-        let sec: SectionContext<'_, ProbeTarget> =
-            SectionContext::new(&mut pc, 100.0, 50.0, 400.0, "Probe", false, false);
-        let needs = [80.0f32, 30.0, 50.0, 40.0];
-        let cols = sec.row_layout_for(&needs, 8.0);
 
-        for (i, &(_, w)) in cols.iter().enumerate() {
-            assert!(w >= needs[i], "column {i} got {w}, less than the {} it needs", needs[i]);
-        }
-        // The slack is shared equally, so every column overshoots by the same
-        // amount — not proportionally, which would starve the short ones.
-        let slack: Vec<f32> = cols.iter().zip(needs.iter()).map(|(&(_, w), n)| w - n).collect();
-        for s in &slack {
-            assert!((s - slack[0]).abs() < 1.0e-3, "slack shared unevenly: {slack:?}");
-        }
-        // And the row still ends inside the section.
-        let (lx, lw) = *cols.last().unwrap();
-        assert!(lx + lw <= sec.content_left() + sec.content_width() + 1.0e-3);
-    }
-
-    /// When the labels genuinely do not fit, everyone shrinks by the same
-    /// factor rather than the last column absorbing the whole shortfall.
-    #[test]
-    fn an_overfull_row_shrinks_every_column_together() {
-        let mut pc = ProbeTarget::default();
-        let sec: SectionContext<'_, ProbeTarget> =
-            SectionContext::new(&mut pc, 100.0, 50.0, 200.0, "Probe", false, false);
-        let needs = [300.0f32, 150.0];
-        let cols = sec.row_layout_for(&needs, 8.0);
-        let ratio0 = cols[0].1 / needs[0];
-        let ratio1 = cols[1].1 / needs[1];
-        assert!((ratio0 - ratio1).abs() < 1.0e-3, "shrink was not shared: {ratio0} vs {ratio1}");
-        let (lx, lw) = cols[1];
-        assert!(lx + lw <= sec.content_left() + sec.content_width() + 1.0e-3, "overfull row escaped the section");
-    }
-
-    /// `ax` used to add `padding()` only for `x_off >= 12.0`, so asking for one
-    /// pixel less moved content a whole `padding()` the other way. Callers do
-    /// pass 11.0 and 13.0 in this tree, and the step put them in different
-    /// coordinate spaces from each other.
-    #[test]
-    fn section_ax_is_continuous() {
-        let mut pc = ProbeTarget::default();
-        let sec: SectionContext<'_, ProbeTarget> =
-            SectionContext::new(&mut pc, 100.0, 50.0, 320.0, "Probe", false, false);
-        for off in [0.0f32, 1.0, 11.0, 11.999, 12.0, 13.0, 24.0] {
-            assert!(
-                (sec.ax(off) - sec.ax(0.0) - off).abs() < 1.0e-3,
-                "ax must be a plain translation; it stepped at {off}"
-            );
-        }
-    }
-
-    /// A string wider than its section used to be drawn unbounded, running over
-    /// the border and out of the window. Every section text now carries bounds
-    /// no wider than the content box.
-    #[test]
-    fn section_text_is_bounded_to_the_content_box() {
-        let mut pc = ProbeTarget::default();
-        let (left, cw) = (100.0f32, 320.0f32);
-        {
-            let mut sec: SectionContext<'_, ProbeTarget> =
-                SectionContext::new(&mut pc, left, 50.0, cw, "Probe", false, false);
-            let right = sec.content_left() + sec.content_width();
-            sec.text(
-                "NVIDIA Corporation AD104M [GeForce RTX 4080 Max-Q / Mobile] and then some",
-                12.0, 0.0, 12.0, [1.0; 4],
-            );
-            assert!(right < left + cw, "content box must sit inside the section");
-        }
-        // Pick our string out by content: the section's own label is drawn
-        // through this target too, and it is not content.
-        let (_, _, _, bounds) = pc
-            .bounded
-            .iter()
-            .find(|(t, ..)| t.starts_with("NVIDIA"))
-            .cloned()
-            .expect("the section text must reach the render target");
-        let b = bounds.expect("section text must be bounded");
-        // Recompute the expectation from the same inputs the section used.
-        let mut pc2 = ProbeTarget::default();
-        let probe: SectionContext<'_, ProbeTarget> =
-            SectionContext::new(&mut pc2, left, 50.0, cw, "Probe", false, false);
-        assert_eq!(b[2], probe.content_left() + probe.content_width());
-        assert!(b[2] <= left + cw - probe.padding(), "bound must not exceed the section border");
-    }
 
     struct MockWidget {
         base: crate::widget::Widget,
@@ -2004,65 +1866,6 @@ mod tests {
             self.w = w;
             self.h = h;
         }
-    }
-
-    struct MockWidgetWithLabel {
-        base: crate::widget::Widget,
-    }
-
-    impl WidgetHost for MockWidgetWithLabel {
-        crate::impl_widget_base!(MockWidgetWithLabel);
-        fn rect(&self) -> (f32, f32, f32, f32) {
-            let offset = self.label_strip();
-            (self.base.x, self.base.y - offset, self.base.w, self.base.h + offset)
-        }
-        fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-            let offset = self.label_strip();
-            self.base.x = x;
-            self.base.y = y + offset;
-            self.base.w = w;
-            self.base.h = (h - offset).max(0.0);
-        }
-    }
-
-    /// The vstack flow is checked against the LIVE style — the label margin, the
-    /// detached-label font and the section padding are process-global and the suite
-    /// runs in parallel, so pinning them here would be a window every other test
-    /// could see (a label measured in one font by its own call and in another by the
-    /// group hull's is exactly the flake this cost us). Every expectation below is
-    /// derived from the getters instead, so the flow holds under any config.
-    #[test]
-    fn test_vstack_flow() {
-        // A section's VStack seats every widget one content margin in from its left edge.
-        let mut mock_pc = MockRenderTarget { rects: Vec::new() };
-        let mut sec = SectionContext::new(&mut mock_pc, 10.0, 20.0, 200.0, "Test Section", false, false);
-        let first_col_x = sec.content_left();
-        let gap = sec.row_gap;
-        let start_y = sec.ay();
-        let mut stack = sec.vstack(10.0);
-
-        let mut dummy = crate::context::UiContext::new();
-        let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        stack.add_widget(&mut w1, 50.0, 30.0, &mut dummy);
-
-        assert_eq!(w1.x, first_col_x);
-        assert_eq!(w1.y, start_y);
-
-        let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        stack.add_widget(&mut w2, 60.0, 40.0, &mut dummy);
-
-        // The next starts below the first, the stack's spacing and the row gap on.
-        assert_eq!(w2.y, start_y + 30.0 + 10.0 + gap);
-
-        let mut base = crate::widget::Widget::new();
-        base.label = Some("Test Label".to_string());
-        let mut w3 = MockWidgetWithLabel { base };
-        stack.add_widget(&mut w3, 70.0, 50.0, &mut dummy);
-
-        let offset = w3.base.label_offset();
-        // A labelled widget's control sits below its label strip.
-        assert!(offset > 0.0, "a labelled widget has a strip");
-        assert_eq!(w3.base.y, start_y + 30.0 + 10.0 + gap + 40.0 + 10.0 + gap + offset);
     }
 
     #[test]
@@ -2094,22 +1897,6 @@ mod tests {
         assert_eq!(grid2.max_height(), 75.0);
     }
 
-    #[test]
-    fn test_subsection() {
-        let mut pc = PopoverCollector::new();
-        let mut subsec = SectionContext::new(&mut pc, 10.0, 20.0, 300.0, "Test Subsec", false, true);
-        assert_eq!(subsec.left, 10.0);
-        assert_eq!(subsec.top, 20.0);
-        assert_eq!(subsec.cw, 300.0);
-        assert!(subsec.is_child);
-
-        let mut dummy = crate::context::UiContext::new();
-        let mut w = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        subsec.widget(&mut w, 12.0, 100.0, 40.0, &mut dummy);
-
-        let bottom = subsec.finish();
-        assert!(bottom > 20.0);
-    }
 
     /// These keys have ONE home, the style registry (since 2026-10-08): the setter writes
     /// it, the getter reads it, an unset key is its default, and a length in other units
@@ -2197,89 +1984,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_section_context_grid() {
-        let mut mock_pc = MockRenderTarget { rects: Vec::new() };
-        let mut ctx = SectionContext::new(&mut mock_pc, 10.0, 20.0, 500.0, "Test Section", false, false);
-        assert_eq!(ctx.left, 10.0);
-        assert_eq!(ctx.top, 20.0);
-        assert_eq!(ctx.cw, 500.0);
 
-        let mut ui_ctx = crate::context::UiContext::new();
-        let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        ctx.widget(&mut w1, 12.0, 100.0, 40.0, &mut ui_ctx);
 
-        let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        ctx.widget(&mut w2, 12.0, 100.0, 30.0, &mut ui_ctx);
 
-        // Since cw=500, we should have multiple columns!
-        // The first widget goes into column 0, second into column 1.
-        assert_ne!(w1.x, w2.x);
-        
-        let bottom = ctx.finish();
-        assert!(bottom > 20.0);
-    }
-
-    #[test]
-    fn test_child_section_single_column_controls() {
-        let mut mock_pc = MockRenderTarget { rects: Vec::new() };
-        let mut ctx = SectionContext::new(&mut mock_pc, 10.0, 20.0, 500.0, "Test Child Section", false, true);
-        assert_eq!(ctx.grid.col_heights.len(), 1);
-        
-        let mut ui_ctx = crate::context::UiContext::new();
-        let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        ctx.widget(&mut w1, 12.0, 100.0, 40.0, &mut ui_ctx);
-
-        let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        ctx.widget(&mut w2, 12.0, 100.0, 30.0, &mut ui_ctx);
-
-        // Since it's a child section, we should have a single column only, so w1.x == w2.x.
-        assert_eq!(w1.x, w2.x);
-    }
-
-    #[test]
-    fn test_parent_section_side_by_side_child_sections() {
-        let mut mock_pc = MockRenderTarget { rects: Vec::new() };
-        let mut parent_ctx = SectionContext::new(&mut mock_pc, 10.0, 20.0, 500.0, "Parent Section", false, false);
-        assert_eq!(parent_ctx.grid.col_heights.len(), 2);
-
-        let mut sub_left_1 = 0.0;
-        let mut sub_left_2 = 0.0;
-
-        parent_ctx.add_section("Child Section 1", false, |subsec1| {
-            sub_left_1 = subsec1.left;
-        });
-
-        parent_ctx.add_section("Child Section 2", false, |subsec2| {
-            sub_left_2 = subsec2.left;
-        });
-
-        // The two child sections should be rendered side-by-side in different columns, so sub_left_1 != sub_left_2.
-        assert_ne!(sub_left_1, sub_left_2);
-    }
-
-    #[test]
-    fn test_section_context_spacing_preserves_columns() {
-        let mut mock_pc = MockRenderTarget { rects: Vec::new() };
-        let mut ctx = SectionContext::new(&mut mock_pc, 10.0, 20.0, 500.0, "Test Section", false, false);
-        assert_eq!(ctx.grid.col_heights.len(), 2);
-
-        let mut ui_ctx = crate::context::UiContext::new();
-        let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
-        ctx.widget(&mut w1, 12.0, 100.0, 40.0, &mut ui_ctx); // placed in col 0
-
-        let height_col_0_before = ctx.grid.col_heights[0];
-        let height_col_1_before = ctx.grid.col_heights[1];
-        assert_ne!(height_col_0_before, height_col_1_before);
-
-        ctx.spacing(12.0);
-
-        let height_col_0_after = ctx.grid.col_heights[0];
-        let height_col_1_after = ctx.grid.col_heights[1];
-        assert_eq!(height_col_0_after, height_col_0_before + 12.0);
-        assert_eq!(height_col_1_after, height_col_1_before);
-        assert_ne!(height_col_0_after, height_col_1_after);
-    }
 
     #[test]
     fn test_spinbox_button_padding_config() {
