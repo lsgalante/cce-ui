@@ -483,6 +483,21 @@ pub trait Input {
         None
     }
 
+    /// The range an assistive tool may set this widget's value in, as `(min, max, step)` in
+    /// the units [`value_string`](Input::value_string) reads in — a slider's or spin
+    /// button's. Default `None`: the value is not a number a reader can set.
+    fn a11y_range(&self) -> Option<(f64, f64, f64)> {
+        None
+    }
+
+    /// Set the value an assistive tool asked for (AT-SPI's `SetCurrentValue`), clamped to
+    /// [`a11y_range`](Input::a11y_range), and mark it changed as a typed value would be, so
+    /// the host's `take_change` reports it. Returns whether it changed. Default: not
+    /// settable.
+    fn a11y_set_value(&mut self, _value: f64) -> bool {
+        false
+    }
+
     /// Set the widget's value from a config string. Returns whether it parsed and changed.
     fn set_value_string(&mut self, _val: &str) -> bool {
         false
@@ -1293,6 +1308,14 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
 
     fn a11y_value(&self) -> Option<String> {
         Input::value_string(&self.inner)
+    }
+
+    fn a11y_range(&self) -> Option<(f64, f64, f64)> {
+        Input::a11y_range(&self.inner)
+    }
+
+    fn a11y_set_value(&mut self, value: f64) -> bool {
+        Input::a11y_set_value(&mut self.inner, value)
     }
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
         Paint::solid_border(&self.inner)

@@ -668,6 +668,15 @@ impl Input for Slider {
         Some(self.scaled_string())
     }
 
+    fn a11y_range(&self) -> Option<(f64, f64, f64)> {
+        let (lo, hi) = (self.min.min(self.max) as f64, self.min.max(self.max) as f64);
+        Some((lo, hi, (self.notch_step() * (self.max - self.min).abs()) as f64))
+    }
+
+    fn a11y_set_value(&mut self, value: f64) -> bool {
+        self.set_value_string(&value.to_string())
+    }
+
     fn set_value_string(&mut self, val: &str) -> bool {
         if let Ok(new_val) = val.trim().parse::<f32>() {
             let range = self.max - self.min;

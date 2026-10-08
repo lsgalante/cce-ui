@@ -694,6 +694,33 @@ impl Driver {
         *t.redraw = true;
     }
 
+    /// Press and release a named key on the app's behalf — an assistive tool's Click or
+    /// Increment (`backend::a11y_unix::act`), after it has focused the widget. Through the
+    /// app's own `handle_key_input` like any key, but past the chords (a reader's Space is
+    /// not Tab), with no modifiers and no text, and never repeated.
+    pub fn press_named_key<A: Application>(&mut self, t: Turn<'_, A>, key: NamedKey) {
+        self.note_input();
+        let mut rebuild = false;
+        for state in [ElementState::Pressed, ElementState::Released] {
+            let event = KeyEvent {
+                state,
+                logical_key: Key::Named(key),
+                text: None,
+                repeat: false,
+                ctrl: false,
+                shift: false,
+                alt: false,
+            };
+            let msg = t.app.handle_key_input(&event, &mut rebuild);
+            if let Some(msg) = msg {
+                let mut update_rebuild = false;
+                t.app.update(msg, &mut update_rebuild, t.exit);
+                rebuild |= update_rebuild;
+            }
+        }
+        *t.redraw = true;
+    }
+
     /// The input method's composition changed (`None`: it ended without a
     /// commit, or the commit follows). The editing widget shows it from the
     /// next frame.

@@ -31,6 +31,9 @@ pub struct Spinbox {
     /// Wheel notches carried between events: a trackpad's fractional notches
     /// add up to whole steps instead of being dropped.
     wheel_accum: f32,
+    /// Whether it has the keyboard. Enter ends editing but not focus, and a focused box that
+    /// is not editing goes back into it on the keys that edit or step it.
+    focused: bool,
     /// Char-index → x offsets of the value text, recorded by [`Paint::prepare_text`]
     /// from the same shaped buffer the renderer draws (`ctx.text`, size 14, default
     /// family). The caret and click→index math read these; the `8.4` px/char guess
@@ -96,6 +99,7 @@ impl Spinbox {
             just_changed: false,
             label: None,
             wheel_accum: 0.0,
+            focused: false,
             glyph_offsets: Vec::new(),
         })
     }
@@ -577,8 +581,23 @@ impl Input for Spinbox {
                 true
             }
             Event::KeyInput(key_event) => {
-                if !self.editing || key_event.state != ElementState::Pressed {
+                if key_event.state != ElementState::Pressed {
                     return false;
+                }
+                if !self.editing {
+                    // Focused but done editing (Enter committed): the keys that edit or step
+                    // the box take it back into editing; Enter just reopens it.
+                    let reopens = match &key_event.logical_key {
+                        Key::Named(NamedKey::Enter | NamedKey::ArrowUp | NamedKey::ArrowDown | NamedKey::Backspace) => true,
+                        _ => key_event.text.as_deref().is_some_and(|t| t.chars().all(|c| c.is_ascii_digit() || c == '-' || c == '.') && !t.is_empty()),
+                    };
+                    if !self.focused || !reopens {
+                        return false;
+                    }
+                    self.begin_edit(true);
+                    if key_event.logical_key == Key::Named(NamedKey::Enter) {
+                        return true;
+                    }
                 }
                 let mut state = TextEditorState {
                     buffer: self.edit_buffer.clone(),
@@ -592,6 +611,12 @@ impl Input for Spinbox {
                     Key::Named(NamedKey::Delete) => handled = state.delete_forwards(),
                     Key::Named(NamedKey::ArrowLeft) => handled = state.move_cursor_left(false),
                     Key::Named(NamedKey::ArrowRight) => handled = state.move_cursor_right(false),
+                    // Up / Down step the value, as the -/+ run does (and an assistive
+                    // tool's Increment / Decrement, which presses them).
+                    Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::ArrowDown) => {
+                        self.step_by(if key_event.logical_key == Key::Named(NamedKey::ArrowUp) { 1 } else { -1 });
+                        return true;
+                    }
                     Key::Named(NamedKey::Enter) => {
                         let text = state.buffer.clone();
                         self.parse_into_value(&text);
@@ -633,10 +658,12 @@ impl Input for Spinbox {
             // Focus gained programmatically enters edit mode (legacy `focus()` override);
             // focus loss commits (legacy `unfocus`).
             Event::FocusIn => {
+                self.focused = true;
                 self.begin_edit(true);
                 false
             }
             Event::FocusOut => {
+                self.focused = false;
                 if self.editing {
                     self.editing = false;
                     let text = self.edit_buffer.clone();
@@ -658,6 +685,26 @@ impl Input for Spinbox {
 
     fn value_string(&self) -> Option<String> {
         Some(self.formatted_value())
+    }
+
+    fn a11y_range(&self) -> Option<(f64, f64, f64)> {
+        let unit = 10f64.powi(self.decimals as i32);
+        Some((self.min as f64 / unit, self.max as f64 / unit, self.step as f64 / unit))
+    }
+
+    fn a11y_set_value(&mut self, value: f64) -> bool {
+        let old_val = self.value;
+        let unit = 10f64.powi(self.decimals as i32);
+        self.value = ((value * unit).round() as i32).clamp(self.min, self.max);
+        if self.value == old_val {
+            return false;
+        }
+        self.just_changed = true;
+        if self.editing {
+            self.edit_buffer = self.formatted_value();
+            self.cursor_idx = self.edit_buffer.chars().count();
+        }
+        true
     }
 
     fn set_value_string(&mut self, val: &str) -> bool {
@@ -715,6 +762,66 @@ mod tests {
             "no well or ring of its own beside the field"
         );
         assert!(prims.iter().any(|p| matches!(p, Prim::Groove { .. })), "the -/+ seam");
+    }
+
+    /// Up / Down step a focused spinbox, as its -/+ run does: the keys a keyboard user
+    /// steps it with, and what an assistive tool's Increment / Decrement press.
+    #[test]
+    fn up_and_down_step_a_focused_spinbox() {
+        let key = |k| {
+            Event::KeyInput(crate::widget::KeyEvent { logical_key: Key::Named(k), state: ElementState::Pressed, text: None, repeat: false, ctrl: false, shift: false, alt: false })
+        };
+        let mut ctx = UiContext::new();
+        let mut sb = Spinbox::new(5, 0, 10, 2);
+        WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
+        assert!(!sb.handle_event(&key(NamedKey::ArrowUp), &mut ctx), "unfocused: not this box's key");
+        sb.handle_event(&Event::FocusIn, &mut ctx);
+        assert!(sb.handle_event(&key(NamedKey::ArrowUp), &mut ctx));
+        assert_eq!(sb.value, 7);
+        assert!(sb.take_change());
+        assert!(sb.handle_event(&key(NamedKey::ArrowDown), &mut ctx));
+        assert!(sb.handle_event(&key(NamedKey::ArrowDown), &mut ctx));
+        assert_eq!(sb.value, 3);
+        assert_eq!(sb.edit_buffer, "3", "the shown text follows while editing");
+        for _ in 0..5 {
+            sb.handle_event(&key(NamedKey::ArrowDown), &mut ctx);
+        }
+        assert_eq!(sb.value, 0, "clamped at the bottom");
+    }
+
+    /// Enter commits and leaves the box focused; the keys that edit or step it take it back
+    /// into editing, where until 2026-10-08 a focused box ignored every key after Enter.
+    #[test]
+    fn a_focused_spinbox_takes_keys_again_after_enter() {
+        let key = |k: Key, text: Option<&str>| {
+            Event::KeyInput(crate::widget::KeyEvent { logical_key: k, state: ElementState::Pressed, text: text.map(str::to_string), repeat: false, ctrl: false, shift: false, alt: false })
+        };
+        let mut ctx = UiContext::new();
+        let mut sb = Spinbox::new(5, 0, 100, 1);
+        sb.handle_event(&Event::FocusIn, &mut ctx);
+        assert!(sb.handle_event(&key(Key::Named(NamedKey::Enter), None), &mut ctx));
+        assert!(!sb.editing, "Enter commits");
+        assert!(sb.handle_event(&key(Key::Named(NamedKey::ArrowUp), None), &mut ctx), "Up steps it again");
+        assert_eq!(sb.value, 6);
+        sb.handle_event(&key(Key::Named(NamedKey::Enter), None), &mut ctx);
+        assert!(sb.handle_event(&key(Key::Character("4".into()), Some("4")), &mut ctx), "a digit reopens it");
+        assert_eq!(sb.edit_buffer, "64", "typed at the end of the shown value");
+        sb.handle_event(&Event::FocusOut, &mut ctx);
+        assert!(!sb.handle_event(&key(Key::Named(NamedKey::ArrowUp), None), &mut ctx), "unfocused: not its key");
+    }
+
+    /// What a screen reader sets (AT-SPI SetCurrentValue) lands in the box's own units,
+    /// clamped, and is reported as a change; the range is read in the same units.
+    #[test]
+    fn a_reader_sets_a_spinbox_in_its_units() {
+        let mut sb = Spinbox::new(150, 0, 500, 25).with_decimals(2);
+        assert_eq!(sb.inner().a11y_range(), Some((0.0, 5.0, 0.25)));
+        assert!(Input::a11y_set_value(sb.inner_mut(), 2.5));
+        assert_eq!(sb.value, 250);
+        assert!(sb.take_change());
+        assert!(Input::a11y_set_value(sb.inner_mut(), 9.0));
+        assert_eq!(sb.value, 500, "clamped to the top");
+        assert!(!Input::a11y_set_value(sb.inner_mut(), 5.0), "no change, none reported");
     }
 
     #[test]

@@ -34,7 +34,7 @@
 use accesskit::{Action, Affine, Node, NodeId, Rect, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
 
 use crate::context::UiContext;
-use crate::widget::{FocusRole, WidgetHost, WidgetId};
+use crate::widget::{FocusRole, NamedKey, WidgetHost, WidgetId};
 
 /// The window's node, the root every widget hangs from.
 pub const WINDOW: NodeId = NodeId(0);
@@ -161,13 +161,40 @@ pub fn widget_node(w: &dyn WidgetHost, children: Vec<NodeId>) -> Node {
     if focus != FocusRole::None {
         node.add_action(Action::Focus);
     }
-    if focus == FocusRole::Plate {
-        node.add_action(Action::Click);
+    if let Some((min, max, step)) = w.a11y_range() {
+        node.set_min_numeric_value(min);
+        node.set_max_numeric_value(max);
+        if step > 0.0 {
+            node.set_numeric_value_step(step);
+        }
+        node.add_action(Action::SetValue);
+    }
+    for action in [Action::Click, Action::Increment, Action::Decrement] {
+        if key_for(w, action).is_some() {
+            node.add_action(action);
+        }
     }
     if !children.is_empty() {
         node.set_children(children);
     }
     node
+}
+
+/// The key a keyboard user presses on the focused widget to do `action`, which is how the
+/// Linux adapter carries it out (`backend::a11y_unix::act`): Space clicks a plate (what
+/// arms on `FocusIn`); Right / Left step a slider or a range's focused end, Up / Down a
+/// spin button. `None`: the widget does not take it. The node advertises exactly the
+/// actions this answers, so the tree never offers one the runner cannot perform.
+pub fn key_for(w: &dyn WidgetHost, action: Action) -> Option<NamedKey> {
+    let role = role_for(w.type_name(), w.focus_role(), w.a11y_role());
+    match (action, role) {
+        (Action::Click, _) if w.focus_role() == FocusRole::Plate => Some(NamedKey::Space),
+        (Action::Increment, Role::Slider) if w.type_name() != "Slider2D" => Some(NamedKey::ArrowRight),
+        (Action::Decrement, Role::Slider) if w.type_name() != "Slider2D" => Some(NamedKey::ArrowLeft),
+        (Action::Increment, Role::SpinButton) => Some(NamedKey::ArrowUp),
+        (Action::Decrement, Role::SpinButton) => Some(NamedKey::ArrowDown),
+        _ => None,
+    }
 }
 
 /// Whether a widget is on screen: visible, with a size, and not parked. Apps park a widget
@@ -327,7 +354,41 @@ fn push_context_menu(nodes: &mut Vec<(NodeId, Node)>) -> Option<NodeId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Button, Checkbox, Owned, Slider, TextBox};
+    use crate::widget::{Button, Checkbox, Owned, RangeSlider, Slider, Spinbox, TextBox};
+
+    /// A node offers the actions the Linux adapter can carry out, and each by the key a
+    /// keyboard user presses: Space on a plate, Right / Left on a slider or a range,
+    /// Up / Down on a spin button, nothing on a text box.
+    #[test]
+    fn a_node_offers_the_actions_its_keys_carry_out() {
+        let button = Button::new(0.0, 0.0, 80.0, 24.0).with_label("Save");
+        let slider = Slider::new().with_label("Zoom");
+        let range = RangeSlider::new();
+        let spin = Spinbox::new(0, 0, 10, 1);
+        let text = TextBox::new(String::new());
+        let check = Checkbox::new();
+        let offers = |w: &dyn WidgetHost| {
+            let node = widget_node(w, Vec::new());
+            [Action::Click, Action::Increment, Action::Decrement]
+                .into_iter()
+                .filter(|a| node.supports_action(*a))
+                .map(|a| (a, key_for(w, a).expect("an offered action has its key")))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(offers(&button), [(Action::Click, NamedKey::Space)]);
+        assert_eq!(offers(&check), [(Action::Click, NamedKey::Space)]);
+        assert_eq!(offers(&slider), [(Action::Increment, NamedKey::ArrowRight), (Action::Decrement, NamedKey::ArrowLeft)]);
+        assert_eq!(offers(&range), [(Action::Increment, NamedKey::ArrowRight), (Action::Decrement, NamedKey::ArrowLeft)]);
+        assert_eq!(offers(&spin), [(Action::Increment, NamedKey::ArrowUp), (Action::Decrement, NamedKey::ArrowDown)]);
+        assert_eq!(offers(&text), [], "a well is typed into, not pressed or stepped");
+
+        let spin_node = widget_node(&spin, Vec::new());
+        assert!(spin_node.supports_action(Action::SetValue), "a reader sets a spin button");
+        assert_eq!((spin_node.min_numeric_value(), spin_node.max_numeric_value()), (Some(0.0), Some(10.0)));
+        assert_eq!(spin_node.numeric_value_step(), Some(1.0));
+        assert!(!widget_node(&button, Vec::new()).supports_action(Action::SetValue));
+        assert_eq!(key_for(&text, Action::Click), None);
+    }
 
     fn node<'a>(update: &'a TreeUpdate, id: NodeId) -> &'a Node {
         &update.nodes.iter().find(|(n, _)| *n == id).expect("node in the update").1

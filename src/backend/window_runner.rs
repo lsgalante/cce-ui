@@ -1952,8 +1952,22 @@ pub fn run<A: Application>() {
     event_loop
         .handle()
         .insert_source(a11y_rx, |event, _metadata, app_state: &mut EngineState<A>| {
-            use crate::backend::a11y_unix::{act, Event};
+            use crate::backend::a11y_unix::{act, Acted, Event};
             let calloop::channel::Event::Msg(event) = event else { return };
+            if app_state.inner.is_none() {
+                return;
+            }
+            if let Event::Action(request) = &event {
+                match act(app_state.inner.as_mut().unwrap(), request) {
+                    Acted::Nothing => return,
+                    Acted::Changed => app_state.redraw = true,
+                    Acted::Key(key) => {
+                        app_state.redraw = true;
+                        let (driver, t) = app_state.turn();
+                        driver.press_named_key(t, key);
+                    }
+                }
+            }
             let (Some(publisher), Some(app)) = (app_state.a11y.as_mut(), app_state.inner.as_mut()) else { return };
             match event {
                 // Published from here, not at the next frame: an idle window renders none,
@@ -1965,12 +1979,8 @@ pub fn run<A: Application>() {
                     publisher.publish(app, crate::scale::scale_factor() as f64)
                 }
                 Event::Deactivated => {}
-                Event::Action(request) => {
-                    if act(app, &request) {
-                        app_state.redraw = true;
-                        publisher.publish(app, crate::scale::scale_factor() as f64);
-                    }
-                }
+                // Carried out above; the tree it left is published now, as on arrival.
+                Event::Action(_) => publisher.publish(app, crate::scale::scale_factor() as f64),
             }
         })
         .unwrap();

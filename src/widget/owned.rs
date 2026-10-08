@@ -156,6 +156,8 @@ impl<W: WidgetHost + 'static> WidgetHost for Owned<W> {
     fn focus_role(&self) -> FocusRole { self.widget.focus_role() }
     fn a11y_role(&self) -> Option<accesskit::Role> { self.widget.a11y_role() }
     fn a11y_value(&self) -> Option<String> { self.widget.a11y_value() }
+    fn a11y_range(&self) -> Option<(f64, f64, f64)> { self.widget.a11y_range() }
+    fn a11y_set_value(&mut self, value: f64) -> bool { self.widget.a11y_set_value(value) }
     fn corner_radii(&self) -> CornerRadii { self.widget.corner_radii() }
 }
 

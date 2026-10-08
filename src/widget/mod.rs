@@ -587,6 +587,16 @@ pub trait WidgetHost {
         None
     }
 
+    /// The `(min, max, step)` an assistive tool may set the value in (`Input::a11y_range`).
+    fn a11y_range(&self) -> Option<(f64, f64, f64)> {
+        None
+    }
+
+    /// Set the value an assistive tool asked for (`Input::a11y_set_value`).
+    fn a11y_set_value(&mut self, _value: f64) -> bool {
+        false
+    }
+
     fn corner_radii(&self) -> CornerRadii {
         let (r, (tl, tr, br, bl)) = self.corner_style();
         CornerRadii::new(

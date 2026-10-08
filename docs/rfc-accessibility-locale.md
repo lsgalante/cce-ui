@@ -138,8 +138,32 @@ republished. A tree of 21 nodes builds in 50–100 µs in a debug build.
 
 What it showed is the apps' to fix, not the adapter's: most of the data editor's controls
 have no label (an unlabelled field is an empty name to a reader), and its inactive editors
-are registered and visible though not drawn. Next: a widget `Click` (activate), the macOS
-adapter onto the AppKit view, and listening with Orca.
+are registered and visible though not drawn.
+
+**Widget actions (2026-10-08).** A reader can now press and set widgets, not only focus
+them. What AT-SPI reaches through AccessKit is narrower than AccessKit's action list: the
+Action interface carries `click` alone, and a value is adjusted through the Value
+interface's `SetCurrentValue` (`Action::SetValue` with a number); Increment / Decrement
+exist for the macOS and Windows adapters. So:
+- **Click** focuses the widget and presses Space through the app's own
+  `handle_key_input` (`Driver::press_named_key`), what activates a plate from the keyboard,
+  so the app hears of it as it hears of a key. **Increment / Decrement** are the arrows
+  (Right / Left on a slider or range, Up / Down on a spin button), ready for the other
+  adapters. `a11y::key_for` is the one table: a node offers exactly the actions it answers.
+- **SetValue** sets the value on the widget (`Input::a11y_set_value`, Slider and Spinbox),
+  clamped and marked changed as a typed value is, without moving focus. Not by keys: a key
+  a widget does not take falls through to the app, where Backspace or Escape may mean
+  something else. An app that drains `take_change` in `tick` sees it this turn; one that
+  drains only in its input handlers, at the next input.
+- A slider's or spin button's node carries its range and step (`Input::a11y_range`), what a
+  reader reads a percentage and a step from.
+- A Spinbox now steps on Up / Down, and a focused box takes keys again after Enter (it
+  ignored every key until refocused).
+
+Verified on cce-data-editor in a shadow: a check box clicked on and off (CHECKED read
+back), spin buttons set to 7 and 3 with their ranges read. Next: the macOS adapter onto
+the AppKit view, a text field's `SetValue` (AT-SPI's editable text), and listening with
+Orca.
 
 - **Wayland / Linux:** AT-SPI over D-Bus. AccessKit's Unix adapter is the likely carrier
   (evaluate it first; the alternative is a small AT-SPI server of our own). The compositor

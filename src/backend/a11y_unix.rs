@@ -12,13 +12,17 @@
 //!   an idle window renders nothing, so the runner publishes from the event itself.
 //! - **after every frame**: publish again ([`Publisher::publish`] builds nothing while no
 //!   screen reader is connected — `update_if_active`).
-//! - **asked** ([`Event::Action`]): [`act`] — focus a widget, or press a context-menu row.
+//! - **asked** ([`Event::Action`]): [`act`] — focus a widget, press or step one (by the key a
+//!   keyboard user would press, through the app's own key handling), or press a context-menu
+//!   row.
 //! - **the window's keyboard focus**: [`Publisher::window_focus`].
 //!
 //! Without the `a11y` feature the same API compiles to a stub whose [`Publisher::start`] is
 //! `None`, so the runner carries no `cfg`.
 
-use accesskit::{Action, ActionRequest};
+use accesskit::{Action, ActionData, ActionRequest};
+
+use crate::widget::NamedKey;
 
 use crate::backend::app::Application;
 
@@ -45,41 +49,72 @@ pub fn wanted<A: Application>(app: &A) -> bool {
     app.publishes_accessibility() || std::env::var("CCE_A11Y").is_ok_and(|v| v == "1")
 }
 
-/// Carry out an assistive tool's request on `app`; true when something changed (redraw).
+/// What [`act`] did, and what is left for the runner to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Acted {
+    /// Nothing: the target is gone, or the action is not one it takes.
+    Nothing,
+    /// Done; redraw and republish.
+    Changed,
+    /// The target is focused; now press this key as a keyboard user would
+    /// (`Driver::press_named_key`), so the widget and the app answer it as they answer one.
+    Key(NamedKey),
+}
+
+/// Carry out an assistive tool's request on `app`.
 ///
 /// - **Focus** on a widget's node focuses it, through the app's `UiContext` like a Tab step.
+/// - **Click** on a widget focuses it and presses Space: what activates a plate from the
+///   keyboard (`FocusRole::Plate`), so the app learns of it the way it learns of a key.
+/// - **Increment / Decrement** focus a slider or spin button and press the key that steps
+///   it: Right / Left on a slider (a `RangeSlider` uses Up / Down to change ends), Up / Down
+///   on a spin button.
+/// - **SetValue** with a number (AT-SPI's `SetCurrentValue`, how a reader adjusts a slider
+///   or spin button on Linux, where AccessKit offers no Increment) sets it on the widget
+///   (`WidgetHost::a11y_set_value`), marked changed for the app's `take_change`. An app
+///   that drains changes in `tick` sees it this turn; one that drains them only in its
+///   input handlers sees it at the next input.
 /// - **Click** on an open context menu's row presses it where it is drawn, so the menu runs
 ///   the row's action exactly as a pointer would.
 ///
-/// Anything else is not supported yet and does nothing, as AccessKit requires of an action
-/// the app cannot perform (a click on a widget is the next step).
-pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> bool {
+/// Anything else does nothing, as AccessKit requires of an action the app cannot perform.
+/// A key reaches the widget only through the app's `handle_key_input`, as every key does —
+/// an app that does not route keys to its focused widget answers a reader as it answers a
+/// keyboard.
+pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> Acted {
     use crate::widget::context_menu as cm;
     if debug() {
         eprintln!("[a11y] action {:?} on {:?}", request.action, request.target_node);
     }
-    match request.action {
-        Action::Focus => {
-            let (Some(id), Some(ctx)) = (crate::a11y::widget_of(request.target_node), app.ui_context_mut()) else {
-                return false;
-            };
-            if ctx.tree.get_ptr(id).is_none() {
-                return false;
-            }
-            ctx.set_focused_id(id);
-            true
+    if let Some(row) = crate::a11y::menu_row_of(request.target_node) {
+        if request.action != Action::Click || !cm::is_visible() || row >= cm::options().len() {
+            return Acted::Nothing;
         }
-        Action::Click => {
-            let Some(row) = crate::a11y::menu_row_of(request.target_node) else { return false };
-            if !cm::is_visible() || row >= cm::options().len() {
-                return false;
-            }
-            let (x, y) = (cm::x() + cm::w() * 0.5, cm::row_y(row) + cm::ROW_H * 0.5);
-            cm::mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, x, y, app.ui_context_mut());
-            true
-        }
-        _ => false,
+        let (x, y) = (cm::x() + cm::w() * 0.5, cm::row_y(row) + cm::ROW_H * 0.5);
+        cm::mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, x, y, app.ui_context_mut());
+        return Acted::Changed;
     }
+    let Some(id) = crate::a11y::widget_of(request.target_node) else { return Acted::Nothing };
+    let Some(ctx) = app.ui_context_mut() else { return Acted::Nothing };
+    if request.action == Action::SetValue {
+        // Set where it is, focus untouched: a reader adjusting a value has not moved.
+        let Some(ActionData::NumericValue(value)) = request.data else { return Acted::Nothing };
+        let changed = ctx.get_widget_mut(id).is_some_and(|w| w.a11y_set_value(value));
+        return if changed { Acted::Changed } else { Acted::Nothing };
+    }
+    let Some(w) = ctx.get_widget(id) else { return Acted::Nothing };
+    let key = match request.action {
+        Action::Focus => None,
+        action => match crate::a11y::key_for(w, action) {
+            Some(key) => Some(key),
+            None => return Acted::Nothing,
+        },
+    };
+    if ctx.focused_widget != Some(id) {
+        ctx.set_focused_id(id);
+        app.focus_stepped();
+    }
+    key.map_or(Acted::Changed, Acted::Key)
 }
 
 #[cfg(feature = "a11y")]
