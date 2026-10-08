@@ -117,6 +117,9 @@ pub async fn run<A: Application>(canvas: HtmlCanvasElement, fonts: Fonts, sizing
     if let Some(lang) = web_sys::window().and_then(|w| w.navigator().language()) {
         crate::locale::set_locale(&lang);
     }
+    // The page's window's interaction state (`crate::window_state`). The loop runs on the
+    // page's callbacks after this returns, so the state is entered for the page's life.
+    std::mem::forget(crate::window_state::enter(&crate::window_state::WindowState::new()));
     let fs = crate::create_font_system();
 
     let mut renderer = WebRenderer::new(canvas.clone()).await?;

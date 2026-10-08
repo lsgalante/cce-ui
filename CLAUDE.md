@@ -1094,7 +1094,7 @@ there:
 - **`refill(options, sliders)`** changes the shown rows' labels and slider values in
   place (hover, scroll, band, page rows and a held slider kept) — how a host re-marks a
   switch on a page that stays up after it ran. A different row count is refused.
-- **The swipe is `widget::side_swipe`**, one recognizer per thread (`side_swipe::feed`)
+- **The swipe is `widget::side_swipe`**, one recognizer per window (`side_swipe::feed`)
   shared by the menu and any plate a host turns into, so one gesture turns one page
   however many plates pass under the fingers; the lift (`ScrollPhase::FingerEnd`) or a
   250 ms pause readies the next. It fires once the fingers have gone `SWIPE_PX` (40) to
@@ -1659,8 +1659,16 @@ interaction state (context menu, hover highlight, composition — per thread), p
 "the" window (scale, metric, scroll phase), and caches (fine). The RFC sorts them and
 phases the moves. Phase 1 is done: keyboard focus has ONE store, `UiContext::focused_widget`
 (the `widget::focus` thread-local is gone; a widget asks `EventCtx::is_focused`, claims with
-`request_focus`), and the context's dead hover and context-menu twins are deleted. Do not
-add a static for state that belongs to a window.
+`request_focus`), and the context's dead hover and context-menu twins are deleted. Phase 2
+is done: a window's interaction state — the context menu, the hover highlight and its
+cursor, the side swipe, the input-method composition — is a `window_state::WindowState` the
+window OWNS, which its shell makes current (`window_state::enter`) while it runs that
+window's code; the modules' free functions (`context_menu::show`, `ime::caret`, …) act on
+the current one, so no caller changed, and with none entered (a test) each thread has a
+default. `context_menu::with_state` replaces reaching for the old `CONTEXT_MENU`. An app
+that drives a widget's focus itself calls `UiContext::focus_widget` / `unfocus_widget`
+rather than `w.focus()` / `w.unfocus()`, so the window's record of focus follows. Do not
+add a static for state that belongs to a window: give it a field in `WindowState`.
 
 ### The registry holds pointers, and knows when they die
 

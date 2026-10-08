@@ -84,6 +84,10 @@ use crate::backend::text::DlText;
 /// (a process's `main`), as AppKit requires.
 pub fn run<A: Application>() {
     let mtm = MainThreadMarker::new().expect("cce-ui's macOS shell runs on the main thread");
+    // The window's interaction state (`crate::window_state`), current while the run loop
+    // below runs this window's code — which is until `run` returns.
+    let window_state = crate::window_state::WindowState::new();
+    let _window = crate::window_state::enter(&window_state);
     let ns_app = NSApplication::sharedApplication(mtm);
     ns_app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
 

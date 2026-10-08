@@ -63,7 +63,7 @@ impl Preedit {
 }
 
 #[derive(Default)]
-struct State {
+pub(crate) struct State {
     preedit: Option<Preedit>,
     /// Moves on every change of `preedit`, so a widget can tell it has
     /// applied the current one.
@@ -77,15 +77,16 @@ struct State {
     pressed: bool,
 }
 
-thread_local! {
-    static STATE: RefCell<State> = RefCell::new(State::default());
+/// The current window's composition and caret (`crate::window_state`).
+fn state<R>(f: impl FnOnce(&RefCell<State>) -> R) -> R {
+    crate::window_state::with(|w| f(&w.ime))
 }
 
 /// The composition changed: `None` (or empty text) when there is none. A
 /// shell's, through `Driver::preedit`.
 pub fn set_preedit(preedit: Option<Preedit>) {
     let preedit = preedit.filter(|p| !p.text.is_empty());
-    STATE.with(|s| {
+    state(|s| {
         let mut s = s.borrow_mut();
         if s.preedit != preedit {
             s.preedit = preedit;
@@ -96,22 +97,22 @@ pub fn set_preedit(preedit: Option<Preedit>) {
 
 /// The composition, if the input method is composing.
 pub fn preedit() -> Option<Preedit> {
-    STATE.with(|s| s.borrow().preedit.clone())
+    state(|s| s.borrow().preedit.clone())
 }
 
 /// Moves whenever the composition does.
 pub fn generation() -> u64 {
-    STATE.with(|s| s.borrow().generation)
+    state(|s| s.borrow().generation)
 }
 
 /// A frame is being built: carets are reported afresh.
 pub fn begin_frame() {
-    STATE.with(|s| s.borrow_mut().reported = None);
+    state(|s| s.borrow_mut().reported = None);
 }
 
 /// The frame is built: what was reported is the caret.
 pub fn end_frame() {
-    STATE.with(|s| {
+    state(|s| {
         let mut s = s.borrow_mut();
         s.caret = s.reported;
     });
@@ -120,26 +121,26 @@ pub fn end_frame() {
 /// A widget editing text has its caret at `x, y` (`w` x `h`), in the
 /// window's logical px. Called as it paints.
 pub fn report_caret(x: f32, y: f32, w: f32, h: f32) {
-    STATE.with(|s| s.borrow_mut().reported = Some([x, y, w, h]));
+    state(|s| s.borrow_mut().reported = Some([x, y, w, h]));
 }
 
 /// Where the editing widget's caret was in the last built frame, or `None`
 /// when no widget is editing text.
 pub fn caret() -> Option<[f32; 4]> {
-    STATE.with(|s| s.borrow().caret)
+    state(|s| s.borrow().caret)
 }
 
 /// A widget dropped a composition it was showing: the input method should
 /// cancel it too. Clears the composition.
 pub fn request_reset() {
     set_preedit(None);
-    STATE.with(|s| s.borrow_mut().reset = true);
+    state(|s| s.borrow_mut().reset = true);
 }
 
 /// What this frame has reported so far, replaced by `caret`. For
 /// `text_input::capture`, which reads what one painting reported.
 pub(crate) fn swap_reported(caret: Option<[f32; 4]>) -> Option<[f32; 4]> {
-    STATE.with(|s| std::mem::replace(&mut s.borrow_mut().reported, caret))
+    state(|s| std::mem::replace(&mut s.borrow_mut().reported, caret))
 }
 
 /// A pointer or touch press reached the window. A field that is still
@@ -150,7 +151,7 @@ pub(crate) fn swap_reported(caret: Option<[f32; 4]>) -> Option<[f32; 4]> {
 /// nothing new when tapped. True when a field is editing, so the caller
 /// builds that frame.
 pub fn note_press() -> bool {
-    STATE.with(|s| {
+    state(|s| {
         let mut s = s.borrow_mut();
         s.pressed = true;
         s.caret.is_some()
@@ -159,12 +160,12 @@ pub fn note_press() -> bool {
 
 /// Whether a press landed since the last call. A shell's.
 pub fn take_press() -> bool {
-    STATE.with(|s| std::mem::replace(&mut s.borrow_mut().pressed, false))
+    state(|s| std::mem::replace(&mut s.borrow_mut().pressed, false))
 }
 
 /// Whether a reset was asked for since the last call. A shell's.
 pub fn take_reset() -> bool {
-    STATE.with(|s| std::mem::replace(&mut s.borrow_mut().reset, false))
+    state(|s| std::mem::replace(&mut s.borrow_mut().reset, false))
 }
 
 #[cfg(test)]

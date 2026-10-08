@@ -1885,6 +1885,11 @@ fn raise_fd_limit() {
 /// `renderer_init` if they must survive a reconnect.
 pub fn run<A: Application>() {
     raise_fd_limit();
+    // This window's interaction state (menu, hover highlight, swipe, composition), current
+    // for the whole run: every session, every callback (`crate::window_state`). It outlives
+    // a reconnect, as the app does, so a menu open across one stays open.
+    let window_state = crate::window_state::WindowState::new();
+    let _window = crate::window_state::enter(&window_state);
 
     // Outlives every session: worker threads hold this Sender, and the app's
     // own event sources are registered on this loop once.

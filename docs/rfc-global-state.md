@@ -94,7 +94,35 @@ gate exists for). The whole workspace builds.
 - **Hover highlight and the context menu:** the dead `UiContext` twins are deleted, so the
   thread-locals are the one store each until phase 2 moves them.
 
-### Phase 2 — interaction state into `UiContext`
+### Phase 2 — interaction state into a window's own state — DONE 2026-10-08
+
+Done, by a different route than first written below, for a reason found in the counting:
+the context menu alone is reached 266 times from 18 apps, most of them through free
+functions with no `UiContext` in hand, and some apps that show a menu have no context at
+all (the terminal). So the state did not move INTO the context but beside it:
+`window_state::WindowState` (the context menu, the hover highlight and its cursor, the side
+swipe recognizer, the input-method composition) is OWNED by a window — the Wayland shell
+makes one in `run` and keeps it across reconnects; the AppKit and browser shells make one
+too — and the shell makes it current (`window_state::enter`, a guard) while it runs that
+window's code. The modules' free functions act on the current one, so not one of their
+callers changed; with none entered, each thread has a default (tests, tools that draw no
+window), which is exactly what the thread-locals were. Two windows keep two menus
+(`each_window_has_its_own_menu`); a shell that runs two windows on one thread enters each
+around its dispatch. `context_menu::with_state` replaces the designer's reach into the old
+`CONTEXT_MENU`. The browser clipboard bridge's `PAGE` stays: it is the page's clipboard,
+not a window's interaction.
+
+**Direct focus calls.** Of the 103 `w.focus()` / `w.unfocus()` calls in apps, the 73 in the
+eleven apps with a `UiContext` moved to `UiContext::focus_widget` / `unfocus_widget`, which
+do what the direct call did AND keep the window's record of focus (the Tab walk, the
+accessibility tree) in step: before, unfocusing the focused widget left the record on it,
+and focusing another left the old one lit. The rest were already paired with a context call,
+or are in the three apps with no context (cce-authenticator, cce-mail, cce-secrets), where a
+widget's own flag is the only focus there is. Checked in a shadow: cce-fonts' preview box
+takes a click and typing as before (its search box ignores clicks before and after — a
+separate, older bug).
+
+The plan as first written:
 
 The context menu, its page turn, the hover highlight, the side swipe and the composition
 move into the context (or a per-window struct beside it), reached through `EventCtx` by

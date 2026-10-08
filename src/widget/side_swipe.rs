@@ -105,13 +105,15 @@ impl SideSwipe {
     }
 }
 
-thread_local! {
-    static SHARED: std::cell::RefCell<SideSwipe> = std::cell::RefCell::new(SideSwipe::new());
+/// The current window's recognizer (`crate::window_state`), one per window.
+fn shared<R>(f: impl FnOnce(&std::cell::RefCell<SideSwipe>) -> R) -> R {
+    crate::window_state::with(|w| f(&w.swipe))
 }
 
-/// Feed a wheel event to the thread's one recognizer — see the module docs.
+/// Feed a wheel event to the current window's recognizer (`crate::window_state`) — see the
+/// module docs.
 pub fn feed(delta: &MouseScrollDelta) -> Option<SwipeDir> {
-    SHARED.with(|s| s.borrow_mut().feed(delta))
+    shared(|s| s.borrow_mut().feed(delta))
 }
 
 /// Whether `delta` continues a gesture that has turned a page already. The
@@ -125,7 +127,7 @@ pub fn swallow(delta: &MouseScrollDelta) -> bool {
 }
 
 fn swallow_at(delta: &MouseScrollDelta, phase: ScrollPhase, now: Instant) -> bool {
-    SHARED.with(|s| {
+    shared(|s| {
         let mut s = s.borrow_mut();
         let live = s.fired && phase != ScrollPhase::FingerEnd && s.last.is_some_and(|t| now.duration_since(t) <= SWIPE_GAP);
         if live {
@@ -139,7 +141,7 @@ fn swallow_at(delta: &MouseScrollDelta, phase: ScrollPhase, now: Instant) -> boo
 /// that swipes twice calls between, since the runner's phase is one value
 /// for the whole process and not the test's to set.
 pub fn end_gesture() {
-    SHARED.with(|s| s.borrow_mut().reset());
+    shared(|s| s.borrow_mut().reset());
 }
 
 #[cfg(test)]
@@ -175,10 +177,10 @@ mod tests {
         let t = Instant::now();
         let f = ScrollPhase::Finger;
         assert!(!swallow_at(&px(-30.0, 0.0), f, t), "nothing has turned");
-        SHARED.with(|s| s.borrow_mut().feed_at(&px(-50.0, 0.0), f, t));
+        shared(|s| s.borrow_mut().feed_at(&px(-50.0, 0.0), f, t));
         assert!(swallow_at(&px(-30.0, 0.0), f, t), "the rest of the turn");
         assert!(!swallow_at(&px(0.0, 0.0), ScrollPhase::FingerEnd, t), "the lift is not");
-        SHARED.with(|s| s.borrow_mut().feed_at(&px(0.0, 0.0), ScrollPhase::FingerEnd, t));
+        shared(|s| s.borrow_mut().feed_at(&px(0.0, 0.0), ScrollPhase::FingerEnd, t));
         assert!(!swallow_at(&px(-30.0, 0.0), f, t), "a new gesture");
         end_gesture();
     }

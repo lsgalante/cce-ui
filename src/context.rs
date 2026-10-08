@@ -651,6 +651,34 @@ impl UiContext {
         false
     }
 
+    /// Focus `w` as a direct `w.focus()` did — the widget is told (`focus`), the holder before
+    /// it is told it lost focus (`unfocus`) — and record it as the window's focus, which a
+    /// direct call never did: the Tab walk and the accessibility tree read the record, and
+    /// went on pointing at the widget before. For an app that drives a widget's focus
+    /// itself (`docs/rfc-global-state.md`, phase 2); a focus change the context should
+    /// announce with FocusIn / FocusOut is [`set_focused_id`](Self::set_focused_id).
+    pub fn focus_widget(&mut self, w: &mut dyn WidgetHost) {
+        let id = w.base().id();
+        if let Some(old) = self.focused_widget.filter(|old| *old != id) {
+            if let Some(ptr) = self.tree.get_ptr(old) {
+                // SAFETY: a registry-resolved live widget, not `w` (a different id).
+                unsafe { (*ptr).unfocus() };
+            }
+        }
+        self.focused_widget = Some(id);
+        w.focus();
+    }
+
+    /// Unfocus `w` as a direct `w.unfocus()` did, and drop the window's record of focus if
+    /// it was `w` — which a direct call never did, leaving the Tab walk and the
+    /// accessibility tree on a widget that had let go.
+    pub fn unfocus_widget(&mut self, w: &mut dyn WidgetHost) {
+        if self.focused_widget == Some(w.base().id()) {
+            self.focused_widget = None;
+        }
+        w.unfocus();
+    }
+
     pub fn clear_if_matches(&mut self, w: &dyn WidgetHost) {
         if self.focused_widget == Some(w.base().id()) {
             self.focused_widget = None;
