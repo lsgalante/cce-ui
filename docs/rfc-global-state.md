@@ -130,7 +130,27 @@ widgets and through `UiContext` by apps; the free functions stay as deprecated f
 for one release while the apps move. The 139 direct `focus()` / `unfocus()` calls move to
 the context's focus at the same time.
 
-### Phase 3 — style as one snapshot
+### Phase 3 — style as one snapshot — DONE 2026-10-08
+
+`crate::style::Style` is the whole style — the colour slots, the layout slots, the named
+materials and the registry — published as an `Arc` and replaced whole on change. Each
+former `static RwLock` (178 of them) is a typed handle on one field, `style::StyleCell`,
+keeping the `RwLock` API (`.read()` / `.write()` returning a `Result` of a guard), so none of
+the ~550 places that read or write them changed; `get_style_registry` returns the
+registry's handle, and cce-grid, which writes it, compiles unchanged. A read takes no lock
+(each thread keeps the last snapshot and checks a generation); a write publishes a new
+snapshot when its guard drops, and guards never wait on each other. `reload_config` and
+the colour load run as one `style::batch`: their writes go to one pending snapshot, which
+their own reads see, published once — a reload is atomic, and its hundreds of per-key
+writes cost one copy. 14 slots that were written and never read went with it (13
+per-widget corner radii whose getters read the registry long ago, and the button hover
+colour, a config key that did nothing). The per-thread test overlays are as they were.
+Checked: the suite passes repeatedly; the demo and the settings app, run against the real
+config, draw identically to the pixel before and after.
+
+Not done: some keys are still parsed twice in one reload, into the registry and into a
+slot; they are now one snapshot, so they cannot disagree, but one of the two copies could
+go per key.
 
 `Style` (every colour, radius, font and size, and the registry's flattened config) built
 whole by a reload and published as an `Arc`; getters read the current snapshot; tests

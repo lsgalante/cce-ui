@@ -37,6 +37,7 @@ pub use cce_core::motion;
 pub use cce_core::locale;
 pub mod l10n;
 pub mod window_state;
+pub mod style;
 pub mod text_input;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vk;

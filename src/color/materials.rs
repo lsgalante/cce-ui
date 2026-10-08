@@ -1,15 +1,14 @@
 //! The named materials config defines and the rung bindings (`docs/rfc-material.md` § 5).
 
 use super::*;
-use std::sync::RwLock;
 
 /// The named materials config defines (`style.surface.material { <name> {…} }`)
 /// and the rung bindings (`plate material=`, `plate { root material= }`,
 /// `control material=`) — see `docs/rfc-material.md` § 5. Replaced wholesale
 /// on every config load, so a node or binding removed from config is gone
 /// after a reload.
-pub(super) static NAMED_MATERIALS: RwLock<Vec<(String, crate::scene::material::MaterialDef)>> = RwLock::new(Vec::new());
-pub(super) static MATERIAL_BINDINGS: RwLock<[Option<String>; 3]> = RwLock::new([None, None, None]);
+pub(super) static NAMED_MATERIALS: crate::style::StyleCell<Vec<(String, crate::scene::material::MaterialDef)>> = crate::style::StyleCell::new(|s| &s.color.NAMED_MATERIALS, |s| &mut s.color.NAMED_MATERIALS);
+pub(super) static MATERIAL_BINDINGS: crate::style::StyleCell<[Option<String>; 3]> = crate::style::StyleCell::new(|s| &s.color.MATERIAL_BINDINGS, |s| &mut s.color.MATERIAL_BINDINGS);
 
 fn rung_index(rung: crate::scene::material::PlateRung) -> usize {
     match rung {

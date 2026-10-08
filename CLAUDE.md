@@ -1665,7 +1665,12 @@ cursor, the side swipe, the input-method composition — is a `window_state::Win
 window OWNS, which its shell makes current (`window_state::enter`) while it runs that
 window's code; the modules' free functions (`context_menu::show`, `ime::caret`, …) act on
 the current one, so no caller changed, and with none entered (a test) each thread has a
-default. `context_menu::with_state` replaces reaching for the old `CONTEXT_MENU`. An app
+default. `context_menu::with_state` replaces reaching for the old `CONTEXT_MENU`. Phase 3
+is done: the style is ONE snapshot (`crate::style::Style`: colour slots, layout slots, named
+materials, the registry), published as an `Arc`; each former style `RwLock` is a
+`style::StyleCell` handle with the same `.read()` / `.write()` API, reads take no lock, and
+a reload runs as one `style::batch`, published once. A new style value is a field in its
+module's `style_slots!` block and a `StyleCell` handle, not a new lock. An app
 that drives a widget's focus itself calls `UiContext::focus_widget` / `unfocus_widget`
 rather than `w.focus()` / `w.unfocus()`, so the window's record of focus follows. Do not
 add a static for state that belongs to a window: give it a field in `WindowState`.
@@ -1766,6 +1771,8 @@ cce-system-interface) to confirm behavior, not just the test suite.
   `docs/rfc-accessibility-locale.md`, phase 2).
 - `l10n.rs` — the toolkit's catalogue (`tr`, `tr_args`, `catalog`) over `cce_core::l10n`;
   its English is `locale/en-US/cce-ui.ftl`.
+- `style.rs` — the style snapshot: `Style`, `StyleCell`, `batch`, `style_slots!`.
+- `window_state.rs` — a window's interaction state (`WindowState`, `enter`).
 - `ime.rs` — input-method composition shared between the editing widget and the shell:
   `Preedit`, the composition and its generation, the reported caret, the reset request
   (see "Input-method composition is one model for every shell").

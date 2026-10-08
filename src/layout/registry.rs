@@ -3,9 +3,7 @@
 //! getter in `layout` and `color` reads through it.
 
 use super::*;
-use std::sync::RwLock;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 /// Per-thread overrides for runtime style writes, under `cfg(test)` only.
 ///
@@ -58,7 +56,7 @@ mod test_overlay {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct StyleRegistry {
     pub floats: HashMap<String, f32>,
     pub strings: HashMap<String, String>,
@@ -161,10 +159,13 @@ impl StyleRegistry {
     }
 }
 
-pub static STYLE_REGISTRY: OnceLock<RwLock<StyleRegistry>> = OnceLock::new();
+/// The registry is a field of the one style snapshot (`crate::style`); this is its handle,
+/// with the `RwLock` API it had.
+pub static STYLE_REGISTRY: crate::style::StyleCell<StyleRegistry> =
+    crate::style::StyleCell::new(|s| &s.registry, |s| &mut s.registry);
 
-pub fn get_style_registry() -> &'static RwLock<StyleRegistry> {
-    STYLE_REGISTRY.get_or_init(|| RwLock::new(StyleRegistry::new()))
+pub fn get_style_registry() -> &'static crate::style::StyleCell<StyleRegistry> {
+    &STYLE_REGISTRY
 }
 
 pub fn lazy_init_style_registry() {

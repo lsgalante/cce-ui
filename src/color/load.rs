@@ -11,7 +11,13 @@ fn read_config() -> Option<String> {
     None
 }
 
+/// Load the colour and surface config as one change of style (`crate::style::batch`): a
+/// frame drawn meanwhile sees the style before or after, never half of each.
 fn parse_and_set_colors(content: &str) {
+    crate::style::batch(|| parse_and_set_colors_in_batch(content));
+}
+
+fn parse_and_set_colors_in_batch(content: &str) {
     let val = crate::config::parse_kdl_to_json(content);
 
     let parse_hex = |hex_str: &str| -> Option<[f32; 4]> {
@@ -204,9 +210,6 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/control/button/border_color").or_else(|| get_color("/style/button/border_color")) {
         if let Ok(mut lock) = BUTTON_BORDER_COLOR.write() { *lock = Some(c); }
-    }
-    if let Some(c) = get_color("/style/control/button/hover_color").or_else(|| get_color("/style/button/hover_color")) {
-        if let Ok(mut lock) = BUTTON_HOVER_COLOR.write() { *lock = Some(c); }
     }
     if let Some(c) = get_color("/style/control/dropdown/border_color").or_else(|| get_color("/style/dropdown/border_color")) {
         if let Ok(mut lock) = DROPDOWN_BORDER_COLOR.write() { *lock = c; }

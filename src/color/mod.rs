@@ -29,7 +29,110 @@ pub const TOGGLE_ON: [f32; 4] = [0.14, 0.70, 0.38, 1.0];
 pub const TOGGLE_HOVER: [f32; 4] = [0.30, 0.30, 0.35, 1.0];
 pub const SLIDER_TRACK: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
 
-use std::sync::RwLock;
+
+// This module's part of the one style snapshot (`crate::style`): every slot below,
+// with its default. Each slot's `static` handle stands where its lock did.
+crate::style::style_slots! {
+    NAMED_MATERIALS: Vec<(String, crate::scene::material::MaterialDef)> = Vec::new();
+    MATERIAL_BINDINGS: [Option<String>; 3] = [None, None, None];
+    PAGE_LOW_COLOR: [f32; 4] = [0.0600316, 0.0600316, 0.080219, 1.0];
+    COLOR_BORDERS_COLOR: [f32; 4] = [0.2039, 0.2039, 0.2530, 1.0];
+    NODE_COLOR: [f32; 4] = NODE_IDLE;
+    NODE_SELECTED_COLOR: [f32; 4] = NODE_SELECTED;
+    NODE_DRAG_COLOR: [f32; 4] = NODE_DRAG;
+    SIDEBAR_BG_COLOR: [f32; 4] = SIDEBAR_BG;
+    HIGHLIGHT_PRIMARY_COLOR: [f32; 4] = HIGHLIGHT_PRIMARY;
+    MENUBAR_TAB_LABEL_COLOR: [f32; 4] = [0.90196, 0.90196, 0.94902, 1.0];
+    CONTROL_LABEL_COLOR: [f32; 4] = [0.61206, 0.61206, 0.68666, 1.0];
+    CONTROL_LABEL_COLOR_DETACHED: [f32; 4] = [0.22416, 0.22416, 0.2526, 1.0];
+    CONTROL_LABEL_HOVER_COLOR: Option<[f32; 4]> = None;
+    CONTROL_LABEL_FOCUS_COLOR: Option<[f32; 4]> = None;
+    OPACITY: Option<f32> = None;
+    ROOT_PLATE_OPACITY: Option<f32> = None;
+    LIST_BG_COLOR: [f32; 4] = [0.08, 0.08, 0.12, 0.3];
+    LIST_ENTRY_BG_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.04];
+    LIST_ENTRY_HIGHLIGHT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.8];
+    LIST_FONT_COLOR: [f32; 4] = [0.80, 0.80, 0.85, 1.0];
+    BREADCRUMB_BG_COLOR: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
+    POPOVER_BG_COLOR: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
+    PAGE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+    LAYER_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+    ROOT_PLATE_CORNER_RADIUS: f32 = 12.0;
+    DROPDOWN_BACKGROUND_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+    TEXTBOX_PLACEHOLDER_TEXT_COLOR: [u8; 3] = [0x60, 0x60, 0x6a];
+    TEXTBOX_BACKGROUND_COLOR: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
+    TEXTBOX_BACKGROUND_EDIT_COLOR: [f32; 4] = [0.06, 0.10, 0.18, 1.0];
+    ROOT_PLATE_MENUBAR_COLOR: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
+    ROOT_PLATE_MENUBAR_TEXT_COLOR: [f32; 4] = [0.90196, 0.90196, 0.94902, 1.0];
+    ROOT_PLATE_MENUBAR_BLUR: bool = false;
+    MENU_OPACITY: f32 = 0.8;
+    MENU_COMPRESSION: f32 = 0.6;
+    MENU_COLOR: Option<[f32; 4]> = None;
+    ROOT_PLATE_STATUSBAR_COLOR: [f32; 4] = [0.06, 0.06, 0.10, 1.0];
+    ROOT_PLATE_STATUSBAR_TEXT_COLOR: [f32; 4] = [0.6666, 0.6666, 0.7333, 1.0];
+    ROOT_PLATE_STATUSBAR_BLUR: bool = false;
+    BUTTON_BACKGROUND_COLOR: [f32; 4] = BUTTON_IDLE;
+    RAMP_BACKGROUND_COLOR: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
+    RAMP_BORDER_COLOR: [f32; 4] = [0.18, 0.18, 0.24, 1.0];
+    CONTROL_PANEL_COLOR: [f32; 4] = [0.075, 0.082, 0.11, 1.0];
+    CONTROL_PANEL_BORDER_COLOR: [f32; 4] = [0.161, 0.173, 0.216, 1.0];
+    PROGRESS_BG_COLOR: [f32; 4] = PROGRESS_BG;
+    PROGRESS_FILL_COLOR: [f32; 4] = PROGRESS_FILL;
+    SPINBOX_DISPLAY_COLOR: [f32; 4] = SPINBOX_DISPLAY;
+    SPINBOX_BUTTON_COLOR: [f32; 4] = SPINBOX_BUTTON;
+    SPINBOX_BUTTON_HOVER_COLOR: [f32; 4] = SPINBOX_BUTTON_HOVER;
+    SPINBOX_TEXT_COLOR: [f32; 4] = [0.8, 0.8, 0.83, 1.0];
+    BUTTON_BORDER_COLOR: Option<[f32; 4]> = None;
+    DROPDOWN_BORDER_COLOR: [f32; 4] = [0.18, 0.18, 0.24, 1.0];
+    DROPDOWN_TEXT_COLOR: [f32; 4] = [0.72305, 0.72305, 0.76008, 1.0];
+    SLIDER_THUMB_COLOR: [f32; 4] = SLIDER_THUMB;
+    SLIDER_THUMB_DRAG_COLOR: [f32; 4] = SLIDER_THUMB_DRAG;
+    RANGE_SLIDER_THUMB_COLOR: [f32; 4] = SLIDER_THUMB;
+    RANGE_SLIDER_THUMB_DRAG_COLOR: [f32; 4] = SLIDER_THUMB_DRAG;
+    TREE_BACKGROUND_COLOR: [f32; 4] = [0.08, 0.08, 0.12, 0.3];
+    TREE_BORDER_COLOR: [f32; 4] = [0.18, 0.18, 0.24, 1.0];
+    TREE_BORDER_HOVER_COLOR: [f32; 4] = [0.25, 0.25, 0.35, 1.0];
+    TREE_BORDER_FOCUS_COLOR: [f32; 4] = [0.30, 0.50, 0.32, 1.0];
+    TREE_OPEN_SEARCH_KEY: String = String::new();
+    LIST_OPEN_SEARCH_KEY: String = String::new();
+    LIST_CLOSE_SEARCH_KEY: String = String::new();
+    TREE_SECTION_BG_COLOR: [f32; 4] = [0.07, 0.07, 0.09, 1.0];
+    TREE_SECTION_BG_HOVER_COLOR: [f32; 4] = [0.10, 0.12, 0.18, 1.0];
+    TREE_LEAF_BG_EVEN_COLOR: [f32; 4] = [0.09, 0.09, 0.11, 1.0];
+    TREE_LEAF_BG_ODD_COLOR: [f32; 4] = [0.08, 0.08, 0.10, 1.0];
+    TREE_LEAF_BG_HOVER_COLOR: [f32; 4] = [0.12, 0.12, 0.16, 1.0];
+    TREE_LEAF_BG_SELECTED_COLOR: [f32; 4] = [0.15, 0.20, 0.30, 1.0];
+    TREE_SECTION_TEXT_COLOR: [f32; 4] = [0.38, 0.69, 0.94, 1.0];
+    TREE_LEAF_TEXT_COLOR: [f32; 4] = [0.80, 0.80, 0.83, 1.0];
+    TREE_LEAF_TEXT_SELECTED_COLOR: [f32; 4] = [0.49, 1.0, 1.0, 1.0];
+    TREE_TYPE_TEXT_COLOR: [f32; 4] = [0.78, 0.47, 0.87, 1.0];
+    TREE_VALUE_TEXT_COLOR: [f32; 4] = [0.51, 0.51, 0.54, 1.0];
+    TREE_SEPARATOR_COLOR: [f32; 4] = [0.15, 0.15, 0.19, 1.0];
+    SCROLLBAR_TRACK_COLOR: [f32; 4] = [0.15, 0.15, 0.20, 0.3];
+    SCROLLBAR_THUMB_COLOR: [f32; 4] = [0.60, 0.60, 0.65, 0.4];
+    GRAPH_GRID_COLOR: [f32; 3] = [0.07, 0.07, 0.09];
+    GRAPH_OPACITY: f32 = 0.95;
+    GRAPH_NODE_OPACITY: f32 = 1.0;
+    GRAPH_NODE_COLOR: [f32; 4] = NODE_IDLE;
+    GRAPH_NODE_SELECTED_COLOR: [f32; 4] = NODE_SELECTED;
+    GRAPH_NODE_DRAG_COLOR: [f32; 4] = NODE_DRAG;
+    GRAPH_WIRE_COLOR: [f32; 4] = [0.1, 0.8, 0.4, 1.0];
+    GRAPH_WIRE_HIGHLIGHT_COLOR: [f32; 4] = [0.0, 1.0, 0.9, 1.0];
+    GRAPH_CONNECTOR_COLOR: [f32; 4] = [0.1, 0.8, 0.4, 1.0];
+    GRAPH_CONNECTOR_HIGHLIGHT_COLOR: [f32; 4] = [0.0, 1.0, 0.9, 1.0];
+    PARAM_BG_COLOR: [f32; 4] = PARAM_BG;
+    PANE_COLOR_WHOLE: bool = false;
+    PLATE_COLOR: Option<[f32; 4]> = Some([0.15, 0.15, 0.2, 0.95]);
+    PLATE_BORDER_COLOR: Option<[f32; 4]> = Some([0.3, 0.3, 0.4, 1.0]);
+    PLATE_BORDER_THICKNESS: f32 = 1.0;
+    PLATE_BACKDROP_COMPRESSION: f32 = 0.0;
+    PLATE_REFRACTION: f32 = 0.0;
+    PLATE_BLUR: bool = false;
+    FINISH_SPEC: f32 = FINISH_SPEC_DEFAULT;
+    FINISH_SHININESS: f32 = FINISH_SHININESS_DEFAULT;
+    FINISH_CURVATURE: f32 = FINISH_CURVATURE_DEFAULT;
+    PLATE_FROST_RADIUS: f32 = crate::scene::material::Frost::DEFAULT_RADIUS;
+}
 
 /// Per-thread overrides for runtime colour writes, under `cfg(test)` only.
 ///
@@ -61,7 +164,7 @@ mod test_overlay {
 
 /// Read a style static, preferring this thread's test override.
 #[inline]
-fn style_read<T: Clone + 'static>(cell: &'static RwLock<T>) -> T {
+fn style_read<T: Clone + 'static>(cell: &'static crate::style::StyleCell<T>) -> T {
     #[cfg(test)]
     if let Some(v) = test_overlay::get::<T>(cell as *const _ as usize) {
         return v;
@@ -71,7 +174,7 @@ fn style_read<T: Clone + 'static>(cell: &'static RwLock<T>) -> T {
 
 /// Write a style static: per-thread under `cfg(test)`, process-wide otherwise.
 #[inline]
-fn style_write<T: Clone + 'static>(cell: &'static RwLock<T>, val: T) {
+fn style_write<T: Clone + 'static>(cell: &'static crate::style::StyleCell<T>, val: T) {
     #[cfg(test)]
     test_overlay::set(cell as *const _ as usize, val);
     #[cfg(not(test))]
@@ -81,132 +184,131 @@ fn style_write<T: Clone + 'static>(cell: &'static RwLock<T>, val: T) {
 }
 
 
-static PAGE_LOW_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0600316, 0.0600316, 0.080219, 1.0]);
-static COLOR_BORDERS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.2039, 0.2039, 0.2530, 1.0]);
-static NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
-static NODE_SELECTED_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_SELECTED);
-static NODE_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_DRAG);
-static SIDEBAR_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(SIDEBAR_BG);
-static HIGHLIGHT_PRIMARY_COLOR: RwLock<[f32; 4]> = RwLock::new(HIGHLIGHT_PRIMARY);
-static MENUBAR_TAB_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]); // sRGB [230, 230, 242] linear
-static CONTROL_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.61206, 0.61206, 0.68666, 1.0]); // sRGB [204, 204, 212]
-static CONTROL_LABEL_COLOR_DETACHED: RwLock<[f32; 4]> = RwLock::new([0.22416, 0.22416, 0.2526, 1.0]); // sRGB [131, 131, 138]
-static CONTROL_LABEL_HOVER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
-static CONTROL_LABEL_FOCUS_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
-static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
-static ROOT_PLATE_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
-static LIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
-static LIST_ENTRY_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.04]);
-static LIST_ENTRY_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.8]);
-static LIST_FONT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.80, 0.80, 0.85, 1.0]);
-static BREADCRUMB_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
-static POPOVER_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
-static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
-static LAYER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
-static ROOT_PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
+static PAGE_LOW_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.PAGE_LOW_COLOR, |s| &mut s.color.PAGE_LOW_COLOR);
+static COLOR_BORDERS_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.COLOR_BORDERS_COLOR, |s| &mut s.color.COLOR_BORDERS_COLOR);
+static NODE_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.NODE_COLOR, |s| &mut s.color.NODE_COLOR);
+static NODE_SELECTED_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.NODE_SELECTED_COLOR, |s| &mut s.color.NODE_SELECTED_COLOR);
+static NODE_DRAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.NODE_DRAG_COLOR, |s| &mut s.color.NODE_DRAG_COLOR);
+static SIDEBAR_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SIDEBAR_BG_COLOR, |s| &mut s.color.SIDEBAR_BG_COLOR);
+static HIGHLIGHT_PRIMARY_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.HIGHLIGHT_PRIMARY_COLOR, |s| &mut s.color.HIGHLIGHT_PRIMARY_COLOR);
+static MENUBAR_TAB_LABEL_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.MENUBAR_TAB_LABEL_COLOR, |s| &mut s.color.MENUBAR_TAB_LABEL_COLOR); // sRGB [230, 230, 242] linear
+static CONTROL_LABEL_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.CONTROL_LABEL_COLOR, |s| &mut s.color.CONTROL_LABEL_COLOR); // sRGB [204, 204, 212]
+static CONTROL_LABEL_COLOR_DETACHED: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.CONTROL_LABEL_COLOR_DETACHED, |s| &mut s.color.CONTROL_LABEL_COLOR_DETACHED); // sRGB [131, 131, 138]
+static CONTROL_LABEL_HOVER_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.CONTROL_LABEL_HOVER_COLOR, |s| &mut s.color.CONTROL_LABEL_HOVER_COLOR);
+static CONTROL_LABEL_FOCUS_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.CONTROL_LABEL_FOCUS_COLOR, |s| &mut s.color.CONTROL_LABEL_FOCUS_COLOR);
+static OPACITY: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.color.OPACITY, |s| &mut s.color.OPACITY);
+static ROOT_PLATE_OPACITY: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_OPACITY, |s| &mut s.color.ROOT_PLATE_OPACITY);
+static LIST_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.LIST_BG_COLOR, |s| &mut s.color.LIST_BG_COLOR);
+static LIST_ENTRY_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.LIST_ENTRY_BG_COLOR, |s| &mut s.color.LIST_ENTRY_BG_COLOR);
+static LIST_ENTRY_HIGHLIGHT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.LIST_ENTRY_HIGHLIGHT_COLOR, |s| &mut s.color.LIST_ENTRY_HIGHLIGHT_COLOR);
+static LIST_FONT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.LIST_FONT_COLOR, |s| &mut s.color.LIST_FONT_COLOR);
+static BREADCRUMB_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.BREADCRUMB_BG_COLOR, |s| &mut s.color.BREADCRUMB_BG_COLOR);
+static POPOVER_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.POPOVER_BG_COLOR, |s| &mut s.color.POPOVER_BG_COLOR);
+static PAGE_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.PAGE_COLOR, |s| &mut s.color.PAGE_COLOR);
+static LAYER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.LAYER_COLOR, |s| &mut s.color.LAYER_COLOR);
+static ROOT_PLATE_CORNER_RADIUS: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_CORNER_RADIUS, |s| &mut s.color.ROOT_PLATE_CORNER_RADIUS);
 
 // Transparent by default (alpha 0): a dropdown picks up the surface it sits
 // on, and its closed-state chrome is the flush inset trough alone — the
 // cce-files treatment, DE-wide. A configured `dropdown color=` opts a theme
 // back into a filled face (the paint path judges the RAW alpha).
-static DROPDOWN_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
+static DROPDOWN_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.DROPDOWN_BACKGROUND_COLOR, |s| &mut s.color.DROPDOWN_BACKGROUND_COLOR);
 
-static TEXTBOX_PLACEHOLDER_TEXT_COLOR: RwLock<[u8; 3]> = RwLock::new([0x60, 0x60, 0x6a]);
-static TEXTBOX_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
-static TEXTBOX_BACKGROUND_EDIT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.10, 0.18, 1.0]);
+static TEXTBOX_PLACEHOLDER_TEXT_COLOR: crate::style::StyleCell<[u8; 3]> = crate::style::StyleCell::new(|s| &s.color.TEXTBOX_PLACEHOLDER_TEXT_COLOR, |s| &mut s.color.TEXTBOX_PLACEHOLDER_TEXT_COLOR);
+static TEXTBOX_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXTBOX_BACKGROUND_COLOR, |s| &mut s.color.TEXTBOX_BACKGROUND_COLOR);
+static TEXTBOX_BACKGROUND_EDIT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXTBOX_BACKGROUND_EDIT_COLOR, |s| &mut s.color.TEXTBOX_BACKGROUND_EDIT_COLOR);
 
-static ROOT_PLATE_MENUBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
-static ROOT_PLATE_MENUBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]);
-static ROOT_PLATE_MENUBAR_BLUR: RwLock<bool> = RwLock::new(false);
+static ROOT_PLATE_MENUBAR_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_MENUBAR_COLOR, |s| &mut s.color.ROOT_PLATE_MENUBAR_COLOR);
+static ROOT_PLATE_MENUBAR_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_MENUBAR_TEXT_COLOR, |s| &mut s.color.ROOT_PLATE_MENUBAR_TEXT_COLOR);
+static ROOT_PLATE_MENUBAR_BLUR: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_MENUBAR_BLUR, |s| &mut s.color.ROOT_PLATE_MENUBAR_BLUR);
 /// Tint strength of frosted menus/popovers over the blurred backdrop:
 /// 1.0 is fully opaque (frost invisible), lower shows more content through.
-static MENU_OPACITY: RwLock<f32> = RwLock::new(0.8);
+static MENU_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.MENU_OPACITY, |s| &mut s.color.MENU_OPACITY);
 /// Backdrop compression of frosted menus/popovers (`style.surface.menu.
 /// compression`, 0..1): how hard the blurred content beneath a menu is
 /// pulled toward the menu's own key, so the menu holds its legibility over
 /// whatever it opens above. Menu-scoped, overriding the DE recipe's
 /// `plate.backdrop_compression` for popovers only; a menu is read while
 /// something else is going on beneath it, which a pane is not.
-static MENU_COMPRESSION: RwLock<f32> = RwLock::new(0.6);
+static MENU_COMPRESSION: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.MENU_COMPRESSION, |s| &mut s.color.MENU_COMPRESSION);
 /// The colour a menu's face is tinted with (`style.surface.menu.color`),
 /// when the config names one; `None` follows the root plate colour
 /// (`page_low_color`), which is what every menu wore before the key
 /// existed. The alpha is ignored — `menu.opacity` is the tint strength —
 /// so a menu can be dark on a light window without the window's own
 /// plate going dark with it.
-static MENU_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
+static MENU_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.MENU_COLOR, |s| &mut s.color.MENU_COLOR);
 
-static ROOT_PLATE_STATUSBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.06, 0.10, 1.0]);
-static ROOT_PLATE_STATUSBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.6666, 0.6666, 0.7333, 1.0]);
-static ROOT_PLATE_STATUSBAR_BLUR: RwLock<bool> = RwLock::new(false);
-static BUTTON_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new(BUTTON_IDLE);
-static RAMP_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
-static RAMP_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
-static CONTROL_PANEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.075, 0.082, 0.11, 1.0]); // default #13151cff
-static CONTROL_PANEL_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.161, 0.173, 0.216, 1.0]); // default #292c37ff
+static ROOT_PLATE_STATUSBAR_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_STATUSBAR_COLOR, |s| &mut s.color.ROOT_PLATE_STATUSBAR_COLOR);
+static ROOT_PLATE_STATUSBAR_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_STATUSBAR_TEXT_COLOR, |s| &mut s.color.ROOT_PLATE_STATUSBAR_TEXT_COLOR);
+static ROOT_PLATE_STATUSBAR_BLUR: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_STATUSBAR_BLUR, |s| &mut s.color.ROOT_PLATE_STATUSBAR_BLUR);
+static BUTTON_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.BUTTON_BACKGROUND_COLOR, |s| &mut s.color.BUTTON_BACKGROUND_COLOR);
+static RAMP_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.RAMP_BACKGROUND_COLOR, |s| &mut s.color.RAMP_BACKGROUND_COLOR);
+static RAMP_BORDER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.RAMP_BORDER_COLOR, |s| &mut s.color.RAMP_BORDER_COLOR);
+static CONTROL_PANEL_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.CONTROL_PANEL_COLOR, |s| &mut s.color.CONTROL_PANEL_COLOR); // default #13151cff
+static CONTROL_PANEL_BORDER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.CONTROL_PANEL_BORDER_COLOR, |s| &mut s.color.CONTROL_PANEL_BORDER_COLOR); // default #292c37ff
 
-static PROGRESS_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_BG);
-static PROGRESS_FILL_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_FILL);
-static SPINBOX_DISPLAY_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_DISPLAY);
-static SPINBOX_BUTTON_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_BUTTON);
-static SPINBOX_BUTTON_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_BUTTON_HOVER);
-static SPINBOX_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.8, 0.8, 0.83, 1.0]);
+static PROGRESS_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.PROGRESS_BG_COLOR, |s| &mut s.color.PROGRESS_BG_COLOR);
+static PROGRESS_FILL_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.PROGRESS_FILL_COLOR, |s| &mut s.color.PROGRESS_FILL_COLOR);
+static SPINBOX_DISPLAY_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SPINBOX_DISPLAY_COLOR, |s| &mut s.color.SPINBOX_DISPLAY_COLOR);
+static SPINBOX_BUTTON_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SPINBOX_BUTTON_COLOR, |s| &mut s.color.SPINBOX_BUTTON_COLOR);
+static SPINBOX_BUTTON_HOVER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SPINBOX_BUTTON_HOVER_COLOR, |s| &mut s.color.SPINBOX_BUTTON_HOVER_COLOR);
+static SPINBOX_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SPINBOX_TEXT_COLOR, |s| &mut s.color.SPINBOX_TEXT_COLOR);
 
-static BUTTON_BORDER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
-static BUTTON_HOVER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
+static BUTTON_BORDER_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.BUTTON_BORDER_COLOR, |s| &mut s.color.BUTTON_BORDER_COLOR);
 
-static DROPDOWN_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
-static DROPDOWN_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.72305, 0.72305, 0.76008, 1.0]);
+static DROPDOWN_BORDER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.DROPDOWN_BORDER_COLOR, |s| &mut s.color.DROPDOWN_BORDER_COLOR);
+static DROPDOWN_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.DROPDOWN_TEXT_COLOR, |s| &mut s.color.DROPDOWN_TEXT_COLOR);
 
-static SLIDER_THUMB_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_THUMB);
-static SLIDER_THUMB_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_THUMB_DRAG);
+static SLIDER_THUMB_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SLIDER_THUMB_COLOR, |s| &mut s.color.SLIDER_THUMB_COLOR);
+static SLIDER_THUMB_DRAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SLIDER_THUMB_DRAG_COLOR, |s| &mut s.color.SLIDER_THUMB_DRAG_COLOR);
 
-static RANGE_SLIDER_THUMB_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_THUMB);
-static RANGE_SLIDER_THUMB_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_THUMB_DRAG);
+static RANGE_SLIDER_THUMB_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.RANGE_SLIDER_THUMB_COLOR, |s| &mut s.color.RANGE_SLIDER_THUMB_COLOR);
+static RANGE_SLIDER_THUMB_DRAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.RANGE_SLIDER_THUMB_DRAG_COLOR, |s| &mut s.color.RANGE_SLIDER_THUMB_DRAG_COLOR);
 
-static TREE_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
-static TREE_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
-static TREE_BORDER_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.25, 0.25, 0.35, 1.0]);
-static TREE_BORDER_FOCUS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.30, 0.50, 0.32, 1.0]);
-static TREE_OPEN_SEARCH_KEY: RwLock<String> = RwLock::new(String::new());
-static LIST_OPEN_SEARCH_KEY: RwLock<String> = RwLock::new(String::new());
-static LIST_CLOSE_SEARCH_KEY: RwLock<String> = RwLock::new(String::new());
+static TREE_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_BACKGROUND_COLOR, |s| &mut s.color.TREE_BACKGROUND_COLOR);
+static TREE_BORDER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_BORDER_COLOR, |s| &mut s.color.TREE_BORDER_COLOR);
+static TREE_BORDER_HOVER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_BORDER_HOVER_COLOR, |s| &mut s.color.TREE_BORDER_HOVER_COLOR);
+static TREE_BORDER_FOCUS_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_BORDER_FOCUS_COLOR, |s| &mut s.color.TREE_BORDER_FOCUS_COLOR);
+static TREE_OPEN_SEARCH_KEY: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.color.TREE_OPEN_SEARCH_KEY, |s| &mut s.color.TREE_OPEN_SEARCH_KEY);
+static LIST_OPEN_SEARCH_KEY: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.color.LIST_OPEN_SEARCH_KEY, |s| &mut s.color.LIST_OPEN_SEARCH_KEY);
+static LIST_CLOSE_SEARCH_KEY: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.color.LIST_CLOSE_SEARCH_KEY, |s| &mut s.color.LIST_CLOSE_SEARCH_KEY);
 
-static TREE_SECTION_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.07, 0.07, 0.09, 1.0]);
-static TREE_SECTION_BG_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.10, 0.12, 0.18, 1.0]);
+static TREE_SECTION_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_SECTION_BG_COLOR, |s| &mut s.color.TREE_SECTION_BG_COLOR);
+static TREE_SECTION_BG_HOVER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_SECTION_BG_HOVER_COLOR, |s| &mut s.color.TREE_SECTION_BG_HOVER_COLOR);
 
-static TREE_LEAF_BG_EVEN_COLOR: RwLock<[f32; 4]> = RwLock::new([0.09, 0.09, 0.11, 1.0]);
-static TREE_LEAF_BG_ODD_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.10, 1.0]);
-static TREE_LEAF_BG_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.12, 0.12, 0.16, 1.0]);
-static TREE_LEAF_BG_SELECTED_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.20, 0.30, 1.0]);
+static TREE_LEAF_BG_EVEN_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_BG_EVEN_COLOR, |s| &mut s.color.TREE_LEAF_BG_EVEN_COLOR);
+static TREE_LEAF_BG_ODD_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_BG_ODD_COLOR, |s| &mut s.color.TREE_LEAF_BG_ODD_COLOR);
+static TREE_LEAF_BG_HOVER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_BG_HOVER_COLOR, |s| &mut s.color.TREE_LEAF_BG_HOVER_COLOR);
+static TREE_LEAF_BG_SELECTED_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_BG_SELECTED_COLOR, |s| &mut s.color.TREE_LEAF_BG_SELECTED_COLOR);
 
-static TREE_SECTION_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.38, 0.69, 0.94, 1.0]);
-static TREE_LEAF_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.80, 0.80, 0.83, 1.0]);
-static TREE_LEAF_TEXT_SELECTED_COLOR: RwLock<[f32; 4]> = RwLock::new([0.49, 1.0, 1.0, 1.0]);
+static TREE_SECTION_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_SECTION_TEXT_COLOR, |s| &mut s.color.TREE_SECTION_TEXT_COLOR);
+static TREE_LEAF_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_TEXT_COLOR, |s| &mut s.color.TREE_LEAF_TEXT_COLOR);
+static TREE_LEAF_TEXT_SELECTED_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_TEXT_SELECTED_COLOR, |s| &mut s.color.TREE_LEAF_TEXT_SELECTED_COLOR);
 
-static TREE_TYPE_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.78, 0.47, 0.87, 1.0]);
-static TREE_VALUE_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.51, 0.51, 0.54, 1.0]);
-static TREE_SEPARATOR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.15, 0.19, 1.0]);
+static TREE_TYPE_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_TYPE_TEXT_COLOR, |s| &mut s.color.TREE_TYPE_TEXT_COLOR);
+static TREE_VALUE_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_VALUE_TEXT_COLOR, |s| &mut s.color.TREE_VALUE_TEXT_COLOR);
+static TREE_SEPARATOR_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_SEPARATOR_COLOR, |s| &mut s.color.TREE_SEPARATOR_COLOR);
 
-static SCROLLBAR_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.15, 0.20, 0.3]);
-static SCROLLBAR_THUMB_COLOR: RwLock<[f32; 4]> = RwLock::new([0.60, 0.60, 0.65, 0.4]);
+static SCROLLBAR_TRACK_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SCROLLBAR_TRACK_COLOR, |s| &mut s.color.SCROLLBAR_TRACK_COLOR);
+static SCROLLBAR_THUMB_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SCROLLBAR_THUMB_COLOR, |s| &mut s.color.SCROLLBAR_THUMB_COLOR);
 
-static GRAPH_GRID_COLOR: RwLock<[f32; 3]> = RwLock::new([0.07, 0.07, 0.09]);
-static GRAPH_OPACITY: RwLock<f32> = RwLock::new(0.95);
+static GRAPH_GRID_COLOR: crate::style::StyleCell<[f32; 3]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_GRID_COLOR, |s| &mut s.color.GRAPH_GRID_COLOR);
+static GRAPH_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.GRAPH_OPACITY, |s| &mut s.color.GRAPH_OPACITY);
 /// Opacity of the graph's NODE-domain content (node bodies, wires, connectors,
 /// node text) — `style.surface.graph.node.opacity`, deliberately independent of
 /// `GRAPH_OPACITY`, which fades only the pane surface (grid cells/gaps).
-static GRAPH_NODE_OPACITY: RwLock<f32> = RwLock::new(1.0);
+static GRAPH_NODE_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.GRAPH_NODE_OPACITY, |s| &mut s.color.GRAPH_NODE_OPACITY);
 
-static GRAPH_NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
-static GRAPH_NODE_SELECTED_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_SELECTED);
-static GRAPH_NODE_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_DRAG);
+static GRAPH_NODE_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_NODE_COLOR, |s| &mut s.color.GRAPH_NODE_COLOR);
+static GRAPH_NODE_SELECTED_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_NODE_SELECTED_COLOR, |s| &mut s.color.GRAPH_NODE_SELECTED_COLOR);
+static GRAPH_NODE_DRAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_NODE_DRAG_COLOR, |s| &mut s.color.GRAPH_NODE_DRAG_COLOR);
 
-static GRAPH_WIRE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.1, 0.8, 0.4, 1.0]);
-static GRAPH_WIRE_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 1.0, 0.9, 1.0]);
+static GRAPH_WIRE_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_WIRE_COLOR, |s| &mut s.color.GRAPH_WIRE_COLOR);
+static GRAPH_WIRE_HIGHLIGHT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_WIRE_HIGHLIGHT_COLOR, |s| &mut s.color.GRAPH_WIRE_HIGHLIGHT_COLOR);
 
-static GRAPH_CONNECTOR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.1, 0.8, 0.4, 1.0]);
-static GRAPH_CONNECTOR_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 1.0, 0.9, 1.0]);
+static GRAPH_CONNECTOR_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_CONNECTOR_COLOR, |s| &mut s.color.GRAPH_CONNECTOR_COLOR);
+static GRAPH_CONNECTOR_HIGHLIGHT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_CONNECTOR_HIGHLIGHT_COLOR, |s| &mut s.color.GRAPH_CONNECTOR_HIGHLIGHT_COLOR);
 
 pub fn button_background_color() -> [f32; 4] {
     style_read(&BUTTON_BACKGROUND_COLOR)
@@ -449,12 +551,12 @@ pub const PARAM_BG: [f32; 4] = [0.10, 0.10, 0.14, 0.25];
 /// `style.surface.param.color` in config overrides it, and apps can retint at
 /// runtime (the designer's Style section "Plate Color"). Alpha doubles as the
 /// frost strength under plate blur.
-static PARAM_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(PARAM_BG);
+static PARAM_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.PARAM_BG_COLOR, |s| &mut s.color.PARAM_BG_COLOR);
 /// Whether the pane tint came in as `style.surface.plate.pane.color` — the
 /// spelling whose alpha IS the tint strength — rather than the legacy
 /// `style.surface.param.color`, which the top-level `plate_opacity` line
 /// still multiplies (`Material::pane_legacy`). Two spellings, one tint.
-static PANE_COLOR_WHOLE: RwLock<bool> = RwLock::new(false);
+static PANE_COLOR_WHOLE: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.color.PANE_COLOR_WHOLE, |s| &mut s.color.PANE_COLOR_WHOLE);
 
 pub fn param_bg_color() -> [f32; 4] {
     load_colors_once();
@@ -1034,9 +1136,9 @@ pub fn set_root_plate_statusbar_blur(b: bool) {
     style_write(&ROOT_PLATE_STATUSBAR_BLUR, b);
 }
 
-static PLATE_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.15, 0.15, 0.2, 0.95]));
-static PLATE_BORDER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.3, 0.3, 0.4, 1.0]));
-static PLATE_BORDER_THICKNESS: RwLock<f32> = RwLock::new(1.0);
+static PLATE_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.PLATE_COLOR, |s| &mut s.color.PLATE_COLOR);
+static PLATE_BORDER_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.PLATE_BORDER_COLOR, |s| &mut s.color.PLATE_BORDER_COLOR);
+static PLATE_BORDER_THICKNESS: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.PLATE_BORDER_THICKNESS, |s| &mut s.color.PLATE_BORDER_THICKNESS);
 pub fn plate_color() -> Option<[f32; 4]> {
     load_colors_once();
     style_read(&PLATE_COLOR)
@@ -1097,7 +1199,7 @@ pub fn plate_bevel_width() -> f32 {
 /// luminance while its hue, chroma and movement still read.
 ///
 /// Default 0.0 — the behavior every existing config already has.
-static PLATE_BACKDROP_COMPRESSION: RwLock<f32> = RwLock::new(0.0);
+static PLATE_BACKDROP_COMPRESSION: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.PLATE_BACKDROP_COMPRESSION, |s| &mut s.color.PLATE_BACKDROP_COMPRESSION);
 
 pub fn plate_backdrop_compression() -> f32 {
     load_colors_once();
@@ -1120,7 +1222,7 @@ pub fn set_plate_backdrop_compression(c: f32) {
 /// rim as the only place the material can still say what it is.
 ///
 /// Default 0.0 — no existing config changes appearance.
-static PLATE_REFRACTION: RwLock<f32> = RwLock::new(0.0);
+static PLATE_REFRACTION: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.PLATE_REFRACTION, |s| &mut s.color.PLATE_REFRACTION);
 
 pub fn plate_refraction() -> f32 {
     load_colors_once();
@@ -1135,7 +1237,7 @@ pub fn set_plate_refraction(r: f32) {
 /// `Frost::from_style`. Spelled `style.surface.plate.frost` (a block, the
 /// knobs inside it; see the loader). The older `style.surface.plate.blur`
 /// bool is retired and reported, not read.
-static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
+static PLATE_BLUR: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.color.PLATE_BLUR, |s| &mut s.color.PLATE_BLUR);
 
 /// The finish's three fixed terms — specular strength, shininess exponent,
 /// curvature/AO strength — as `scene::material::Finish::from_style` reads
@@ -1143,9 +1245,9 @@ static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
 /// (0.4 / 24 / 0.2); the getters exist so the DE's plastic can be edited and
 /// so a named material (RFC material, step 4) has somewhere to land. No config
 /// path yet: the defaults ARE the shipped look.
-static FINISH_SPEC: RwLock<f32> = RwLock::new(FINISH_SPEC_DEFAULT);
-static FINISH_SHININESS: RwLock<f32> = RwLock::new(FINISH_SHININESS_DEFAULT);
-static FINISH_CURVATURE: RwLock<f32> = RwLock::new(FINISH_CURVATURE_DEFAULT);
+static FINISH_SPEC: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.FINISH_SPEC, |s| &mut s.color.FINISH_SPEC);
+static FINISH_SHININESS: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.FINISH_SHININESS, |s| &mut s.color.FINISH_SHININESS);
+static FINISH_CURVATURE: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.FINISH_CURVATURE, |s| &mut s.color.FINISH_CURVATURE);
 /// The finish a config without `relief spec` / `shininess` / `curvature`
 /// gets: the literals the shader shipped with.
 pub(crate) const FINISH_SPEC_DEFAULT: f32 = 0.4;
@@ -1155,7 +1257,7 @@ pub(crate) const FINISH_CURVATURE_DEFAULT: f32 = 0.2;
 /// The default material's blur radius (`style.surface.plate.frost.radius`,
 /// the kernel sigma in logical px) — [`crate::scene::Frost::DEFAULT_RADIUS`]
 /// unless config says otherwise.
-static PLATE_FROST_RADIUS: RwLock<f32> = RwLock::new(crate::scene::material::Frost::DEFAULT_RADIUS);
+static PLATE_FROST_RADIUS: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.PLATE_FROST_RADIUS, |s| &mut s.color.PLATE_FROST_RADIUS);
 
 pub fn plate_frost_radius() -> f32 {
     load_colors_once();

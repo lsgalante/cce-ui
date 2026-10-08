@@ -1,4 +1,74 @@
-use std::sync::RwLock;
+
+// This module's part of the one style snapshot (`crate::style`): every slot below,
+// with its default. Each slot's `static` handle stands where its lock did.
+crate::style::style_slots! {
+    SECTION_PADDING: f32 = 8.0;
+    SPINBOX_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
+    SPINBOX_BUTTON_PADDING: f32 = 0.0;
+    COLOR_SELECTOR_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
+    TEXTBOX_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
+    FONT_SELECTOR_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
+    SLIDER_HEIGHT: f32 = DEFAULT_TRACK_HEIGHT;
+    PROGRESSBAR_HEIGHT: f32 = DEFAULT_TRACK_HEIGHT;
+    RANGESLIDER_HEIGHT: f32 = DEFAULT_TRACK_HEIGHT;
+    TOGGLE_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
+    COLOR_SELECTOR_FONT: String = String::new();
+    COLOR_SELECTOR_PREVIEW_MARGIN: f32 = 0.0;
+    MENUBAR_FONT: String = String::new();
+    MENUBAR_FONT_CACHED: Option<(String, f32)> = None;
+    STATUSBAR_FONT: String = String::new();
+    STATUSBAR_FONT_CACHED: Option<(String, f32)> = None;
+    SECTION_LABEL_FONT: String = String::new();
+    NESTED_SECTION_LABEL_FONT: String = String::new();
+    BREADCRUMB_FONT: String = String::new();
+    BUTTON_FONT: String = String::new();
+    PAGINATOR_TAB_PADDING_X: f32 = 10.0;
+    BUTTON_PADDING: f32 = 14.0;
+    BUTTON_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
+    RAMP_HEIGHT: f32 = 32.0;
+    BUTTON_STRIP_SPACING: f32 = 8.0;
+    SCROLLBAR_WIDTH: f32 = 4.0;
+    SCROLLBAR_INSET: f32 = 16.0;
+    COLUMN_GAP: Option<f32> = None;
+    CONTROL_PANEL_PADDING: Option<f32> = None;
+    CONTROL_PANEL_GAP: Option<f32> = None;
+    TREE_OPACITY: f32 = 1.0;
+    TREE_BLUR: f32 = 0.0;
+    PLATE_PADDING: f32 = 20.0;
+    DROPDOWN_HEIGHT: f32 = DEFAULT_CONTROL_HEIGHT;
+    NESTED_SECTION_LABEL_ALIGNMENT: u8 = 0;
+    TOUCHPAD_NATURAL_SCROLL: bool = false;
+    TOGGLE_BORDER_WIDTH: f32 = 1.0;
+    FONT_SELECTOR_FONT: String = String::new();
+    FONT_SELECTOR_FONT_CACHED: Option<(String, f32)> = None;
+    BUTTON_STRIP_FONT: String = String::new();
+    BUTTON_STRIP_FONT_CACHED: Option<(String, f32)> = None;
+    CONTROL_LABEL_FONT: String = String::new();
+    CONTROL_LABEL_FONT_CACHED: Option<(String, f32)> = None;
+    CONTROL_LABEL_FONT_DETACHED: String = String::new();
+    CONTROL_LABEL_FONT_DETACHED_CACHED: Option<(String, f32)> = None;
+    CONTROL_LABEL_MARGIN: f32 = 6.0;
+    LIST_FONT: String = String::new();
+    LIST_FONT_CACHED: Option<(String, f32)> = None;
+    TREE_FONT: String = String::new();
+    TREE_FONT_CACHED: Option<(String, f32)> = None;
+    GRAPH_FONT: String = String::new();
+    GRAPH_FONT_CACHED: Option<(String, f32)> = None;
+    GRAPH_NODE_FONT: String = String::new();
+    GRAPH_NODE_FONT_CACHED: Option<(String, f32)> = None;
+    LIST_JUSTIFICATION: u8 = 0;
+    PLATE_OPACITY: f32 = 1.0;
+    PAGE_OPACITY: f32 = 1.0;
+    LAYER_OPACITY: f32 = 1.0;
+    TEXTBOX_LINE_WRAP: bool = true;
+    TEXTBOX_MULTILINE_BORDER_WIDTH: f32 = 1.0;
+    NESTED_SECTION_LABEL_OFFSET: f32 = 0.0;
+    PAGE_MARGIN: Option<f32> = None;
+    GRID_MIN_COL_WIDTH: f32 = 260.0;
+    GRID_GAP: f32 = 8.0;
+    BEVEL_PROFILE: Option<[f32; BEVEL_PROFILE_SAMPLES]> = None;
+    ROLL_PROFILE: Option<[f32; BEVEL_PROFILE_SAMPLES]> = None;
+}
 
 mod registry;
 pub use registry::*;
@@ -7,7 +77,7 @@ pub use bridge::*;
 mod legacy;
 pub use legacy::*;
 
-static SECTION_PADDING: RwLock<f32> = RwLock::new(8.0);
+static SECTION_PADDING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SECTION_PADDING, |s| &mut s.layout.SECTION_PADDING);
 
 /// Per-thread overrides for the style values tests pin, active only under
 /// `cfg(test)`.
@@ -83,82 +153,69 @@ pub const DETACHED_LABEL_INSET: f32 = 4.0;
 /// usage bar.
 pub const DEFAULT_TRACK_HEIGHT: f32 = 16.0;
 
-static SPINBOX_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
-static SPINBOX_BUTTON_PADDING: RwLock<f32> = RwLock::new(0.0);
-static COLOR_SELECTOR_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
-static TEXTBOX_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
-static FONT_SELECTOR_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
-static SLIDER_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_TRACK_HEIGHT);
-static PROGRESSBAR_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_TRACK_HEIGHT);
-static RANGESLIDER_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_TRACK_HEIGHT);
-static TOGGLE_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
-static COLOR_SELECTOR_FONT: RwLock<String> = RwLock::new(String::new());
-static COLOR_SELECTOR_PREVIEW_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static COLOR_SELECTOR_PREVIEW_MARGIN: RwLock<f32> = RwLock::new(0.0);
-static COLOR_SELECTOR_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static MENUBAR_FONT: RwLock<String> = RwLock::new(String::new());
-static MENUBAR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static STATUSBAR_FONT: RwLock<String> = RwLock::new(String::new());
-static STATUSBAR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
-static NESTED_SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
-static BREADCRUMB_FONT: RwLock<String> = RwLock::new(String::new());
-static BUTTON_FONT: RwLock<String> = RwLock::new(String::new());
+static SPINBOX_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SPINBOX_HEIGHT, |s| &mut s.layout.SPINBOX_HEIGHT);
+static SPINBOX_BUTTON_PADDING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SPINBOX_BUTTON_PADDING, |s| &mut s.layout.SPINBOX_BUTTON_PADDING);
+static COLOR_SELECTOR_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.COLOR_SELECTOR_HEIGHT, |s| &mut s.layout.COLOR_SELECTOR_HEIGHT);
+static TEXTBOX_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TEXTBOX_HEIGHT, |s| &mut s.layout.TEXTBOX_HEIGHT);
+static FONT_SELECTOR_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.FONT_SELECTOR_HEIGHT, |s| &mut s.layout.FONT_SELECTOR_HEIGHT);
+static SLIDER_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SLIDER_HEIGHT, |s| &mut s.layout.SLIDER_HEIGHT);
+static PROGRESSBAR_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.PROGRESSBAR_HEIGHT, |s| &mut s.layout.PROGRESSBAR_HEIGHT);
+static RANGESLIDER_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.RANGESLIDER_HEIGHT, |s| &mut s.layout.RANGESLIDER_HEIGHT);
+static TOGGLE_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TOGGLE_HEIGHT, |s| &mut s.layout.TOGGLE_HEIGHT);
+static COLOR_SELECTOR_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.COLOR_SELECTOR_FONT, |s| &mut s.layout.COLOR_SELECTOR_FONT);
+static COLOR_SELECTOR_PREVIEW_MARGIN: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.COLOR_SELECTOR_PREVIEW_MARGIN, |s| &mut s.layout.COLOR_SELECTOR_PREVIEW_MARGIN);
+static MENUBAR_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.MENUBAR_FONT, |s| &mut s.layout.MENUBAR_FONT);
+static MENUBAR_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.MENUBAR_FONT_CACHED, |s| &mut s.layout.MENUBAR_FONT_CACHED);
+static STATUSBAR_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.STATUSBAR_FONT, |s| &mut s.layout.STATUSBAR_FONT);
+static STATUSBAR_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.STATUSBAR_FONT_CACHED, |s| &mut s.layout.STATUSBAR_FONT_CACHED);
+static SECTION_LABEL_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.SECTION_LABEL_FONT, |s| &mut s.layout.SECTION_LABEL_FONT);
+static NESTED_SECTION_LABEL_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.NESTED_SECTION_LABEL_FONT, |s| &mut s.layout.NESTED_SECTION_LABEL_FONT);
+static BREADCRUMB_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.BREADCRUMB_FONT, |s| &mut s.layout.BREADCRUMB_FONT);
+static BUTTON_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_FONT, |s| &mut s.layout.BUTTON_FONT);
 
-static PAGINATOR_TAB_PADDING_X: RwLock<f32> = RwLock::new(10.0);
-static BUTTON_PADDING: RwLock<f32> = RwLock::new(14.0);
-static BUTTON_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
-static RAMP_HEIGHT: RwLock<f32> = RwLock::new(32.0);
-static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
-static SCROLLBAR_WIDTH: RwLock<f32> = RwLock::new(4.0);
-static SCROLLBAR_INSET: RwLock<f32> = RwLock::new(16.0);
-static COLUMN_GAP: RwLock<Option<f32>> = RwLock::new(None);
-static CONTROL_PANEL_PADDING: RwLock<Option<f32>> = RwLock::new(None);
-static CONTROL_PANEL_GAP: RwLock<Option<f32>> = RwLock::new(None);
-static TREE_OPACITY: RwLock<f32> = RwLock::new(1.0);
-static TREE_BLUR: RwLock<f32> = RwLock::new(0.0);
+static PAGINATOR_TAB_PADDING_X: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.PAGINATOR_TAB_PADDING_X, |s| &mut s.layout.PAGINATOR_TAB_PADDING_X);
+static BUTTON_PADDING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_PADDING, |s| &mut s.layout.BUTTON_PADDING);
+static BUTTON_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_HEIGHT, |s| &mut s.layout.BUTTON_HEIGHT);
+static RAMP_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.RAMP_HEIGHT, |s| &mut s.layout.RAMP_HEIGHT);
+static BUTTON_STRIP_SPACING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_STRIP_SPACING, |s| &mut s.layout.BUTTON_STRIP_SPACING);
+static SCROLLBAR_WIDTH: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SCROLLBAR_WIDTH, |s| &mut s.layout.SCROLLBAR_WIDTH);
+static SCROLLBAR_INSET: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.SCROLLBAR_INSET, |s| &mut s.layout.SCROLLBAR_INSET);
+static COLUMN_GAP: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.layout.COLUMN_GAP, |s| &mut s.layout.COLUMN_GAP);
+static CONTROL_PANEL_PADDING: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_PANEL_PADDING, |s| &mut s.layout.CONTROL_PANEL_PADDING);
+static CONTROL_PANEL_GAP: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_PANEL_GAP, |s| &mut s.layout.CONTROL_PANEL_GAP);
+static TREE_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TREE_OPACITY, |s| &mut s.layout.TREE_OPACITY);
+static TREE_BLUR: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TREE_BLUR, |s| &mut s.layout.TREE_BLUR);
 
-static PLATE_PADDING: RwLock<f32> = RwLock::new(20.0);
-static DROPDOWN_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
-static NESTED_SECTION_LABEL_ALIGNMENT: RwLock<u8> = RwLock::new(0);
-static TOUCHPAD_NATURAL_SCROLL: RwLock<bool> = RwLock::new(false);
+static PLATE_PADDING: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.PLATE_PADDING, |s| &mut s.layout.PLATE_PADDING);
+static DROPDOWN_HEIGHT: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.DROPDOWN_HEIGHT, |s| &mut s.layout.DROPDOWN_HEIGHT);
+static NESTED_SECTION_LABEL_ALIGNMENT: crate::style::StyleCell<u8> = crate::style::StyleCell::new(|s| &s.layout.NESTED_SECTION_LABEL_ALIGNMENT, |s| &mut s.layout.NESTED_SECTION_LABEL_ALIGNMENT);
+static TOUCHPAD_NATURAL_SCROLL: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.layout.TOUCHPAD_NATURAL_SCROLL, |s| &mut s.layout.TOUCHPAD_NATURAL_SCROLL);
 
 
-static BUTTON_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static SPINBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static TEXTBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static FONT_SELECTOR_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static DROPDOWN_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static TOGGLE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static SLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static RANGESLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static LIST_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static TREE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static TOGGLE_BORDER_WIDTH: RwLock<f32> = RwLock::new(1.0);
-static FONT_SELECTOR_FONT: RwLock<String> = RwLock::new(String::new());
-static FONT_SELECTOR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static BUTTON_STRIP_FONT: RwLock<String> = RwLock::new(String::new());
-static BUTTON_STRIP_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static CONTROL_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
-static CONTROL_LABEL_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static CONTROL_LABEL_FONT_DETACHED: RwLock<String> = RwLock::new(String::new());
-static CONTROL_LABEL_FONT_DETACHED_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static CONTROL_LABEL_MARGIN: RwLock<f32> = RwLock::new(6.0);
-static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
-static LIST_FONT: RwLock<String> = RwLock::new(String::new());
-static LIST_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static TREE_FONT: RwLock<String> = RwLock::new(String::new());
-static TREE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static GRAPH_FONT: RwLock<String> = RwLock::new(String::new());
-static GRAPH_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static GRAPH_NODE_FONT: RwLock<String> = RwLock::new(String::new());
-static GRAPH_NODE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static LIST_JUSTIFICATION: RwLock<u8> = RwLock::new(0);
-static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
-static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
-static LAYER_OPACITY: RwLock<f32> = RwLock::new(1.0);
-static TEXTBOX_LINE_WRAP: RwLock<bool> = RwLock::new(true);
-static TEXTBOX_MULTILINE_BORDER_WIDTH: RwLock<f32> = RwLock::new(1.0);
+static TOGGLE_BORDER_WIDTH: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TOGGLE_BORDER_WIDTH, |s| &mut s.layout.TOGGLE_BORDER_WIDTH);
+static FONT_SELECTOR_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.FONT_SELECTOR_FONT, |s| &mut s.layout.FONT_SELECTOR_FONT);
+static FONT_SELECTOR_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.FONT_SELECTOR_FONT_CACHED, |s| &mut s.layout.FONT_SELECTOR_FONT_CACHED);
+static BUTTON_STRIP_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_STRIP_FONT, |s| &mut s.layout.BUTTON_STRIP_FONT);
+static BUTTON_STRIP_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.BUTTON_STRIP_FONT_CACHED, |s| &mut s.layout.BUTTON_STRIP_FONT_CACHED);
+static CONTROL_LABEL_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_FONT, |s| &mut s.layout.CONTROL_LABEL_FONT);
+static CONTROL_LABEL_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_FONT_CACHED, |s| &mut s.layout.CONTROL_LABEL_FONT_CACHED);
+static CONTROL_LABEL_FONT_DETACHED: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_FONT_DETACHED, |s| &mut s.layout.CONTROL_LABEL_FONT_DETACHED);
+static CONTROL_LABEL_FONT_DETACHED_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_FONT_DETACHED_CACHED, |s| &mut s.layout.CONTROL_LABEL_FONT_DETACHED_CACHED);
+static CONTROL_LABEL_MARGIN: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.CONTROL_LABEL_MARGIN, |s| &mut s.layout.CONTROL_LABEL_MARGIN);
+static LIST_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.LIST_FONT, |s| &mut s.layout.LIST_FONT);
+static LIST_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.LIST_FONT_CACHED, |s| &mut s.layout.LIST_FONT_CACHED);
+static TREE_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.TREE_FONT, |s| &mut s.layout.TREE_FONT);
+static TREE_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.TREE_FONT_CACHED, |s| &mut s.layout.TREE_FONT_CACHED);
+static GRAPH_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.GRAPH_FONT, |s| &mut s.layout.GRAPH_FONT);
+static GRAPH_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.GRAPH_FONT_CACHED, |s| &mut s.layout.GRAPH_FONT_CACHED);
+static GRAPH_NODE_FONT: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.layout.GRAPH_NODE_FONT, |s| &mut s.layout.GRAPH_NODE_FONT);
+static GRAPH_NODE_FONT_CACHED: crate::style::StyleCell<Option<(String, f32)>> = crate::style::StyleCell::new(|s| &s.layout.GRAPH_NODE_FONT_CACHED, |s| &mut s.layout.GRAPH_NODE_FONT_CACHED);
+static LIST_JUSTIFICATION: crate::style::StyleCell<u8> = crate::style::StyleCell::new(|s| &s.layout.LIST_JUSTIFICATION, |s| &mut s.layout.LIST_JUSTIFICATION);
+static PLATE_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.PLATE_OPACITY, |s| &mut s.layout.PLATE_OPACITY);
+static PAGE_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.PAGE_OPACITY, |s| &mut s.layout.PAGE_OPACITY);
+static LAYER_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.LAYER_OPACITY, |s| &mut s.layout.LAYER_OPACITY);
+static TEXTBOX_LINE_WRAP: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.layout.TEXTBOX_LINE_WRAP, |s| &mut s.layout.TEXTBOX_LINE_WRAP);
+static TEXTBOX_MULTILINE_BORDER_WIDTH: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.TEXTBOX_MULTILINE_BORDER_WIDTH, |s| &mut s.layout.TEXTBOX_MULTILINE_BORDER_WIDTH);
 
 
 
@@ -182,7 +239,13 @@ pub fn align_text_y(y: f32, height: f32, font_size: f32, top_offset: f32) -> f32
     y + top_offset + (height - top_offset - font_size) / 2.0
 }
 
+/// Load the style config as one change of style (`crate::style::batch`): the registry and
+/// every slot are published together, and the hundreds of per-key writes cost one copy.
 pub fn reload_config() {
+    crate::style::batch(reload_config_in_batch);
+}
+
+fn reload_config_in_batch() {
     if let Some(content) = read_config() {
         let mut menubar_font_changed = false;
         let mut statusbar_font_changed = false;
@@ -365,24 +428,6 @@ pub fn reload_config() {
                     }
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("spinbox_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = SPINBOX_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("textbox_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = TEXTBOX_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
             if let Some(rest) = trimmed.strip_prefix("textbox_line_wrap") {
                 let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
@@ -404,60 +449,6 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TEXTBOX_MULTILINE_BORDER_WIDTH.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("list_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = LIST_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("tree_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = TREE_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("font_selector_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = FONT_SELECTOR_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("dropdown_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = DROPDOWN_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("toggle_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = TOGGLE_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("plate_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = PLATE_CORNER_RADIUS.write() {
                         *lock = val;
                     }
                 }
@@ -604,24 +595,6 @@ pub fn reload_config() {
                     *lock = font;
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("color_selector_preview_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("color_selector_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = COLOR_SELECTOR_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
             if let Some(rest) = trimmed.strip_prefix("color_selector_preview_margin") {
                 let rest = rest.trim_start_matches([' ', '=', '"']);
                 let val_str = rest.trim_end_matches('"').trim();
@@ -707,33 +680,6 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = RANGESLIDER_HEIGHT.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("button_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = BUTTON_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("slider_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = SLIDER_CORNER_RADIUS.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("rangeslider_corner_radius") {
-                let rest = rest.trim_start_matches([' ', '=', '"']);
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = RANGESLIDER_CORNER_RADIUS.write() {
                         *lock = val;
                     }
                 }
@@ -1032,7 +978,7 @@ pub fn set_nested_section_label_alignment(align: u8) {
     }
 }
 
-static NESTED_SECTION_LABEL_OFFSET: RwLock<f32> = RwLock::new(0.0);
+static NESTED_SECTION_LABEL_OFFSET: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.NESTED_SECTION_LABEL_OFFSET, |s| &mut s.layout.NESTED_SECTION_LABEL_OFFSET);
 
 pub fn nested_section_label_offset() -> f32 {
     use std::sync::Once;
@@ -1079,7 +1025,7 @@ pub fn set_plate_padding(padding: f32) {
     }
 }
 
-static PAGE_MARGIN: RwLock<Option<f32>> = RwLock::new(None);
+static PAGE_MARGIN: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.layout.PAGE_MARGIN, |s| &mut s.layout.PAGE_MARGIN);
 
 /// Legacy: the page-level margin (`style.surface.page.margin`). Unset, it
 /// IS the pane rung's [`plate_padding`] — a page is a pane — so an app
@@ -1096,7 +1042,7 @@ pub fn set_page_margin(margin: f32) {
     }
 }
 
-static GRID_MIN_COL_WIDTH: RwLock<f32> = RwLock::new(260.0);
+static GRID_MIN_COL_WIDTH: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.GRID_MIN_COL_WIDTH, |s| &mut s.layout.GRID_MIN_COL_WIDTH);
 
 pub fn grid_min_col_width() -> f32 {
     use std::sync::Once;
@@ -1126,7 +1072,7 @@ pub fn set_grid_min_col_width(width: f32) {
     }
 }
 
-static GRID_GAP: RwLock<f32> = RwLock::new(8.0);
+static GRID_GAP: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.layout.GRID_GAP, |s| &mut s.layout.GRID_GAP);
 
 pub fn grid_gap() -> f32 {
     use std::sync::Once;
@@ -1495,8 +1441,7 @@ pub const BEVEL_PROFILE_SAMPLES: usize = 32;
 /// floor / boss crest; `h` in units of the feature's depth, so a 0→1 curve is
 /// the classic full-depth bevel and a curve ending back at its start height is
 /// a pure decorative rim). `None` = the analytic smoothstep profile.
-static BEVEL_PROFILE: std::sync::RwLock<Option<[f32; BEVEL_PROFILE_SAMPLES]>> =
-    std::sync::RwLock::new(None);
+static BEVEL_PROFILE: crate::style::StyleCell<Option<[f32; BEVEL_PROFILE_SAMPLES]>> = crate::style::StyleCell::new(|s| &s.layout.BEVEL_PROFILE, |s| &mut s.layout.BEVEL_PROFILE);
 /// Bumped on every profile change so renderers know to re-upload their LUT.
 static BEVEL_PROFILE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -1506,8 +1451,7 @@ static BEVEL_PROFILE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::Atom
 /// silhouette, and the curve is the roll's descent progress (0 = face height,
 /// 1 = fully dropped), so the identity curve is a straight chamfer and `None`
 /// is the analytic superellipse quadrant.
-static ROLL_PROFILE: std::sync::RwLock<Option<[f32; BEVEL_PROFILE_SAMPLES]>> =
-    std::sync::RwLock::new(None);
+static ROLL_PROFILE: crate::style::StyleCell<Option<[f32; BEVEL_PROFILE_SAMPLES]>> = crate::style::StyleCell::new(|s| &s.layout.ROLL_PROFILE, |s| &mut s.layout.ROLL_PROFILE);
 static ROLL_PROFILE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub use cce_core::ramp::sample_ramp_keys;
