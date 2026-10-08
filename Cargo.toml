@@ -19,7 +19,7 @@ doc_editor = []
 [dependencies]
 # The GUI-free half: config, input, motion, units, ipc and the spec parsers,
 # re-exported at their old paths (`cce_ui::config`, …). See lib.rs.
-cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "39e989d6ebc7850a1e5aa96bf228fe8714e538e0" }
+cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "de8a6ff818874b38f3958b0bd562377390e7af34" }
 cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "41ca52bd51ea3655a791c58005be9fce939e4333", optional = true }
 glam = "0.29"
 bytemuck = { version = "1", features = ["derive"] }
@@ -232,7 +232,7 @@ crate-type = ["cdylib"]
 # The same crate with its `cfg(test)` behaviour switched on, so this suite reads
 # no machine config now that config/input/motion live there (cce-core's
 # `test-isolation`; resolver 2 keeps it out of normal builds).
-cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "39e989d6ebc7850a1e5aa96bf228fe8714e538e0", features = ["test-isolation"] }
+cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "de8a6ff818874b38f3958b0bd562377390e7af34", features = ["test-isolation"] }
 
 [build-dependencies]
 # build.rs compiles the fixed WGSL shaders to SPIR-V once, instead of in every
