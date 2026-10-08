@@ -484,7 +484,7 @@ following the caret through every step, each `done`'s serial equal to the commit
 Sway routes text-input focus only while an input method is bound, so with none (the
 24-step harness) nothing changes: 0 px.
 
-CI (`.github/workflows/ci.yml`, every push and PR) has four jobs, warnings as errors in each:
+CI (`.github/workflows/ci.yml`, every push and PR) has five jobs, warnings as errors in the first four:
 
 - **`test`** (Ubuntu 24.04) builds and tests with default and with all features. It installs
   `libwayland-dev` and `libxkbcommon-dev` (the two native libraries the build links, through
@@ -501,6 +501,9 @@ CI (`.github/workflows/ci.yml`, every push and PR) has four jobs, warnings as er
   loops, `new` without `Default`); anything else clippy reports is fixed, not allowed —
   locally, `cargo clippy -p cce-ui --all-features --all-targets -- -D warnings` is the check.
   Linux only: `src/web` and `src/mac` are compiled out there.
+- **`miri`** runs the `widget::owned` tests under Miri, Stacked and Tree Borrows (nightly):
+  the app's access to a widget and the registry's taking turns (see "The registry holds
+  pointers, and knows when they die").
 - **`wasm`** runs `scripts/check-wasm`: the library, its features and the four wasm examples,
   type-checked for the browser. Its `RUSTFLAGS` carries `--cfg=web_sys_unstable_apis` itself,
   since an environment `RUSTFLAGS` replaces `.cargo/config.toml`'s. Its first run (2026-10-08)
@@ -1721,13 +1724,39 @@ The pointer-taking entry points say so:
   whose trait objects are not `'static`, and tests that exercise raw pointers.
 - The demo's `register_roots` is the pattern to copy.
 
-What is still open is the ALIASING model. The registry derefs its pointers while the app holds
-the `Owned`, so a `&mut` reached through the registry and one reached through the field can
-coexist. The end state for that is a registry that owns its widgets and lends them out.
+**The aliasing is sound since 2026-10-08, and checked by Miri.** Three things were not:
+
+- **`Owned` held its widget in a `Box`.** A `Box` is a unique pointer to the language, so every
+  reborrow of the widget through it — each `self.button.take_click()` — invalidated the raw
+  pointer the registry had taken, and the registry's next dispatch was undefined behaviour,
+  every frame in every app. Miri reported it ("trying to retag … but that tag does not exist in
+  the borrow stack", at the registry's write). `Owned` now holds the allocation as a raw
+  `NonNull` ROOT, which the app's `Deref` and the registry both derive their references from.
+- **A registration from inside a widget replaced that root.** Opening a context menu
+  (`show_context_menu`), focusing by pointer (`set_focused_ptr`), `set_parent` and the like
+  re-registered the widget with a pointer taken from its own `&mut self` — a reborrow the next
+  app access invalidates. `WidgetTree::register` now KEEPS a live `Owned` root against a
+  pointer to the same address (compared by address, never read through); a widget swapped out
+  of its box is elsewhere and registers as usual.
+- **A widget focused itself through the registry mid-event.** The tree list's click handler
+  called `set_focused_ptr` on itself, and the context delivered FocusIn back through the
+  registry — a second `&mut` while its own was live. `UiContext::claim_focus` records the
+  focus and tells the old holder without re-entering the claimant (what
+  `EventCtx::request_focus` does too); the widget sets its own focused state.
+
+The toolkit's embedded children (the tree list's search box, add-key button and popover,
+inline editor; the paginator's menu) are `Owned` fields now, so they have roots of their own.
+The rule left is the ordinary one: a `&mut` reached through the registry must not overlap one
+taken through the `Owned` — an app does not hold `&mut self.x` across a `UiContext` call that
+reaches `x`, and a `UiContext` call handed the widget uses what it was handed. The end state
+that makes even that the compiler's job is a registry that owns its widgets and lends them out
+by handle; it would touch every widget access in every app.
 
 `a_dropped_widget_is_never_handed_out`, `a_clone_has_a_liveness_of_its_own`,
-`an_owned_widget_survives_its_vec_reallocating` and
-`swapping_the_widget_out_of_its_box_never_leaves_a_dangling_entry` are the tests.
+`an_owned_widget_survives_its_vec_reallocating`,
+`swapping_the_widget_out_of_its_box_never_leaves_a_dangling_entry`,
+`an_app_and_the_registry_take_turns_soundly` and `an_inner_registration_keeps_the_root` are
+the tests; CI's `miri` job runs the `widget::owned` ones under Stacked and Tree Borrows.
 
 **Runtime verification matters here.** Several scene changes are "compiles + tests pass; runtime
 verification pending" per the RFC — the headless tests can't catch paint/event regressions. When

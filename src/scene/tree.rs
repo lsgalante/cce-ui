@@ -51,6 +51,9 @@ struct Entry {
     id: WidgetId,
     ptr: Option<*mut (dyn WidgetHost + 'static)>,
     alive: Option<Weak<()>>,
+    /// The pointer is an `Owned` box's raw root (`WidgetHost::stable_target`), which every
+    /// later access to the widget — the app's and the registry's — derives from.
+    stable: bool,
 }
 
 /// Resolve an entry's pointer to a usable one: non-null (skipping link-only and null-data
@@ -99,7 +102,7 @@ impl WidgetTree {
                 return node;
             }
         }
-        let node = self.arena.insert(Entry { id, ptr: None, alive: None });
+        let node = self.arena.insert(Entry { id, ptr: None, alive: None, stable: false });
         self.by_id.insert(id, node);
         node
     }
@@ -114,13 +117,28 @@ impl WidgetTree {
     /// a watch on the widget's liveness token. After the call the tree resolves the pointer only
     /// while that widget has not been dropped.
     pub unsafe fn register(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
+        // A live `Owned` root already registered for this widget is KEPT against a pointer to
+        // the same address taken some other way — a widget's own `&mut self` mid-event (its
+        // context menu, its focus), the inner widget handed for the `Owned`: that pointer is a
+        // reborrow the next access to the widget invalidates, and the root is what stays valid
+        // (`widget::Owned`). Compared by address, without reading through either pointer,
+        // which would disturb the borrow of a widget that is handling an event. A widget moved
+        // out of its box is at another address and registers as usual.
+        if let Some(node) = self.by_id.get(&id).copied() {
+            if let Some(e) = self.arena.value(node) {
+                let same = e.ptr.is_some_and(|p| std::ptr::addr_eq(p, ptr));
+                if e.stable && same && e.alive.as_ref().is_some_and(|w| w.strong_count() > 0) {
+                    return;
+                }
+            }
+        }
         // SAFETY: the caller's contract — null, or a live widget. A widget in an `Owned` box
         // names the boxed widget and the allocation's token instead of itself.
-        let (ptr, alive) = match unsafe { ptr.as_mut() } {
-            None => (ptr, None),
+        let (ptr, alive, stable) = match unsafe { ptr.as_mut() } {
+            None => (ptr, None, false),
             Some(w) => match w.stable_target() {
-                Some((inner, alive)) => (inner, Some(alive)),
-                None => (ptr, Some(w.base().live.watch())),
+                Some((inner, alive)) => (inner, Some(alive), true),
+                None => (ptr, Some(w.base().live.watch()), false),
             },
         };
         let node = self.ensure_node(id);
@@ -128,6 +146,7 @@ impl WidgetTree {
         let entry = self.arena.value_mut(node).unwrap();
         entry.ptr = Some(ptr);
         entry.alive = alive;
+        entry.stable = stable;
     }
 
     /// Make `child` a child of `parent` (deduped, reparenting from any previous parent). Mirrors

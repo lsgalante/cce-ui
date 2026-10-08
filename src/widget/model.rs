@@ -354,14 +354,9 @@ impl EventCtx<'_> {
     /// `focus()` / `unfocus()`, whose caller is the context) there is nothing to record.
     pub fn request_focus(&mut self) {
         let id = self.id;
-        let Some(ui) = self.ui.as_deref_mut() else { return };
-        if let Some(old) = ui.focused_widget.filter(|old| *old != id) {
-            if let Some(ptr) = ui.tree.get_ptr(old) {
-                // SAFETY: a registry-resolved live widget other than this one.
-                unsafe { (*ptr).unfocus() };
-            }
+        if let Some(ui) = self.ui.as_deref_mut() {
+            ui.claim_focus(id);
         }
-        ui.focused_widget = Some(id);
     }
 
     /// Drop this widget's hold on the window's focus, if it has it (MenuBar releases focus

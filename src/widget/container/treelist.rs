@@ -164,10 +164,16 @@ fn build_tree(
 pub struct TreeList {
     pub base: Widget,
     pub scroll_box: ScrollBox,
-    pub search_box: crate::widget::Adapted<TextBox>,
-    pub add_key_btn: crate::widget::Adapted<Button>,
+    /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
+    /// stable root rather than into this widget (see `widget::Owned`).
+    pub search_box: crate::widget::Owned<crate::widget::Adapted<TextBox>>,
+    /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
+    /// stable root rather than into this widget (see `widget::Owned`).
+    pub add_key_btn: crate::widget::Owned<crate::widget::Adapted<Button>>,
     pub add_key_popover_open: bool,
-    pub add_key_popover_box: crate::widget::Adapted<TextBox>,
+    /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
+    /// stable root rather than into this widget (see `widget::Owned`).
+    pub add_key_popover_box: crate::widget::Owned<crate::widget::Adapted<TextBox>>,
     pub new_key_path_request: Option<String>,
     pub flat_keys: Vec<(String, serde_json::Value)>,
     pub annotations: Vec<Option<String>>,
@@ -186,7 +192,9 @@ pub struct TreeList {
     /// tree while still being, visually, part of the tree pane.
     pub focused: bool,
     pub deleted_key_path: Option<String>,
-    pub edit_box: crate::widget::Adapted<TextBox>,
+    /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
+    /// stable root rather than into this widget (see `widget::Owned`).
+    pub edit_box: crate::widget::Owned<crate::widget::Adapted<TextBox>>,
     pub editing_key_idx: Option<usize>,
     pub double_click_timer: Option<(web_time::Instant, usize)>,
     pub rename_request: Option<(String, String)>,
@@ -202,10 +210,10 @@ impl TreeList {
         Adapted::new(TreeList {
             base: Widget::new(),
             scroll_box,
-            search_box: TextBox::new(String::new()).with_search().with_update_on_type(true),
-            add_key_btn: Button::new(0.0, 0.0, 80.0, 26.0).with_label("+ Add Key"),
+            search_box: TextBox::new(String::new()).with_search().with_update_on_type(true).into(),
+            add_key_btn: Button::new(0.0, 0.0, 80.0, 26.0).with_label("+ Add Key").into(),
             add_key_popover_open: false,
-            add_key_popover_box: TextBox::new(String::new()).with_placeholder("new.key.path").with_multiline(false),
+            add_key_popover_box: TextBox::new(String::new()).with_placeholder("new.key.path").with_multiline(false).into(),
             new_key_path_request: None,
             flat_keys: Vec::new(),
             annotations: Vec::new(),
@@ -219,7 +227,7 @@ impl TreeList {
             last_scroll_y: 0.0,
             focused: false,
             deleted_key_path: None,
-            edit_box: TextBox::new(String::new()).with_multiline(false).with_draw_bg_border(true),
+            edit_box: TextBox::new(String::new()).with_multiline(false).with_draw_bg_border(true).into(),
             editing_key_idx: None,
             double_click_timer: None,
             rename_request: None,
@@ -454,8 +462,10 @@ impl TreeList {
         if button == MouseButton::Left && state == ElementState::Pressed && !covered {
             let on_scrollbar = self.scroll_box.hit_test_scrollbar(px, py) || self.scroll_box.scrollbar_dragging;
             if !on_scrollbar && px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
-                // SAFETY: `host` is this widget's own adapter, live while its event is routed.
-                if let Some(h) = host { unsafe { ui.set_focused_ptr(h) }; }
+                // Focus claimed from inside this event (`UiContext::claim_focus`): a FocusIn
+                // through the registry would re-enter this widget while it holds `&mut self`.
+                ui.claim_focus(host_id);
+                self.focused = true;
                 let relative_y = py - list_top + self.scroll_box.scroll_y;
                 let row_idx = (relative_y / self.item_height) as usize;
                 if row_idx < self.items.len() {
@@ -484,7 +494,7 @@ impl TreeList {
                             TreeElement::Leaf { path, name, .. } => (path.clone(), name.clone()),
                         };
                         self.editing_key_idx = Some(row_idx);
-                        self.edit_box = TextBox::new(relative_name).with_multiline(false).with_draw_bg_border(true);
+                        self.edit_box = TextBox::new(relative_name).with_multiline(false).with_draw_bg_border(true).into();
                         self.edit_box.editing = true;
                         self.edit_box.cursor_idx = self.edit_box.text.chars().count();
                         self.edit_box.select_anchor = Some(0);
@@ -531,8 +541,10 @@ impl TreeList {
 
         if button == MouseButton::Right && state == ElementState::Pressed && !covered
             && px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
-                // SAFETY: `host` is this widget's own adapter, live while its event is routed.
-                if let Some(h) = host { unsafe { ui.set_focused_ptr(h) }; }
+                // Focus claimed from inside this event (`UiContext::claim_focus`): a FocusIn
+                // through the registry would re-enter this widget while it holds `&mut self`.
+                ui.claim_focus(host_id);
+                self.focused = true;
                 let relative_y = py - list_top + self.scroll_box.scroll_y;
                 let row_idx = (relative_y / self.item_height) as usize;
                 if row_idx < self.items.len() {
@@ -1094,7 +1106,6 @@ impl Input for TreeList {
     /// search box, positions/commits the inline rename editor (re-targeting focus to the
     /// adapter on commit), and runs the scrollbar activity fade.
     fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
-        let host = ectx.host_ptr();
         let host_id = ectx.id;
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
@@ -1168,8 +1179,8 @@ impl Input for TreeList {
                 let eb_id = self.edit_box.base().id();
                 ui.unlink_child(host_id, eb_id);
                 ui.unregister_widget(eb_id);
-                // SAFETY: `host` is this widget's own adapter, live while its event is routed.
-                if let Some(h) = host { unsafe { ui.set_focused_ptr(h) }; }
+                ui.claim_focus(host_id);
+                self.focused = true;
                 changed = true;
             }
         }

@@ -651,6 +651,22 @@ impl UiContext {
         false
     }
 
+    /// Make `id` the window's focus from INSIDE that widget's own event handling: recorded,
+    /// and the holder before told (`unfocus`), but no FocusIn delivered back to `id` —
+    /// it is running, holding `&mut self`, and a FocusIn through the registry would be a
+    /// second `&mut` to it while the first is live. What a widget that focuses itself does
+    /// (`EventCtx::request_focus`; a tree list on a click into its rows), setting whatever
+    /// its FocusIn would have set itself.
+    pub fn claim_focus(&mut self, id: WidgetId) {
+        if let Some(old) = self.focused_widget.filter(|old| *old != id) {
+            if let Some(ptr) = self.tree.get_ptr(old) {
+                // SAFETY: a registry-resolved live widget other than the claimant.
+                unsafe { (*ptr).unfocus() };
+            }
+        }
+        self.focused_widget = Some(id);
+    }
+
     /// Focus `w` as a direct `w.focus()` did — the widget is told (`focus`), the holder before
     /// it is told it lost focus (`unfocus`) — and record it as the window's focus, which a
     /// direct call never did: the Tab walk and the accessibility tree read the record, and

@@ -25,7 +25,9 @@ use crate::widget::{
 };
 
 pub struct Paginator {
-    pub sidebar_menu: Adapted<ButtonStrip>,
+    /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
+    /// stable root rather than into this widget (see `widget::Owned`).
+    pub sidebar_menu: crate::widget::Owned<Adapted<ButtonStrip>>,
     pub selected_page: usize,
     pub sidebar_w: f32,
     pub page_labels: Vec<String>,
@@ -38,7 +40,7 @@ impl Paginator {
         let num_pages = pages.len();
 
         let temp_paginator = Paginator {
-            sidebar_menu: Adapted::new(ButtonStrip::new(0.0, 0.0, 0.0, 0.0)),
+            sidebar_menu: Adapted::new(ButtonStrip::new(0.0, 0.0, 0.0, 0.0)).into(),
             selected_page: 0,
             sidebar_w: 0.0,
             page_labels: pages.clone(),
@@ -57,7 +59,7 @@ impl Paginator {
         }
 
         Adapted::new(Paginator {
-            sidebar_menu,
+            sidebar_menu: sidebar_menu.into(),
             selected_page: 0,
             sidebar_w,
             page_labels: pages,
