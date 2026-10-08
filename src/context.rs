@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::widget::{WidgetHost, WidgetId, Key, NamedKey, MouseButton, ElementState, Event, WidgetHostExt};
+use crate::widget::{Handle, WidgetHost, WidgetId, Key, NamedKey, MouseButton, ElementState, Event, WidgetHostExt};
 
 pub struct SpatialGrid {
     pub cell_size: f32,
@@ -152,6 +152,104 @@ impl UiContext {
         self.tree.get_ptr(id).map(|ptr| unsafe { &mut *ptr })
     }
 
+    // ── Widgets the context owns, by handle (docs/rfc-owning-registry.md) ──────────────
+
+    /// Take ownership of `widget`, register it under its own id, and hand back its handle.
+    /// The widget lives in the context from here on; reach it with [`get`](Self::get) /
+    /// [`get_mut`](Self::get_mut) (or `ctx[h]`), give it back with [`remove`](Self::remove).
+    pub fn insert<W: WidgetHost + 'static>(&mut self, widget: W) -> Handle<W> {
+        let id = self.tree.insert_owned(widget);
+        self.invalidate_coverage_cache();
+        Handle::from_id(id)
+    }
+
+    /// The widget `h` names: `None` once it is removed, or while the context has it out on
+    /// loan (a widget reaching for itself while it handles an event).
+    pub fn get<W: WidgetHost + 'static>(&self, h: Handle<W>) -> Option<&W> {
+        // SAFETY: the tree's own allocation, typed by `owned_root`, not lent; borrowed from
+        // `&self`, so no `&mut` to it can be live.
+        self.tree.owned_root::<W>(h.id()).map(|p| unsafe { &*p.as_ptr() })
+    }
+
+    /// [`get`](Self::get), mutably. The borrow is of the whole context, so an app cannot
+    /// hold the widget across another context call — the one rule the pointer registry left
+    /// to discipline, now the compiler's.
+    pub fn get_mut<W: WidgetHost + 'static>(&mut self, h: Handle<W>) -> Option<&mut W> {
+        // SAFETY: as in `get`, and `&mut self` is exclusive: nothing else in the context is
+        // touching the widget while this borrow lives.
+        self.tree.owned_root::<W>(h.id()).map(|p| unsafe { &mut *p.as_ptr() })
+    }
+
+    /// Give the widget `h` names back by value, unregistered: its links, its focus and its
+    /// place in the tick list go with it. `None` if it is gone or out on loan.
+    pub fn remove<W: WidgetHost + 'static>(&mut self, h: Handle<W>) -> Option<W> {
+        let id = h.id();
+        let widget = self.tree.take_owned::<W>(id)?;
+        if self.focused_widget == Some(id) {
+            self.focused_widget = None;
+        }
+        self.tick_receivers.retain(|&r| r != id);
+        self.invalidate_coverage_cache();
+        Some(widget)
+    }
+
+    /// Lend the widget `id` out for one call: `f` gets it and the context, and it is back in
+    /// the registry when `f` returns. While it is out nothing in the context resolves it, so
+    /// whatever `f` does with the context — dispatch, focus, a handle lookup — cannot reach
+    /// the widget a second time. `None` if `id` is unknown, stale, or already out.
+    ///
+    /// Every call the context makes into a widget that hands it the context comes through
+    /// here; so does a host that places or drives a widget it holds by handle.
+    pub fn lend<R>(&mut self, id: WidgetId, f: impl FnOnce(&mut (dyn WidgetHost + 'static), &mut UiContext) -> R) -> Option<R> {
+        let ptr = self.tree.get_ptr(id)?;
+        if !self.tree.set_lent(id, true) {
+            return None;
+        }
+        // SAFETY: a live widget the registry resolved, now out on loan: until it is put back
+        // no resolver in the context hands it out, so this `&mut` is the only one.
+        let out = f(unsafe { &mut *ptr }, self);
+        self.tree.set_lent(id, false);
+        Some(out)
+    }
+
+    /// [`lend`](Self::lend) by handle, typed.
+    pub fn lend_h<W: WidgetHost + 'static, R>(&mut self, h: Handle<W>, f: impl FnOnce(&mut W, &mut UiContext) -> R) -> Option<R> {
+        let root = self.tree.owned_root::<W>(h.id())?;
+        if !self.tree.set_lent(h.id(), true) {
+            return None;
+        }
+        // SAFETY: as in `lend`; the root is the tree's own `W`.
+        let out = f(unsafe { &mut *root.as_ptr() }, self);
+        self.tree.set_lent(h.id(), false);
+        Some(out)
+    }
+
+    /// Hand `event` to widget `id`, lent for the call; a widget that takes it is marked dirty.
+    fn deliver(&mut self, id: WidgetId, event: &Event) -> bool {
+        self.lend(id, |w, ctx| {
+            let handled = w.handle_event(event, ctx);
+            if handled {
+                w.mark_dirty(ctx);
+            }
+            handled
+        })
+        .unwrap_or(false)
+    }
+
+    /// [`deliver`](Self::deliver), marking the widget dirty whatever it answers (the drag
+    /// lifecycle's start and end).
+    fn deliver_dirty(&mut self, id: WidgetId, event: &Event) {
+        self.lend(id, |w, ctx| {
+            w.handle_event(event, ctx);
+            w.mark_dirty(ctx);
+        });
+    }
+
+    /// A widget's rect, read without lending it.
+    fn rect_of(&self, id: WidgetId) -> Option<(f32, f32, f32, f32)> {
+        self.get_widget(id).map(|w| w.rect())
+    }
+
     /// Dispatch an event into the tree rooted at `root` — a `WidgetId` resolved through the
     /// registry (the plumbing retype: the router's last raw-pointer API boundary is gone; apps
     /// name roots by id and the registry is the one place a pointer lives). The root must be
@@ -193,10 +291,10 @@ impl UiContext {
     }
 
     pub fn propagate_event(&mut self, event: &Event, root: WidgetId) -> bool {
-        let Some(root_ptr) = self.tree.get_ptr(root) else {
+        if self.tree.get_ptr(root).is_none() {
             eprintln!("propagate_event: unregistered/stale root {root:?} — event dropped");
             return false;
-        };
+        }
         if let Event::MouseWheel { .. } = event {
             self.note_scroll_event();
         }
@@ -211,210 +309,169 @@ impl UiContext {
                     | Key::Named(NamedKey::ArrowDown)
             );
             if is_scroll_key {
-                let mut handled = false;
-                if let Some(focused) = self.focused_widget.and_then(|id| self.tree.get_ptr(id)) {
-                    unsafe {
-                        if (*focused).handle_event(event, self) {
-                            (*focused).mark_dirty(self);
-                            handled = true;
-                        }
+                if let Some(focused) = self.focused_widget {
+                    if self.deliver(focused, event) {
+                        return true;
                     }
                 }
-                if handled {
-                    return true;
-                }
                 let (cx, cy) = self.cursor_pos;
-                if let Some(scrollable) = self.find_hovered_scrollable(root_ptr, cx, cy) {
-                    unsafe {
-                        if (*scrollable).handle_event(event, self) {
-                            (*scrollable).mark_dirty(self);
-                            return true;
-                        }
+                if let Some(scrollable) = self.find_hovered_scrollable(root, cx, cy) {
+                    if self.deliver(scrollable, event) {
+                        return true;
                     }
                 }
             }
         }
-        self.propagate_event_impl(event, root_ptr)
+        self.propagate_event_impl(event, root)
     }
 
-    /// The dispatch body. Private — `root` is the registry-resolved pointer from
-    /// `propagate_event`, live for the duration of this call.
-    fn propagate_event_impl(&mut self, event: &Event, root: *mut (dyn WidgetHost + 'static)) -> bool {
+    /// The dispatch body, by id: each widget it calls is lent for the call.
+    fn propagate_event_impl(&mut self, event: &Event, root: WidgetId) -> bool {
         if let Event::Tick(_) = event {
             return false;
         }
-        unsafe {
-            // Track drag gestures based on mouse events
-            match event {
-                Event::MouseButton { button, state, x, y, .. } if *button == MouseButton::Left => {
-                    if *state == ElementState::Pressed {
-                        // Apps re-dispatch the SAME press to several roots (a plain loop
-                        // over their top-level widgets); only the first call for a given
-                        // press may reset the drag bookkeeping — a later call would wipe
-                        // the target an earlier root just armed, killing the drag before
-                        // its first move. drag_start_pos is cleared on release, so an
-                        // equal position here means "same press, next root".
-                        if self.drag_start_pos != Some((*x, *y)) {
-                            // A fresh press while a grab is still armed means the
-                            // release never arrived (lost to a focus change or eaten
-                            // compositor-side). End the stale drag and drop the grab —
-                            // otherwise active_grab redirects every event to the old
-                            // target forever and the whole UI stops responding.
-                            if self.active_grab.is_some() {
-                                if self.is_dragging {
-                                    if let Some(target_ptr) = self.drag_target.and_then(|id| self.tree.get_ptr(id)) {
-                                        (*target_ptr).handle_event(&Event::DragEnd, self);
-                                        (*target_ptr).mark_dirty(self);
-                                    }
-                                }
-                                self.active_grab = None;
-                            }
-                            self.drag_start_pos = Some((*x, *y));
-                            self.is_dragging = false;
-                            self.drag_target = None;
-                        }
-                    } else if *state == ElementState::Released {
-                        if self.is_dragging {
-                            if let Some(target_id) = self.drag_target {
-                                if let Some(target_ptr) = self.tree.get_ptr(target_id) {
-                                    (*target_ptr).handle_event(&Event::DragEnd, self);
-                                    (*target_ptr).mark_dirty(self);
+        // Track drag gestures based on mouse events
+        match event {
+            Event::MouseButton { button, state, x, y, .. } if *button == MouseButton::Left => {
+                if *state == ElementState::Pressed {
+                    // Apps re-dispatch the SAME press to several roots (a plain loop
+                    // over their top-level widgets); only the first call for a given
+                    // press may reset the drag bookkeeping — a later call would wipe
+                    // the target an earlier root just armed, killing the drag before
+                    // its first move. drag_start_pos is cleared on release, so an
+                    // equal position here means "same press, next root".
+                    if self.drag_start_pos != Some((*x, *y)) {
+                        // A fresh press while a grab is still armed means the
+                        // release never arrived (lost to a focus change or eaten
+                        // compositor-side). End the stale drag and drop the grab —
+                        // otherwise active_grab redirects every event to the old
+                        // target forever and the whole UI stops responding.
+                        if self.active_grab.is_some() {
+                            if self.is_dragging {
+                                if let Some(target) = self.drag_target {
+                                    self.deliver_dirty(target, &Event::DragEnd);
                                 }
                             }
                             self.active_grab = None;
                         }
-                        self.drag_start_pos = None;
-                        self.drag_target = None;
+                        self.drag_start_pos = Some((*x, *y));
                         self.is_dragging = false;
+                        self.drag_target = None;
                     }
+                } else if *state == ElementState::Released {
+                    if self.is_dragging {
+                        if let Some(target) = self.drag_target {
+                            self.deliver_dirty(target, &Event::DragEnd);
+                        }
+                        self.active_grab = None;
+                    }
+                    self.drag_start_pos = None;
+                    self.drag_target = None;
+                    self.is_dragging = false;
                 }
-                Event::PointerMove { x, y, .. } => {
-                    if let Some((sx, sy)) = self.drag_start_pos {
-                        if let Some(target_id) = self.drag_target {
-                            if self.is_dragging {
-                                let dx = *x - sx;
-                                let dy = *y - sy;
-                                if let Some(target_ptr) = self.tree.get_ptr(target_id) {
-                                    let (cx, cy, _, _) = (*target_ptr).rect();
-                                    let drag_evt = Event::DragUpdate { dx, dy, x: *x, y: *y, local_x: *x - cx, local_y: *y - cy };
-                                    (*target_ptr).handle_event(&drag_evt, self);
-                                    (*target_ptr).mark_dirty(self);
-                                }
-                            } else {
-                                let dx = *x - sx;
-                                let dy = *y - sy;
-                                if (dx * dx + dy * dy).sqrt() > 3.0 {
-                                    self.is_dragging = true;
-                                    self.active_grab = Some(target_id);
-                                    if let Some(target_ptr) = self.tree.get_ptr(target_id) {
-                                        (*target_ptr).handle_event(&Event::DragStart { start_x: sx, start_y: sy }, self);
-                                        (*target_ptr).mark_dirty(self);
-                                    }
-                                }
+            }
+            Event::PointerMove { x, y, .. } => {
+                if let Some((sx, sy)) = self.drag_start_pos {
+                    if let Some(target_id) = self.drag_target {
+                        let (dx, dy) = (*x - sx, *y - sy);
+                        if self.is_dragging {
+                            if let Some((cx, cy, _, _)) = self.rect_of(target_id) {
+                                let drag_evt = Event::DragUpdate { dx, dy, x: *x, y: *y, local_x: *x - cx, local_y: *y - cy };
+                                self.deliver_dirty(target_id, &drag_evt);
                             }
+                        } else if (dx * dx + dy * dy).sqrt() > 3.0 {
+                            self.is_dragging = true;
+                            self.active_grab = Some(target_id);
+                            self.deliver_dirty(target_id, &Event::DragStart { start_x: sx, start_y: sy });
                         }
                     }
+                }
+            }
+            _ => {}
+        }
+
+        // Normal grab redirection for mouse events if active
+        if let Some(grabbed_id) = self.active_grab {
+            if let Event::PointerMove { .. }
+            | Event::MouseButton { .. }
+            | Event::MouseWheel { .. }
+            | Event::DragStart { .. }
+            | Event::DragUpdate { .. }
+            | Event::DragEnd = event
+            {
+                if self.tree.get_ptr(grabbed_id).is_some() {
+                    return self.deliver(grabbed_id, event);
+                }
+            }
+        }
+
+        // For KeyInput, send directly to focused widget if it exists
+        if let Event::KeyInput(_) = event {
+            if let Some(focused) = self.focused_widget {
+                if self.deliver(focused, event) {
+                    return true;
+                }
+            }
+        }
+
+        let mut handled = false;
+        let mut children: Vec<WidgetId> =
+            self.tree.child_ids(root).into_iter().filter(|&c| self.tree.get_ptr(c).is_some()).collect();
+        children.sort_by_key(|&c| self.get_widget(c).map_or(0, |w| w.z_index()));
+
+        // Determine if we should record a drag target candidate
+        let check_drag_target = matches!(
+            event,
+            Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, .. }
+        );
+
+        let localized = |event: &Event, rect: Option<(f32, f32, f32, f32)>| {
+            let (cx, cy, _, _) = rect.unwrap_or_default();
+            let mut local_adjusted = event.clone();
+            match &mut local_adjusted {
+                Event::PointerMove { local_x, local_y, .. }
+                | Event::MouseButton { local_x, local_y, .. }
+                | Event::MouseWheel { local_x, local_y, .. }
+                | Event::DragUpdate { local_x, local_y, .. } => {
+                    *local_x -= cx;
+                    *local_y -= cy;
                 }
                 _ => {}
             }
+            local_adjusted
+        };
 
-            // Normal grab redirection for mouse events if active
-            if let Some(grabbed_id) = self.active_grab {
-                if let Event::PointerMove { .. }
-                | Event::MouseButton { .. }
-                | Event::MouseWheel { .. }
-                | Event::DragStart { .. }
-                | Event::DragUpdate { .. }
-                | Event::DragEnd = event
-                {
-                    if let Some(grabbed_ptr) = self.tree.get_ptr(grabbed_id) {
-                        let handled = (*grabbed_ptr).handle_event(event, self);
-                        if handled {
-                            (*grabbed_ptr).mark_dirty(self);
-                        }
-                        return handled;
-                    }
-                }
-            }
-
-            // For KeyInput, send directly to focused widget if it exists
-            if let Event::KeyInput(_) = event {
-                if let Some(focused) = self.focused_widget.and_then(|id| self.tree.get_ptr(id)) {
-                    if (*focused).handle_event(event, self) {
-                        (*focused).mark_dirty(self);
-                        return true;
-                    }
-                }
-            }
-
-            let mut handled = false;
-            let mut children = self.tree.children_ptrs((*root).base().id());
-            children.sort_by_key(|&child_ptr| (*child_ptr).z_index());
-
-            // Determine if we should record a drag target candidate
-            let mut check_drag_target = false;
-            if let Event::MouseButton { button, state, .. } = event {
-                if *button == MouseButton::Left && *state == ElementState::Pressed {
-                    check_drag_target = true;
-                }
-            }
-
-            match event {
-                Event::PointerMove { .. } | Event::Tick(_) => {
-                    for child in children.into_iter().rev() {
-                        let (cx, cy, _, _) = (*child).rect();
-                        let mut local_adjusted = event.clone();
-                        match &mut local_adjusted {
-                            Event::PointerMove { local_x, local_y, .. }
-                            | Event::MouseButton { local_x, local_y, .. }
-                            | Event::MouseWheel { local_x, local_y, .. }
-                            | Event::DragUpdate { local_x, local_y, .. } => {
-                                *local_x -= cx;
-                                *local_y -= cy;
-                            }
-                            _ => {}
-                        }
-                        if self.propagate_event_impl(&local_adjusted, child) {
-                            handled = true;
-                        }
-                    }
-                    if (*root).handle_event(event, self) {
-                        (*root).mark_dirty(self);
+        match event {
+            Event::PointerMove { .. } | Event::Tick(_) => {
+                for child in children.into_iter().rev() {
+                    let local_adjusted = localized(event, self.rect_of(child));
+                    if self.propagate_event_impl(&local_adjusted, child) {
                         handled = true;
                     }
                 }
-                _ => {
-                    for child in children.into_iter().rev() {
-                        let (cx, cy, _, _) = (*child).rect();
-                        let mut local_adjusted = event.clone();
-                        match &mut local_adjusted {
-                            Event::PointerMove { local_x, local_y, .. }
-                            | Event::MouseButton { local_x, local_y, .. }
-                            | Event::MouseWheel { local_x, local_y, .. }
-                            | Event::DragUpdate { local_x, local_y, .. } => {
-                                *local_x -= cx;
-                                *local_y -= cy;
-                            }
-                            _ => {}
-                        }
-                        if self.propagate_event_impl(&local_adjusted, child) {
-                            if check_drag_target {
-                                self.drag_target = Some((*child).base().id());
-                            }
-                            return true;
-                        }
-                    }
-                    if (*root).handle_event(event, self) {
-                        (*root).mark_dirty(self);
+                if self.deliver(root, event) {
+                    handled = true;
+                }
+            }
+            _ => {
+                for child in children.into_iter().rev() {
+                    let local_adjusted = localized(event, self.rect_of(child));
+                    if self.propagate_event_impl(&local_adjusted, child) {
                         if check_drag_target {
-                            self.drag_target = Some((*root).base().id());
+                            self.drag_target = Some(child);
                         }
                         return true;
                     }
                 }
+                if self.deliver(root, event) {
+                    if check_drag_target {
+                        self.drag_target = Some(root);
+                    }
+                    return true;
+                }
             }
-            handled
         }
+        handled
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -494,14 +551,14 @@ impl UiContext {
         let ids = self.tick_receivers.clone();
         for id in ids {
             if self.is_widget_visible(id) {
-                if let Some(ptr) = self.tree.get_ptr(id) {
-                    unsafe {
-                        if (*ptr).tick(dt, self) {
-                            (*ptr).mark_dirty(self);
-                            changed = true;
-                        }
+                let ticked = self.lend(id, |w, ctx| {
+                    let moved = w.tick(dt, ctx);
+                    if moved {
+                        w.mark_dirty(ctx);
                     }
-                }
+                    moved
+                });
+                changed |= ticked.unwrap_or(false);
             }
         }
         changed
@@ -538,29 +595,20 @@ impl UiContext {
     }
 
     pub fn set_focused_id(&mut self, id: WidgetId) {
-        if let Some(old_id) = self.focused_widget {
-            if old_id != id {
-                if let Some(old_ptr) = self.tree.get_ptr(old_id) {
-                    unsafe {
-                        (*old_ptr).unfocus();
-                        (*old_ptr).handle_event(&Event::FocusOut, self);
-                    }
-                }
-                self.focused_widget = Some(id);
-                if let Some(new_ptr) = self.tree.get_ptr(id) {
-                    unsafe {
-                        (*new_ptr).handle_event(&Event::FocusIn, self);
-                    }
-                }
-            }
-        } else {
-            self.focused_widget = Some(id);
-            if let Some(new_ptr) = self.tree.get_ptr(id) {
-                unsafe {
-                    (*new_ptr).handle_event(&Event::FocusIn, self);
-                }
-            }
+        if self.focused_widget == Some(id) {
+            return;
         }
+        if let Some(old_id) = self.focused_widget {
+            self.lend(old_id, |w, ctx| {
+                w.unfocus();
+                w.handle_event(&Event::FocusOut, ctx);
+            });
+        }
+        self.focused_widget = Some(id);
+        // A widget focusing itself mid-event is out on loan: it is not told (`claim_focus`).
+        self.lend(id, |w, ctx| {
+            w.handle_event(&Event::FocusIn, ctx);
+        });
     }
 
     pub fn is_focused(&self, w: &dyn WidgetHost) -> bool {
@@ -575,26 +623,23 @@ impl UiContext {
     /// for the `undo` / `redo` chords. Returns whether the widget applied it;
     /// a widget that did is marked dirty.
     pub fn focused_context_action(&mut self, action: crate::widget::ContextAction) -> bool {
-        let Some(ptr) = self.focused_widget.and_then(|id| self.tree.get_ptr(id)) else {
-            return false;
-        };
-        unsafe {
-            if (*ptr).context_action(action) {
-                (*ptr).mark_dirty(self);
-                return true;
+        let Some(id) = self.focused_widget else { return false };
+        self.lend(id, |w, ctx| {
+            let applied = w.context_action(action);
+            if applied {
+                w.mark_dirty(ctx);
             }
-        }
-        false
+            applied
+        })
+        .unwrap_or(false)
     }
 
     pub fn clear_focus(&mut self) {
         if let Some(id) = self.focused_widget.take() {
-            if let Some(ptr) = self.tree.get_ptr(id) {
-                unsafe {
-                    (*ptr).unfocus();
-                    (*ptr).handle_event(&Event::FocusOut, self);
-                }
-            }
+            self.lend(id, |w, ctx| {
+                w.unfocus();
+                w.handle_event(&Event::FocusOut, ctx);
+            });
         }
     }
 
@@ -1004,21 +1049,21 @@ impl UiContext {
     /// and closed the menu under the click.
     pub fn close_popovers_missed_by_press_with(&mut self, x: f32, y: f32, offset: impl Fn(WidgetId) -> (f32, f32)) {
         for id in self.popover_owners() {
-            let Some(ptr) = self.tree.get_ptr(id) else { continue };
+            let Some(w) = self.get_widget(id) else { continue };
             let (dx, dy) = offset(id);
             let (x, y) = (x - dx, y - dy);
-            unsafe {
-                if !(*ptr).hit_test(x, y, self) {
-                    let ev = Event::MouseButton {
-                        button: crate::widget::MouseButton::Left,
-                        state: crate::widget::ElementState::Pressed,
-                        x,
-                        y,
-                        local_x: x,
-                        local_y: y,
-                    };
-                    (*ptr).handle_event(&ev, self);
-                }
+            if !w.hit_test(x, y, self) {
+                let ev = Event::MouseButton {
+                    button: crate::widget::MouseButton::Left,
+                    state: crate::widget::ElementState::Pressed,
+                    x,
+                    y,
+                    local_x: x,
+                    local_y: y,
+                };
+                self.lend(id, |w, ctx| {
+                    w.handle_event(&ev, ctx);
+                });
             }
         }
     }
@@ -1048,6 +1093,15 @@ impl UiContext {
 
     /// Register an open popover. Takes `&mut` so the registry can be refreshed with the
     /// pointer we are handed (the occlusion walks resolve the stored id through the tree).
+    /// [`register_popover`](Self::register_popover) for a widget already registered — one
+    /// the context owns, named by its handle's id.
+    pub fn register_popover_id(&mut self, id: WidgetId) {
+        if !self.active_popovers.contains(&id) {
+            self.active_popovers.push(id);
+        }
+        self.invalidate_coverage_cache();
+    }
+
     pub fn register_popover(&mut self, w: &mut (dyn WidgetHost + 'static)) {
         let id = w.base().id();
         // SAFETY: derived from the live borrow we were handed.
@@ -1362,27 +1416,32 @@ impl UiContext {
         false
     }
 
-    fn find_hovered_scrollable(&self, root: *mut (dyn WidgetHost + 'static), cx: f32, cy: f32) -> Option<*mut (dyn WidgetHost + 'static)> {
-        unsafe {
-            if root.is_null() {
-                return None;
-            }
-            if !(*root).visible() {
-                return None;
-            }
-            if !(*root).hit_test(cx, cy, self) {
-                return None;
-            }
-            for child in self.tree.children_ptrs((*root).base().id()).into_iter().rev() {
-                if let Some(scrollable) = self.find_hovered_scrollable(child, cx, cy) {
-                    return Some(scrollable);
-                }
-            }
-            if (*root).is_scrollable() {
-                return Some(root);
+    fn find_hovered_scrollable(&self, root: WidgetId, cx: f32, cy: f32) -> Option<WidgetId> {
+        let w = self.get_widget(root)?;
+        if !w.visible() || !w.hit_test(cx, cy, self) {
+            return None;
+        }
+        for child in self.tree.child_ids(root).into_iter().rev() {
+            if let Some(scrollable) = self.find_hovered_scrollable(child, cx, cy) {
+                return Some(scrollable);
             }
         }
-        None
+        w.is_scrollable().then_some(root)
+    }
+}
+
+/// `ctx[h]`: the widget `h` names. Panics if it was removed or is out on loan — use
+/// [`UiContext::get`] where either can happen.
+impl<W: WidgetHost + 'static> std::ops::Index<Handle<W>> for UiContext {
+    type Output = W;
+    fn index(&self, h: Handle<W>) -> &W {
+        self.get(h).unwrap_or_else(|| panic!("{h:?} is not in the context (removed, or out on loan)"))
+    }
+}
+
+impl<W: WidgetHost + 'static> std::ops::IndexMut<Handle<W>> for UiContext {
+    fn index_mut(&mut self, h: Handle<W>) -> &mut W {
+        self.get_mut(h).unwrap_or_else(|| panic!("{h:?} is not in the context (removed, or out on loan)"))
     }
 }
 

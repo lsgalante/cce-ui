@@ -19,11 +19,14 @@
 //!    owns and lays out; [`Dialog`] is the plate under them, and opening it traps the Tab
 //!    walk among them and covers the window behind (`UiContext::open_modal`). Closed, its
 //!    members are hidden, so they are neither Tab stops nor in the accessibility tree.
-//! 5. **No embedded bases.** Widgets are app-owned values (all [`Adapted`]); the window
-//!    plate is prims, not a root plate container; popovers draw INTO the frame (there is no popup
-//!    surface); app state — not any widget tree — is the source of truth.
+//! 5. **The context owns the widgets.** The app holds a [`Handle`] to each (all [`Adapted`])
+//!    and reaches it through the context — `ui[h]`, `ui.get_mut(h)`, `ui.lend_h(h, ..)` when the
+//!    widget and the context are both needed — so the compiler keeps the app's access and the
+//!    context's own from overlapping (`docs/rfc-owning-registry.md`). The window plate is prims,
+//!    not a root plate container; popovers draw INTO the frame (there is no popup surface); app
+//!    state — not any widget tree — is the source of truth.
 
-use cce_ui::widget::Owned;
+use cce_ui::context::UiContext;
 use cce_ui::engine::{Application, AppSender, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::arena::Arena;
 use cce_ui::scene::layout::{
@@ -31,8 +34,8 @@ use cce_ui::scene::layout::{
 };
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
 use cce_ui::widget::{
-    Adapted, Button, Dialog, Dropdown, ImageView, RadioGroup, WidgetHost, WidgetId, ElementState, Event,
-    KeyEvent, MouseButton, MouseScrollDelta, NamedKey, Slider, TextBox, Toggle,
+    Adapted, Button, Dialog, Dropdown, ElementState, Event, Handle, ImageView, KeyEvent, MouseButton,
+    MouseScrollDelta, NamedKey, RadioGroup, Slider, TextBox, Toggle, WidgetHost, WidgetId,
 };
 
 #[derive(Debug, Clone)]
@@ -57,24 +60,22 @@ fn text_leaf_height(font_size: f32) -> f32 {
 }
 
 pub(crate) struct DemoApp {
-    // ── Widgets: app-owned values on the narrow-trait adapter. Their addresses must be
-    // stable across frames (plain struct fields, not Vec elements): the UiContext
-    // registry and the router's drag-target bookkeeping hold pointers to them.
-    button: Owned<Adapted<Button>>,
-    toggle: Owned<Adapted<Toggle>>,
-    slider: Owned<Adapted<Slider>>,
-    name_box: Owned<Adapted<TextBox>>,
-    theme_dropdown: Owned<Adapted<Dropdown>>,
+    // ── Widgets: owned by `ui_context`, named here by handle (narrow-trait adapters).
+    button: Handle<Adapted<Button>>,
+    toggle: Handle<Adapted<Toggle>>,
+    slider: Handle<Adapted<Slider>>,
+    name_box: Handle<Adapted<TextBox>>,
+    theme_dropdown: Handle<Adapted<Dropdown>>,
     // ImageView pair sharing ONE uploaded texture (the widget borrows ids —
     // upload/free stay app-side): Contain letterboxes, Stretch fills.
-    image_contain: Owned<Adapted<ImageView>>,
-    image_stretch: Owned<Adapted<ImageView>>,
+    image_contain: Handle<Adapted<ImageView>>,
+    image_stretch: Handle<Adapted<ImageView>>,
     // The Options dialog: a button that opens it, the plate, and what stands on it.
-    options_button: Owned<Adapted<Button>>,
-    dialog: Owned<Adapted<Dialog>>,
-    text_size: Owned<Adapted<RadioGroup>>,
-    dialog_cancel: Owned<Adapted<Button>>,
-    dialog_ok: Owned<Adapted<Button>>,
+    options_button: Handle<Adapted<Button>>,
+    dialog: Handle<Adapted<Dialog>>,
+    text_size: Handle<Adapted<RadioGroup>>,
+    dialog_cancel: Handle<Adapted<Button>>,
+    dialog_ok: Handle<Adapted<Button>>,
 
     // ── App state: the source of truth. Widgets are re-asserted from it every rebuild
     // (`set_toggled` below); `take_*` changes flow back into it, never the reverse.
@@ -84,12 +85,13 @@ pub(crate) struct DemoApp {
     /// The text size chosen in the Options dialog (an index into `TEXT_SIZES`).
     text_size_choice: usize,
 
-    ui_context: cce_ui::context::UiContext,
+    ui_context: UiContext,
     width: u32,
     height: u32,
     scale_factor: f64,
     needs_rebuild: bool,
-    widgets_registered: bool,
+    /// The dialog's members are laid out once, on the first frame.
+    laid_out: bool,
     /// Set while `open_dialog` lays the members out before the dialog is open.
     dialog_pending: bool,
     title_rect: Rect,
@@ -98,8 +100,6 @@ pub(crate) struct DemoApp {
 
 impl DemoApp {
     /// The widget root ids, in paint order — what the router dispatches over.
-    /// `propagate_event` takes a `WidgetId` and resolves it through the registry, so the
-    /// event paths need no raw pointers and no unsafe self-alias.
     fn root_ids(&self) -> [WidgetId; 12] {
         // While the dialog is open the rest are still dispatched to: the context answers
         // every one of them "covered", so none takes a press or a hover.
@@ -126,114 +126,103 @@ impl DemoApp {
 
     /// Lay the dialog's members out in the middle of the window, shown while it is open.
     fn layout_dialog(&mut self) {
-        let open = self.dialog.inner().is_open() || self.dialog_pending;
-        for w in [&mut *self.text_size as &mut dyn WidgetHost, &mut *self.dialog_cancel, &mut *self.dialog_ok] {
-            w.set_visible(open);
+        let ui = &mut self.ui_context;
+        let open = ui[self.dialog].inner().is_open() || self.dialog_pending;
+        for id in [self.text_size.id(), self.dialog_cancel.id(), self.dialog_ok.id()] {
+            if let Some(w) = ui.get_widget_mut(id) {
+                w.set_visible(open);
+            }
         }
         if !open {
             return;
         }
         let gap = cce_ui::layout::control_gap();
-        let group_h = self.text_size.intrinsic_size().map_or(0.0, |s| s.height);
+        let group_h = ui[self.text_size].intrinsic_size().map_or(0.0, |s| s.height);
         let (button_w, button_h) = (DIALOG_BUTTON_W, 28.0);
         let content_w = 2.0 * button_w + gap;
         let content_h = group_h + gap * 2.0 + button_h;
-        let (pad, top) = (self.dialog.inner().padding(), self.dialog.inner().headroom());
+        let (pad, top) = (ui[self.dialog].inner().padding(), ui[self.dialog].inner().headroom());
         let x = (self.width as f32 - content_w) * 0.5;
         let y = (self.height as f32 - (top + content_h + pad)) * 0.5 + top;
-        self.text_size.set_rect(x, y, content_w, group_h);
+        ui[self.text_size].set_rect(x, y, content_w, group_h);
         let by = y + group_h + gap * 2.0;
-        self.dialog_cancel.set_rect(x, by, button_w, button_h);
-        self.dialog_ok.set_rect(x + button_w + gap, by, button_w, button_h);
+        ui[self.dialog_cancel].set_rect(x, by, button_w, button_h);
+        ui[self.dialog_ok].set_rect(x + button_w + gap, by, button_w, button_h);
         let window = Rect { x: 0.0, y: 0.0, width: self.width as f32, height: self.height as f32 };
-        self.dialog.set_backdrop(Some(window));
-        self.dialog.fit(&self.ui_context);
+        ui[self.dialog].set_backdrop(Some(window));
+        // The dialog fits itself around its members, which it reads through the context:
+        // lent for the call, so it and the context are both in hand.
+        ui.lend_h(self.dialog, |d, ui| d.fit(ui));
     }
 
     /// Open the Options dialog on the size the app holds.
     fn open_dialog(&mut self) {
-        self.text_size.inner_mut().set_selected(self.text_size_choice);
+        self.ui_context[self.text_size].inner_mut().set_selected(self.text_size_choice);
         self.dialog_pending = true;
         self.layout_dialog();
         self.dialog_pending = false;
         let members = self.dialog_members();
-        self.dialog.open(&mut self.ui_context, members);
+        self.ui_context.lend_h(self.dialog, |d, ui| d.open(ui, members));
         self.needs_rebuild = true;
     }
 
     /// Close it: `keep` takes the choice into the app, else it is dropped.
     fn close_dialog(&mut self, keep: bool) {
         if keep {
-            self.text_size_choice = self.text_size.inner().selected();
+            self.text_size_choice = self.ui_context[self.text_size].inner().selected();
             self.status = format!("Text size: {}", TEXT_SIZES[self.text_size_choice]);
         }
-        self.dialog.close(&mut self.ui_context);
+        self.ui_context.lend_h(self.dialog, |d, ui| d.close(ui));
         self.layout_dialog();
         self.needs_rebuild = true;
-    }
-
-    /// The widget roots as pointers, for the one genuinely pointer-consuming path left:
-    /// registration (the registry stores them). The paint walk takes shared borrows.
-    /// Register every dispatch root by reference: the registry keeps a pointer to each
-    /// and resolves it only while the widget lives, so register once `self` is at its
-    /// final address (see `display_list`).
-    fn register_roots(&mut self) {
-        let ctx = &mut self.ui_context;
-        ctx.register_host(&mut self.button);
-        ctx.register_host(&mut self.toggle);
-        ctx.register_host(&mut self.slider);
-        ctx.register_host(&mut self.name_box);
-        ctx.register_host(&mut self.theme_dropdown);
-        ctx.register_host(&mut self.image_contain);
-        ctx.register_host(&mut self.image_stretch);
-        ctx.register_host(&mut self.options_button);
-        ctx.register_host(&mut self.dialog);
-        ctx.register_host(&mut self.text_size);
-        ctx.register_host(&mut self.dialog_cancel);
-        ctx.register_host(&mut self.dialog_ok);
-        self.layout_dialog();
     }
 
     /// `take_*` plumbing: translate widget changes into app state. Runs after any routed
     /// dispatch; every check is STATE-gated, so it does not matter which propagate call
     /// consumed the event (see the KeyInput note in `handle_key_input`).
     fn drain_widget_changes(&mut self) {
-        if self.options_button.take_click() {
-            self.open_dialog();
-        }
-        if self.dialog_ok.take_click() {
-            self.close_dialog(true);
-        }
-        if self.dialog_cancel.take_click() {
-            self.close_dialog(false);
-        }
-        if self.text_size.take_change() {
+        let ui = &mut self.ui_context;
+        let (options, ok, cancel) = (
+            ui[self.options_button].take_click(),
+            ui[self.dialog_ok].take_click(),
+            ui[self.dialog_cancel].take_click(),
+        );
+        if ui[self.text_size].take_change() {
             self.needs_rebuild = true;
         }
-        if self.button.take_click() {
+        if ui[self.button].take_click() {
             self.clicks += 1;
             self.status = format!("Button clicked {} time(s)", self.clicks);
             self.needs_rebuild = true;
         }
-        if self.toggle.take_change() {
+        if ui[self.toggle].take_change() {
             self.toggle_on = !self.toggle_on;
             self.status = format!("Toggle: {}", if self.toggle_on { "on" } else { "off" });
             self.needs_rebuild = true;
         }
-        if self.slider.take_change() {
-            self.status = format!("Slider: {:.0}", self.slider.get_scaled_value());
+        if ui[self.slider].take_change() {
+            self.status = format!("Slider: {:.0}", ui[self.slider].get_scaled_value());
             self.needs_rebuild = true;
         }
-        if self.theme_dropdown.take_change() {
-            let idx = self.theme_dropdown.selected;
-            if let Some(opt) = self.theme_dropdown.options.get(idx) {
+        if ui[self.theme_dropdown].take_change() {
+            let dropdown = &ui[self.theme_dropdown];
+            if let Some(opt) = dropdown.options.get(dropdown.selected) {
                 self.status = format!("Theme: {opt}");
             }
             self.needs_rebuild = true;
         }
-        if self.name_box.take_change() {
-            self.status = format!("Name: {}", self.name_box.text);
+        if ui[self.name_box].take_change() {
+            self.status = format!("Name: {}", ui[self.name_box].text);
             self.needs_rebuild = true;
+        }
+        if options {
+            self.open_dialog();
+        }
+        if ok {
+            self.close_dialog(true);
+        }
+        if cancel {
+            self.close_dialog(false);
         }
     }
 }
@@ -259,46 +248,41 @@ impl Application for DemoApp {
             }
         }
         let gradient_id = cce_ui::draw::upload_rgba(gradient, GRADIENT_W, GRADIENT_H);
+        // The context owns every widget; the app keeps the handles.
+        let mut ui = UiContext::new();
         Self {
             // Relief styling (raised buttons/toggles/dropdowns, recessed
             // wells) is the `control_relief` config default — no opt-in.
-            button: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Click me")),
-            toggle: Owned::new(Toggle::new()),
+            button: ui.insert(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Click me")),
+            toggle: ui.insert(Toggle::new()),
             // Slider `value` is NORMALIZED 0..1; `with_range` only scales the readout
             // (`get_scaled_value`). Wheel nudging is an explicit opt-in.
-            slider: Owned::new(Slider::new()
-                .with_range(0.0, 100.0)
-                .with_value(0.4)
-                .with_scroll(true)),
-            name_box: Owned::new(TextBox::new(String::new())
-                .with_placeholder("Type a name...")),
-            theme_dropdown: Owned::new(Dropdown::new(
-                vec!["Forest".into(), "Ocean".into(), "Ember".into()],
-                0,
-            )),
-            image_contain: Owned::new(ImageView::new()
-                .with_image(gradient_id, GRADIENT_W, GRADIENT_H)
-                .with_fit(FitMode::Contain { max_upscale: 4.0 })
-                .with_bg([0.10, 0.10, 0.16, 1.0])),
-            image_stretch: Owned::new(ImageView::new()
-                .with_image(gradient_id, GRADIENT_W, GRADIENT_H)
-                .with_fit(FitMode::Stretch)),
-            options_button: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Options…")),
-            dialog: Owned::new(Dialog::new().with_label("Text size")),
-            text_size: Owned::new(RadioGroup::new(TEXT_SIZES).with_selected(1)),
-            dialog_cancel: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel")),
-            dialog_ok: Owned::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label("OK")),
+            slider: ui.insert(Slider::new().with_range(0.0, 100.0).with_value(0.4).with_scroll(true)),
+            name_box: ui.insert(TextBox::new(String::new()).with_placeholder("Type a name...")),
+            theme_dropdown: ui.insert(Dropdown::new(vec!["Forest".into(), "Ocean".into(), "Ember".into()], 0)),
+            image_contain: ui.insert(
+                ImageView::new()
+                    .with_image(gradient_id, GRADIENT_W, GRADIENT_H)
+                    .with_fit(FitMode::Contain { max_upscale: 4.0 })
+                    .with_bg([0.10, 0.10, 0.16, 1.0]),
+            ),
+            image_stretch: ui.insert(ImageView::new().with_image(gradient_id, GRADIENT_W, GRADIENT_H).with_fit(FitMode::Stretch)),
+            options_button: ui.insert(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Options…")),
+            dialog: ui.insert(Dialog::new().with_label("Text size")),
+            text_size: ui.insert(RadioGroup::new(TEXT_SIZES).with_selected(1)),
+            dialog_cancel: ui.insert(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel")),
+            dialog_ok: ui.insert(Button::new(0.0, 0.0, 0.0, 0.0).with_label("OK")),
             text_size_choice: 1,
             dialog_pending: false,
             toggle_on: false,
             clicks: 0,
             status: "Ready.".to_string(),
-            ui_context: cce_ui::context::UiContext::new(),
+            ui_context: ui,
             width: 560,
             height: 420,
             scale_factor: 1.0,
             needs_rebuild: true,
-            widgets_registered: false,
+            laid_out: false,
             title_rect: Rect::ZERO,
             status_rect: Rect::ZERO,
         }
@@ -332,12 +316,9 @@ impl Application for DemoApp {
     }
 
     fn display_list(&mut self, size: LogicalSize, scale: f64) -> Option<DisplayList> {
-        // Register once: the registry backs the router (drag targets are looked up by
-        // widget id) and drag_allowed_at. Pointers into `self` are stable only once
-        // `self` sits at its final address — hence here, not in `new()`.
-        if !self.widgets_registered {
-            self.widgets_registered = true;
-            self.register_roots();
+        if !self.laid_out {
+            self.laid_out = true;
+            self.layout_dialog();
         }
 
         let size_changed = self.width != size.width as u32
@@ -350,8 +331,9 @@ impl Application for DemoApp {
             cce_ui::scale::set_scale_factor(scale as f32);
 
             // Re-assert widget visuals from app state (the app is the source of truth).
-            self.toggle.set_toggled(self.toggle_on);
-            self.toggle.set_label(if self.toggle_on { "ON" } else { "OFF" });
+            let ui = &mut self.ui_context;
+            ui[self.toggle].set_toggled(self.toggle_on);
+            ui[self.toggle].set_label(if self.toggle_on { "ON" } else { "OFF" });
 
             // ── Layout: a plain LayoutBox tree, solved in one call. Leaves carry their
             // intrinsic sizes; `grow` distributes leftover space; the solved rects are
@@ -420,22 +402,21 @@ impl Application for DemoApp {
 
             // Stretched children fill the column width; fixed leaves keep their size.
             let r = |id| arena.value(id).unwrap().rect;
-            let b = r(button);
-            self.button.set_rect(b.x, b.y, b.width, b.height);
-            let t = r(toggle);
-            self.toggle.set_rect(t.x, t.y, t.width, t.height);
-            let d = r(dropdown);
-            self.theme_dropdown.set_rect(d.x, d.y, d.width, d.height);
-            let o = r(options);
-            self.options_button.set_rect(o.x, o.y, o.width, o.height);
-            let s = r(slider);
-            self.slider.set_rect(s.x, s.y, s.width, s.height);
-            let n = r(name_box);
-            self.name_box.set_rect(n.x, n.y, n.width, n.height);
-            let ic = r(image_contain);
-            self.image_contain.set_rect(ic.x, ic.y, ic.width, ic.height);
-            let is = r(image_stretch);
-            self.image_stretch.set_rect(is.x, is.y, is.width, is.height);
+            let placed: [(WidgetId, Rect); 8] = [
+                (self.button.id(), r(button)),
+                (self.toggle.id(), r(toggle)),
+                (self.theme_dropdown.id(), r(dropdown)),
+                (self.options_button.id(), r(options)),
+                (self.slider.id(), r(slider)),
+                (self.name_box.id(), r(name_box)),
+                (self.image_contain.id(), r(image_contain)),
+                (self.image_stretch.id(), r(image_stretch)),
+            ];
+            for (id, b) in placed {
+                if let Some(w) = self.ui_context.get_widget_mut(id) {
+                    w.set_rect(b.x, b.y, b.width, b.height);
+                }
+            }
             self.title_rect = r(title);
             self.status_rect = r(status);
             self.layout_dialog();
@@ -448,8 +429,8 @@ impl Application for DemoApp {
         // text occlusion clamp (labels under the open popover get clipped); the popover
         // itself is drawn into this frame below — there is no popup surface.
         self.ui_context.clear_popovers();
-        if self.theme_dropdown.popover_rect().is_some() {
-            self.ui_context.register_popover(&mut self.theme_dropdown);
+        if self.ui_context[self.theme_dropdown].popover_rect().is_some() {
+            self.ui_context.register_popover_id(self.theme_dropdown.id());
         }
 
         let mut pc = PaintCtx::new();
@@ -518,28 +499,36 @@ impl Application for DemoApp {
         // Widgets: each root walked through the single paint pass. The walk recurses,
         // clips, and emits each widget's own geometry AND text (`Adapted::paint_self`
         // serves per-widget fonts and bounds).
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.button, &mut pc);
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.toggle, &mut pc);
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.slider, &mut pc);
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.name_box, &mut pc);
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.image_contain, &mut pc);
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.image_stretch, &mut pc);
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.theme_dropdown, &mut pc);
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.options_button, &mut pc);
+        let ui = &self.ui_context;
+        let roots = [
+            self.button.id(),
+            self.toggle.id(),
+            self.slider.id(),
+            self.name_box.id(),
+            self.image_contain.id(),
+            self.image_stretch.id(),
+            self.theme_dropdown.id(),
+            self.options_button.id(),
+        ];
+        for id in roots {
+            if let Some(w) = ui.get_widget(id) {
+                cce_ui::scene::painter::paint_root_into(ui, w, &mut pc);
+            }
+        }
 
         // The dropdown popover — geometry and labels last, on top of everything, exactly
         // where it hit-tests. Labels carry bounds equal to the popover rect: that clips
         // them to the plate AND exempts them from the occlusion clamp (text whose bounds
         // equal an overlay rect is treated as the overlay's own).
-        if self.theme_dropdown.popover_rect().is_some() {
+        if ui[self.theme_dropdown].popover_rect().is_some() {
             // PaintCtx is a RenderTarget: the popover draws its real prims (the
             // dropdown's expanded inset-plate surface) with its own bounds.
-            self.theme_dropdown.render_popover(&mut pc);
+            ui[self.theme_dropdown].render_popover(&mut pc);
         }
 
         // The dialog over everything: its backdrop, its plate, and its members on the plate
         // (it paints them; they are never painted on their own).
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.dialog, &mut pc);
+        cce_ui::scene::painter::paint_root_into(ui, &ui[self.dialog], &mut pc);
 
         Some(pc.finish())
     }
@@ -651,7 +640,7 @@ impl Application for DemoApp {
         }
 
         // Escape cancels the open dialog, as its Cancel does.
-        if self.dialog.inner().is_open()
+        if self.ui_context[self.dialog].inner().is_open()
             && event.state == ElementState::Pressed
             && event.logical_key == cce_ui::widget::Key::Named(NamedKey::Escape)
         {

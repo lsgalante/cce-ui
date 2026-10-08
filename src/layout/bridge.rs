@@ -172,6 +172,20 @@ impl RenderTarget for PopoverCollector {
 }
 
 
+/// [`render_widget`] for a widget the context owns, named by its handle: lent for the call.
+/// Draws nothing if the widget is gone or already out on loan.
+pub fn render_widget_h<T: WidgetHost + 'static>(
+    pc: &mut dyn RenderTarget,
+    h: crate::widget::Handle<T>,
+    x: f32,
+    y: f32,
+    ww: f32,
+    wh: f32,
+    ctx: &mut UiContext,
+) {
+    ctx.lend_h(h, |w, ctx| render_widget(pc, w, x, y, ww, wh, ctx));
+}
+
 pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
     ctx.register_host(w);
     // The flat-host contract, the same block `set_rect` takes: `(x, y)` is the top of

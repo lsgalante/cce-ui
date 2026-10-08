@@ -1811,6 +1811,19 @@ reaches `x`, and a `UiContext` call handed the widget uses what it was handed. T
 that makes even that the compiler's job is a registry that owns its widgets and lends them out
 by handle; it would touch every widget access in every app.
 
+**The registry can own its widgets** (since 2026-10-08, `docs/rfc-owning-registry.md`, the
+end state the rule above points at). `ctx.insert(w)` moves a widget into the context and
+returns a `Handle<W>` (`Copy`, typed); the app reaches it through the context —
+`ctx[h]`, `ctx.get(h)` / `get_mut(h)`, `ctx.lend_h(h, |w, ctx| ..)` when it needs the
+widget and the context together (`Dialog::open`, `fit`) — so the borrow checker refuses an
+app access that overlaps a context call. `ctx.remove(h)` gives it back by value; dropping
+the context drops the rest; `clear_hierarchy` keeps them. And every call the context makes
+into a widget that hands it the context goes through `lend`, which takes the widget out of
+reach for the call: a widget reaching itself through the context mid-event gets `None`,
+for owned and pointer entries alike. The demo app is on handles; the other apps move one at
+a time, then `Owned` and the pointer API go (the RFC's phases). New code uses handles:
+`render_widget_h`, `Form::widget_h`, `register_popover_id`, `paint_root_into(ctx, &ctx[h], pc)`.
+
 `a_dropped_widget_is_never_handed_out`, `a_clone_has_a_liveness_of_its_own`,
 `an_owned_widget_survives_its_vec_reallocating`,
 `swapping_the_widget_out_of_its_box_never_leaves_a_dangling_entry`,

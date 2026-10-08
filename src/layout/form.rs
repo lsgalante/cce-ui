@@ -128,6 +128,24 @@ impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
         self
     }
 
+    /// [`widget`](Self::widget) for a widget the context owns, named by its handle: its height
+    /// read from `ctx` now, and the widget lent for its placement and paint. A handle that no
+    /// longer names a widget takes `fallback` and draws nothing.
+    pub fn widget_h<T: WidgetHost + 'static>(&mut self, ctx: &UiContext, h: crate::widget::Handle<T>, fallback: f32) -> &mut Self {
+        let h_px = ctx.get(h).map_or(fallback, |w| w.preferred_height().unwrap_or(fallback) + w.label_strip());
+        let style = self.leaf_style(self.axis_row);
+        let span = self.row_span();
+        let draw: Draw<'w, P> = Box::new(move |pc, r, ctx| {
+            ctx.lend_h(h, |w, ctx| {
+                let (x, width) = span.unwrap_or((r.x, r.width));
+                w.set_row_rect(x, width);
+                render_widget(pc, w, r.x, r.y, r.width, r.height, ctx);
+            });
+        });
+        self.form.add(self.node, style, Size::new(0.0, h_px), Some(draw));
+        self
+    }
+
     /// A retained widget at a width of its own (a toggle that is not as wide as its row), not
     /// growing. Its height is as for [`widget`](Self::widget).
     pub fn widget_w<T: WidgetHost + 'static>(&mut self, w: &'w mut T, width: f32, fallback: f32) -> &mut Self {

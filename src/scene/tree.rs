@@ -46,21 +46,46 @@ use crate::widget::{WidgetHost, WidgetId};
 /// `layout_tree` link can precede the `widget_registry` entry. (`*mut dyn WidgetHost` is a fat
 /// pointer, so `Option` is the natural "absent" representation — there is no thin null to use as
 /// a sentinel.) `alive` is `None` exactly when there is no non-null pointer to watch.
-#[derive(Clone)]
 struct Entry {
     id: WidgetId,
     ptr: Option<*mut (dyn WidgetHost + 'static)>,
     alive: Option<Weak<()>>,
-    /// The pointer is an `Owned` box's raw root (`WidgetHost::stable_target`), which every
-    /// later access to the widget — the app's and the registry's — derives from.
+    /// The pointer is an `Owned` box's raw root (`WidgetHost::stable_target`) or the tree's
+    /// own slot's, which every later access to the widget — the app's and the registry's —
+    /// derives from.
     stable: bool,
+    /// The widget, when the TREE owns it (`UiContext::insert`): `ptr` is this slot's root.
+    owned: Option<OwnedSlot>,
+    /// Out on loan (`UiContext::lend`): while set, nothing in the tree resolves the widget,
+    /// so a re-entrant reach for it is a miss rather than a second `&mut`.
+    lent: bool,
+}
+
+/// A widget the tree owns: its allocation (held as the raw root `Entry::ptr` names, never a
+/// `Box` across accesses, for the reason `widget::Owned` gives), its type for typed access,
+/// and the liveness token `Entry::alive` watches. Dropping the slot drops the widget.
+struct OwnedSlot {
+    root: std::ptr::NonNull<dyn WidgetHost>,
+    type_id: std::any::TypeId,
+    _live: crate::widget::core::Liveness,
+}
+
+impl Drop for OwnedSlot {
+    fn drop(&mut self) {
+        // SAFETY: `root` was made by `Box::into_raw` in `insert_owned` and is freed only here,
+        // once; the entry naming it is going away with the slot.
+        unsafe { drop(Box::from_raw(self.root.as_ptr())) };
+    }
 }
 
 /// Resolve an entry's pointer to a usable one: non-null (skipping link-only and null-data
-/// pointers exactly as the legacy `filter_map` over the registry did) and naming a widget that
-/// has not been dropped since it was registered.
+/// pointers exactly as the legacy `filter_map` over the registry did), naming a widget that
+/// has not been dropped since it was registered, and not out on loan.
 #[inline]
 fn live_ptr(entry: &Entry) -> Option<*mut (dyn WidgetHost + 'static)> {
+    if entry.lent {
+        return None;
+    }
     match (entry.ptr, &entry.alive) {
         (Some(p), Some(alive)) if !p.is_null() && alive.strong_count() > 0 => Some(p),
         _ => None,
@@ -102,7 +127,7 @@ impl WidgetTree {
                 return node;
             }
         }
-        let node = self.arena.insert(Entry { id, ptr: None, alive: None, stable: false });
+        let node = self.arena.insert(Entry { id, ptr: None, alive: None, stable: false, owned: None, lent: false });
         self.by_id.insert(id, node);
         node
     }
@@ -126,6 +151,10 @@ impl WidgetTree {
         // out of its box is at another address and registers as usual.
         if let Some(node) = self.by_id.get(&id).copied() {
             if let Some(e) = self.arena.value(node) {
+                // The tree's own widget is registered once, by `insert_owned`, and stays its.
+                if e.owned.is_some() {
+                    return;
+                }
                 let same = e.ptr.is_some_and(|p| std::ptr::addr_eq(p, ptr));
                 if e.stable && same && e.alive.as_ref().is_some_and(|w| w.strong_count() > 0) {
                     return;
@@ -197,10 +226,95 @@ impl WidgetTree {
         }
     }
 
-    /// Drop the entire tree. Mirrors `clear_hierarchy`'s reset of both maps.
+    /// Drop the entire tree. Mirrors `clear_hierarchy`'s reset of both maps — except the
+    /// widgets the tree OWNS, which stay registered (unlinked, as roots): an app that rebuilds
+    /// its links every frame does not hand its widgets back by doing so.
     pub fn clear_all(&mut self) {
-        self.arena.clear();
-        self.by_id.clear();
+        let nodes: Vec<NodeId> = self.by_id.values().copied().collect();
+        for &node in &nodes {
+            if self.arena.contains(node) {
+                self.arena.detach(node);
+            }
+        }
+        for node in nodes {
+            let keep = self.arena.value(node).is_some_and(|e| e.owned.is_some());
+            if !keep && self.arena.contains(node) {
+                let id = self.arena.value(node).map(|e| e.id);
+                self.arena.remove_subtree(node);
+                if let Some(id) = id {
+                    self.by_id.remove(&id);
+                }
+            }
+        }
+        self.by_id.retain(|_, n| self.arena.contains(*n));
+    }
+
+    /// Take ownership of `widget`: it moves into an allocation the tree keeps, registered under
+    /// its own id, and is dropped when its node is removed or the tree is. Returns the id.
+    pub fn insert_owned<W: WidgetHost + 'static>(&mut self, widget: W) -> WidgetId {
+        let id = widget.base().id();
+        let live = crate::widget::core::Liveness::new();
+        let alive = live.watch();
+        let raw: *mut (dyn WidgetHost + 'static) = Box::into_raw(Box::new(widget));
+        // SAFETY: `Box::into_raw` never returns null.
+        let root = unsafe { std::ptr::NonNull::new_unchecked(raw) };
+        let node = self.ensure_node(id);
+        let entry = self.arena.value_mut(node).unwrap();
+        entry.ptr = Some(raw);
+        entry.alive = Some(alive);
+        entry.stable = true;
+        entry.lent = false;
+        entry.owned = Some(OwnedSlot { root, type_id: std::any::TypeId::of::<W>(), _live: live });
+        id
+    }
+
+    /// The tree's own widget `id` as a `W`: its root, when the tree owns it, it is a `W`, and
+    /// it is not out on loan.
+    pub fn owned_root<W: WidgetHost + 'static>(&self, id: WidgetId) -> Option<std::ptr::NonNull<W>> {
+        let entry = self.arena.value(*self.by_id.get(&id)?)?;
+        let slot = entry.owned.as_ref()?;
+        if entry.lent || slot.type_id != std::any::TypeId::of::<W>() {
+            return None;
+        }
+        Some(slot.root.cast::<W>())
+    }
+
+    /// Give the tree's own widget `id` back by value, unregistering it (its links go too).
+    pub fn take_owned<W: WidgetHost + 'static>(&mut self, id: WidgetId) -> Option<W> {
+        let node = *self.by_id.get(&id)?;
+        let entry = self.arena.value_mut(node)?;
+        if entry.lent || entry.owned.as_ref()?.type_id != std::any::TypeId::of::<W>() {
+            return None;
+        }
+        let slot = std::mem::ManuallyDrop::new(entry.owned.take()?);
+        entry.ptr = None;
+        entry.alive = None;
+        entry.stable = false;
+        // SAFETY: the slot's root was made by `Box::into_raw` of a `W` (its type id says so);
+        // the slot is forgotten (ManuallyDrop) so it is freed only here, by the `Box` the
+        // widget is moved out of.
+        let widget = unsafe { *Box::from_raw(slot.root.cast::<W>().as_ptr()) };
+        // The token goes now: nothing resolves the old allocation again.
+        drop(unsafe { std::ptr::read(&slot._live) });
+        self.remove(id);
+        Some(widget)
+    }
+
+    /// Whether `id` is the tree's own widget.
+    pub fn is_owned(&self, id: WidgetId) -> bool {
+        self.by_id.get(&id).and_then(|&n| self.arena.value(n)).is_some_and(|e| e.owned.is_some())
+    }
+
+    /// Mark `id` lent (or back). Returns whether it was free to lend: false for an unknown id,
+    /// an unresolvable one, or one already out.
+    pub fn set_lent(&mut self, id: WidgetId, lent: bool) -> bool {
+        let Some(&node) = self.by_id.get(&id) else { return false };
+        let Some(entry) = self.arena.value_mut(node) else { return false };
+        if lent && (entry.lent || entry.ptr.is_none()) {
+            return false;
+        }
+        entry.lent = lent;
+        true
     }
 
     /// Remove `id` and its whole subtree, freeing arena slots and dropping their `by_id` entries.

@@ -746,6 +746,7 @@ pub mod doc_editor;
 pub mod line_edit;
 pub mod model;
 pub mod owned;
+pub mod handle;
 pub mod scroll_region;
 pub mod scroll_motion;
 pub mod side_swipe;
@@ -758,6 +759,7 @@ pub use self::side_swipe::{SideSwipe, SwipeDir};
 pub use self::scroll_motion::{Bounds, ScrollAxis, ScrollMotion, ScrollPhase, ScrollSettings, LINE_PX};
 pub use self::model::{Adapted, EventCtx, Input, Layout, Paint};
 pub use self::owned::Owned;
+pub use self::handle::Handle;
 pub use self::core::{Widget, focus, hover_animation, clipboard, context_menu, clear_widget_references};
 pub use self::core::focus::link_parent_child;
 pub use self::input::{
