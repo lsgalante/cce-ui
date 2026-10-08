@@ -83,6 +83,8 @@ fn buffer_tick() -> u64 {
 /// `pub static`s at the crate root (`IS_VERTICAL`, `BAR_THICKNESS`) until 2026-10-07.
 pub fn set_vertical_text(bar_thickness: Option<u32>) {
     use std::sync::atomic::Ordering::Relaxed;
+    // The window's own (`crate::window_state::Props`), and the process's for a worker.
+    crate::window_state::entered(|w| w.props.borrow_mut().vertical_text = bar_thickness);
     if let Some(t) = bar_thickness {
         VERTICAL_BAR_THICKNESS.store(t, Relaxed);
     }
@@ -91,6 +93,11 @@ pub fn set_vertical_text(bar_thickness: Option<u32>) {
 
 /// The vertical bar's thickness while vertical text is on (see [`set_vertical_text`]).
 pub fn vertical_text() -> Option<u32> {
+    crate::window_state::entered(|w| w.props.borrow().vertical_text).unwrap_or_else(process_vertical_text)
+}
+
+/// The process-wide vertical text: the last any window set (what a worker thread reads).
+pub(crate) fn process_vertical_text() -> Option<u32> {
     use std::sync::atomic::Ordering::Relaxed;
     VERTICAL_TEXT.load(Relaxed).then(|| VERTICAL_BAR_THICKNESS.load(Relaxed))
 }

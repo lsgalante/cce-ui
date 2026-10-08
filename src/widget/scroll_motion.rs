@@ -40,7 +40,7 @@
 //! }
 //! ```
 
-use std::sync::atomic::{AtomicU8, Ordering};
+
 use web_time::Instant;
 
 use crate::widget::MouseScrollDelta;
@@ -58,11 +58,12 @@ pub enum ScrollPhase {
     FingerEnd,
 }
 
-static PHASE: AtomicU8 = AtomicU8::new(0);
-
-/// Publish the phase of the wheel event about to be dispatched. Runner-side.
+/// Publish the phase of the wheel event about to be dispatched, for the window being run
+/// (`crate::window_state`; a thread's own with none entered). Runner-side. It was one
+/// process-wide atomic until 2026-10-08, which a test setting it changed for every test
+/// running beside it.
 pub fn set_scroll_phase(phase: ScrollPhase) {
-    PHASE.store(phase as u8, Ordering::Relaxed);
+    crate::window_state::with(|w| w.scroll_phase.set(phase));
 }
 
 /// The phase of the wheel event currently being dispatched. Outside a
@@ -70,11 +71,7 @@ pub fn set_scroll_phase(phase: ScrollPhase) {
 /// synthesize their own wheel events (they get `Wheel` semantics unless a
 /// real gesture is mid-flight).
 pub fn current_scroll_phase() -> ScrollPhase {
-    match PHASE.load(Ordering::Relaxed) {
-        1 => ScrollPhase::Finger,
-        2 => ScrollPhase::FingerEnd,
-        _ => ScrollPhase::Wheel,
-    }
+    crate::window_state::with(|w| w.scroll_phase.get())
 }
 
 /// Pixels one wheel notch moves a list — the toolkit's line unit, shared so

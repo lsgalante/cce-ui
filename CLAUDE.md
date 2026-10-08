@@ -1102,8 +1102,8 @@ there:
   **Forward follows the content**: the delta that scrolls a list to show what is to its
   right, so under natural scrolling the fingers go LEFT to go in and right to go back,
   as on every touch surface, and the user's scrolling setting flips both. A test that
-  swipes twice calls `side_swipe::end_gesture()` between, since the runner's phase is
-  process-wide.
+  swipes twice calls `side_swipe::end_gesture()` between, since a gesture's phase is the
+  window's (a thread's own in a test).
 - **The rest of a gesture that turned is the turn's**: `side_swipe::swallow(delta)`,
   asked at the top of a host's wheel handling, is true for it until the lift, and the
   host drops the event. Without it a page narrower than the plate it replaced left the
@@ -1670,7 +1670,13 @@ is done: the style is ONE snapshot (`crate::style::Style`: colour slots, layout 
 materials, the registry), published as an `Arc`; each former style `RwLock` is a
 `style::StyleCell` handle with the same `.read()` / `.write()` API, reads take no lock, and
 a reload runs as one `style::batch`, published once. A new style value is a field in its
-module's `style_slots!` block and a `StyleCell` handle, not a new lock. An app
+module's `style_slots!` block and a `StyleCell` handle, not a new lock. Phase 4 is done: a
+window's properties — scale, display metric, app id, fullscreen, maximized, vertical text,
+and the scroll phase — are its `WindowState`'s (`window_state::Props`). The window whose
+code runs reads its own; a thread with no window (a worker) reads the process-wide value,
+which every setter also writes, so one window in a process reads exactly what it did.
+`units::metric` asks cce-ui first (`units::set_metric_resolver`); a runner reports a
+metric through `window_state::set_metric`. An app
 that drives a widget's focus itself calls `UiContext::focus_widget` / `unfocus_widget`
 rather than `w.focus()` / `w.unfocus()`, so the window's record of focus follows. Do not
 add a static for state that belongs to a window: give it a field in `WindowState`.
@@ -2421,11 +2427,11 @@ Three things learned taking it to the apps (2026-10-05):
 
 ### A host may name the phase; a test may pin the settings (2026-09-30)
 
-The phase a wheel event belongs to (`Finger`, `FingerEnd`, `Wheel`) is a
-process GLOBAL the runner publishes before each dispatch, and
-`ScrollMotion::apply_px` reads it. So does anything a test would set it
-through — which, in a suite running tests in parallel, changes what every
-other test's pixel delta means. `ScrollMotion::apply_phase` takes the phase
+The phase a wheel event belongs to (`Finger`, `FingerEnd`, `Wheel`) is the
+window's (`window_state`), published by the runner before each dispatch, and
+`ScrollMotion::apply_px` reads it. Until 2026-10-08 it was one process-wide
+atomic, so a test setting it changed what every other test's pixel delta
+meant; with no window entered it is now each thread's own. `ScrollMotion::apply_phase` takes the phase
 as an argument (`apply_px` is it with the published one), for a host that
 reads the phase itself and hands it on; cce-designer's viewport does, and
 its test drives a flick without touching the global.

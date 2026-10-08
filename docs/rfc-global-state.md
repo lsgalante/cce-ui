@@ -156,7 +156,24 @@ go per key.
 whole by a reload and published as an `Arc`; getters read the current snapshot; tests
 install their own per thread. The two hundred `RwLock`s and the second registry go.
 
-### Phase 4 — per-window properties
+### Phase 4 — per-window properties — DONE 2026-10-08
+
+Not by threading them through every frame and event (the scale alone has 27 readers and 37
+setters across the toolkit and 17 apps) but as phase 2 did the interaction state: the
+scale, the display metric, the app id, fullscreen, maximized and vertical text are a
+window's `window_state::Props`, and the scroll phase a field beside them. The setters
+(`scale::set_scale_factor`, `set_app_id`, …, `backend::text::set_vertical_text`,
+`window_state::set_metric`) write the current window's AND the process-wide value; the
+getters read the current window's, else the process-wide one. That last rule is what keeps
+a worker thread right — a page rasterized at the scale, a tile decoded for it, has no
+window entered, and reads the last value any window set — and it makes a single-window
+process read exactly what it did. The metric lives in cce-core, which knows nothing of
+windows: `units::set_metric_resolver` lets cce-ui answer first. The scroll phase, read only
+while a window dispatches, is the window's or the thread's own, never the process's — so
+tests no longer race on it. `each_window_has_its_own_scale_and_a_worker_reads_the_last`.
+Checked at a forced scale of 2 against the real config: the demo and the settings app draw
+identically to the pixel before and after (the settings app's run-to-run hover noise
+aside).
 
 Scale, metric, scroll phase and vertical text travel with the frame and the event context
 instead of process statics.
