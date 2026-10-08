@@ -653,20 +653,30 @@ live data (uptime, temperatures, a different saved plan per shadow home).
 ### A layer app can have no surface while it is empty (`Application::wants_surface`, 2026-10-05)
 
 A layer-shell app that is usually empty — the notifier, between notifications — returns
-false from `wants_surface` while it has nothing to show. On that turn the runner drops the
-renderer and then the layer surface (SCTK destroys the role, then the `wl_surface`); on the
-turn it says true again it builds a fresh `wl_surface`, re-attaches the same layer role and
-a new renderer, and the first configure makes it presentable as at session start. The app
+false from `wants_surface` while it has nothing to show. On that turn the runner detaches
+its renderer (`VkRenderer::detach_surface`: the swapchain and `VkSurfaceKHR` go, the device,
+pipelines, atlases and image table stay) and drops the layer surface (SCTK destroys the
+role, then the `wl_surface`); on the turn it says true again it builds a fresh `wl_surface`,
+re-attaches the same layer role, moves the SAME renderer onto it (`attach_surface`, as the
+menu popup's renderer moves between popups), and the first configure makes it presentable
+as at session start. The app
 keeps running throughout — its calloop sources, D-Bus thread and state are untouched; only
 the surface goes. Why bother: an always-mapped transparent overlay still made the
 compositor blur behind it whenever anything under it changed, and it kept a fullscreen
 client off direct scanout (scenefx scans out only a one-entry render list).
 
-`surface_hidden` tells the app it happened. Image ids it uploads from then on are queued
-for the NEXT renderer, so that renderer's `renderer_init` must not re-upload them the way
-it would after a lost connection (the notifier keeps a flag for this). Rebuilding costs a
-renderer: a card after an empty spell appeared ~45 ms after `Notify` in a scale-2 shadow.
-Default true; xdg windows ignore it.
+Since the renderer is the same one, image ids stay good across the gap and
+`renderer_init` does not run; ids uploaded while hidden are drained into it at its next
+frame. Until 2026-10-08 the runner dropped the renderer and built a new one on show — a
+device and every pipeline, about 45 ms before a card after an empty spell appeared — and a
+`surface_hidden` hook told the app, whose `renderer_init` then had to skip re-uploading what
+was already queued (the notifier kept a flag for it). Both are gone. Only if attaching fails
+does the surface stay hidden with no renderer; the next show makes a new one and calls
+`renderer_init` as for a replacement. It is also what a launcher like cce-cloud, which keeps
+one renderer for its life and moves it between popups, would need from the runner. Checked
+in a scale-2 shadow on a private session bus: a card, its expiry, a second card with a
+thumbnail after the empty spell — drawn identically to the pixel by the old binary and the
+new. Default true; xdg windows ignore it.
 
 ### `renderer_init` — GPU handles do not survive a reconnect
 
@@ -1588,8 +1598,8 @@ when unset, the radius rule applied to spacing; do not add a new one.
 
 In the box model the ladder is presets — `Style::root_column()` /
 `root_row()`, `pane_column()` / `pane_row()`, `controls_column()` /
-`controls_row()` — and the legacy strategies' `Default`s and
-`ColumnLayout::pane` / `controls` read the same getters. An app picks the
+`controls_row()` — and the container layouts' `Default`s read the same
+getters. An app picks the
 rung; a literal padding or gap in an app (`const PAD`, `+ 12.0`) is a number
 the ladder should be supplying, and the audit counts them.
 

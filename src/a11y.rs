@@ -156,7 +156,7 @@ pub fn role_for(type_name: &str, focus: FocusRole, explicit: Option<Role>) -> Ro
         "ImageView" => Role::Image,
         "Splitter" => Role::Splitter,
         "Graph" | "Trackpad" => Role::Canvas,
-        "Group" | "ParametersBg" | "Panel" => Role::Group,
+        "Group" | "ParametersBg" => Role::Group,
         _ => match focus {
             FocusRole::Plate => Role::Button,
             FocusRole::Well | FocusRole::None => Role::GenericContainer,
@@ -169,7 +169,8 @@ pub fn widget_node(w: &dyn WidgetHost, children: Vec<NodeId>) -> Node {
     let focus = w.focus_role();
     let role = role_for(w.type_name(), focus, w.a11y_role());
     let mut node = Node::new(role);
-    if let Some(label) = w.label().filter(|l| !l.is_empty()) {
+    let name = w.base().accessible_name.clone().filter(|n| !n.is_empty());
+    if let Some(label) = name.or_else(|| w.label().filter(|l| !l.is_empty())) {
         node.set_label(label);
     }
     if let Some(value) = w.a11y_value() {
@@ -229,10 +230,11 @@ pub fn key_for(w: &dyn WidgetHost, action: Action) -> Option<NamedKey> {
     }
 }
 
-/// Whether a widget is on screen: visible, with a size, and not parked. Apps park a widget
-/// they are not showing far off the window (x or y below -9000, the toolkit's sentinel —
-/// cce-data-editor's per-type value editors) instead of hiding it; a reader must not see
-/// those either.
+/// Whether a widget is on screen: visible, with a size, and not parked far off the window
+/// (x or y below -9000). A widget an app is not showing should be HIDDEN
+/// (`WidgetHost::set_visible(false)`), which takes it out of the Tab walk too; the sentinel
+/// is a backstop for one only parked. cce-data-editor parked its per-type value editors at
+/// -1000, above the sentinel, so all of them were in the tree until it hid them (2026-10-08).
 fn shown_on_screen(w: &dyn WidgetHost) -> bool {
     let (x, y, width, height) = w.rect();
     w.visible() && width > 0.0 && height > 0.0 && x > -9000.0 && y > -9000.0
@@ -457,6 +459,22 @@ mod tests {
     /// A node offers the actions the Linux adapter can carry out, and each by the key a
     /// keyboard user presses: Space on a plate, Right / Left on a slider or a range,
     /// Up / Down on a spin button, nothing on a text box.
+    /// A control named without a label of its own (a value editor in a table row) is called
+    /// by its accessible name, which wins over a label and adds no label strip.
+    #[test]
+    fn an_accessible_name_names_a_widget_and_draws_nothing() {
+        let mut text = TextBox::new(String::new());
+        let strip = text.label_strip();
+        text.set_accessible_name(Some("Value of font_size"));
+        assert_eq!(widget_node(&text, Vec::new()).label(), Some("Value of font_size"));
+        assert_eq!(text.label_strip(), strip, "no label strip for a name nobody draws");
+        let mut save = Button::new(0.0, 0.0, 80.0, 24.0).with_label("Save");
+        save.set_accessible_name(Some("Save the file"));
+        assert_eq!(widget_node(&save, Vec::new()).label(), Some("Save the file"));
+        save.set_accessible_name(None);
+        assert_eq!(widget_node(&save, Vec::new()).label(), Some("Save"), "back to the label");
+    }
+
     #[test]
     fn a_node_offers_the_actions_its_keys_carry_out() {
         let button = Button::new(0.0, 0.0, 80.0, 24.0).with_label("Save");

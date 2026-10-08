@@ -83,7 +83,7 @@ pub struct EngineState<A: Application> {
     /// which is what makes [`Application::wants_surface`] apply.
     pub is_layer_app: bool,
     /// The app said [`Application::wants_surface`] = false and the layer
-    /// surface and renderer are gone until it says true.
+    /// surface is gone until it says true (the renderer is kept, detached).
     pub layer_hidden: bool,
     pub surface: Option<wl_surface::WlSurface>,
     
@@ -766,10 +766,14 @@ impl<A: Application> EngineState<A> {
         }
     }
 
-    /// Destroy the renderer (its swapchain first, as at session end), then
-    /// the layer surface — SCTK destroys the role and then the `wl_surface`.
+    /// Let the renderer go of the surface (its swapchain and `VkSurfaceKHR`;
+    /// the device, pipelines, atlases and image table stay), then destroy the
+    /// layer surface — SCTK destroys the role and then the `wl_surface`, which
+    /// must not happen while a swapchain still presents to it.
     fn hide_layer_surface(&mut self) {
-        self.renderer = None;
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.detach_surface();
+        }
         self.layer_surface = None;
         self.surface = None;
         self.layer_hidden = true;
@@ -780,12 +784,15 @@ impl<A: Application> EngineState<A> {
         self.entered_outputs.clear();
         self.applied_input_regions = None;
         log::info!("[window_runner] nothing to show; layer surface unmapped");
-        self.inner.as_mut().unwrap().surface_hidden();
     }
 
-    /// A fresh `wl_surface` with the app's layer role and a renderer on it.
-    /// The first configure then makes it presentable, exactly as at session
-    /// start. A renderer that cannot be made leaves the surface hidden.
+    /// A fresh `wl_surface` with the app's layer role, and the renderer moved
+    /// onto it (`attach_surface`: one swapchain, where a new renderer costs a
+    /// device and every pipeline). The first configure then makes it
+    /// presentable, exactly as at session start. The renderer is the same one,
+    /// so its image ids are still good and `renderer_init` is not called; only
+    /// where there is none (an attach that failed before) is one made, and
+    /// that one is announced. A surface nothing can draw to stays hidden.
     fn show_layer_surface(&mut self) {
         let app = self.inner.as_ref().unwrap();
         let settings = app.settings();
@@ -801,21 +808,37 @@ impl<A: Application> EngineState<A> {
         let display_ptr = self.display_ptr as *mut std::ffi::c_void;
         let surface_ptr = surface.id().as_ptr() as *mut std::ffi::c_void;
         self.surface = Some(surface);
-        match unsafe { VkRenderer::try_new(display_ptr, surface_ptr, pw, ph, 0.0) } {
-            Ok(renderer) => self.renderer = Some(renderer),
+        let made = match self.renderer.as_mut() {
+            Some(renderer) => match unsafe { renderer.attach_surface(display_ptr, surface_ptr, pw, ph) } {
+                Ok(()) => Ok(false),
+                Err(lost) => Err(lost),
+            },
+            None => unsafe { VkRenderer::try_new(display_ptr, surface_ptr, pw, ph, 0.0) }.map(|renderer| {
+                self.renderer = Some(renderer);
+                true
+            }),
+        };
+        let made = match made {
+            Ok(made) => made,
             Err(lost) => {
-                log::error!("[window_runner] cannot rebuild the renderer, staying unmapped: {lost}");
+                log::error!("[window_runner] cannot draw to the new surface, staying unmapped: {lost}");
+                self.renderer = None;
                 self.layer_surface = None;
                 self.surface = None;
                 return;
             }
-        }
+        };
         self.logical_width = settings.width as f32;
         self.logical_height = settings.height as f32;
         self.layer_hidden = false;
         self.redraw = true;
-        log::info!("[window_runner] layer surface mapped again");
-        self.inner.as_mut().unwrap().renderer_init(self.renderer.as_mut().unwrap());
+        log::info!(
+            "[window_runner] layer surface mapped again ({})",
+            if made { "a new renderer" } else { "the renderer moved onto it" }
+        );
+        if made {
+            self.inner.as_mut().unwrap().renderer_init(self.renderer.as_mut().unwrap());
+        }
     }
 
     /// One warm-down step: a frame callback and a commit with no buffer, so

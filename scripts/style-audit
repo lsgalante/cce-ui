@@ -44,7 +44,7 @@ for n in "${apps[@]}"; do
   if grep -rqE 'PlateSpec::(window|root_at)\(|\.root_plate\(' "$src"; then root=PLATE
   elif grep -rqE '(quad|rounded_rect)\([^;]*(0\.0, *0\.0|x: *0\.0, *y: *0\.0)' "$src"; then root=FILL
   else root=NONE; fi
-  ladder=$(grep -rhoE 'root_plate_(inset|padding|gap)\(\)|plate_(padding|gap)\(\)|control_gap\(\)|Style::(root|pane|controls)_(column|row)\(\)|ColumnLayout::(pane|controls)\(' "$src" | wc -l)
+  ladder=$(grep -rhoE 'root_plate_(inset|padding|gap)\(\)|plate_(padding|gap)\(\)|control_gap\(\)|Style::(root|pane|controls)_(column|row)\(\)' "$src" | wc -l)
   literals=$(grep -rhE '^\s*(pub )?const [A-Z_]*(PAD|GAP|MARGIN|INSET)[A-Z_]*: *f32' "$src" | wc -l)
   note=""
   [ "$root" != PLATE ] && { note="base is not the standard root plate"; fail=1; }

@@ -1929,6 +1929,11 @@ pub struct Widget {
     pub w: f32,
     pub h: f32,
     pub label: Option<String>,
+    /// What a screen reader calls the widget when it draws no label of its own
+    /// (an `aria-label`): the accessibility tree prefers it over [`label`](Self::label),
+    /// and nothing draws it. For a control whose label stands beside it in the host's
+    /// own text — a value editor in a table row, an icon button.
+    pub accessible_name: Option<String>,
     pub hovered: bool,
     pub row_x: f32,
     pub row_w: f32,
@@ -1990,6 +1995,7 @@ impl Widget {
             w: 0.0,
             h: 0.0,
             label: None,
+            accessible_name: None,
             hovered: false,
             row_x: 0.0,
             row_w: 0.0,
@@ -2009,6 +2015,7 @@ impl Widget {
             w,
             h,
             label: None,
+            accessible_name: None,
             hovered: false,
             row_x: 0.0,
             row_w: 0.0,

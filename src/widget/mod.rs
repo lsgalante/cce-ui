@@ -634,7 +634,6 @@ pub mod plate_dock;
 pub mod container;
 pub mod display;
 pub mod editor;
-pub mod layout_helper;
 pub mod shaping;
 #[cfg(feature = "markdown")]
 pub mod markdown;
@@ -678,7 +677,6 @@ pub mod side_swipe;
 // Re-exports
 pub use self::editor::TextEditorState;
 pub use self::line_edit::{EditOutcome, LineEdit};
-pub use self::layout_helper::{ColumnLayout, RowLayout};
 pub use self::scroll_region::{ScrollRegion, ScrollbarActivity};
 pub use self::side_swipe::{SideSwipe, SwipeDir};
 pub use self::scroll_motion::{Bounds, ScrollAxis, ScrollMotion, ScrollPhase, ScrollSettings, LINE_PX};
@@ -704,8 +702,8 @@ pub use self::container::{
 pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, UsageBar,
     InfoBox, StatusDot, InteractiveListItem,
-    GraphNode, Graph, TaggedQuad, node_wires, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
-    DotStatus, Panel, ImageView, serialize_widgets,
+    GraphNode, Graph, TaggedQuad, node_wires, Float3, ProgressBar, StatusBar, Splitter, Separator,
+    DotStatus, ImageView,
     truncate_head, truncate_tail,
 };
 

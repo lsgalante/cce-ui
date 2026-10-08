@@ -222,10 +222,10 @@ pub trait Application: Sized + 'static {
     }
     /// For a [`layer`](Self::layer) app that is usually empty — a
     /// notification stack — whether there is anything to show right now.
-    /// While this is `false` the Wayland runner destroys the layer surface
-    /// and its renderer, and it builds both again (a new renderer, so
-    /// [`renderer_init`](Self::renderer_init) runs) on the turn it turns
-    /// `true`. An always-mapped transparent overlay is not free: the
+    /// While this is `false` the Wayland runner destroys the layer surface,
+    /// keeping its renderer detached, and on the turn it turns `true` builds a
+    /// new surface and moves the same renderer onto it — so image ids stay
+    /// good and [`renderer_init`](Self::renderer_init) does not run. An always-mapped transparent overlay is not free: the
     /// compositor blurs behind it whenever anything under it changes, and it
     /// keeps a fullscreen client off direct scanout. Asked once a loop turn;
     /// ignored for xdg windows. Default `true`: always mapped.
@@ -233,14 +233,6 @@ pub trait Application: Sized + 'static {
     fn wants_surface(&self) -> bool {
         true
     }
-    /// The runner has just destroyed the surface and renderer because
-    /// [`wants_surface`](Self::wants_surface) said `false`. Image ids
-    /// uploaded from here on are queued for the NEXT renderer, so its
-    /// `renderer_init` has nothing of theirs to re-upload — unlike the
-    /// `renderer_init` after a lost connection, whose ids died with the old
-    /// renderer.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
-    fn surface_hidden(&mut self) {}
     /// Declare the window a UTILITY window: a tool whose shape is decided by
     /// its contents. The compositor then never dictates a size to it (every
     /// configure is the "you choose" 0x0 — [`WindowSettings::width`]/`height`

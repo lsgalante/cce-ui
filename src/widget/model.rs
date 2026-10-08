@@ -758,6 +758,12 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         self.inner.sync_label("");
     }
 
+    /// Name the widget to a screen reader without drawing a label
+    /// ([`Widget::accessible_name`]); `None` falls back to the label.
+    pub fn set_accessible_name(&mut self, name: Option<&str>) {
+        self.base.accessible_name = name.map(str::to_string);
+    }
+
     // --- The value/polling drains (off `WidgetHost` in the 6bd value shrink): apps read
     // widget state through these concrete methods; each forwards to the narrow `Input`
     // hook. The last dyn readers went concrete-slot instead (TI roster, cloud JsonControl,
