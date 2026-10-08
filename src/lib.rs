@@ -7,19 +7,19 @@
 pub mod color;
 pub mod compute;
 pub mod widget;
-pub mod config;
-pub mod input;
+pub use cce_core::config;
+pub use cce_core::input;
 pub mod history;
 pub mod ime;
 pub mod layout;
-pub mod relief_spec;
+pub use cce_core::relief_spec;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod wayland;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod protocol;
 pub mod engine;
 pub mod scale;
-pub mod units;
+pub use cce_core::units;
 pub mod backend;
 pub mod context;
 pub mod draw;
@@ -28,10 +28,10 @@ pub mod scene;
 pub mod file_dialog;
 pub mod icon;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod ipc;
+pub use cce_core::ipc;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod mcp;
-pub mod motion;
+pub use cce_core::motion;
 pub mod text_input;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vk;
@@ -39,6 +39,9 @@ pub mod vk;
 pub mod web;
 #[cfg(target_os = "macos")]
 pub mod mac;
+
+#[cfg(test)]
+mod config_style_tests;
 
 pub mod colors {
     pub use crate::color::*;

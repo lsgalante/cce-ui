@@ -279,35 +279,7 @@ pub const RAMP_PRESETS: &[(&str, &[(f32, f32)])] = &[
     ("Valley", &[(0.0, 1.0), (0.5, 0.0), (1.0, 1.0)]),
 ];
 
-/// Serialize ramp keys + line type as the DE's ramp spec string:
-/// `"smooth;0.000:0.500,0.200:1.000,…"` (`"linear;…"` for straight segments) —
-/// the format ramp-valued params travel in (`ParametersBg` "ramp" rows,
-/// project files, `cce_ui::layout::set_bevel_profile_keys` consumers).
-pub fn format_ramp_spec(keys: &[(f32, f32)], smooth: bool) -> String {
-    let body: Vec<String> =
-        keys.iter().map(|(p, v)| format!("{:.3}:{:.3}", p, v)).collect();
-    format!("{};{}", if smooth { "smooth" } else { "linear" }, body.join(","))
-}
-
-/// Parse a ramp spec string ([`format_ramp_spec`]) into `(keys, smooth)`.
-/// `None` for anything that doesn't yield at least two keys.
-pub fn parse_ramp_spec(spec: &str) -> Option<(Vec<(f32, f32)>, bool)> {
-    let (head, body) = spec.split_once(';')?;
-    let smooth = head.trim() == "smooth";
-    let mut keys = Vec::new();
-    for part in body.split(',') {
-        let (p, v) = part.split_once(':')?;
-        keys.push((
-            p.trim().parse::<f32>().ok()?.clamp(0.0, 1.0),
-            v.trim().parse::<f32>().ok()?.clamp(0.0, 1.0),
-        ));
-    }
-    if keys.len() < 2 {
-        return None;
-    }
-    keys.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-    Some((keys, smooth))
-}
+pub use cce_core::ramp::{format_ramp_spec, parse_ramp_spec};
 
 
 

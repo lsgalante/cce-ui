@@ -24,7 +24,7 @@
 //! the scene tessellates).
 
 use cce_ui::scene::layout::Rect;
-use cce_ui::scene::paint::{ControlPlate, DropletSpec, PaintCtx, PlateSpec, PlateStance};
+use cce_ui::scene::paint::{ControlPlate, DropletFinish, DropletSpec, PaintCtx, PlateSpec, PlateStance};
 use cce_ui::scene::Material;
 use std::fmt::Write as _;
 

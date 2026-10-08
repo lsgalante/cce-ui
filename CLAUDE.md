@@ -52,13 +52,15 @@ cargo run   -p cce-ui                            # run the demo/reference app (n
 ```
 
 Tests are headless unit tests colocated in `#[cfg(test)]` modules — concentrated in `src/scene/*`
-(the arena/layout/paint/anim engine) and `src/color.rs`, `src/config.rs`, `src/layout.rs`, plus a
+(the arena/layout/paint/anim engine) and `src/color.rs`, `src/layout.rs`, plus a
 scattering of widgets (`text_box`, `slider`, `dropdown`, `treelist`, …). When touching the scene
 engine, that module's tests are the fast feedback loop; run `cargo test -p cce-ui scene::` before
 anything else.
 
 **The tests never read the machine's config** (since 2026-10-07). Under `cfg(test)`,
-`config::config_home()` is a per-process directory nobody creates, so `config.kdl`, the per-app
+`config::config_home()` is a per-process directory nobody creates (`config`, `input` and
+`motion` live in `cce-core` now, where that gate is its `test-isolation` feature, which
+cce-ui's dev-dependency turns on — see "The GUI-free half is cce-core" below), so `config.kdl`, the per-app
 overrides and `input.kdl` are all absent and every getter answers its default. A test that needs a
 setting loads it from a string (`color::reload_colors`) or pins it on its thread. Before this, six
 heightfield and material tests failed on the desktop, whose `relief edge height` and frost keys
@@ -1625,7 +1627,10 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `src/layout.rs` (largest file, ~6.9k lines) — fonts + sizing; many `*_font_parsed()` getters and
   the `read_preferred_fonts` / font-family resolution used by the cosmic-text path.
 - `color.rs` — color model and named colors (`colors` re-export module in `lib.rs`).
-- `config.rs` — KDL loading and `kdl_to_json` conversion (see workspace `CLAUDE.md` for paths).
+- **`config`, `input`, `motion`, `units`, `relief_spec`, `ipc`** — re-exported from
+  `cce-core` (see "The GUI-free half is cce-core"), as are `color`'s hex/sRGB helpers,
+  `scene::paint::DropletSpec` and the ramp spec functions (`widget::{format,parse}_ramp_spec`,
+  `layout::sample_ramp_keys`).
 - `context.rs` — `UiContext`: the retained widget tree, event routing, spatial grid, dirty
   tracking, hit-testing.
 - `compute.rs` — what a compute job is, apart from the device that runs it: `Kernel`,
@@ -1699,16 +1704,39 @@ cce-system-interface) to confirm behavior, not just the test suite.
   for (with the limits a caller names raised to the adapter's).
 - `mac/` — macOS only: the AppKit shell, `run` (see "And on a Mac, type-checked only").
 - `protocol.rs` — inline-generated Wayland protocol bindings.
-- `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
-  the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance
-  claim-or-forward for apps that run once per session.
+- `ipc` (in `cce-core`) — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`,
+  `send_command`, the bounded `read_request_line`, `focus_window`), and `ipc::instance`:
+  single-instance claim-or-forward for apps that run once per session.
 - `icon.rs` — XDG icon-theme lookup: a `.desktop` `Icon=` key (or an SNI tray icon
   name) → a file on disk, plus `upload_themed` to rasterize/decode and upload it.
   **Not** `lib.rs`'s `upload_icon`, which loads a *bundled* cce-icons glyph by its
   own name for in-widget use; this one resolves names any installed app may ship.
 - `file_dialog.rs` (rfd), `scale.rs` (HiDPI), `wayland.rs` (surface/scale detection, and
   `detect_metric` — the display's logical px per mm from its `wl_output` geometry).
-- `units.rs` — lengths with units and the display metric; see the Units section below.
+- `units` (in `cce-core`) — lengths with units and the display metric; see the Units section below.
+
+### The GUI-free half is cce-core (since 2026-10-07)
+
+`config`, `input`, `motion`, `units`, `relief_spec` and `ipc` — and the parsers for the specs the
+DE writes (hex colours, ramps, droplets) — moved to the sibling crate `cce-core`
+(github.com/lsgalante/cce-core). cce-ui depends on it and re-exports each at its old path
+(`pub use cce_core::config;` in `lib.rs`, `pub use cce_core::droplet::DropletSpec` in
+`scene::paint`, …), so `cce_ui::config::…` and `crate::config::…` resolve as they always did and
+no app changed. Two things did change:
+
+- `DropletSpec::finish()` became the extension trait `scene::paint::DropletFinish` (a `Finish` is
+  a renderer type `cce-core` cannot name): a call site writes
+  `use cce_ui::scene::paint::DropletFinish;`.
+- The `cfg(test)` gates in those modules are `cfg(any(test, feature = "test-isolation"))` there,
+  and cce-ui's `[dev-dependencies]` names `cce-core` with that feature, so this suite still never
+  reads the machine. Two tests of the style layer that sat in `config.rs`'s suite are
+  `src/config_style_tests.rs`.
+
+The compositor depends on `cce-core` alone (it used cce-ui only for config, input bindings,
+`motion::enabled` and the relief/droplet parsers, and linked the whole toolkit for it), as do
+`cce-browser-open` (the instance client, no copy any more) and cce-window-manager (the ramp, with
+`default-features = false`: no config half, so no KDL or JSON). A change to these modules is a
+change to `cce-core`; push it, then `bump-revs.sh` repins cce-ui and the rest.
 
 ## Markdown: `MarkdownView` and `DocEditor` (features, 2026-10-01)
 
