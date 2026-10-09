@@ -174,7 +174,7 @@ fn style_read<T: Clone + 'static>(cell: &'static crate::style::StyleCell<T>) -> 
 
 /// Write a style static: per-thread under `cfg(test)`, process-wide otherwise.
 #[inline]
-fn style_write<T: Clone + 'static>(cell: &'static crate::style::StyleCell<T>, val: T) {
+fn style_write<T: Clone + PartialEq + 'static>(cell: &'static crate::style::StyleCell<T>, val: T) {
     #[cfg(test)]
     test_overlay::set(cell as *const _ as usize, val);
     #[cfg(not(test))]

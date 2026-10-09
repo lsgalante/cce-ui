@@ -83,6 +83,59 @@ today's date — what changed, why, and how it was checked.
   images, text, frosted plates), `frost_pair`, and `probe3d` raster and traced — identical to
   the pixel, every shot. (One scale-2 "before" run of the demo landed its slider wheel
   differently, an input-timing outlier; two further "before" runs matched "after" exactly.)
+- **A style write outside a batch lands its change on the newest snapshot, not the copy it
+  took.** `StyleCell::write` outside a `style::batch` returned a guard holding a clone of the
+  field from the snapshot current at `write()`, and its drop installed that clone whole — so a
+  write to the same field another thread published while the guard was held was reverted.
+  Under the per-slot `RwLock`s the one-snapshot refactor (2026-10-08) replaced, a write guard
+  held its slot's lock and same-slot read-modify-writes were serialised. The visible case was
+  the registry: two setters on different keys lost one, and under `cfg(test)` a registry
+  setter (which writes this thread's overlay and changes nothing) re-installed its stale copy
+  of the whole registry over a load made meanwhile. Guards still never wait on each other —
+  serialising them again would have meant a lock held across the caller's code, with the
+  deadlocks that brings and an end to nesting writes on one field. Instead the guard keeps the
+  snapshot it copied from, and its drop (`style::land`) publishes nothing when the copy is
+  unchanged, installs it when the newest snapshot's field still equals the one it copied, and
+  otherwise hands the change to the cell's merge: a plain value is a store (the last guard to
+  drop wins, a serial order of stores); `StyleCell::merging` declares another, and
+  `STYLE_REGISTRY` merges key by key (`StyleRegistry::merge`: a key the guard added, changed or
+  removed relative to its copy is applied to the newest registry; every other key is left as
+  the newest has it). `write` now needs `T: PartialEq` (every slot type has it; the registry
+  derives it). Untouched: a batch still carries its fields whole onto the newest snapshot (a
+  field both wrote ends with the batch's value), and a read-then-`style_write` pair, as the
+  material setters in `color/materials.rs` do, is two guards, not one, and can still interleave.
+  Three tests, each failing on the old guard every run:
+  `a_write_keeps_what_another_thread_published_to_its_field_meanwhile` (a merging probe field
+  and an unchanged scalar guard, sequenced with channels),
+  `a_registry_setter_does_not_revert_a_load_meanwhile` (the real registry, the `cfg(test)`
+  case above) and `writes_to_one_field_nest` (an outer guard merging over an inner one's
+  publish, removals included). Verified: the three fail on every run against the old guard
+  (3 of 3); fixed, 0 failures in 200 `cargo test --all-features --lib` runs and 30 full
+  `cargo test --all-features` runs (`tests/style_registry_reentrancy.rs`, which hammers the
+  registry's getters and setters across threads outside `cfg(test)`, among them); clippy
+  clean.
+
+- **`style::batch` publishes the fields it wrote, not the snapshot it began from.** A batch
+  cloned the whole style when it began and published that clone whole when it ended, so every
+  change another thread published while it ran was reverted — even in fields the batch never
+  touched, and even by a batch that wrote nothing (`reload_config` with no config file, as
+  `lazy_init_style_registry` runs it in every test). Under the per-slot locks this replaced, a
+  reload never undid another slot's write; the one-snapshot refactor of 2026-10-08 brought the
+  bug in. Each `StyleCell::write` inside a batch now records its field, and the batch's end
+  publishes its snapshot whole only when nothing was published since it began; otherwise it
+  carries the fields it wrote onto the newest snapshot (a field both wrote ends with the
+  batch's value). It is what made two tests flaky: `style::tests::writes_publish_and_a_batch_publishes_once`
+  (lost its writes at the post-batch read, line 250, or at the read after the first write,
+  238, when a parallel test's reload spanned them) and
+  `scene::material::tests::the_frost_block_is_the_only_spelling_of_the_default_recipe` (its
+  colour reloads reverted by an unlocked test's `reload_config` batch). That style test now
+  probes `Style::probe`, a test-only field nothing else writes, so a registry setter's
+  re-published copy in a parallel test cannot touch it either; the new
+  `a_batch_keeps_what_another_thread_published_meanwhile` sequences a write into another
+  thread's open batch with channels and fails on the old `batch` every time. Verified: the
+  unfixed crate failed 9 of 200 `cargo test --all-features --lib` runs (5 the style test,
+  4 the frost test); fixed, 0 of 200, and 0 of 30 full `cargo test --all-features` runs;
+  clippy clean.
 - **The Vulkan renderer is a directory module.** `vk/renderer/`: `mod.rs` (`VkRenderer`, its
   `Frame`, the push-constant and window-info sizes, `Drop`), `init` (construction), `surface`
   (the swapchain: create, recreate, detach and attach, resize, surface loss, window info),
