@@ -227,6 +227,8 @@ pub enum AppAction {
     Focus,
     /// Press it.
     Click,
+    /// Open its context menu: what a right-click on it does.
+    ShowContextMenu,
     /// Replace a field's text (AT-SPI's `SetTextContents`): as the user replacing it would.
     SetText(String),
     /// Set a value (AT-SPI's `SetCurrentValue`).

@@ -206,6 +206,19 @@ browser's address bar set from the reader — the bar unfolds, takes the keyboar
 it, the caret at its end — and the gallery's colour selector set to `#20c060`, its swatch
 green, "not a colour" refused.
 
+**The status bar is the first app that draws without widgets to publish (2026-10-09).**
+Each segment's modules are status nodes NAMED by their reading ("Battery: 80%,
+charging"): AccessKit's AT-SPI side publishes a string value only through a text field's
+runs, so a reading put in `value` was never heard. Its tray items are buttons, an open
+menu a menu of rows. AT-SPI offers a reader only "click" (AccessKit maps no other
+action there — `AppAction::ShowContextMenu` exists for the other platforms), so the bar
+makes a click on a module do what a left press does, else open its menu. Verified over
+AT-SPI on private buses, a stand-in `StatusNotifierItem` in the tray: the readings, a
+module's menu opened and a row run (the shadow compositor's adjust-position mode
+flipped), and a reader's click on the tray item reaching its `Activate`. (A shadow left
+running idles its output OFF after a while — `ctl outputs` says `enabled=false` — and a
+status segment then has no size and draws no frame: `ctl idle display on`.)
+
 Next: the macOS adapter onto the AppKit view, and listening with Orca.
 
 - **Wayland / Linux:** AT-SPI over D-Bus. AccessKit's Unix adapter is the likely carrier

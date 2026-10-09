@@ -147,6 +147,7 @@ fn app_action(request: &ActionRequest) -> Option<crate::a11y::AppAction> {
     Some(match (request.action, request.data.as_ref()) {
         (Action::Focus, _) => AppAction::Focus,
         (Action::Click, _) => AppAction::Click,
+        (Action::ShowContextMenu, _) => AppAction::ShowContextMenu,
         (Action::SetValue, Some(ActionData::Value(text))) => AppAction::SetText(text.to_string()),
         (Action::SetValue, Some(ActionData::NumericValue(value))) => AppAction::SetNumber(*value),
         (Action::Increment, _) => AppAction::Increment,
@@ -308,6 +309,7 @@ mod tests {
         assert_eq!(app_action(&req(Action::SetValue, Some(ActionData::Value("x.org".into())))), Some(AppAction::SetText("x.org".into())));
         assert_eq!(app_action(&req(Action::SetValue, Some(ActionData::NumericValue(2.0)))), Some(AppAction::SetNumber(2.0)));
         assert_eq!(app_action(&req(Action::Focus, None)), Some(AppAction::Focus));
+        assert_eq!(app_action(&req(Action::ShowContextMenu, None)), Some(AppAction::ShowContextMenu));
         assert_eq!(app_action(&req(Action::ScrollIntoView, None)), None);
     }
 }
