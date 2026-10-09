@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`Spreadsheet` is a directory module** (`widget/container/spreadsheet/`): `mod.rs` (the
+  struct, its constants and scroll geometries, construction, column widths, taking a table,
+  `SpreadsheetController`), `column` (`SheetColumn`), `scroll` (both scroll geometries and the
+  scrollbars), `rows` (the header and body hit tests, sorting, selection), `paint`, `input` and
+  `tests`. `SheetColumn` re-exported, so paths are unchanged. A pure move, checked line for
+  line; the module doc's dated notes are rewritten in the present tense. Clippy, the suite and
+  `cargo check --workspace --exclude cce-fx` pass.
 - **The widget model is a directory module** (`widget/model/`): `mod.rs` (the `Adapted` struct,
   `Drop`, `Default`, `Deref`), `layout`, `paint` and `input` (one trait each; `input` also holds
   `FocusRole` and `EventCtx`), `adapted` (`Adapted`'s inherent API), `host` (`impl WidgetHost
