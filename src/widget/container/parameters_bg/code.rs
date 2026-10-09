@@ -52,6 +52,236 @@ impl ParametersBg {
             7.2
         }
     }
+
+    /// A key on the focused code row. Edits go to the BUFFER, not the value: a host
+    /// re-evaluates a script on every value change, and a half-typed line would fail on every
+    /// keystroke. ctrl+enter applies, and so does leaving the row (Escape, a click elsewhere,
+    /// `unfocus`). Typing runs coalesce into one undo step; anything structural (a newline, a
+    /// paste, deleting a selection) starts a new one.
+    pub(super) fn code_key(&mut self, idx: usize, event: &crate::widget::KeyEvent) -> bool {
+        let Some(mut editor) = self.code_editor.take() else {
+            return false;
+        };
+        let before = editor.clone();
+        let k = code_editor_key(&mut editor, &mut self.code_history, event);
+        if k.edited {
+            let plain_char = matches!(&event.logical_key, Key::Character(c) if !event.ctrl && c.chars().count() == 1);
+            if plain_char {
+                self.code_history.record_grouped(before, 1);
+            } else {
+                self.code_history.record(before);
+            }
+        }
+        if k.apply {
+            self.display_params[idx].1 = editor.buffer.clone();
+        }
+        if k.unfocus {
+            self.focused_param = None;
+            self.code_editor = None;
+            self.code_history.clear();
+        } else {
+            self.code_editor = Some(editor);
+        }
+        k.handled
+    }
+
+    /// A press in code row `i`'s box (`r` its row rect): place the caret there (shift extends
+    /// the selection) and focus the row. A press in the box already being edited keeps its
+    /// buffer and history; one in another row's box starts a fresh editor on that row's value.
+    pub(super) fn place_code_caret(&mut self, i: usize, r: (f32, f32, f32, f32), px: f32, py: f32, shift: bool) {
+        let mut editor = match (self.focused_param == Some(i), self.code_editor.take()) {
+            (true, Some(e)) => e,
+            (_, other) => {
+                drop(other);
+                self.code_history.clear();
+                TextEditorState::new(self.display_params[i].1.clone())
+            }
+        };
+        self.focused_param = Some(i);
+        let click_x = px - self.code_text_x(r);
+        let click_y = py - (r.1 + Self::CODE_TOP);
+        let line = (click_y / Self::CODE_LINE_H).floor().max(0.0) as usize;
+        let col = (click_x / self.code_col_w() + 0.5).floor().max(0.0) as usize;
+        let at = map_2d_to_1d(&editor.buffer, line, col);
+        if shift {
+            if editor.select_anchor.is_none() {
+                editor.select_anchor = Some(editor.cursor_idx);
+            }
+        } else {
+            editor.clear_selection();
+        }
+        editor.cursor_idx = at;
+        self.code_editor = Some(editor);
+    }
+}
+
+/// What one key did to the code editor: whether it was the editor's at all, whether it
+/// changed the buffer (for history), whether it applies the buffer to the row's value, and
+/// whether it leaves the row.
+pub(super) struct CodeKey {
+    handled: bool,
+    edited: bool,
+    apply: bool,
+    unfocus: bool,
+}
+
+/// One key press on a code editor: typing, deleting, moving and selecting (arrows, Home /
+/// End, emacs chords), Tab / shift+Tab indenting, Enter carrying the line's indentation (a
+/// level deeper after an opening bracket), and the clipboard and history chords — free of the
+/// pane, so it is the editor's behaviour alone.
+pub(super) fn code_editor_key(
+    editor: &mut TextEditorState,
+    history: &mut crate::history::History<TextEditorState>,
+    event: &crate::widget::KeyEvent,
+) -> CodeKey {
+    let mut handled = true;
+    let mut edited = false;
+    let mut apply = false;
+    let mut should_unfocus = false;
+    let shift = event.shift;
+    let move_vertical = |editor: &mut TextEditorState, delta: i32| {
+        if shift && editor.select_anchor.is_none() {
+            editor.select_anchor = Some(editor.cursor_idx);
+        } else if !shift {
+            editor.clear_selection();
+        }
+        let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+        let total = editor.buffer.split('\n').count() as i32;
+        let target = (line as i32 + delta).clamp(0, total - 1) as usize;
+        editor.cursor_idx = map_2d_to_1d(&editor.buffer, target, col);
+    };
+    match &event.logical_key {
+        Key::Named(NamedKey::Backspace) => {
+            edited = editor.delete_backwards();
+        }
+        Key::Named(NamedKey::Delete) => {
+            edited = editor.delete_forwards();
+        }
+        Key::Named(NamedKey::Enter) if event.ctrl => {
+            apply = true;
+        }
+        Key::Named(NamedKey::Enter) => {
+            // Auto-indent: the line's own leading whitespace,
+            // one level deeper after an opening brace.
+            let line_start = get_line_start(&editor.buffer, editor.cursor_idx);
+            let line: String = editor.buffer.chars().skip(line_start).take(editor.cursor_idx - line_start).collect();
+            let mut indent: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+            if line.trim_end().ends_with('{') || line.trim_end().ends_with('(') || line.trim_end().ends_with('[') {
+                indent.push_str(ParametersBg::CODE_INDENT);
+            }
+            editor.insert_text(&format!("\n{indent}"));
+            edited = true;
+        }
+        Key::Named(NamedKey::Tab) if event.shift => {
+            // Dedent the current line by one level, or what it has.
+            let line_start = get_line_start(&editor.buffer, editor.cursor_idx);
+            let leading = editor.buffer.chars().skip(line_start).take_while(|c| *c == ' ').count().min(ParametersBg::CODE_INDENT.len());
+            if leading > 0 {
+                let chars: Vec<char> = editor.buffer.chars().collect();
+                editor.buffer = chars[..line_start].iter().chain(&chars[line_start + leading..]).collect();
+                editor.cursor_idx = editor.cursor_idx.saturating_sub(leading).max(line_start);
+                editor.clear_selection();
+                edited = true;
+            }
+        }
+        Key::Named(NamedKey::Tab) => {
+            editor.insert_text(ParametersBg::CODE_INDENT);
+            edited = true;
+        }
+        Key::Named(NamedKey::Escape) => {
+            apply = true;
+            should_unfocus = true;
+        }
+        Key::Named(NamedKey::ArrowLeft) => {
+            editor.move_cursor_left(shift);
+        }
+        Key::Named(NamedKey::ArrowRight) => {
+            editor.move_cursor_right(shift);
+        }
+        Key::Named(NamedKey::ArrowUp) => move_vertical(editor, -1),
+        Key::Named(NamedKey::ArrowDown) => move_vertical(editor, 1),
+        Key::Named(NamedKey::Home) => {
+            if shift && editor.select_anchor.is_none() {
+                editor.select_anchor = Some(editor.cursor_idx);
+            } else if !shift {
+                editor.clear_selection();
+            }
+            editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
+        }
+        Key::Named(NamedKey::End) => {
+            if shift && editor.select_anchor.is_none() {
+                editor.select_anchor = Some(editor.cursor_idx);
+            } else if !shift {
+                editor.clear_selection();
+            }
+            editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
+        }
+        Key::Character(s) => {
+            if event.ctrl {
+                match s.to_lowercase().as_str() {
+                    "f" => {
+                        editor.move_cursor_right(false);
+                    }
+                    "b" => {
+                        editor.move_cursor_left(false);
+                    }
+                    "p" => move_vertical(editor, -1),
+                    "n" => move_vertical(editor, 1),
+                    "a" if event.shift => {
+                        editor.select_all();
+                    }
+                    "a" => {
+                        editor.clear_selection();
+                        editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
+                    }
+                    "e" => {
+                        editor.clear_selection();
+                        editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
+                    }
+                    "d" => {
+                        edited = editor.delete_forwards();
+                    }
+                    "h" => {
+                        edited = editor.delete_backwards();
+                    }
+                    "k" => {
+                        let current_idx = editor.cursor_idx;
+                        let end_idx = get_line_end(&editor.buffer, current_idx);
+                        let chars: Vec<char> = editor.buffer.chars().collect();
+                        if current_idx < chars.len() {
+                            let delete_end = if chars[current_idx] == '\n' { current_idx + 1 } else { end_idx };
+                            editor.buffer = chars[..current_idx].iter().chain(&chars[delete_end..]).collect();
+                            editor.clear_selection();
+                            edited = true;
+                        }
+                    }
+                    // The clipboard and history chords are the
+                    // context actions, so the chord, the runner's
+                    // routing and the menu row do one thing.
+                    "c" | "x" | "v" | "z" => {
+                        let action = match (s.to_lowercase().as_str(), event.shift) {
+                            ("c", _) => crate::widget::ContextAction::Copy,
+                            ("x", _) => crate::widget::ContextAction::Cut,
+                            ("v", _) => crate::widget::ContextAction::Paste,
+                            ("z", true) => crate::widget::ContextAction::Redo,
+                            _ => crate::widget::ContextAction::Undo,
+                        };
+                        apply_code_action(editor, history, action);
+                    }
+                    _ => {
+                        handled = false;
+                    }
+                }
+            } else {
+                editor.insert_text(s);
+                edited = true;
+            }
+        }
+        _ => {
+            handled = false;
+        }
+    }
+    CodeKey { handled, edited, apply, unfocus: should_unfocus }
 }
 
 /// One clipboard, selection or history action over a code editor and its

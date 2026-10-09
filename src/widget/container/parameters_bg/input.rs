@@ -208,30 +208,8 @@ impl ParametersBg {
         };
         let mut changed = raised_changed;
 
-        if self.scrollbar_dragging {
-            let sb_track_h = self.rect.height - 8.0;
-            let sb_track_y = self.rect.y + 4.0;
-            let visible_ratio = self.rect.height / self.content_h;
-            let thumb_h = if sb_track_h <= 20.0 {
-                sb_track_h
-            } else {
-                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-            };
-            let max_scroll = (self.content_h - self.rect.height).max(0.0);
-
-            let target_thumb_y = py - self.drag_offset_y;
-            let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
-                ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-
-            let old_scroll = self.scroll_y;
-            self.scroll_y = new_scroll_ratio * max_scroll;
-            if (self.scroll_y - old_scroll).abs() > 0.01 {
-                self.update_slider_rects();
-                changed = true;
-            }
+        if self.scrollbar_dragging && self.drag_thumb_to(py) {
+            changed = true;
         }
 
         if self.hover_controls(px, py, ui) {
@@ -241,7 +219,9 @@ impl ParametersBg {
         changed
     }
 
-    /// A press or release: the scrollbar, a section's title box, open popovers, then the rows' controls.
+    /// A press or release, offered to each stage in turn until one claims it: the scrollbar,
+    /// a section's title box, an open popover, the rows' controls — and last, focus: a left
+    /// press nothing claimed focuses the field it landed on, or commits and unfocuses.
     fn on_mouse_button(&mut self, button: &MouseButton, state: &ElementState, px: &f32, py: &f32, ectx: &mut EventCtx) -> bool {
         if !self.visible {
             return false;
@@ -250,78 +230,81 @@ impl ParametersBg {
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
-
-        if button == MouseButton::Left {
-            if state == ElementState::Pressed {
-                // Only a raised bar can be grabbed — a sunk one is behind the plate,
-                // so the press falls through to the pane content underneath it.
-                if self.activity.raised() && self.hit_test_scrollbar(px, py) {
-                    // Legacy called `self.focus()` here — base flag only, which
-                    // nothing reads (see module docs).
-                    self.scrollbar_dragging = true;
-
-                    let sb_track_h = self.rect.height - 8.0;
-                    let sb_track_y = self.rect.y + 4.0;
-                    let visible_ratio = self.rect.height / self.content_h;
-                    let thumb_h = if sb_track_h <= 20.0 {
-                        sb_track_h
-                    } else {
-                        (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-                    };
-                    let max_scroll = (self.content_h - self.rect.height).max(0.0);
-                    let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
-                    let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
-
-                    let click_offset = py - thumb_y;
-                    if click_offset >= 0.0 && click_offset <= thumb_h {
-                        self.drag_offset_y = click_offset;
-                    } else {
-                        // Clicked outside the thumb: jump thumb center to py
-                        self.drag_offset_y = thumb_h / 2.0;
-                        let target_thumb_y = py - self.drag_offset_y;
-                        let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
-                            ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                        self.scroll_y = new_scroll_ratio * max_scroll;
-                        self.update_slider_rects();
-                    }
-                    return true;
-                }
-            } else if state == ElementState::Released
-                && self.scrollbar_dragging {
-                    self.scrollbar_dragging = false;
-                    self.activity.bump();
-                    return true;
-                }
+        let left_press = button == MouseButton::Left && state == ElementState::Pressed;
+        if button == MouseButton::Left && self.press_scrollbar(state, px, py) {
+            return true;
         }
-
-        // A press on a section's title box collapses/expands it. Checked before the
-        // rows so a header can never be shadowed by a control under it, and only on
-        // the press — the matching release lands on whatever the relayout moved
-        // under the pointer, which must not toggle it straight back.
-        if button == MouseButton::Left && state == ElementState::Pressed {
-            let rects = self.get_param_rects();
-            let hit = self.display_params.iter().enumerate().position(|(i, p)| {
-                if p.2 != "section" {
-                    return false;
-                }
-                let (bx, by, bw, bh) = self.section_title_box(i, rects[i]);
-                px >= bx && px <= bx + bw && py >= by && py <= by + bh
-            });
-            if let Some(i) = hit {
-                let title = self.display_params[i].0.clone();
-                let collapsed = self.collapsed.contains(&title);
-                // Collapsing out from under a focused row would strand the editor.
-                self.commit_and_unfocus();
-                self.set_section_collapsed(&title, !collapsed);
-                return true;
-            }
+        if left_press && self.press_section_title(px, py) {
+            return true;
         }
-
         let hidden = self.hidden_rows();
+        if self.press_open_popovers(button, state, px, py, ui, &hidden)
+            || self.press_row_controls(button, state, px, py, ui, &hidden)
+        {
+            return true;
+        }
+        if left_press {
+            self.focus_on_press(button, state, px, py, ui, &hidden);
+            return true;
+        }
+        false
+    }
 
+    /// A left press on a raised scrollbar grabs its thumb (a press off the thumb first jumps
+    /// the thumb's centre to it); the release ends the drag. Only a raised bar can be grabbed:
+    /// a sunk one is behind the plate, so the press falls through to the rows under it.
+    fn press_scrollbar(&mut self, state: ElementState, px: f32, py: f32) -> bool {
+        if state == ElementState::Pressed {
+            if !(self.activity.raised() && self.hit_test_scrollbar(px, py)) {
+                return false;
+            }
+            self.scrollbar_dragging = true;
+            let t = self.thumb();
+            let click_offset = py - t.y_at(self.scroll_y);
+            if click_offset >= 0.0 && click_offset <= t.h {
+                self.drag_offset_y = click_offset;
+            } else {
+                self.drag_offset_y = t.h / 2.0;
+                self.scroll_y = t.scroll_for_top(py - self.drag_offset_y);
+                self.update_slider_rects();
+            }
+            true
+        } else if state == ElementState::Released && self.scrollbar_dragging {
+            self.scrollbar_dragging = false;
+            self.activity.bump();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// A press on a section's title box collapses or expands it. Asked before the rows so a
+    /// header can never be shadowed by a control under it, and only on the press: the
+    /// matching release lands on whatever the relayout moved under the pointer, which must
+    /// not toggle it straight back.
+    fn press_section_title(&mut self, px: f32, py: f32) -> bool {
+        let rects = self.get_param_rects();
+        let hit = self.display_params.iter().enumerate().position(|(i, p)| {
+            if p.2 != "section" {
+                return false;
+            }
+            let (bx, by, bw, bh) = self.section_title_box(i, rects[i]);
+            px >= bx && px <= bx + bw && py >= by && py <= by + bh
+        });
+        if let Some(i) = hit {
+            let title = self.display_params[i].0.clone();
+            let collapsed = self.collapsed.contains(&title);
+            // Collapsing out from under a focused row would strand the editor.
+            self.commit_and_unfocus();
+            self.set_section_collapsed(&title, !collapsed);
+            return true;
+        }
+        false
+    }
+
+    /// An open dropdown, or a ramp row's open field dropdown, takes the event first: they are
+    /// drawn over the rows, so they may cover a neighbouring row's control.
+    fn press_open_popovers(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext, hidden: &[bool]) -> bool {
         // 1. Check open dropdown popovers first (since they are drawn on top)
         for (i, d_opt) in self.choices.iter_mut().enumerate() {
             if hidden[i] {
@@ -383,8 +366,12 @@ impl ParametersBg {
                     }
             }
         }
+        false
+    }
 
-        // 2. Propagate to our widgets
+    /// The rows' controls, in row order: the first that takes the event claims it, and its
+    /// value is written back into its row (and the row focused while it is open or editing).
+    fn press_row_controls(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext, hidden: &[bool]) -> bool {
         for (i, p) in self.display_params.iter_mut().enumerate() {
             if hidden[i] {
                 continue;
@@ -518,83 +505,55 @@ impl ParametersBg {
                 }
             }
         }
-
-        if button == MouseButton::Left && state == ElementState::Pressed {
-            let rects = self.get_param_rects();
-            let mut clicked_any_focusable = false;
-            for (i, p) in self.display_params.iter_mut().enumerate() {
-                if hidden[i] {
-                    continue;
-                }
-                if p.2 == "code" {
-                    let r = rects[i];
-                    if px >= r.0 && px <= r.0 + r.2 && py >= r.1 + Self::CODE_BOX_TOP && py <= r.1 + r.3 {
-                        // Clicking inside the box already being edited moves the
-                        // caret and keeps the buffer (and its history); a click
-                        // into a different row's box starts a fresh editor.
-                        let mut editor = match (self.focused_param == Some(i), self.code_editor.take()) {
-                            (true, Some(e)) => e,
-                            (_, other) => {
-                                drop(other);
-                                self.code_history.clear();
-                                TextEditorState::new(p.1.clone())
-                            }
-                        };
-                        self.focused_param = Some(i);
-                        let click_x = px - self.code_text_x(r);
-                        let click_y = py - (r.1 + Self::CODE_TOP);
-                        let line = (click_y / Self::CODE_LINE_H).floor().max(0.0) as usize;
-                        let col = (click_x / self.code_col_w() + 0.5).floor().max(0.0) as usize;
-                        let at = map_2d_to_1d(&editor.buffer, line, col);
-                        if ui.shift_pressed {
-                            if editor.select_anchor.is_none() {
-                                editor.select_anchor = Some(editor.cursor_idx);
-                            }
-                        } else {
-                            editor.clear_selection();
-                        }
-                        editor.cursor_idx = at;
-                        self.code_editor = Some(editor);
-                        clicked_any_focusable = true;
-                        break;
-                    }
-                } else if p.2.starts_with("slider") {
-                    let r = rects[i];
-                    if py >= r.1 && py <= r.1 + r.3 {
-                        if let Some(s) = &mut self.sliders[i] {
-                            if s.mouse_input(button, state, px, py, ui) {
-                                if s.editing {
-                                    self.focused_param = Some(i);
-                                    clicked_any_focusable = true;
-                                }
-                                break;
-                            }
-                        }
-                    }
-                } else if is_vec_row(&p.2) {
-                    let r = rects[i];
-                    if py >= r.1 && py <= r.1 + r.3 {
-                        if let Some(f) = &mut self.float3s[i] {
-                            if f.mouse_input(button, state, px, py, ui) {
-                                if f.editing_idx().is_some() {
-                                    self.focused_param = Some(i);
-                                    clicked_any_focusable = true;
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            if !clicked_any_focusable {
-                self.commit_and_unfocus();
-            }
-            return true;
-        }
         false
     }
 
-    /// A key, to the focused row: the code editor's chords on a code row, else the row's control.
+    /// A left press nothing else claimed: it focuses the code box, slider readout or vector
+    /// field it landed on, and otherwise commits and unfocuses the focused row.
+    fn focus_on_press(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext, hidden: &[bool]) {
+        let rects = self.get_param_rects();
+        let mut clicked_any_focusable = false;
+        for i in 0..self.display_params.len() {
+            if hidden[i] {
+                continue;
+            }
+            let kind = self.display_params[i].2.as_str();
+            let r = rects[i];
+            let in_row_band = py >= r.1 && py <= r.1 + r.3;
+            if kind == "code" {
+                if px >= r.0 && px <= r.0 + r.2 && py >= r.1 + Self::CODE_BOX_TOP && py <= r.1 + r.3 {
+                    self.place_code_caret(i, r, px, py, ui.shift_pressed);
+                    clicked_any_focusable = true;
+                    break;
+                }
+            } else if kind.starts_with("slider") && in_row_band {
+                if let Some(s) = &mut self.sliders[i] {
+                    if s.mouse_input(button, state, px, py, ui) {
+                        if s.editing {
+                            self.focused_param = Some(i);
+                            clicked_any_focusable = true;
+                        }
+                        break;
+                    }
+                }
+            } else if is_vec_row(kind) && in_row_band {
+                if let Some(f) = &mut self.float3s[i] {
+                    if f.mouse_input(button, state, px, py, ui) {
+                        if f.editing_idx().is_some() {
+                            self.focused_param = Some(i);
+                            clicked_any_focusable = true;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        if !clicked_any_focusable {
+            self.commit_and_unfocus();
+        }
+    }
+
+    /// A key, to the focused row: the code editor on a code row, else the row's control.
     fn on_key(&mut self, event: &crate::widget::KeyEvent, ectx: &mut EventCtx) -> bool {
         if !self.visible {
             return false;
@@ -602,272 +561,103 @@ impl ParametersBg {
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
-        if let Some(idx) = self.focused_param {
-            if event.state == ElementState::Pressed {
-                let p = &mut self.display_params[idx];
-                if p.2 == "code" {
-                    if let Some(mut editor) = self.code_editor.take() {
-                        // Edits go to the BUFFER, not the value: a script
-                        // re-evaluates the node on every value change, and
-                        // a half-typed line would fail on every keystroke.
-                        // ctrl+enter applies, and so does leaving the row
-                        // (Escape, a click elsewhere, `unfocus`).
-                        let before = editor.clone();
-                        let mut handled = true;
-                        let mut edited = false;
-                        let mut apply = false;
-                        let mut should_unfocus = false;
-                        let shift = event.shift;
-                        let move_vertical = |editor: &mut TextEditorState, delta: i32| {
-                            if shift && editor.select_anchor.is_none() {
-                                editor.select_anchor = Some(editor.cursor_idx);
-                            } else if !shift {
-                                editor.clear_selection();
+        let Some(idx) = self.focused_param else {
+            return false;
+        };
+        if event.state != ElementState::Pressed {
+            return false;
+        }
+        if self.display_params[idx].2 == "code" {
+            return self.code_key(idx, event);
+        }
+        self.row_key(idx, event, ui)
+    }
+
+    /// A key to the focused row's control (any row but code); its value is written back
+    /// into the row, and the row unfocused once the control stops editing.
+    fn row_key(&mut self, idx: usize, event: &crate::widget::KeyEvent, ui: &mut UiContext) -> bool {
+        let p = &mut self.display_params[idx];
+        if is_text_row(&p.2) {
+            if let Some(d) = &mut self.choices[idx] {
+                if d.open && d.keyboard_input(event, ui) {
+                    if d.take_change() {
+                        if let Some(val) = d.get_value_string() {
+                            if let Some(tb) = &mut self.texts[idx] {
+                                tb.text = val.clone();
+                                tb.edit_buffer = val.clone();
                             }
-                            let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                            let total = editor.buffer.split('\n').count() as i32;
-                            let target = (line as i32 + delta).clamp(0, total - 1) as usize;
-                            editor.cursor_idx = map_2d_to_1d(&editor.buffer, target, col);
-                        };
-                        match &event.logical_key {
-                            Key::Named(NamedKey::Backspace) => {
-                                edited = editor.delete_backwards();
-                            }
-                            Key::Named(NamedKey::Delete) => {
-                                edited = editor.delete_forwards();
-                            }
-                            Key::Named(NamedKey::Enter) if event.ctrl => {
-                                apply = true;
-                            }
-                            Key::Named(NamedKey::Enter) => {
-                                // Auto-indent: the line's own leading whitespace,
-                                // one level deeper after an opening brace.
-                                let line_start = get_line_start(&editor.buffer, editor.cursor_idx);
-                                let line: String = editor.buffer.chars().skip(line_start).take(editor.cursor_idx - line_start).collect();
-                                let mut indent: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
-                                if line.trim_end().ends_with('{') || line.trim_end().ends_with('(') || line.trim_end().ends_with('[') {
-                                    indent.push_str(Self::CODE_INDENT);
-                                }
-                                editor.insert_text(&format!("\n{indent}"));
-                                edited = true;
-                            }
-                            Key::Named(NamedKey::Tab) if event.shift => {
-                                // Dedent the current line by one level, or what it has.
-                                let line_start = get_line_start(&editor.buffer, editor.cursor_idx);
-                                let leading = editor.buffer.chars().skip(line_start).take_while(|c| *c == ' ').count().min(Self::CODE_INDENT.len());
-                                if leading > 0 {
-                                    let chars: Vec<char> = editor.buffer.chars().collect();
-                                    editor.buffer = chars[..line_start].iter().chain(&chars[line_start + leading..]).collect();
-                                    editor.cursor_idx = editor.cursor_idx.saturating_sub(leading).max(line_start);
-                                    editor.clear_selection();
-                                    edited = true;
-                                }
-                            }
-                            Key::Named(NamedKey::Tab) => {
-                                editor.insert_text(Self::CODE_INDENT);
-                                edited = true;
-                            }
-                            Key::Named(NamedKey::Escape) => {
-                                apply = true;
-                                should_unfocus = true;
-                            }
-                            Key::Named(NamedKey::ArrowLeft) => {
-                                editor.move_cursor_left(shift);
-                            }
-                            Key::Named(NamedKey::ArrowRight) => {
-                                editor.move_cursor_right(shift);
-                            }
-                            Key::Named(NamedKey::ArrowUp) => move_vertical(&mut editor, -1),
-                            Key::Named(NamedKey::ArrowDown) => move_vertical(&mut editor, 1),
-                            Key::Named(NamedKey::Home) => {
-                                if shift && editor.select_anchor.is_none() {
-                                    editor.select_anchor = Some(editor.cursor_idx);
-                                } else if !shift {
-                                    editor.clear_selection();
-                                }
-                                editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
-                            }
-                            Key::Named(NamedKey::End) => {
-                                if shift && editor.select_anchor.is_none() {
-                                    editor.select_anchor = Some(editor.cursor_idx);
-                                } else if !shift {
-                                    editor.clear_selection();
-                                }
-                                editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
-                            }
-                            Key::Character(s) => {
-                                if event.ctrl {
-                                    match s.to_lowercase().as_str() {
-                                        "f" => {
-                                            editor.move_cursor_right(false);
-                                        }
-                                        "b" => {
-                                            editor.move_cursor_left(false);
-                                        }
-                                        "p" => move_vertical(&mut editor, -1),
-                                        "n" => move_vertical(&mut editor, 1),
-                                        "a" if event.shift => {
-                                            editor.select_all();
-                                        }
-                                        "a" => {
-                                            editor.clear_selection();
-                                            editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
-                                        }
-                                        "e" => {
-                                            editor.clear_selection();
-                                            editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
-                                        }
-                                        "d" => {
-                                            edited = editor.delete_forwards();
-                                        }
-                                        "h" => {
-                                            edited = editor.delete_backwards();
-                                        }
-                                        "k" => {
-                                            let current_idx = editor.cursor_idx;
-                                            let end_idx = get_line_end(&editor.buffer, current_idx);
-                                            let chars: Vec<char> = editor.buffer.chars().collect();
-                                            if current_idx < chars.len() {
-                                                let delete_end = if chars[current_idx] == '\n' { current_idx + 1 } else { end_idx };
-                                                editor.buffer = chars[..current_idx].iter().chain(&chars[delete_end..]).collect();
-                                                editor.clear_selection();
-                                                edited = true;
-                                            }
-                                        }
-                                        // The clipboard and history chords are the
-                                        // context actions, so the chord, the runner's
-                                        // routing and the menu row do one thing.
-                                        "c" | "x" | "v" | "z" => {
-                                            let action = match (s.to_lowercase().as_str(), event.shift) {
-                                                ("c", _) => crate::widget::ContextAction::Copy,
-                                                ("x", _) => crate::widget::ContextAction::Cut,
-                                                ("v", _) => crate::widget::ContextAction::Paste,
-                                                ("z", true) => crate::widget::ContextAction::Redo,
-                                                _ => crate::widget::ContextAction::Undo,
-                                            };
-                                            apply_code_action(&mut editor, &mut self.code_history, action);
-                                        }
-                                        _ => {
-                                            handled = false;
-                                        }
-                                    }
-                                } else {
-                                    editor.insert_text(s);
-                                    edited = true;
-                                }
-                            }
-                            _ => {
-                                handled = false;
-                            }
-                        }
-                        if edited {
-                            // Typing runs coalesce into one undo step; anything
-                            // structural (a newline, a paste, a deletion of a
-                            // selection) starts a new one.
-                            let plain_char = matches!(&event.logical_key, Key::Character(c) if !event.ctrl && c.chars().count() == 1);
-                            if plain_char {
-                                self.code_history.record_grouped(before, 1);
-                            } else {
-                                self.code_history.record(before);
-                            }
-                        }
-                        if apply {
-                            p.1 = editor.buffer.clone();
-                        }
-                        if should_unfocus {
-                            self.focused_param = None;
-                            self.code_editor = None;
-                            self.code_history.clear();
-                        } else {
-                            self.code_editor = Some(editor);
-                        }
-                        if handled {
-                            return true;
+                            p.1 = val;
                         }
                     }
-                } else if is_text_row(&p.2) {
-                    if let Some(d) = &mut self.choices[idx] {
-                        if d.open && d.keyboard_input(event, ui) {
-                            if d.take_change() {
-                                if let Some(val) = d.get_value_string() {
-                                    if let Some(tb) = &mut self.texts[idx] {
-                                        tb.text = val.clone();
-                                        tb.edit_buffer = val.clone();
-                                    }
-                                    p.1 = val;
-                                }
-                            }
-                            return true;
-                        }
+                    return true;
+                }
+            }
+            if let Some(tb) = &mut self.texts[idx] {
+                if tb.keyboard_input(event, ui) {
+                    if !tb.editing {
+                        p.1 = tb.text.clone();
+                        self.focused_param = None;
+                    } else {
+                        p.1 = tb.edit_buffer.clone();
                     }
-                    if let Some(tb) = &mut self.texts[idx] {
-                        if tb.keyboard_input(event, ui) {
-                            if !tb.editing {
-                                p.1 = tb.text.clone();
-                                self.focused_param = None;
-                            } else {
-                                p.1 = tb.edit_buffer.clone();
-                            }
-                            return true;
+                    return true;
+                }
+            }
+        } else if p.2.starts_with("choice") {
+            if let Some(d) = &mut self.choices[idx] {
+                if d.keyboard_input(event, ui) {
+                    if !d.open {
+                        if let Some(val) = d.get_value_string() {
+                            p.1 = val;
                         }
+                        self.focused_param = None;
                     }
-                } else if p.2.starts_with("choice") {
-                    if let Some(d) = &mut self.choices[idx] {
-                        if d.keyboard_input(event, ui) {
-                            if !d.open {
-                                if let Some(val) = d.get_value_string() {
-                                    p.1 = val;
-                                }
-                                self.focused_param = None;
-                            }
-                            return true;
-                        }
+                    return true;
+                }
+            }
+        } else if p.2.starts_with("spinbox") {
+            if let Some(sb) = &mut self.spinboxes[idx] {
+                if sb.keyboard_input(event, ui) {
+                    if !sb.editing {
+                        p.1 = sb.value.to_string();
+                        self.focused_param = None;
+                    } else {
+                        p.1 = sb.edit_buffer.clone();
                     }
-                } else if p.2.starts_with("spinbox") {
-                    if let Some(sb) = &mut self.spinboxes[idx] {
-                        if sb.keyboard_input(event, ui) {
-                            if !sb.editing {
-                                p.1 = sb.value.to_string();
-                                self.focused_param = None;
-                            } else {
-                                p.1 = sb.edit_buffer.clone();
-                            }
-                            return true;
-                        }
+                    return true;
+                }
+            }
+        } else if p.2.starts_with("slider") {
+            if let Some(s) = &mut self.sliders[idx] {
+                if s.keyboard_input(event, ui) {
+                    let new_val = s.get_scaled_value();
+                    p.1 = format!("{:.*}", slider_decimals(&p.2), new_val);
+                    if !s.editing {
+                        self.focused_param = None;
                     }
-                } else if p.2.starts_with("slider") {
-                    if let Some(s) = &mut self.sliders[idx] {
-                        if s.keyboard_input(event, ui) {
-                            let new_val = s.get_scaled_value();
-                            p.1 = format!("{:.*}", slider_decimals(&p.2), new_val);
-                            if !s.editing {
-                                self.focused_param = None;
-                            }
-                            return true;
-                        }
+                    return true;
+                }
+            }
+        } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
+            if let Some(c) = &mut self.colors[idx] {
+                if c.keyboard_input(event, ui) {
+                    if let Some(val) = c.get_value_string() {
+                        p.1 = val;
                     }
-                } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
-                    if let Some(c) = &mut self.colors[idx] {
-                        if c.keyboard_input(event, ui) {
-                            if let Some(val) = c.get_value_string() {
-                                p.1 = val;
-                            }
-                            if !c.editing {
-                                self.focused_param = None;
-                            }
-                            return true;
-                        }
+                    if !c.editing {
+                        self.focused_param = None;
                     }
-                } else if is_vec_row(&p.2) {
-                    if let Some(f) = &mut self.float3s[idx] {
-                        if f.keyboard_input(event, ui) {
-                            p.1 = f.value_string();
-                            if f.editing_idx().is_none() {
-                                self.focused_param = None;
-                            }
-                            return true;
-                        }
+                    return true;
+                }
+            }
+        } else if is_vec_row(&p.2) {
+            if let Some(f) = &mut self.float3s[idx] {
+                if f.keyboard_input(event, ui) {
+                    p.1 = f.value_string();
+                    if f.editing_idx().is_none() {
+                        self.focused_param = None;
                     }
+                    return true;
                 }
             }
         }
@@ -1191,30 +981,7 @@ impl Input for ParametersBg {
 
     fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
         if self.scrollbar_dragging {
-            let sb_track_h = self.rect.height - 8.0;
-            let sb_track_y = self.rect.y + 4.0;
-            let visible_ratio = self.rect.height / self.content_h;
-            let thumb_h = if sb_track_h <= 20.0 {
-                sb_track_h
-            } else {
-                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-            };
-            let max_scroll = (self.content_h - self.rect.height).max(0.0);
-
-            let target_thumb_y = py - self.drag_offset_y;
-            let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
-                ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-
-            let old_scroll = self.scroll_y;
-            self.scroll_y = new_scroll_ratio * max_scroll;
-            if (self.scroll_y - old_scroll).abs() > 0.01 {
-                self.update_slider_rects();
-                return true;
-            }
-            return false;
+            return self.drag_thumb_to(py);
         }
 
         if let Some(i) = self.dragging_param {

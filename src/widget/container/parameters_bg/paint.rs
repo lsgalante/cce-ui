@@ -134,22 +134,10 @@ impl ParametersBg {
         }
         let sb_w = self.scrollbar_w();
         let sb_x = self.scrollbar_x();
-        let sb_track_h = self.rect.height - 8.0;
-        let sb_track_y = self.rect.y + 4.0;
-
-        let visible_ratio = self.rect.height / self.content_h;
-        let thumb_h = if sb_track_h <= 20.0 {
-            sb_track_h
-        } else {
-            (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-        };
-        let max_scroll = self.content_h - self.rect.height;
-        let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
-        let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
-
+        let t = self.thumb();
         vec![
-            (sb_x, sb_track_y, sb_w, sb_track_h, crate::color::scrollbar_track_color()),
-            (sb_x, thumb_y, sb_w, thumb_h, crate::color::scrollbar_thumb_color()),
+            (sb_x, t.track_y, sb_w, t.track_h, crate::color::scrollbar_track_color()),
+            (sb_x, t.y_at(self.scroll_y), sb_w, t.h, crate::color::scrollbar_thumb_color()),
         ]
     }
 

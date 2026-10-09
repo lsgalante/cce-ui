@@ -404,11 +404,10 @@ impl ParametersBg {
         }
         let sb_w = self.scrollbar_w();
         let sb_x = self.scrollbar_x();
-        let sb_track_h = self.rect.height - 8.0;
-        let sb_track_y = self.rect.y + 4.0;
+        let t = self.thumb();
 
         px >= sb_x - 4.0 && px <= sb_x + sb_w + 4.0
-            && py >= sb_track_y && py <= sb_track_y + sb_track_h
+            && py >= t.track_y && py <= t.track_y + t.track_h
     }
 
     /// Whether the pane holds enough content to need a scrollbar at all.
@@ -588,5 +587,54 @@ impl ParametersBg {
             return Some(r);
         }
         None
+    }
+
+    /// The scrollbar's track and thumb, from the viewport and the content height.
+    pub(super) fn thumb(&self) -> Thumb {
+        let track_h = self.rect.height - 8.0;
+        let track_y = self.rect.y + 4.0;
+        let visible_ratio = self.rect.height / self.content_h;
+        let h = if track_h <= 20.0 { track_h } else { (track_h * visible_ratio).clamp(20.0, track_h) };
+        Thumb { track_y, track_h, h, max_scroll: (self.content_h - self.rect.height).max(0.0) }
+    }
+
+    /// Drag the thumb so its top sits `drag_offset_y` above `py`; true if the rows moved.
+    pub(super) fn drag_thumb_to(&mut self, py: f32) -> bool {
+        let old_scroll = self.scroll_y;
+        self.scroll_y = self.thumb().scroll_for_top(py - self.drag_offset_y);
+        if (self.scroll_y - old_scroll).abs() > 0.01 {
+            self.update_slider_rects();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// The scrollbar's geometry: its track (the viewport less 4 px at each end), its thumb's
+/// height (the visible share of the track, at least 20 px, or the whole track when that is
+/// shorter), and the most the rows can scroll.
+pub(super) struct Thumb {
+    pub(super) track_y: f32,
+    pub(super) track_h: f32,
+    pub(super) h: f32,
+    pub(super) max_scroll: f32,
+}
+
+impl Thumb {
+    /// The thumb's top at scroll `scroll_y`.
+    pub(super) fn y_at(&self, scroll_y: f32) -> f32 {
+        let scroll_ratio = if self.max_scroll > 0.0 { scroll_y / self.max_scroll } else { 0.0 };
+        self.track_y + scroll_ratio * (self.track_h - self.h)
+    }
+
+    /// The scroll that puts the thumb's top at `top`, clamped to the track.
+    pub(super) fn scroll_for_top(&self, top: f32) -> f32 {
+        let ratio = if self.track_h - self.h > 0.0 {
+            ((top - self.track_y) / (self.track_h - self.h)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        ratio * self.max_scroll
     }
 }

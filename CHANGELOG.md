@@ -10,6 +10,14 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The params pane's press and key handling are staged.** `on_mouse_button` offers an event to
+  `press_scrollbar`, `press_section_title`, `press_open_popovers`, `press_row_controls` and
+  `focus_on_press` in turn; `on_key` sends a code row's keys to `code_key` and the rest to
+  `row_key`. The code editor's key behaviour is `code_editor_key` in `code.rs`, a function of the
+  editor and its history alone, and a code-row click is `place_code_caret`. The scrollbar thumb's
+  arithmetic, written out five times (press, pointer drag, `drag_update`, `scrollbar_quads`,
+  `hit_test_scrollbar`), is one `Thumb` (`ParametersBg::thumb`, `drag_thumb_to`). Stage bodies
+  were lifted unchanged; the focus-on-press loop became index-based to call `place_code_caret`.
 - **`ParametersBg` is a directory module split by concern** (`widget/container/parameters_bg/`:
   `mod.rs`, `rows`, `geometry`, `paint`, `input`, `code`, `controller`, `tests`), where it was one
   5.1k-line file. A pure move, done by script at method boundaries and checked line for line
