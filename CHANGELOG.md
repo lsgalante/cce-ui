@@ -10,6 +10,14 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`Graph` is a directory module** (`widget/display/graph/`): `mod.rs` (the node and port types,
+  `node_wires`, the struct, its construction and setters, `impl Layout`), `geometry` (the
+  lattice, node and port rects, a free cell, zoom), `wires` (styles, paths drawn and hit alike,
+  stroke and turn, painting, splicing; `WireStyle` re-exported), `paint`, `input` (presses,
+  drags and their commit, the swap target, the zoom keys), `controller` and `tests`. A pure move,
+  checked line for line; the module doc lost its two dated history sentences. Clippy, the suite
+  (the graph's wire, turn and swap tests included) and `cargo check --workspace --exclude cce-fx`
+  pass.
 - **The layout getters are split by topic.** `layout/mod.rs` (2.3k lines) keeps the style slots,
   the shared constants, text-line metrics and `reload_config`; the getters and setters are
   `relief` (light, bevel and roll geometry, corner shape and window radii, carve depth, the
