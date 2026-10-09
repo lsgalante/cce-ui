@@ -530,6 +530,16 @@ pub trait WidgetHostExt: WidgetHost {
         self.input_model_mut().a11y_set_value(value)
     }
 
+    /// A text field's text, caret and selection for a reader (`Input::a11y_text`).
+    fn a11y_text(&self) -> Option<crate::a11y::A11yText> {
+        self.input_model().a11y_text()
+    }
+
+    /// Replace a text field's text for an assistive tool (`Input::a11y_set_text`).
+    fn a11y_set_text(&mut self, text: &str) -> bool {
+        self.input_model_mut().a11y_set_text(text)
+    }
+
     /// An assistive tool clicked one of them (`Input::a11y_select_item`).
     fn a11y_select_item(&mut self, idx: usize) -> bool {
         self.input_model_mut().a11y_select_item(idx)

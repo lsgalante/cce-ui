@@ -11,6 +11,9 @@
 //! - **name** — its label;
 //! - **value** — [`WidgetHost::a11y_value`] (a widget's `value_string`): a check box or switch
 //!   as toggled, a slider, spin button or progress bar as a number, anything else as text;
+//!   a text field ([`WidgetHost::a11y_text`]) has its text as TEXT RUNS instead, one per
+//!   line, with its caret and selection — what gives it AT-SPI's Text and EditableText
+//!   interfaces, so a reader reads it by character and line and can set it;
 //! - **bounds** — its rect in LOGICAL px, the window node carrying the HiDPI scale as its
 //!   transform, so no widget's bounds change with the scale;
 //! - **actions** — focus for every keyboard stop, click for every [`FocusRole::Plate`];
@@ -31,7 +34,7 @@
 //! raise events only for nodes that changed; sending changed nodes alone is an optimisation
 //! for later, with `backend::frame`'s damage diff as its model.
 
-use accesskit::{Action, Affine, Node, NodeId, Rect, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
+use accesskit::{Action, Affine, Node, NodeId, Rect, Role, TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate};
 
 use crate::context::UiContext;
 use crate::widget::{FocusRole, NamedKey, WidgetHost, WidgetId, WidgetHostExt};
@@ -62,6 +65,75 @@ pub struct A11yItem {
 /// Where widgets' items begin: `ITEM_BASE + (widget id << 16) + index`, below the apps' own
 /// nodes and above every widget's.
 const ITEM_BASE: u64 = 1 << 60;
+
+/// A text field's text as a reader reads and edits it (`Input::a11y_text`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct A11yText {
+    /// What the field shows: a password field's as one bullet a character, never the secret.
+    pub text: String,
+    /// While it is being edited, the selection's anchor and its focus (the caret), as char
+    /// indices into `text`; equal for a bare caret.
+    pub selection: Option<(usize, usize)>,
+    pub multiline: bool,
+    pub password: bool,
+    /// Whether a reader may set it (a disabled field may not).
+    pub editable: bool,
+    /// What it shows while empty ("Search..."): a hint, and the field's only words when it
+    /// has no label.
+    pub placeholder: Option<String>,
+}
+
+/// A text field's text runs take the item indices from here up, one per line, so they never
+/// meet a widget's own items ([`A11yItem`]), which stay below.
+const RUN_BASE: usize = 0x8000;
+
+/// The node of line `line`'s text run in widget `id`'s field ([`A11yText`]).
+pub fn text_run_id(id: WidgetId, line: usize) -> NodeId {
+    item_id(id, RUN_BASE + line.min(RUN_BASE - 1))
+}
+
+/// A field's text as AccessKit's text runs: one per line, each line's break at its end, the
+/// characters as the field counts them (chars). A text ending in a break has an empty last
+/// line, where a caret after it stands. Past `RUN_BASE` lines the rest is one run.
+fn text_lines(text: &str) -> Vec<&str> {
+    let mut lines: Vec<&str> = text.split_inclusive('\n').collect();
+    if text.is_empty() || text.ends_with('\n') {
+        lines.push("");
+    }
+    if lines.len() > RUN_BASE {
+        let start: usize = lines[..RUN_BASE - 1].iter().map(|l| l.len()).sum();
+        lines.truncate(RUN_BASE - 1);
+        lines.push(&text[start..]);
+    }
+    lines
+}
+
+/// Char index `at` of a field's text as a position in its runs.
+fn run_position(id: WidgetId, lines: &[&str], at: usize) -> TextPosition {
+    let mut start = 0;
+    for (i, line) in lines.iter().enumerate() {
+        let len = line.chars().count();
+        if at < start + len || i + 1 == lines.len() {
+            return TextPosition { node: text_run_id(id, i), character_index: at.saturating_sub(start).min(len) };
+        }
+        start += len;
+    }
+    TextPosition { node: text_run_id(id, 0), character_index: 0 }
+}
+
+/// The text run nodes of widget `id`'s field, in order.
+pub fn text_run_nodes(id: WidgetId, text: &A11yText) -> Vec<(NodeId, Node)> {
+    text_lines(&text.text)
+        .into_iter()
+        .enumerate()
+        .map(|(i, line)| {
+            let mut run = Node::new(Role::TextRun);
+            run.set_value(line);
+            run.set_character_lengths(line.chars().map(|c| c.len_utf8() as u8).collect::<Vec<u8>>());
+            (text_run_id(id, i), run)
+        })
+        .collect()
+}
 
 /// The node of item `idx` of widget `id` ([`A11yItem`]).
 pub fn item_id(id: WidgetId, idx: usize) -> NodeId {
@@ -167,13 +239,34 @@ pub fn role_for(type_name: &str, focus: FocusRole, explicit: Option<Role>) -> Ro
 /// One widget's node, with `children` already resolved.
 pub fn widget_node(w: &dyn WidgetHost, children: Vec<NodeId>) -> Node {
     let focus = w.focus_role();
-    let role = role_for(w.type_name(), focus, w.a11y_role());
+    let text = w.a11y_text();
+    let role = match (&text, role_for(w.type_name(), focus, w.a11y_role())) {
+        (Some(t), Role::TextInput) if t.password => Role::PasswordInput,
+        (Some(t), Role::TextInput) if t.multiline => Role::MultilineTextInput,
+        (_, role) => role,
+    };
     let mut node = Node::new(role);
     let name = w.base().accessible_name.clone().filter(|n| !n.is_empty());
     if let Some(label) = name.or_else(|| w.label().filter(|l| !l.is_empty())) {
         node.set_label(label);
     }
-    if let Some(value) = w.a11y_value() {
+    if let Some(t) = &text {
+        // The text is the runs (`text_run_nodes`, the node's first children); the selection
+        // is in them.
+        let id = w.base().id();
+        if let Some((anchor, focus)) = t.selection {
+            let lines = text_lines(&t.text);
+            node.set_text_selection(TextSelection { anchor: run_position(id, &lines, anchor), focus: run_position(id, &lines, focus) });
+        }
+        if let Some(hint) = t.placeholder.as_deref().filter(|h| !h.is_empty()) {
+            node.set_placeholder(hint);
+        }
+        if t.editable {
+            node.add_action(Action::SetValue);
+        } else {
+            node.set_read_only();
+        }
+    } else if let Some(value) = w.a11y_value() {
         match role {
             Role::CheckBox | Role::Switch => {
                 if let Some(on) = truth(&value) {
@@ -290,8 +383,15 @@ pub fn window_tree(ctx: Option<&UiContext>, app: AppNodes, title: &str, scale: f
     // The keyboard's node: a focused widget's, or its focused item's.
     let mut item_focus: Option<NodeId> = None;
     for (id, w) in &widgets {
-        // The widget's own items come first, then its linked children.
+        // A text field's runs come first, then the widget's own items, then its linked
+        // children.
         let mut children: Vec<NodeId> = Vec::new();
+        if let Some(text) = w.a11y_text() {
+            for (nid, run) in text_run_nodes(*id, &text) {
+                nodes.push((nid, run));
+                children.push(nid);
+            }
+        }
         for (i, item) in w.a11y_items().into_iter().enumerate() {
             let nid = item_id(*id, i);
             let mut node = Node::new(item.role);
@@ -537,7 +637,8 @@ mod tests {
         assert_eq!(b.bounds(), Some(Rect::new(10.0, 40.0, 90.0, 64.0)), "logical px");
 
         let t = node(&update, node_id(name.id()));
-        assert_eq!((t.role(), t.label(), t.value()), (Role::TextInput, Some("Name"), Some("Ada")));
+        assert_eq!((t.role(), t.label(), t.value()), (Role::TextInput, Some("Name"), None), "a field's text is its runs");
+        assert_eq!(node(&update, t.children()[0]).value(), Some("Ada"));
         assert!(!t.supports_action(Action::Click), "a well is not pressed");
 
         let c = node(&update, node_id(wrap.id()));
@@ -546,6 +647,59 @@ mod tests {
         let s = node(&update, node_id(zoom.id()));
         assert_eq!(s.role(), Role::Slider);
         assert!(s.numeric_value().is_some(), "a slider's value is a number");
+    }
+
+    /// A text field is its text runs, a line each with the line's break at its end, every
+    /// character's byte length beside it; while it is edited its selection is in the runs. A
+    /// reader may set it (AT-SPI's EditableText) unless it is disabled, and a password field's
+    /// runs are bullets: the secret is nowhere in the tree.
+    #[test]
+    fn a_text_field_is_its_text_runs() {
+        let mut ctx = UiContext::new();
+        let notes = ctx.insert(TextBox::new("héllo\nwo".to_string()).with_multiline(true).with_label("Notes"));
+        ctx[notes].set_rect(10.0, 10.0, 200.0, 80.0);
+        let pass = ctx.insert(TextBox::new("hunter2".to_string()).with_label("Password"));
+        ctx[pass].set_placeholder("Passphrase");
+        ctx[pass].is_password = true;
+        ctx[pass].set_rect(10.0, 100.0, 200.0, 24.0);
+        let fixed = ctx.insert(TextBox::new("fixed".to_string()));
+        ctx[fixed].disabled = true;
+        ctx[fixed].set_rect(10.0, 130.0, 200.0, 24.0);
+        // Focused, a box opens with all of it selected: anchor at the start, caret at the end.
+        ctx.set_focused_id(notes.id());
+
+        let update = tree_update(&ctx, "", 1.0);
+        let t = node(&update, node_id(notes.id()));
+        assert_eq!(t.role(), Role::MultilineTextInput);
+        assert!(t.supports_action(Action::SetValue), "a reader may set it");
+        let runs: Vec<&Node> = t.children().iter().map(|&c| node(&update, c)).collect();
+        assert!(runs.iter().all(|r| r.role() == Role::TextRun));
+        assert_eq!(runs.iter().map(|r| r.value().unwrap()).collect::<Vec<_>>(), ["héllo\n", "wo"]);
+        assert_eq!(runs[0].character_lengths(), &[1, 2, 1, 1, 1, 1], "é is two bytes, the break one character");
+        let sel = t.text_selection().expect("being edited, it has a selection");
+        assert_eq!(sel.anchor, TextPosition { node: t.children()[0], character_index: 0 });
+        assert_eq!(sel.focus, TextPosition { node: t.children()[1], character_index: 2 }, "the caret at the end of the last line");
+
+        let p = node(&update, node_id(pass.id()));
+        assert_eq!(p.role(), Role::PasswordInput);
+        assert_eq!(p.placeholder(), Some("Passphrase"), "its hint");
+        assert_eq!(node(&update, p.children()[0]).value(), Some("\u{2022}".repeat(7).as_str()));
+        assert!(
+            update.nodes.iter().all(|(_, n)| !n.value().unwrap_or("").contains("hunter2") && !n.label().unwrap_or("").contains("hunter2")),
+            "the secret is in no node",
+        );
+
+        let f = node(&update, node_id(fixed.id()));
+        assert!(f.is_read_only() && !f.supports_action(Action::SetValue), "a disabled field is read-only");
+        assert_eq!(f.text_selection(), None, "not being edited, it has no caret");
+
+        // A text that ends in a line break has an empty last line, where the caret after it is.
+        ctx[notes].a11y_set_text("a\n");
+        let update = tree_update(&ctx, "", 1.0);
+        let t = node(&update, node_id(notes.id()));
+        assert_eq!(t.children().len(), 2);
+        assert_eq!(node(&update, t.children()[1]).value(), Some(""));
+        assert_eq!(t.text_selection().unwrap().focus, TextPosition { node: t.children()[1], character_index: 0 });
     }
 
     #[test]

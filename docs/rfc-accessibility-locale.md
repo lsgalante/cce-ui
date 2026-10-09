@@ -162,9 +162,29 @@ exist for the macOS and Windows adapters. So:
   ignored every key until refocused).
 
 Verified on cce-data-editor in a shadow: a check box clicked on and off (CHECKED read
-back), spin buttons set to 7 and 3 with their ranges read. Next: the macOS adapter onto
-the AppKit view, a text field's `SetValue` (AT-SPI's editable text), and listening with
-Orca.
+back), spin buttons set to 7 and 3 with their ranges read.
+
+**A text field is read and set as text (2026-10-09).** A field says what a reader reads and
+edits (`Input::a11y_text` → `a11y::A11yText`: what it shows, its caret and selection while
+it is edited, multi-line, password, editable, placeholder), and the tree publishes it as
+TEXT RUNS — one per line, the line's break at its end, each character's UTF-8 length beside
+it — with the selection in them, instead of a plain value. Runs are what AccessKit gives
+AT-SPI's Text and EditableText interfaces for: a reader reads the field by character and
+line, follows the caret, and sets it with `SetTextContents`, which arrives as `SetValue`
+with text and is `Input::a11y_set_text` (`backend::a11y_unix::set_value`): the text
+replaced as the user replacing it would — undoable, the caret at its end — and reported to
+the app as a typed change. A multi-line box is a `MultilineTextInput`, a password box a
+`PasswordInput` whose runs are bullets; until this its secret was the node's value, in the
+clear. A disabled field is read-only. `TextBox` implements both; the placeholder rides as
+AT-SPI's `placeholder-text`. Verified on cce-data-editor, on a private session bus with its
+own accessibility bus (a plain `dbus-daemon`, `at-spi2-registryd`, and a stand-in
+`org.a11y.Bus` reporting it enabled — so the desktop's own AT-SPI stays off): the source
+editor's whole text and caret read back, the search box set to "grid" filtering the tree to
+`grid_gap`, the source set to new KDL re-parsed into the tree. The add-key popover's box,
+there whether its popover was open or not, is hidden while it is closed: it was a field a
+reader found and a Tab stop nobody could see.
+
+Next: the macOS adapter onto the AppKit view, and listening with Orca.
 
 - **Wayland / Linux:** AT-SPI over D-Bus. AccessKit's Unix adapter is the likely carrier
   (evaluate it first; the alternative is a small AT-SPI server of our own). The compositor

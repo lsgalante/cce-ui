@@ -498,6 +498,7 @@ impl TreeList {
                 self.add_key_popover_open = !self.add_key_popover_open;
                 if self.add_key_popover_open {
                     let b = self.add_key_popover_box.get_mut(ui);
+                    WidgetHost::set_visible(b, true);
                     b.text.clear();
                     b.edit_buffer.clear();
                     b.cursor_idx = 0;
@@ -766,6 +767,13 @@ impl Layout for TreeList {
         self.search_box.get_mut(ctx).set_rect(r.search_box.x, r.search_box.y, r.search_box.width, r.search_box.height);
         self.add_key_btn.get_mut(ctx).set_rect(r.add_key_btn.x, r.add_key_btn.y, r.add_key_btn.width, r.add_key_btn.height);
         self.add_key_popover_box.get_mut(ctx).set_rect(r.popover_box.x, r.popover_box.y, r.popover_box.width, r.popover_box.height);
+        // The popover's box is shown only while the popover is: hidden, it is no Tab stop
+        // and no field a screen reader finds, where it stood in both, drawn or not.
+        let open = self.add_key_popover_open;
+        let b = self.add_key_popover_box.get_mut(ctx);
+        if WidgetHost::visible(b) != open {
+            WidgetHost::set_visible(b, open);
+        }
     }
 
     fn release_embedded_children(&mut self, ctx: &mut UiContext) {
@@ -1717,6 +1725,34 @@ mod tests {
         let t = &ctx[h];
         assert!(t.search_box.is_attached() && t.add_key_btn.is_attached());
         assert_eq!((t.search_box.get(&ctx).rect(), t.add_key_btn.get(&ctx).rect()), held);
+    }
+
+    /// The add-key popover's box is in the window only while the popover is open: closed,
+    /// it is no Tab stop and no field a screen reader finds; the add-key button opens it,
+    /// and focuses it.
+    #[test]
+    fn the_add_key_box_is_there_only_while_its_popover_is() {
+        let mut ctx = UiContext::new();
+        let tl = ctx.insert(TreeList::new());
+        WidgetHost::set_rect(&mut ctx[tl], 0.0, 0.0, 400.0, 300.0);
+        ctx.tick(0.016);
+        let box_id = ctx[tl].add_key_popover_box.id();
+        let in_tree = |ctx: &UiContext| crate::a11y::tree_update(ctx, "", 1.0).nodes.iter().any(|(n, _)| *n == crate::a11y::node_id(box_id));
+        assert!(!ctx.get_widget(box_id).unwrap().visible(), "closed, the box is hidden");
+        assert!(!in_tree(&ctx), "and not in the accessibility tree");
+        for _ in 0..4 {
+            ctx.focus_step(false);
+            assert!(!ctx.is_focused_id(box_id), "nor a Tab stop");
+        }
+
+        let b = ctx[tl].field_rects().add_key_btn;
+        let (x, y) = (b.x + b.width / 2.0, b.y + b.height / 2.0);
+        let at = |state| Event::MouseButton { button: MouseButton::Left, state, x, y, local_x: x, local_y: y };
+        ctx.propagate_event(&at(ElementState::Pressed), tl.id());
+        ctx.propagate_event(&at(ElementState::Released), tl.id());
+        assert!(ctx[tl].add_key_popover_open, "the button opens the popover");
+        assert!(ctx.get_widget(box_id).unwrap().visible() && ctx.is_focused_id(box_id), "its box shown and focused");
+        assert!(in_tree(&ctx));
     }
 
     #[test]

@@ -1895,8 +1895,10 @@ cce-system-interface) to confirm behavior, not just the test suite.
   `WidgetHost::a11y_role` / `a11y_value` are what a widget says about itself), the nodes an
   app without widgets declares (`Application::accessibility`, `AppNodes`), and an open context
   menu; a widget's parts of its own (a radio group's radio buttons) are `A11yItem`s
-  (`Input::a11y_items`). `backend::a11y_unix` publishes it over AT-SPI (the `a11y` feature; see
-  `docs/rfc-accessibility-locale.md`, phase 2).
+  (`Input::a11y_items`), and a text field's text is TEXT RUNS with its caret
+  (`Input::a11y_text` → `A11yText`; a password as bullets), which is what lets a reader read
+  it by line and set it (`Input::a11y_set_text`). `backend::a11y_unix` publishes it over
+  AT-SPI (the `a11y` feature; see `docs/rfc-accessibility-locale.md`, phase 2).
 - `l10n.rs` — the toolkit's catalogue (`tr`, `tr_args`, `catalog`) over `cce_core::l10n`;
   its English is `locale/en-US/cce-ui.ftl`.
 - `style.rs` — the style snapshot: `Style`, `StyleCell`, `batch`, `style_slots!`.

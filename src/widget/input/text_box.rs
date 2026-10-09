@@ -2134,6 +2134,63 @@ impl Input for TextBox {
         self.set_value(val)
     }
 
+    fn a11y_text(&self) -> Option<crate::a11y::A11yText> {
+        // What the box holds, never an input method's provisional run; a password as bullets.
+        let held = if self.editing { self.committed_buffer() } else { self.text.clone() };
+        let len = held.chars().count();
+        let text = if self.is_password { "\u{2022}".repeat(len) } else { held };
+        // The caret and anchor are indices into what is shown; a composition sits at the
+        // caret, so past its start they come back to it.
+        let held_idx = |i: usize| {
+            let i = match self.composing {
+                Some((start, n)) if i > start => i.saturating_sub(n).max(start),
+                _ => i,
+            };
+            i.min(len)
+        };
+        let selection = self.editing.then(|| {
+            let focus = held_idx(self.cursor_idx);
+            (self.select_anchor.map_or(focus, held_idx), focus)
+        });
+        Some(crate::a11y::A11yText {
+            text,
+            selection,
+            multiline: self.multiline,
+            password: self.is_password,
+            editable: !self.disabled,
+            placeholder: self.placeholder.clone(),
+        })
+    }
+
+    fn a11y_set_text(&mut self, text: &str) -> bool {
+        if self.disabled {
+            return false;
+        }
+        self.abandon_composition();
+        let held = if self.editing { self.committed_buffer() } else { self.text.clone() };
+        if held == text {
+            return false;
+        }
+        if self.editing {
+            let before = self.snapshot();
+            self.history.record(before);
+        } else {
+            self.history.clear();
+        }
+        self.text = text.to_string();
+        self.edit_buffer = text.to_string();
+        self.just_changed = true;
+        self.cursor_idx = text.chars().count();
+        self.select_anchor = None;
+        self.all_selected = false;
+        self.sync_editor_state();
+        self.clamp_scroll();
+        if self.editing {
+            self.scroll_to_cursor();
+        }
+        true
+    }
+
     fn context_action(&mut self, action: crate::widget::ContextAction) -> bool {
         use crate::widget::ContextAction as CA;
         match action {

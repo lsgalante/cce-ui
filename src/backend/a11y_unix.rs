@@ -72,7 +72,9 @@ pub enum Acted {
 ///   on a spin button.
 /// - **SetValue** with a number (AT-SPI's `SetCurrentValue`, how a reader adjusts a slider
 ///   or spin button on Linux, where AccessKit offers no Increment) sets it on the widget
-///   (`WidgetHost::a11y_set_value`), marked changed for the app's `take_change`. An app
+///   (`WidgetHost::a11y_set_value`); with text (`SetTextContents` on a text field's
+///   EditableText) it replaces the field's text (`WidgetHost::a11y_set_text`). Either is
+///   marked changed for the app's `take_change` ([`set_value`]). An app
 ///   that drains changes in `tick` sees it this turn; one that drains them only in its
 ///   input handlers sees it at the next input.
 /// - **Click** on a widget's item (a radio button, `a11y::A11yItem`) does what a press on it
@@ -116,10 +118,7 @@ pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> Acted {
     let Some(id) = crate::a11y::widget_of(request.target_node) else { return Acted::Nothing };
     let Some(ctx) = app.ui_context_mut() else { return Acted::Nothing };
     if request.action == Action::SetValue {
-        // Set where it is, focus untouched: a reader adjusting a value has not moved.
-        let Some(ActionData::NumericValue(value)) = request.data else { return Acted::Nothing };
-        let changed = ctx.get_widget_mut(id).is_some_and(|w| w.a11y_set_value(value));
-        return if changed { Acted::Changed } else { Acted::Nothing };
+        return set_value(ctx, id, request.data.as_ref());
     }
     let Some(w) = ctx.get_widget(id) else { return Acted::Nothing };
     let key = match request.action {
@@ -134,6 +133,19 @@ pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> Acted {
         app.focus_stepped();
     }
     key.map_or(Acted::Changed, Acted::Key)
+}
+
+/// A reader's `SetValue` on widget `id`, where it is, focus untouched (a reader adjusting a
+/// value has not moved): a number for a slider or spin button (`WidgetHost::a11y_set_value`),
+/// text for a text field (AT-SPI's `SetTextContents`, `WidgetHost::a11y_set_text`).
+pub fn set_value(ctx: &mut crate::context::UiContext, id: crate::widget::WidgetId, data: Option<&ActionData>) -> Acted {
+    let Some(w) = ctx.get_widget_mut(id) else { return Acted::Nothing };
+    let changed = match data {
+        Some(ActionData::NumericValue(value)) => w.a11y_set_value(*value),
+        Some(ActionData::Value(text)) => w.a11y_set_text(text),
+        _ => false,
+    };
+    if changed { Acted::Changed } else { Acted::Nothing }
 }
 
 #[cfg(feature = "a11y")]
@@ -223,3 +235,42 @@ mod imp {
 }
 
 pub use imp::Publisher;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::UiContext;
+    use crate::widget::{Spinbox, TextBox};
+
+    /// A reader's SetValue reaches a text field as text (AT-SPI's `SetTextContents`) and a
+    /// spin button as a number; each is reported as the user's change would be, and neither
+    /// takes the other's kind. The same text again, or a disabled field, changes nothing.
+    #[test]
+    fn a_reader_sets_a_field_by_text_and_a_spin_button_by_number() {
+        let mut ctx = UiContext::new();
+        let name = ctx.insert(TextBox::new("Ada".to_string()));
+        let count = ctx.insert(Spinbox::new(3, 0, 10, 1));
+        let text = |s: &str| ActionData::Value(s.into());
+
+        assert_eq!(set_value(&mut ctx, name.id(), Some(&text("Grace"))), Acted::Changed);
+        assert_eq!(ctx[name].text, "Grace");
+        assert!(ctx[name].take_change(), "the app hears of it as of a typed change");
+        assert_eq!(set_value(&mut ctx, name.id(), Some(&text("Grace"))), Acted::Nothing, "unchanged");
+        assert_eq!(set_value(&mut ctx, name.id(), Some(&ActionData::NumericValue(4.0))), Acted::Nothing);
+
+        assert_eq!(set_value(&mut ctx, count.id(), Some(&ActionData::NumericValue(7.0))), Acted::Changed);
+        assert_eq!(set_value(&mut ctx, count.id(), Some(&text("2"))), Acted::Nothing, "a spin button is set by number");
+
+        // Being edited, the box takes it as a replacement it can undo, the caret at its end.
+        ctx.set_focused_id(name.id());
+        assert_eq!(set_value(&mut ctx, name.id(), Some(&text("Ada Lovelace"))), Acted::Changed);
+        let t = ctx[name].a11y_text().unwrap();
+        assert_eq!((t.text.as_str(), t.selection), ("Ada Lovelace", Some((12, 12))));
+        assert!(ctx[name].context_action(crate::widget::ContextAction::Undo), "undoable");
+        assert_eq!(ctx[name].a11y_text().unwrap().text, "Grace");
+
+        ctx[name].disabled = true;
+        assert_eq!(set_value(&mut ctx, name.id(), Some(&text("Hopper"))), Acted::Nothing, "a disabled field");
+        assert_eq!(set_value(&mut ctx, crate::widget::WidgetId(usize::MAX), Some(&text("x"))), Acted::Nothing, "nothing there");
+    }
+}

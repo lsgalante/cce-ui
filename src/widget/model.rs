@@ -457,6 +457,22 @@ pub trait Input {
         false
     }
 
+    /// The text a reader reads and edits, when this widget is a text field: what it shows,
+    /// its caret and selection (`crate::a11y::A11yText`). The tree publishes it as text runs,
+    /// which is what gives the field AT-SPI's Text and EditableText interfaces. Default
+    /// `None`: not a text field (its [`value_string`](Input::value_string) is its value).
+    fn a11y_text(&self) -> Option<crate::a11y::A11yText> {
+        None
+    }
+
+    /// Replace the field's text with what an assistive tool asked for (AT-SPI's
+    /// `SetTextContents`), as the user replacing it would — undoable, the caret at its end —
+    /// and mark it changed, so the host's `take_change` reports it. Returns whether it
+    /// changed. Default: not settable.
+    fn a11y_set_text(&mut self, _text: &str) -> bool {
+        false
+    }
+
     /// Set the value an assistive tool asked for (AT-SPI's `SetCurrentValue`), clamped to
     /// [`a11y_range`](Input::a11y_range), and mark it changed as a typed value would be, so
     /// the host's `take_change` reports it. Returns whether it changed. Default: not
