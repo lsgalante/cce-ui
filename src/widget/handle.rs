@@ -23,9 +23,26 @@ impl<W: ?Sized> Handle<W> {
         Handle { id, _w: PhantomData }
     }
 
+    /// A handle that names no widget: it resolves to nothing (`get`, `lend_h`), and
+    /// indexing the context with it panics. It stands in a handle field of a value built
+    /// where there is no context — a page state a worker thread fetches, whose widgets the
+    /// app's own copy keeps — and that field is never read. Ids start at 1, so 0 is no
+    /// widget's.
+    pub const fn none() -> Self {
+        Handle { id: WidgetId(0), _w: PhantomData }
+    }
+
     /// The widget's id: what focus, links, popovers and dispatch roots are keyed by.
     pub fn id(&self) -> WidgetId {
         self.id
+    }
+}
+
+/// [`Handle::none`], so a state that holds handles can derive `Default` for the copy a
+/// worker builds.
+impl<W: ?Sized> Default for Handle<W> {
+    fn default() -> Self {
+        Self::none()
     }
 }
 
@@ -137,6 +154,32 @@ mod tests {
         assert!(ctx.propagate_event(&ev, h.id()));
         assert_eq!(ctx[h].saw_itself, Some(false), "out on loan while handling");
         assert!(ctx.get(h).is_some() && ctx.lend(h.id(), |_, _| ()).is_some(), "back afterwards");
+    }
+
+    /// A handle that names no widget resolves to nothing, and never to a widget the
+    /// context owns.
+    #[test]
+    fn a_none_handle_names_nothing() {
+        let mut ctx = UiContext::new();
+        let h = ctx.insert(Slider::new());
+        let none: super::Handle<crate::widget::Adapted<Slider>> = Default::default();
+        assert_ne!(none, h);
+        assert!(ctx.get(none).is_none() && ctx.lend_h(none, |_, _| ()).is_none());
+        assert!(ctx.get(h).is_some());
+    }
+
+    /// A widget that animates is ticked by the context once it is inserted, as one
+    /// registered by pointer was, and leaves the tick list when it is removed. Without it an
+    /// inserted tree list never applied its search (it does so in its tick).
+    #[test]
+    fn an_inserted_widget_that_ticks_is_ticked() {
+        let mut ctx = UiContext::new();
+        let h = ctx.insert(crate::widget::TextBox::new(String::new()));
+        assert!(ctx.tick_receivers.contains(&h.id()), "a text box ticks");
+        let still = ctx.insert(Slider::new());
+        assert!(!ctx.tick_receivers.contains(&still.id()), "a slider does not");
+        ctx.remove(h);
+        assert!(!ctx.tick_receivers.contains(&h.id()), "removed, it leaves the tick list");
     }
 
     /// An app that rebuilds its links every frame (`clear_hierarchy`) does not hand back the

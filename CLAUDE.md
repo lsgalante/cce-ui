@@ -1750,7 +1750,9 @@ registers raw pointers to them. Every entry keeps a watch on a liveness token be
 and every accessor (`get_ptr`, `children_ptrs`, `iter_registered`, …) resolves a pointer only
 while that token exists.
 
-**App widgets live in `Owned` boxes** (`widget::Owned<W>`, since 2026-10-07). An `Owned` keeps
+**App widgets lived in `Owned` boxes** (`widget::Owned<W>`, 2026-10-07; since 2026-10-08 they
+are `Handle`s into the context, below, and `Owned` remains for the toolkit's embedded children
+until phase 5). An `Owned` keeps
 the widget in a heap allocation of its own and carries a token for that ALLOCATION. Moving the
 `Owned` (a `Vec` reallocating, a struct returned by value) does not move the widget, and the token
 dies only when the box is freed. `Owned` is itself a `WidgetHost`, forwarding every trait method, and
@@ -1820,9 +1822,22 @@ app access that overlaps a context call. `ctx.remove(h)` gives it back by value;
 the context drops the rest; `clear_hierarchy` keeps them. And every call the context makes
 into a widget that hands it the context goes through `lend`, which takes the widget out of
 reach for the call: a widget reaching itself through the context mid-event gets `None`,
-for owned and pointer entries alike. The demo app is on handles; the other apps move one at
-a time, then `Owned` and the pointer API go (the RFC's phases). New code uses handles:
-`render_widget_h`, `Form::widget_h`, `register_popover_id`, `paint_root_into(ctx, &ctx[h], pc)`.
+for owned and pointer entries alike. **Every app is on handles** (phase 3, 2026-10-08); what
+still registers by pointer is the toolkit's own embedded children (phase 4), and then `Owned`
+and the pointer API go (phase 5). New code uses handles: `render_widget_h`,
+`Form::widget_h` / `widget_w_h`, `register_popover_id`, `focus_id` / `unfocus_id` /
+`set_focused_id`, `link_ids`, `paint_root_into(ctx, &ctx[h], pc)`. Three things the apps'
+move taught:
+
+- **An inserted widget that `wants_tick` is a tick receiver**, as one registered by pointer
+  always was. Until the fix `insert` skipped it, and an inserted tree list never applied
+  its search (it does so in its tick) — the data editor's A/B caught it.
+- **A widget made per frame is inserted, placed and removed** (a status dot in a timer
+  row, a usage bar), and a row list rebuilt on data removes the outgoing handles
+  (`ctx.remove`) and inserts the new ones; nothing re-registers each frame any more.
+- **A value built where there is no context** — a page state a worker fetches, merged
+  field by field into the app's copy — holds `Handle::none()` (also `Handle`'s
+  `Default`), which names no widget and is never read.
 
 `a_dropped_widget_is_never_handed_out`, `a_clone_has_a_liveness_of_its_own`,
 `an_owned_widget_survives_its_vec_reallocating`,

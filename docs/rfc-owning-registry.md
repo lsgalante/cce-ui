@@ -64,6 +64,21 @@ itself, reaching back through the context — can reach it a second time.
    typing, the theme dropdown and the Options dialog (open, pick, OK; and Escape) is
    identical to the pixel to the pointer-registry build at every step.
 3. **Every app**, one crate at a time, by widget count: the smallest first.
+   **DONE (2026-10-08).** cce-text-editor, cce-list, cce-notes, cce-weather,
+   cce-authenticator, cce-color-editor, cce-cloud, cce-designer, cce-graph,
+   cce-display-manager, cce-fonts, cce-files, cce-secrets, cce-mail, cce-data-editor,
+   cce-relief, cce-gallery and cce-system-interface hold `Handle`s; each was driven in a
+   shadow session against its pointer-registry build and matched to the pixel, but for live
+   data and one explained case (cce-fonts' preview: the runner now shapes it before the
+   app does, with the font system the glyph pass draws with). Toolkit additions on the
+   way: `focus_id` / `unfocus_id`, `Group::widget_w_h`, `Handle::none` (and `Default`) for
+   values built off-thread, and `insert` registering a tick receiver as `register_widget`
+   did — missing, an inserted tree list never filtered. The move also retired a real bug:
+   cce-files' prompt focused a stack-local `TextBox` by pointer and then moved it into its
+   box, and opening a second prompt corrupted the heap ("double free or corruption"); it
+   now inserts first and focuses by id. Left on the pointer path: the toolkit's embedded
+   children (the designer dialog's dropdown and colour selectors, a ramp's preset
+   dropdown, a tree list's fields), which are phase 4, and widgets tests build on the stack.
 4. **The toolkit's embedded children** on handles.
 5. **Delete the pointer path**: `Owned`, `register_host` / `register_widget` / `set_focused_ptr`
    and the other `unsafe fn`s, `Liveness`, `stable_target`. The tree holds owned slots only.

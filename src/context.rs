@@ -158,8 +158,14 @@ impl UiContext {
     /// The widget lives in the context from here on; reach it with [`get`](Self::get) /
     /// [`get_mut`](Self::get_mut) (or `ctx[h]`), give it back with [`remove`](Self::remove).
     pub fn insert<W: WidgetHost + 'static>(&mut self, widget: W) -> Handle<W> {
+        // A widget that animates is ticked by the context (`tick`), as one registered by
+        // pointer is (`register_widget`): a tree list applies its search there.
+        let wants_tick = crate::widget::WidgetHostExt::wants_tick(&widget);
         let id = self.tree.insert_owned(widget);
         self.invalidate_coverage_cache();
+        if wants_tick {
+            self.register_tick_receiver(id);
+        }
         Handle::from_id(id)
     }
 

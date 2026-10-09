@@ -160,6 +160,22 @@ impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
         self
     }
 
+    /// [`widget_w`](Self::widget_w) for a widget the context owns, as
+    /// [`widget_h`](Self::widget_h) is [`widget`](Self::widget)'s.
+    pub fn widget_w_h<T: WidgetHost + 'static>(&mut self, ctx: &UiContext, h: crate::widget::Handle<T>, width: f32, fallback: f32) -> &mut Self {
+        let h_px = ctx.get(h).map_or(fallback, |w| w.preferred_height().unwrap_or(fallback) + w.label_strip());
+        let span = self.row_span();
+        let draw: Draw<'w, P> = Box::new(move |pc, r, ctx| {
+            ctx.lend_h(h, |w, ctx| {
+                let (x, width) = span.unwrap_or((r.x, r.width));
+                w.set_row_rect(x, width);
+                render_widget(pc, w, r.x, r.y, r.width, r.height, ctx);
+            });
+        });
+        self.form.add(self.node, Style::default(), Size::new(width, h_px), Some(draw));
+        self
+    }
+
     /// A piece the page paints itself, `w` × `h` (in a column the width is the column's;
     /// in a row `w` is the cell's width, and it grows into the row's slack when `grow`).
     pub fn draw(&mut self, w: f32, h: f32, grow: bool, draw: impl FnOnce(&mut P, Rect, &mut UiContext) + 'w) -> &mut Self {
