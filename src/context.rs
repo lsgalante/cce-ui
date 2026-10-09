@@ -740,6 +740,29 @@ impl UiContext {
         w.unfocus();
     }
 
+    /// [`focus_widget`](Self::focus_widget) by id — for a widget the context owns.
+    pub fn focus_id(&mut self, id: WidgetId) {
+        if let Some(old) = self.focused_widget.filter(|old| *old != id) {
+            if let Some(w) = self.get_widget_mut(old) {
+                w.unfocus();
+            }
+        }
+        self.focused_widget = Some(id);
+        if let Some(w) = self.get_widget_mut(id) {
+            w.focus();
+        }
+    }
+
+    /// [`unfocus_widget`](Self::unfocus_widget) by id — for a widget the context owns.
+    pub fn unfocus_id(&mut self, id: WidgetId) {
+        if self.focused_widget == Some(id) {
+            self.focused_widget = None;
+        }
+        if let Some(w) = self.get_widget_mut(id) {
+            w.unfocus();
+        }
+    }
+
     pub fn clear_if_matches(&mut self, w: &dyn WidgetHost) {
         if self.focused_widget == Some(w.base().id()) {
             self.focused_widget = None;
