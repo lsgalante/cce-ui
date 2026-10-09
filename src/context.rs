@@ -166,6 +166,8 @@ impl UiContext {
         if wants_tick {
             self.register_tick_receiver(id);
         }
+        // Its embedded children (`widget::Embedded`) follow it in.
+        self.lend(id, |w, ctx| w.attach_embedded(ctx));
         Handle::from_id(id)
     }
 
@@ -187,9 +189,13 @@ impl UiContext {
     }
 
     /// Give the widget `h` names back by value, unregistered: its links, its focus and its
-    /// place in the tick list go with it. `None` if it is gone or out on loan.
+    /// place in the tick list go with it, and its embedded children come back inside it.
+    /// `None` if it is gone or out on loan.
     pub fn remove<W: WidgetHost + 'static>(&mut self, h: Handle<W>) -> Option<W> {
         let id = h.id();
+        self.tree.owned_root::<W>(id)?;
+        // Its embedded children (`widget::Embedded`) come back into it first.
+        self.lend(id, |w, ctx| w.release_embedded(ctx));
         let widget = self.tree.take_owned::<W>(id)?;
         if self.focused_widget == Some(id) {
             self.focused_widget = None;

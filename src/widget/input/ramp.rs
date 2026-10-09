@@ -134,10 +134,51 @@ pub struct Ramp {
     pub del_button: Adapted<Button>,
     pub preset_dropdown: Adapted<Dropdown>,
     pub line_type_dropdown: Adapted<Dropdown>,
-
 }
 
 impl Ramp {
+    /// How many fields take the keyboard, in order: the two dropdowns, then the key pad and
+    /// the delete button while a key is selected.
+    fn field_count(&self) -> usize {
+        if self.selected_key_idx.is_some() { 4 } else { 2 }
+    }
+
+    fn field(&mut self, i: usize) -> &mut dyn WidgetHost {
+        match i {
+            0 => &mut self.preset_dropdown,
+            1 => &mut self.line_type_dropdown,
+            2 => &mut self.key_pad,
+            _ => &mut self.del_button,
+        }
+    }
+
+    fn field_id(&self, i: usize) -> WidgetId {
+        match i {
+            0 => self.preset_dropdown.base().id(),
+            1 => self.line_type_dropdown.base().id(),
+            2 => self.key_pad.base().id(),
+            _ => self.del_button.base().id(),
+        }
+    }
+
+    /// The field the window's focus is on, if it is one of the ramp's.
+    fn focused_field(&self, ui: &UiContext) -> Option<usize> {
+        let focused = ui.focused_widget?;
+        (0..4).find(|&i| self.field_id(i) == focused)
+    }
+
+    /// Give field `i` the keyboard: the window's focus record names it (a field checks the
+    /// record before it takes a key), and it is told. The field is the ramp's own value and
+    /// never enters the registry; keys reach the ramp, which hands them to the field the
+    /// record names (`on_event`).
+    fn focus_field(&mut self, i: usize, ui: &mut UiContext) {
+        if let Some(old) = self.focused_field(ui).filter(|&o| o != i) {
+            self.field(old).unfocus();
+        }
+        ui.claim_focus(self.field_id(i));
+        self.field(i).focus();
+    }
+
     pub fn new() -> Adapted<Ramp> {
         let keys = vec![
             RampKey { pos: 0.0, value: 0.5 },
@@ -965,8 +1006,8 @@ impl Layout for Ramp {
         self.arrange_fields();
     }
 
-    // register_embedded_children: gone entirely (6bd self-routing): the fields need no
-    // eager registry presence — focus setters self-register on demand (6bc), the composite
+    // register_embedded_children: gone entirely (6bd self-routing): the fields are never
+    // in the registry — the ramp decides which field has the keyboard (`focus_field`), the composite
     // itself covers the spatial grid, and an eagerly-registered child DROPDOWN's open
     // popover made `is_coordinate_covered` occlude the composite's own hit gate (the
     // exclusion is exact-id only), which is why preset-item clicks never landed.
@@ -1362,6 +1403,16 @@ impl Input for Ramp {
         let mut changed = self.just_changed;
         self.just_changed = false;
 
+        // A field the window's focus moved away from is told here: the fields are not in
+        // the registry, so the focus change could not reach them itself.
+        let focused = self.focused_field(ui);
+        for i in 0..4 {
+            if Some(i) != focused && self.field(i).base().focused {
+                self.field(i).unfocus();
+                changed = true;
+            }
+        }
+
         // Hover-scroll inertia: once the finger stream stops (>60ms without
         // an event), the latched key coasts on the estimated velocity with
         // exponential decay, still resettling and syncing like live scrolls.
@@ -1500,10 +1551,10 @@ impl Input for Ramp {
             if self.selected_key_idx.is_some() {
                 if self.key_pad.mouse_input(button, state, px, py_event, ui) {
                     self.apply_pad_to_selected();
-                    return true;
+                            return true;
                 }
                 if self.del_button.mouse_input(button, state, px, py_event, ui) {
-                    if self.del_button.take_click() {
+                            if self.del_button.take_click() {
                         if let Some(idx) = self.selected_key_idx {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
@@ -1674,74 +1725,41 @@ impl Input for Ramp {
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
         if event.state != ElementState::Pressed { return false; }
         
+        let count = self.field_count();
+        let current = self.focused_field(ui).filter(|&i| i < count);
+
         if event.logical_key == Key::Named(NamedKey::Tab) {
-            let is_shift = event.shift;
-            let self_ptr = self as *mut Self;
-            let mut children = unsafe {
-                let mut list = vec![
-                    (*self_ptr).preset_dropdown.as_ptr_mut(),
-                    (*self_ptr).line_type_dropdown.as_ptr_mut(),
-                ];
-                if (*self_ptr).selected_key_idx.is_some() {
-                    list.push((*self_ptr).key_pad.as_ptr_mut());
-                    list.push((*self_ptr).del_button.as_ptr_mut());
-                }
-                list
+            let next = match current {
+                Some(curr) if event.shift => if curr == 0 { count - 1 } else { curr - 1 },
+                Some(curr) => (curr + 1) % count,
+                // Tab into the ramp: its first field takes the keyboard.
+                None => 0,
             };
-            
-            let mut focused_idx = None;
-            for (idx, child) in children.iter().enumerate() {
-                if unsafe { ui.is_focused(&**child) } {
-                    focused_idx = Some(idx);
-                    break;
-                }
-            }
-            
-            if let Some(curr) = focused_idx {
-                let next_idx = if is_shift {
-                    if curr == 0 { children.len() - 1 } else { curr - 1 }
-                } else {
-                    (curr + 1) % children.len()
-                };
-                unsafe {
-                    ui.set_focused(&mut *children[next_idx]);
-                }
-            } else {
-                unsafe {
-                    ui.set_focused(&mut *children[0]);
-                }
-            }
+            self.focus_field(next, ui);
             return true;
         }
-        
-        if ui.is_focused(&self.preset_dropdown) {
-            return self.preset_dropdown.keyboard_input(event, ui);
+
+        match current {
+            Some(0) => self.preset_dropdown.keyboard_input(event, ui),
+            Some(1) => self.line_type_dropdown.keyboard_input(event, ui),
+            Some(2) => self.key_pad.keyboard_input(event, ui),
+            Some(_) => self.del_button.keyboard_input(event, ui),
+            None => false,
         }
-        if ui.is_focused(&self.line_type_dropdown) {
-            return self.line_type_dropdown.keyboard_input(event, ui);
-        }
-        if ui.is_focused(&self.key_pad) {
-            return self.key_pad.keyboard_input(event, ui);
-        }
-        if ui.is_focused(&self.del_button) {
-            return self.del_button.keyboard_input(event, ui);
-        }
-        false
-    
             }
             Event::FocusIn => {
+                // Focused itself, the ramp gives the keyboard to its preset dropdown.
                 if let Some(ui) = ectx.ui.as_deref_mut() {
-                    ui.set_focused(&mut self.preset_dropdown);
+                    self.focus_field(0, ui);
                 }
                 false
             }
             Event::FocusOut => {
-        self.base.focused = false;
-        self.preset_dropdown.unfocus();
-        self.line_type_dropdown.unfocus();
-        self.key_pad.unfocus();
-        self.del_button.unfocus();
-    
+                self.base.focused = false;
+                self.preset_dropdown.unfocus();
+                self.line_type_dropdown.unfocus();
+                self.key_pad.unfocus();
+                self.del_button.unfocus();
                 false
             }
             _ => false,
@@ -1771,6 +1789,44 @@ impl Input for Ramp {
 
 #[cfg(test)]
 mod tests {
+    /// The ramp hands its fields the keyboard itself: the window's focus record names the
+    /// field (it checks the record before taking a key), Tab walks them, and none of them
+    /// enters the registry.
+    #[test]
+    fn the_ramp_hands_its_fields_the_keyboard() {
+        use crate::widget::{Event, KeyEvent};
+        let mut ctx = UiContext::new();
+        let h = ctx.insert(Ramp::new());
+        ctx.lend_h(h, |r, _| WidgetHost::set_rect(r, 0.0, 0.0, 300.0, 260.0));
+        let (preset, line) = (ctx[h].field_id(0), ctx[h].field_id(1));
+        ctx.set_focused_id(h.id());
+        assert_eq!(ctx.focused_widget, Some(preset), "focused, the ramp gives the preset dropdown the keys");
+        assert!(ctx[h].preset_dropdown.base().focused);
+        let key = |named, shift| Event::KeyInput(KeyEvent {
+            logical_key: Key::Named(named),
+            state: ElementState::Pressed,
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift,
+            alt: false,
+        });
+        assert!(ctx.propagate_event(&key(NamedKey::Tab, false), h.id()));
+        assert_eq!(ctx.focused_widget, Some(line), "Tab walks to the line dropdown");
+        assert!(!ctx[h].preset_dropdown.base().focused && ctx[h].line_type_dropdown.base().focused);
+        ctx.propagate_event(&key(NamedKey::Tab, false), h.id());
+        assert_eq!(ctx.focused_widget, Some(preset), "two fields with no key selected: it wraps");
+        ctx.propagate_event(&key(NamedKey::Tab, true), h.id());
+        assert_eq!(ctx.focused_widget, Some(line), "Shift+Tab walks back");
+        assert!(ctx.propagate_event(&key(NamedKey::Enter, false), h.id()), "the focused dropdown takes Enter");
+        assert!(ctx[h].line_type_dropdown.open, "and opens");
+        // Focus moving on from the ramp reaches the field at the ramp's next tick.
+        ctx.clear_focus();
+        ctx.lend_h(h, |r, ctx| WidgetHost::tick(r, 0.016, ctx));
+        assert!(!ctx[h].line_type_dropdown.base().focused, "the field let go");
+        assert!(!ctx.tree.is_registered(line) && !ctx.tree.is_registered(preset), "no field entered the registry");
+    }
+
     use super::*;
 
     /// The Preset dropdown lists the presets and nothing else. A curve

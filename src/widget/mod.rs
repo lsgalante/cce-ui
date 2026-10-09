@@ -454,6 +454,16 @@ pub trait WidgetHost {
     fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool { false }
     fn is_child_visible(&self, _child_id: WidgetId) -> bool { true }
 
+    /// Put the widget's embedded children (`widget::Embedded`) into `ctx`: what
+    /// `UiContext::insert` calls once the widget is in. The adapter forwards to
+    /// `Layout::register_embedded_children`, which also runs on every layout and tick.
+    fn attach_embedded(&mut self, _ctx: &mut UiContext) {}
+
+    /// Take the widget's embedded children back out of `ctx`, so it leaves whole: what
+    /// `UiContext::remove` calls before the widget goes. The adapter forwards to
+    /// `Layout::release_embedded_children`.
+    fn release_embedded(&mut self, _ctx: &mut UiContext) {}
+
     // `set_parent`/`add_child` are GONE from the trait (6bd batch 4): linking is a tree
     // operation — concrete callers ride the inherent `Adapted` methods, dyn callers go
     // through `focus::link_parent_child` or `ctx.tree` directly. `parent`/`children` are
@@ -747,6 +757,7 @@ pub mod line_edit;
 pub mod model;
 pub mod owned;
 pub mod handle;
+pub mod embedded;
 pub mod scroll_region;
 pub mod scroll_motion;
 pub mod side_swipe;
@@ -760,6 +771,7 @@ pub use self::scroll_motion::{Bounds, ScrollAxis, ScrollMotion, ScrollPhase, Scr
 pub use self::model::{Adapted, EventCtx, Input, Layout, Paint};
 pub use self::owned::Owned;
 pub use self::handle::Handle;
+pub use self::embedded::Embedded;
 pub use self::core::{Widget, focus, hover_animation, clipboard, context_menu, clear_widget_references};
 pub use self::core::focus::link_parent_child;
 pub use self::input::{

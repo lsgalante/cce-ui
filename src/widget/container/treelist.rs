@@ -7,6 +7,9 @@ use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use std::collections::HashSet;
 
+/// The add-key button's label, which also sizes it.
+const ADD_KEY_LABEL: &str = "+ Add Key";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TreeElement {
     Section {
@@ -160,20 +163,26 @@ fn build_tree(
     items
 }
 
-#[derive(Debug, Clone)]
+/// The fields' places (`TreeList::field_rects`).
+struct FieldRects {
+    search_box: Rect,
+    add_key_btn: Rect,
+    popover_box: Rect,
+}
+
+#[derive(Debug)]
 pub struct TreeList {
     pub base: Widget,
     pub scroll_box: ScrollBox,
-    /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
-    /// stable root rather than into this widget (see `widget::Owned`).
-    pub search_box: crate::widget::Owned<crate::widget::Adapted<TextBox>>,
-    /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
-    /// stable root rather than into this widget (see `widget::Owned`).
-    pub add_key_btn: crate::widget::Owned<crate::widget::Adapted<Button>>,
+    /// The search field: an [`Embedded`] child, the context's once the tree is (see
+    /// `register_embedded_children`).
+    pub search_box: Embedded<Adapted<TextBox>>,
+    /// What the search field held when the rows were last built (`rebuild_tree` has no
+    /// context to read the field through).
+    query: String,
+    pub add_key_btn: Embedded<Adapted<Button>>,
     pub add_key_popover_open: bool,
-    /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
-    /// stable root rather than into this widget (see `widget::Owned`).
-    pub add_key_popover_box: crate::widget::Owned<crate::widget::Adapted<TextBox>>,
+    pub add_key_popover_box: Embedded<Adapted<TextBox>>,
     pub new_key_path_request: Option<String>,
     pub flat_keys: Vec<(String, serde_json::Value)>,
     pub annotations: Vec<Option<String>>,
@@ -192,9 +201,8 @@ pub struct TreeList {
     /// tree while still being, visually, part of the tree pane.
     pub focused: bool,
     pub deleted_key_path: Option<String>,
-    /// In an [`Owned`](crate::widget::Owned) box of its own, so the registry points at a
-    /// stable root rather than into this widget (see `widget::Owned`).
-    pub edit_box: crate::widget::Owned<crate::widget::Adapted<TextBox>>,
+    /// The inline rename editor: in the context only while a rename is under way.
+    pub edit_box: Embedded<Adapted<TextBox>>,
     pub editing_key_idx: Option<usize>,
     pub double_click_timer: Option<(web_time::Instant, usize)>,
     pub rename_request: Option<(String, String)>,
@@ -210,10 +218,11 @@ impl TreeList {
         Adapted::new(TreeList {
             base: Widget::new(),
             scroll_box,
-            search_box: TextBox::new(String::new()).with_search().with_update_on_type(true).into(),
-            add_key_btn: Button::new(0.0, 0.0, 80.0, 26.0).with_label("+ Add Key").into(),
+            search_box: Embedded::new(TextBox::new(String::new()).with_search().with_update_on_type(true)),
+            query: String::new(),
+            add_key_btn: Embedded::new(Button::new(0.0, 0.0, 80.0, 26.0).with_label(ADD_KEY_LABEL)),
             add_key_popover_open: false,
-            add_key_popover_box: TextBox::new(String::new()).with_placeholder("new.key.path").with_multiline(false).into(),
+            add_key_popover_box: Embedded::new(TextBox::new(String::new()).with_placeholder("new.key.path").with_multiline(false)),
             new_key_path_request: None,
             flat_keys: Vec::new(),
             annotations: Vec::new(),
@@ -227,7 +236,7 @@ impl TreeList {
             last_scroll_y: 0.0,
             focused: false,
             deleted_key_path: None,
-            edit_box: TextBox::new(String::new()).with_multiline(false).with_draw_bg_border(true).into(),
+            edit_box: Embedded::new(TextBox::new(String::new()).with_multiline(false).with_draw_bg_border(true)),
             editing_key_idx: None,
             double_click_timer: None,
             rename_request: None,
@@ -239,7 +248,8 @@ impl TreeList {
     }
 
     pub fn popover_rect_geom(&self) -> (f32, f32, f32, f32) {
-        let (bx, by, bw, bh) = self.add_key_btn.rect();
+        let b = self.field_rects().add_key_btn;
+        let (bx, by, bw, bh) = (b.x, b.y, b.width, b.height);
         let popover_w = 220.0;
         let popover_h = 36.0;
         let popover_x = bx + bw - popover_w;
@@ -247,9 +257,66 @@ impl TreeList {
         (popover_x, popover_y, popover_w, popover_h)
     }
 
+    /// Where the search field, the add-key button and the add-key popover's box stand, from
+    /// the tree's content rect: the field across the top less the button at its right end,
+    /// the popover's box inside the popover under the button.
+    fn field_rects(&self) -> FieldRects {
+        let (x, y, w) = (self.base.x, self.base.y, self.base.w);
+        let search_margin_x = 8.0;
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let (btn_family, btn_size) = crate::layout::parse_font_string(&crate::layout::button_font());
+        let label_w = crate::widget::display::measure_text_width(ADD_KEY_LABEL, &btn_family, btn_size.unwrap_or(12.0));
+        let button_width = label_w + 2.0 * crate::layout::button_padding();
+        let button_x = x + w - search_margin_x - button_width;
+        let add_key_btn = Rect { x: button_x, y: y + search_margin_y, width: button_width, height: search_h };
+        let popover_w = 220.0;
+        let popover_h = 36.0;
+        let (px, py) = (button_x + button_width - popover_w, add_key_btn.y + search_h + 4.0);
+        FieldRects {
+            search_box: Rect { x: x + search_margin_x, y: y + search_margin_y, width: w - 2.0 * search_margin_x - button_width - 6.0, height: search_h },
+            add_key_btn,
+            popover_box: Rect { x: px + 8.0, y: py + 5.0, width: popover_w - 16.0, height: popover_h - 10.0 },
+        }
+    }
+
+    /// Place the fields the tree still holds by value (it is not in a context).
+    fn place_held_fields(&mut self) {
+        let r = self.field_rects();
+        for (field, rect) in [(&mut self.search_box, r.search_box), (&mut self.add_key_popover_box, r.popover_box)] {
+            if let Some(f) = field.here_mut() {
+                f.set_rect(rect.x, rect.y, rect.width, rect.height);
+            }
+        }
+        if let Some(b) = self.add_key_btn.here_mut() {
+            b.set_rect(r.add_key_btn.x, r.add_key_btn.y, r.add_key_btn.width, r.add_key_btn.height);
+        }
+    }
+
+    /// The field children, in the legacy children() order: those held here (`held`) or
+    /// those in `ui` (not `held`).
+    fn paint_fields(&self, ui: &UiContext, pc: &mut PaintCtx, held: bool) {
+        macro_rules! field {
+            ($f:expr) => {
+                if $f.is_attached() != held {
+                    $f.get(ui).paint_self(ui, pc);
+                }
+            };
+        }
+        field!(self.search_box);
+        field!(self.add_key_btn);
+        if self.add_key_popover_open {
+            field!(self.add_key_popover_box);
+        }
+        if self.editing_key_idx.is_some() {
+            field!(self.edit_box);
+        }
+    }
+
     pub fn focus_search(&mut self, ctx: &mut UiContext) {
-        ctx.set_focused(&mut self.search_box);
-        self.search_box.focus();
+        self.search_box.attach(ctx);
+        ctx.set_focused_id(self.search_box.id());
+        self.search_box.get_mut(ctx).focus();
     }
 
     pub fn set_flat_keys(&mut self, flat_keys: Vec<(String, serde_json::Value)>) {
@@ -258,8 +325,7 @@ impl TreeList {
     }
 
     pub fn rebuild_tree(&mut self) {
-        let query = self.search_box.text.clone();
-        self.items = build_tree(&self.flat_keys, &self.annotations, &self.collapsed_sections, &query);
+        self.items = build_tree(&self.flat_keys, &self.annotations, &self.collapsed_sections, &self.query);
         let content_h = self.items.len() as f32 * self.item_height;
         let h = self.base.h;
         let search_margin_y = 6.0;
@@ -385,9 +451,9 @@ impl TreeList {
         let _ = host_id;
         if self.editing_key_idx.is_some() {
             if button == MouseButton::Left && state == ElementState::Pressed {
-                let (ex, ey, ew, eh) = self.edit_box.rect();
+                let (ex, ey, ew, eh) = self.edit_box.get(ui).rect();
                 if px >= ex && px <= ex + ew && py >= ey && py <= ey + eh {
-                    if self.edit_box.mouse_input(button, state, px, py, ui) {
+                    if self.edit_box.lend(ui, |w, ui| w.mouse_input(button, state, px, py, ui)) == Some(true) {
                         return true;
                     }
                 } else {
@@ -408,8 +474,8 @@ impl TreeList {
                     ui.clear_focus();
                     changed = true;
                 } else {
-                    if self.add_key_popover_box.mouse_input(button, state, px, py, ui) {
-                        ui.set_focused(&mut self.add_key_popover_box);
+                    if self.add_key_popover_box.lend(ui, |w, ui| w.mouse_input(button, state, px, py, ui)) == Some(true) {
+                        ui.set_focused_id(self.add_key_popover_box.id());
                         changed = true;
                     }
                 }
@@ -423,22 +489,23 @@ impl TreeList {
         if self.scroll_box.mouse_input(button, state, px, py, ui) {
             changed = true;
         }
-        if self.search_box.mouse_input(button, state, px, py, ui) {
-            ui.set_focused(&mut self.search_box);
+        if self.search_box.lend(ui, |w, ui| w.mouse_input(button, state, px, py, ui)) == Some(true) {
+            ui.set_focused_id(self.search_box.id());
             changed = true;
         }
-        if self.add_key_btn.mouse_input(button, state, px, py, ui) {
-            if self.add_key_btn.take_click() {
+        if let Some(Some(clicked)) = self.add_key_btn.lend(ui, |w, ui| w.mouse_input(button, state, px, py, ui).then(|| w.take_click())) {
+            if clicked {
                 self.add_key_popover_open = !self.add_key_popover_open;
                 if self.add_key_popover_open {
-                    self.add_key_popover_box.text.clear();
-                    self.add_key_popover_box.edit_buffer.clear();
-                    self.add_key_popover_box.cursor_idx = 0;
-                    self.add_key_popover_box.select_anchor = None;
-                    self.add_key_popover_box.all_selected = false;
-                    self.add_key_popover_box.editing = true;
-                    ui.set_focused(&mut self.add_key_popover_box);
-                    self.add_key_popover_box.focus();
+                    let b = self.add_key_popover_box.get_mut(ui);
+                    b.text.clear();
+                    b.edit_buffer.clear();
+                    b.cursor_idx = 0;
+                    b.select_anchor = None;
+                    b.all_selected = false;
+                    b.editing = true;
+                    ui.set_focused_id(self.add_key_popover_box.id());
+                    self.add_key_popover_box.get_mut(ui).focus();
                 } else {
                     ui.clear_focus();
                 }
@@ -494,16 +561,19 @@ impl TreeList {
                             TreeElement::Leaf { path, name, .. } => (path.clone(), name.clone()),
                         };
                         self.editing_key_idx = Some(row_idx);
-                        self.edit_box = TextBox::new(relative_name).with_multiline(false).with_draw_bg_border(true).into();
-                        self.edit_box.editing = true;
-                        self.edit_box.cursor_idx = self.edit_box.text.chars().count();
-                        self.edit_box.select_anchor = Some(0);
-                        
-                        let eb_id = self.edit_box.base().id();
-                        ui.register_embedded(&mut self.edit_box);
+                        // A fresh editor for this rename, the context's while it is up
+                        // (linked under the tree) and given back when it commits (`tick_ctx`).
+                        self.edit_box.detach(ui);
+                        let mut eb = TextBox::new(relative_name).with_multiline(false).with_draw_bg_border(true);
+                        eb.editing = true;
+                        eb.cursor_idx = eb.text.chars().count();
+                        eb.select_anchor = Some(0);
+                        self.edit_box = Embedded::new(eb);
+                        self.edit_box.attach(ui);
+
+                        let eb_id = self.edit_box.id();
                         ui.link_ids(host_id, eb_id);
-                        
-                        ui.set_focused(&mut self.edit_box);
+                        ui.set_focused_id(eb_id);
                         return true;
                     }
 
@@ -597,14 +667,14 @@ impl TreeList {
 
     fn move_body(&mut self, px: f32, py: f32, ui: &mut UiContext) -> bool {
         let mut changed = self.scroll_box.on_cursor_moved(px, py, ui);
-        if self.search_box.on_cursor_moved(px, py, ui) {
+        if self.search_box.lend(ui, |w, ui| w.on_cursor_moved(px, py, ui)) == Some(true) {
             changed = true;
         }
-        if self.add_key_btn.on_cursor_moved(px, py, ui) {
+        if self.add_key_btn.lend(ui, |w, ui| w.on_cursor_moved(px, py, ui)) == Some(true) {
             changed = true;
         }
         if self.add_key_popover_open
-            && self.add_key_popover_box.on_cursor_moved(px, py, ui) {
+            && self.add_key_popover_box.lend(ui, |w, ui| w.on_cursor_moved(px, py, ui)) == Some(true) {
                 changed = true;
             }
 
@@ -634,14 +704,14 @@ impl TreeList {
 
     fn key_body(&mut self, event: &KeyEvent, ui: &mut UiContext) -> bool {
         if self.editing_key_idx.is_some()
-            && self.edit_box.keyboard_input(event, ui) {
+            && self.edit_box.lend(ui, |w, ui| w.keyboard_input(event, ui)) == Some(true) {
                 return true;
             }
         if self.add_key_popover_open
-            && self.add_key_popover_box.keyboard_input(event, ui) {
+            && self.add_key_popover_box.lend(ui, |w, ui| w.keyboard_input(event, ui)) == Some(true) {
                 return true;
             }
-        if self.search_box.keyboard_input(event, ui) {
+        if self.search_box.lend(ui, |w, ui| w.keyboard_input(event, ui)) == Some(true) {
             return true;
         }
         false
@@ -663,57 +733,48 @@ impl Layout for TreeList {
         self.base.y = y;
         self.base.w = w;
         self.base.h = h;
-        
-        let search_margin_x = 8.0;
+
+        // The fields are placed here while the tree holds them; once they are the context's,
+        // `register_embedded_children` places them (it has the context, `set_rect` does not).
+        self.place_held_fields();
+
         let search_margin_y = 6.0;
         let search_h = 26.0;
         let offset_y = search_h + 2.0 * search_margin_y;
-        
-        let (btn_family, btn_size) = crate::layout::parse_font_string(&crate::layout::button_font());
-        let label_w = crate::widget::display::measure_text_width(
-            self.add_key_btn.base().label.as_deref().unwrap_or(""),
-            &btn_family,
-            btn_size.unwrap_or(12.0),
-        );
-        let button_width = label_w + 2.0 * crate::layout::button_padding();
-        let button_height = search_h;
-        let button_x = x + w - search_margin_x - button_width;
-        
-        self.search_box.set_rect(x + search_margin_x, y + search_margin_y, w - 2.0 * search_margin_x - button_width - 6.0, search_h);
-        self.add_key_btn.set_rect(button_x, y + search_margin_y, button_width, button_height);
-        
-        let (px, py, pw, ph) = self.popover_rect_geom();
-        self.add_key_popover_box.set_rect(px + 8.0, py + 5.0, pw - 16.0, ph - 10.0);
-        
         let header_h = 26.0;
         self.scroll_box.set_rect(x, y + offset_y + header_h, w, h - offset_y - header_h);
-        
+
         let content_h = self.items.len() as f32 * self.item_height;
         self.scroll_box.update_bounds(content_h, y + offset_y + header_h, h - offset_y - header_h);
         self.last_scroll_y = self.scroll_box.scroll_y;
-    
     }
 
     /// Keep the field widgets registered/linked under the adapter every tick (the legacy
     /// `set_parent` side effect; also heals the inline rename editor's registry entry).
     fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
-        // Registered but deliberately NOT tree-linked (6bd): the tree is a SELF-ROUTING
+        // In the context but deliberately NOT tree-linked (6bd): the tree is a SELF-ROUTING
         // composite — mouse_body/move_body/key_body forward to every field widget
         // internally, so the router's children-first descent double-delivered AND starved
         // the tree-level logic (the recorded 6as latents: the hit add-key button consumed
         // the press before mouse_body's take_click toggle ran, so the popover never
-        // opened, and the wheel died the same way). Registration alone keeps the ids
-        // resolvable for focus, coverage, and the spatial grid.
+        // opened, and the wheel died the same way). Being the context's keeps the ids
+        // resolvable for focus, coverage, the spatial grid and the accessibility tree.
+        // (The rename editor is linked while it is up; see `mouse_body`.)
         let _ = host_id;
-        ctx.register_embedded(&mut self.search_box);
+        self.search_box.attach(ctx);
+        self.add_key_btn.attach(ctx);
+        self.add_key_popover_box.attach(ctx);
+        let r = self.field_rects();
+        self.search_box.get_mut(ctx).set_rect(r.search_box.x, r.search_box.y, r.search_box.width, r.search_box.height);
+        self.add_key_btn.get_mut(ctx).set_rect(r.add_key_btn.x, r.add_key_btn.y, r.add_key_btn.width, r.add_key_btn.height);
+        self.add_key_popover_box.get_mut(ctx).set_rect(r.popover_box.x, r.popover_box.y, r.popover_box.width, r.popover_box.height);
+    }
 
-        ctx.register_embedded(&mut self.add_key_btn);
-
-        ctx.register_embedded(&mut self.add_key_popover_box);
-
-        if self.editing_key_idx.is_some() {
-            ctx.register_embedded(&mut self.edit_box);
-        }
+    fn release_embedded_children(&mut self, ctx: &mut UiContext) {
+        self.search_box.detach(ctx);
+        self.add_key_btn.detach(ctx);
+        self.add_key_popover_box.detach(ctx);
+        self.edit_box.detach(ctx);
     }
 }
 
@@ -726,21 +787,31 @@ impl Paint for TreeList {
         Some(crate::layout::tree_font())
     }
 
-    // The field widgets are registered but not tree-linked (self-routing, see
-    // register_embedded_children); their pixels come from `paint`'s child pass — the
+    // The field widgets are the context's but not tree-linked (self-routing, see
+    // register_embedded_children); their pixels come from `paint_ui`'s child pass — the
     // walk must not descend either.
     fn paints_own_subtree(&self) -> bool {
         true
     }
 
+    /// Shape the fields the tree still holds; once they are the context's, the runner
+    /// shapes them with every other widget it has.
     fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
-        self.search_box.prepare_text(fs);
-        self.add_key_btn.prepare_text(fs);
+        if let Some(f) = self.search_box.here_mut() {
+            f.prepare_text(fs);
+        }
+        if let Some(b) = self.add_key_btn.here_mut() {
+            b.prepare_text(fs);
+        }
         if self.add_key_popover_open {
-            self.add_key_popover_box.prepare_text(fs);
+            if let Some(f) = self.add_key_popover_box.here_mut() {
+                f.prepare_text(fs);
+            }
         }
         if self.editing_key_idx.is_some() {
-            self.edit_box.prepare_text(fs);
+            if let Some(f) = self.edit_box.here_mut() {
+                f.prepare_text(fs);
+            }
         }
     
     }
@@ -1022,16 +1093,15 @@ impl Paint for TreeList {
             });
         }
 
-        // Field children, in the legacy children() order.
+        // Field children the tree still holds (no context: `paint_ui` paints the context's).
         let dummy = UiContext::new();
-        self.search_box.paint_self(&dummy, pc);
-        self.add_key_btn.paint_self(&dummy, pc);
-        if self.add_key_popover_open {
-            self.add_key_popover_box.paint_self(&dummy, pc);
-        }
-        if self.editing_key_idx.is_some() {
-            self.edit_box.paint_self(&dummy, pc);
-        }
+        self.paint_fields(&dummy, pc, true);
+    }
+
+    /// The tree, then its fields wherever they are — the context's through `ui`.
+    fn paint_ui(&self, ui: &UiContext, rect: Rect, pc: &mut PaintCtx) {
+        self.paint(rect, pc);
+        self.paint_fields(ui, pc, false);
     }
 
     fn popover(&self, _rect: Rect) -> Option<(f32, f32, f32, f32)> {
@@ -1111,18 +1181,18 @@ impl Input for TreeList {
             return false;
         };
         let mut changed = false;
-        if self.search_box.tick(dt, ui) {
+        if self.search_box.lend(ui, |w, ui| w.tick(dt, ui)) == Some(true) {
             changed = true;
         }
-        if self.add_key_btn.tick(dt, ui) {
+        if self.add_key_btn.lend(ui, |w, ui| w.tick(dt, ui)) == Some(true) {
             changed = true;
         }
         if self.add_key_popover_open {
-            if self.add_key_popover_box.tick(dt, ui) {
+            if self.add_key_popover_box.lend(ui, |w, ui| w.tick(dt, ui)) == Some(true) {
                 changed = true;
             }
-            if !self.add_key_popover_box.editing {
-                let path = self.add_key_popover_box.text.trim().to_string();
+            if !self.add_key_popover_box.get(ui).editing {
+                let path = self.add_key_popover_box.get(ui).text.trim().to_string();
                 if !path.is_empty() {
                     self.new_key_path_request = Some(path);
                 }
@@ -1131,13 +1201,14 @@ impl Input for TreeList {
                 changed = true;
             }
         }
-        if self.search_box.take_change() {
+        if self.search_box.get_mut(ui).take_change() {
+            self.query = self.search_box.get(ui).text.clone();
             self.rebuild_tree();
             changed = true;
         }
         
         if self.editing_key_idx.is_some() {
-            if self.edit_box.tick(dt, ui) {
+            if self.edit_box.lend(ui, |w, ui| w.tick(dt, ui)) == Some(true) {
                 changed = true;
             }
             if let Some(row_idx) = self.editing_key_idx {
@@ -1147,17 +1218,17 @@ impl Input for TreeList {
                     let row_y = list_top + row_idx as f32 * self.item_height - self.scroll_box.scroll_y;
                     let box_x = list_left + 5.0;
                     let box_y = row_y + 2.0;
-                    self.edit_box.set_rect(box_x, box_y, 170.0, 24.0);
+                    self.edit_box.get_mut(ui).set_rect(box_x, box_y, 170.0, 24.0);
                 }
             }
-            if !self.edit_box.editing {
+            if !self.edit_box.get(ui).editing {
                 let row_idx = self.editing_key_idx.unwrap();
                 if row_idx < self.items.len() {
                     let (old_path, relative_name) = match &self.items[row_idx] {
                         TreeElement::Section { path, name, .. } => (path.clone(), name.clone()),
                         TreeElement::Leaf { path, name, .. } => (path.clone(), name.clone()),
                     };
-                    let new_name = self.edit_box.text.trim().to_string();
+                    let new_name = self.edit_box.get(ui).text.trim().to_string();
                     if !new_name.is_empty() && new_name != relative_name {
                         let new_path = if let Some(pos) = old_path.rfind('.') {
                             format!("{}.{}", &old_path[..pos], new_name)
@@ -1176,9 +1247,9 @@ impl Input for TreeList {
                 // press before `mouse_body` ever ran: an invisible dead zone that ate row clicks
                 // and silently re-entered editing on an unpainted box. Each rename also minted a
                 // fresh TextBox id into the same field, so the child list grew monotonically.
-                let eb_id = self.edit_box.base().id();
+                let eb_id = self.edit_box.id();
                 ui.unlink_child(host_id, eb_id);
-                ui.unregister_widget(eb_id);
+                self.edit_box.detach(ui);
                 ui.claim_focus(host_id);
                 self.focused = true;
                 changed = true;
@@ -1232,7 +1303,14 @@ impl Input for TreeList {
             Event::FocusOut => {
                 self.focused = false;
                 self.add_key_popover_open = false;
-                self.add_key_popover_box.unfocus();
+                match ectx.ui.as_deref_mut() {
+                    Some(ui) => self.add_key_popover_box.get_mut(ui).unfocus(),
+                    None => {
+                        if let Some(b) = self.add_key_popover_box.here_mut() {
+                            b.unfocus();
+                        }
+                    }
+                }
                 false
             }
             _ => false,
@@ -1622,9 +1700,9 @@ mod tests {
         assert!(strip > 0.0, "a detached label has a strip");
         tree_list.set_rect(10.0, 52.0, 380.0, 200.0 + strip);
         let content_y = 52.0 + strip;
-        let (_, sy, _, sh) = tree_list.search_box.rect();
+        let (_, sy, _, sh) = tree_list.search_box.here().unwrap().rect();
         assert_eq!(sy, content_y + 6.0, "the search box is inside the well, one margin down");
-        let (_, by, _, _) = tree_list.add_key_btn.rect();
+        let (_, by, _, _) = tree_list.add_key_btn.here().unwrap().rect();
         assert_eq!(by, sy, "the add-key button shares the search row");
         let header_y = content_y + sh + 12.0;
         assert_eq!(tree_list.scroll_box.base.y, header_y + 26.0, "the rows start under the header");
@@ -1632,6 +1710,16 @@ mod tests {
         let key = labels.iter().find(|(l, _)| l.text == "Key").expect("a Key header");
         assert_eq!(key.0.y, header_y + 6.0, "the header text is in the header band");
         assert_eq!(tree_list.scroll_box.base.y + tree_list.scroll_box.base.h, 52.0 + strip + 200.0, "the rows end at the block's bottom");
+
+        // In a context the fields are its entries, placed in the same places by the
+        // embedded hook.
+        let held = (tree_list.search_box.here().unwrap().rect(), tree_list.add_key_btn.here().unwrap().rect());
+        let mut ctx = UiContext::new();
+        let h = ctx.insert(tree_list);
+        ctx.lend_h(h, |t, ctx| t.attach_embedded(ctx));
+        let t = &ctx[h];
+        assert!(t.search_box.is_attached() && t.add_key_btn.is_attached());
+        assert_eq!((t.search_box.get(&ctx).rect(), t.add_key_btn.get(&ctx).rect()), held);
     }
 
     #[test]
@@ -1732,12 +1820,12 @@ mod tests {
         ]);
         
         // Match none
-        tree_list.search_box.text = "nonexistent".to_string();
+        tree_list.query = "nonexistent".to_string();
         tree_list.rebuild_tree();
         assert!(tree_list.items.is_empty(), "Tree should be empty for nonexistent search query!");
 
         // Match partially on key path
-        tree_list.search_box.text = "corner".to_string();
+        tree_list.query = "corner".to_string();
         tree_list.rebuild_tree();
         assert!(!tree_list.items.is_empty(), "Tree should have items matching 'corner'!");
         let has_corner = tree_list.items.iter().any(|item| match item {
@@ -1752,7 +1840,7 @@ mod tests {
         assert!(!has_accel, "Tree should not contain 'accel_profile' item!");
 
         // Match on value
-        tree_list.search_box.text = "flat".to_string();
+        tree_list.query = "flat".to_string();
         tree_list.rebuild_tree();
         let has_accel = tree_list.items.iter().any(|item| match item {
             TreeElement::Leaf { name, .. } => name == "accel_profile",
@@ -1761,7 +1849,7 @@ mod tests {
         assert!(has_accel, "Tree should contain 'accel_profile' when matching on value 'flat'!");
 
         // Collapse matching section when filtered
-        tree_list.search_box.text = "corner".to_string();
+        tree_list.query = "corner".to_string();
         tree_list.collapsed_sections.insert("style.data.tree".to_string());
         tree_list.rebuild_tree();
         let has_corner = tree_list.items.iter().any(|item| match item {
@@ -1780,46 +1868,49 @@ mod tests {
     #[test]
     fn test_treelist_double_click_rename() {
         let mut ctx = UiContext::new();
-        let mut tree_list = TreeList::new();
-        tree_list.set_rect(0.0, 0.0, 380.0, 500.0);
-        tree_list.set_flat_keys(vec![
+        let h = ctx.insert(TreeList::new());
+        ctx.lend_h(h, |t, ctx| {
+            t.set_rect(0.0, 0.0, 380.0, 500.0);
+            t.attach_embedded(ctx);
+        });
+        ctx[h].set_flat_keys(vec![
             ("style.control.dropdown.color".to_string(), serde_json::Value::String("#ff00ff".to_string()))
         ]);
+        let double_click = |ctx: &mut UiContext, py: f32| {
+            ctx.lend_h(h, |t, ctx| {
+                t.mouse_input(MouseButton::Left, ElementState::Pressed, 10.0, py, ctx);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                t.mouse_input(MouseButton::Left, ElementState::Pressed, 10.0, py, ctx);
+            });
+        };
+        // The editor is the context's while a rename is up, and given back when it commits.
+        let commit = |ctx: &mut UiContext, name: &str| {
+            let eb = ctx[h].edit_box.handle().expect("the editor is in the context while it is up");
+            let b = &mut ctx[eb];
+            b.text = name.to_string();
+            b.edit_buffer = name.to_string();
+            b.editing = false;
+            ctx.lend_h(h, |t, ctx| t.tick(0.016, ctx));
+            assert!(ctx.get(eb).is_none(), "the committed editor left the context");
+        };
 
         // 1. Test renaming a section (row 0)
-        let list_top = tree_list.scroll_box.viewport_y;
-        let py0 = list_top + 10.0;
-        tree_list.mouse_input(MouseButton::Left, ElementState::Pressed, 10.0, py0, &mut ctx);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        tree_list.mouse_input(MouseButton::Left, ElementState::Pressed, 10.0, py0, &mut ctx);
-
-        assert!(tree_list.editing_key_idx.is_some());
-        assert_eq!(tree_list.edit_box.text, "style"); // Pre-populated with relative name!
-
-        tree_list.edit_box.text = "theme".to_string();
-        tree_list.edit_box.edit_buffer = "theme".to_string();
-        tree_list.edit_box.editing = false;
-        tree_list.tick(0.016, &mut ctx);
-
-        let req = tree_list.take_rename_request();
+        let list_top = ctx[h].scroll_box.viewport_y;
+        double_click(&mut ctx, list_top + 10.0);
+        assert!(ctx[h].editing_key_idx.is_some());
+        assert_eq!(ctx[h].edit_box.get(&ctx).text, "style"); // Pre-populated with relative name!
+        commit(&mut ctx, "theme");
+        let req = ctx[h].take_rename_request();
         assert_eq!(req, Some(("style".to_string(), "theme".to_string())));
 
         // 2. Test renaming a leaf (row 3)
-        tree_list.rebuild_tree();
-        let py3 = list_top + 3.0 * tree_list.item_height + 10.0; // Click row 3 (Leaf "color")
-        tree_list.mouse_input(MouseButton::Left, ElementState::Pressed, 10.0, py3, &mut ctx);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        tree_list.mouse_input(MouseButton::Left, ElementState::Pressed, 10.0, py3, &mut ctx);
-
-        assert!(tree_list.editing_key_idx.is_some());
-        assert_eq!(tree_list.edit_box.text, "color"); // Pre-populated with relative name "color"!
-
-        tree_list.edit_box.text = "bg_color".to_string();
-        tree_list.edit_box.edit_buffer = "bg_color".to_string();
-        tree_list.edit_box.editing = false;
-        tree_list.tick(0.016, &mut ctx);
-
-        let req = tree_list.take_rename_request();
+        ctx[h].rebuild_tree();
+        let py3 = list_top + 3.0 * ctx[h].item_height + 10.0; // Click row 3 (Leaf "color")
+        double_click(&mut ctx, py3);
+        assert!(ctx[h].editing_key_idx.is_some());
+        assert_eq!(ctx[h].edit_box.get(&ctx).text, "color"); // Pre-populated with relative name "color"!
+        commit(&mut ctx, "bg_color");
+        let req = ctx[h].take_rename_request();
         assert_eq!(req, Some(("style.control.dropdown.color".to_string(), "style.control.dropdown.bg_color".to_string())));
     }
 }

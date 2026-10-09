@@ -80,5 +80,32 @@ itself, reaching back through the context — can reach it a second time.
    children (the designer dialog's dropdown and colour selectors, a ramp's preset
    dropdown, a tree list's fields), which are phase 4, and widgets tests build on the stack.
 4. **The toolkit's embedded children** on handles.
+   **DONE (2026-10-08).** `widget::Embedded<W>`: a child a composite holds by value
+   until the composite is inserted, when `UiContext::insert` calls the new
+   `WidgetHost::attach_embedded` (the adapter's `Layout::register_embedded_children`) and the
+   child moves into the context under its own id; `UiContext::remove` calls
+   `release_embedded` first, so a composite leaves with its children in it. A composite's
+   `set_rect` has no context, so it keeps the rect it was given and places its context-held
+   children in `register_embedded_children`, which runs on insert, every layout and every
+   tick. Done: **Paginator** (its strip, linked as before; the page is pushed down when
+   `set_selected_page` asks and otherwise taken from the strip, since the router reaches the
+   linked strip before the paginator — a per-tick push undid a tab clicked on the strip, which
+   the gallery's A/B caught; its `container_children` raw-pointer channel is gone) and
+   **TreeList** (search box, add-key button and popover box, the rename editor while a rename
+   is up; the search query is kept by the tree for `rebuild_tree`, the field geometry is one
+   pure function, and the fields paint through `paint_ui`). Shadow A/B of the data editor and
+   the gallery against the build before: identical. **Ramp** never registers its fields at
+   all: the focus record names the field that has the keyboard (`focus_field` claims its id),
+   the ramp routes keys to it and walks them on Tab, and its tick unfocuses a field the record
+   no longer names — the pointer registration it made while a field was focused is gone, and
+   ColorRamp already worked so. A closed dropdown takes Enter only when the record names it,
+   which is why the record names the field rather than the ramp. **The designer dialog's
+   dropdown** is an `Embedded` the dialog attaches when it is inserted; the host opens it by
+   id (`claim_focus`, which tells the dropdown nothing, so its trigger wears no focus ring as
+   before) and reaches it with `lend_h`. Its colour selectors were paint stamps held in
+   `Owned` boxes and never registered; they are bare `Adapted`s. Shadow A/B of cce-ramp, the
+   gallery's Ramp child (focus, Tab, Enter, a pick, a click on the line) and the designer
+   dialog (open, pick by pointer and by keyboard, Escape): identical. Nothing in the toolkit
+   or the apps registers a widget by pointer any more but tests that build widgets on the stack.
 5. **Delete the pointer path**: `Owned`, `register_host` / `register_widget` / `set_focused_ptr`
    and the other `unsafe fn`s, `Liveness`, `stable_target`. The tree holds owned slots only.

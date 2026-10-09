@@ -171,6 +171,8 @@ impl<W: WidgetHost + 'static> WidgetHost for Owned<W> {
     fn set_visible(&mut self, visible: bool) { (**self).set_visible(visible) }
     fn visible(&self) -> bool { (**self).visible() }
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool { (**self).tick(dt, ctx) }
+    fn attach_embedded(&mut self, ctx: &mut UiContext) { (**self).attach_embedded(ctx) }
+    fn release_embedded(&mut self, ctx: &mut UiContext) { (**self).release_embedded(ctx) }
     fn is_child_visible(&self, child_id: WidgetId) -> bool { (**self).is_child_visible(child_id) }
     fn a11y_items(&self) -> Vec<crate::a11y::A11yItem> { (**self).a11y_items() }
 }

@@ -1822,9 +1822,14 @@ app access that overlaps a context call. `ctx.remove(h)` gives it back by value;
 the context drops the rest; `clear_hierarchy` keeps them. And every call the context makes
 into a widget that hands it the context goes through `lend`, which takes the widget out of
 reach for the call: a widget reaching itself through the context mid-event gets `None`,
-for owned and pointer entries alike. **Every app is on handles** (phase 3, 2026-10-08); what
-still registers by pointer is the toolkit's own embedded children (phase 4), and then `Owned`
-and the pointer API go (phase 5). New code uses handles: `render_widget_h`,
+for owned and pointer entries alike. **Every app is on handles** (phase 3, 2026-10-08), and so
+are the toolkit's embedded children (phase 4): a composite holds each in a `widget::Embedded`,
+by value until the composite is inserted and then in the context under its own id
+(`Layout::register_embedded_children` attaches, `release_embedded_children` takes it back on
+`remove`); a composite's `set_rect` has no context, so it keeps the rect and places its
+children in that hook, which runs on insert, every layout and every tick. A ramp's fields are
+never registered: the focus record names the field with the keyboard and the ramp routes to
+it. Only tests still register by pointer, and then `Owned` and the pointer API go (phase 5). New code uses handles: `render_widget_h`,
 `Form::widget_h` / `widget_w_h`, `register_popover_id`, `focus_id` / `unfocus_id` /
 `set_focused_id`, `link_ids`, `paint_root_into(ctx, &ctx[h], pc)`. Three things the apps'
 move taught:

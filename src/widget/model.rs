@@ -137,6 +137,11 @@ pub trait Layout {
     /// adapter calls this from `WidgetHost::tick` and `WidgetHost::layout`, mirroring the legacy
     /// cadence. `host_id` is the adapter's id, for `link_ids`. Default: nothing embedded.
     fn register_embedded_children(&mut self, _host_id: WidgetId, _ctx: &mut UiContext) {}
+
+    /// Give back the children `register_embedded_children` put into `ctx`
+    /// (`Embedded::detach`), so a widget removed from its context leaves with them. Called by
+    /// `UiContext::remove`. Default: nothing embedded.
+    fn release_embedded_children(&mut self, _ctx: &mut UiContext) {}
 }
 
 /// The paint concern — a widget's fill color, its own (non-recursive) geometry emission, and
@@ -1313,6 +1318,15 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         self.base.row_x = rx;
         self.base.row_w = rw;
     }
+    fn attach_embedded(&mut self, ctx: &mut UiContext) {
+        let host_id = self.base.id();
+        Layout::register_embedded_children(&mut self.inner, host_id, ctx);
+    }
+
+    fn release_embedded(&mut self, ctx: &mut UiContext) {
+        Layout::release_embedded_children(&mut self.inner, ctx);
+    }
+
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
         // Legacy value-owning containers healed their children's registry entries every tick
         // (addresses move with the owning struct); same cadence here.
