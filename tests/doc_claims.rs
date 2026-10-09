@@ -150,8 +150,9 @@ pub mod size_claims {
     }
 }
 
-/// CLAUDE.md's NAMES, checked against the crate: the tests it cites as the
-/// proof of a claim, and the source paths it points at.
+/// The reference docs' NAMES (CLAUDE.md and docs/{runtime,surfaces,widgets,platforms}.md),
+/// checked against the crate: the tests they cite as the
+/// proof of a claim, and the source paths they point at.
 ///
 /// The line counts above were the only check until 2026-10-08, when an audit
 /// found a test cited by a name it no longer had, a constant cited by a name
@@ -165,9 +166,24 @@ pub mod name_claims {
     use std::collections::HashSet;
     use std::path::Path;
 
+    /// The reference docs that describe the CURRENT crate, so their names are checkable:
+    /// CLAUDE.md and the topic docs it points to. The RFCs and CHANGELOG.md are history
+    /// and name things that are gone on purpose; they are not checked.
+    const REFERENCE_DOCS: &[&str] = &[
+        "CLAUDE.md",
+        "docs/runtime.md",
+        "docs/surfaces.md",
+        "docs/widgets.md",
+        "docs/platforms.md",
+    ];
+
     fn doc() -> String {
-        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("CLAUDE.md"))
-            .expect("CLAUDE.md is missing next to Cargo.toml")
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        REFERENCE_DOCS
+            .iter()
+            .map(|d| std::fs::read_to_string(root.join(d)).unwrap_or_else(|_| panic!("{d} is missing")))
+            .collect::<Vec<_>>()
+            .join("\n\n")
     }
 
     fn rust_files(dir: &Path, out: &mut Vec<String>) {

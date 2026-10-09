@@ -1,13 +1,16 @@
 # RFC: Accessibility and locale — what the toolkit owes people who are not its author
 
-**Status:** Draft / roadmap (2026-10-08)
+**Status:** Paused (2026-10-09). Phases 0–5 each landed (see their notes); the per-app
+adoption and the open questions in §6 are parked, not abandoned. Do not extend this work
+unless asked. The rules that stay in force regardless — widgets declare a `focus_role` and a
+label, menu actions are keyed by ID, toolkit strings live in the `.ftl` — are in `CLAUDE.md`.
 **Scope:** Assistive-technology access (screen readers, switch and voice control),
 keyboard-only use, the user's locale, right-to-left and non-monospace text editing, and
 translatable UI strings — across `cce-ui` and the apps built on it.
 **Appetite:** Phased. Phase 0 is a few lines; each later phase is its own piece of work
 and leaves every app building and drawing as before until the step meant to change it.
-**Reads before this:** `CLAUDE.md` § "Plates, wells and seams" (focus roles, the walk),
-§ "Input-method composition is one model for every shell" (the IME model this extends);
+**Reads before this:** `CLAUDE.md` § "The widget model" (focus roles, the walk),
+`docs/runtime.md` § "Input methods and text input" (the IME model this extends);
 `docs/rfc-core-rebuild.md` (the widget tree the accessibility tree would mirror).
 
 ---
