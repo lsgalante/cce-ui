@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The ramp editors are a directory module** (`widget/input/ramp/`): `mod.rs` (the float
+  `Ramp`: its key, construction, presets, the spec in and out, `impl Layout`), `geometry` (the
+  plot, key rings, rolled rim, where a dragged key lands, the controls' places), `paint`,
+  `input`, `color` (the `ColorRamp` widget whole) and `tests`; `ColorRamp`, `ColorRampKey` and
+  the spec parsers re-exported, so `widget::input::…` paths are unchanged. A pure move, checked
+  line for line; the module gained the doc it lacked, in place of two section-banner comments.
+  Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **`TreeList` is a directory module** (`widget/container/treelist/`): `mod.rs` (the element
   types, the struct, construction, its embedded fields and their placement, rebuilding,
   selection, `impl Layout`), `tree` (key paths, the search match, building rows from the value;
