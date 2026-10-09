@@ -10,6 +10,28 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`style::batch` publishes the fields it wrote, not the snapshot it began from.** A batch
+  cloned the whole style when it began and published that clone whole when it ended, so every
+  change another thread published while it ran was reverted — even in fields the batch never
+  touched, and even by a batch that wrote nothing (`reload_config` with no config file, as
+  `lazy_init_style_registry` runs it in every test). Under the per-slot locks this replaced, a
+  reload never undid another slot's write; the one-snapshot refactor of 2026-10-08 brought the
+  bug in. Each `StyleCell::write` inside a batch now records its field, and the batch's end
+  publishes its snapshot whole only when nothing was published since it began; otherwise it
+  carries the fields it wrote onto the newest snapshot (a field both wrote ends with the
+  batch's value). It is what made two tests flaky: `style::tests::writes_publish_and_a_batch_publishes_once`
+  (lost its writes at the post-batch read, line 250, or at the read after the first write,
+  238, when a parallel test's reload spanned them) and
+  `scene::material::tests::the_frost_block_is_the_only_spelling_of_the_default_recipe` (its
+  colour reloads reverted by an unlocked test's `reload_config` batch). That style test now
+  probes `Style::probe`, a test-only field nothing else writes, so a registry setter's
+  re-published copy in a parallel test cannot touch it either; the new
+  `a_batch_keeps_what_another_thread_published_meanwhile` sequences a write into another
+  thread's open batch with channels and fails on the old `batch` every time. Verified: the
+  unfixed crate failed 9 of 200 `cargo test --all-features --lib` runs (5 the style test,
+  4 the frost test); fixed, 0 of 200, and 0 of 30 full `cargo test --all-features` runs;
+  clippy clean.
+
 - **The params pane's `fields` is a loop over `row_field(i)`**, one `Option`-returning arm per
   row type (textpick, button, choice, spinbox, toggle/checkbox). A control's band — its rect
   below the label strip — and the wall depth carved into it (the roll width capped at a fifth of
