@@ -10,6 +10,16 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`widget/core.rs` is a directory module, and the context menu is split.** `core/mod.rs` keeps
+  the `Widget` base, `clear_widget_references` and `impl_widget_base!`; the inline modules it
+  carried are files — `hover_animation`, `clipboard`, `context_menu`, and the menu's four test
+  modules — at the same nesting, so every `widget::core::…` path and `super::` inside them is
+  unchanged. `context_menu/` is then `mod.rs` (the constants, marks, slider rows,
+  `ContextMenuState` construction / show / hide, and the whole free-function API apps call),
+  `turn` (page rows and the animated turn), `geometry` (placement, scrolling, rows as drawn),
+  `input` (hover and keyboard stepping, presses, the wheel, slider rows) and `paint`
+  (`paint_menu_plate` re-exported). Both steps pure moves, checked line for line; clippy, the
+  suite and `cargo check --workspace --exclude cce-fx` pass.
 - **`TextBox` is a directory module** (`widget/input/text_box/`): `mod.rs` (the struct,
   construction and setters, `impl Layout`, the shared font database), `shaping` (advances, wrap,
   x ↔ column ↔ index), `geometry` (border, padding, clip, content width, scrolling to the
