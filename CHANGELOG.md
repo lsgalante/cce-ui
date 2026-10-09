@@ -10,6 +10,16 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`UiContext` is a directory module** (`context/`): `mod.rs` (the struct, the registry —
+  insert, get, remove, lend — delivery, dirty state, ticks, the hierarchy, `ctx[h]`), `spatial`
+  (`SpatialGrid`), `events` (dispatch and the scroll-gesture bookkeeping), `focus` (focus by id,
+  modals, the Tab walk), `popovers` (popovers, coverage, the hit tests that ask them), `menu`
+  (the context menu), and the two test modules as files. A pure move, checked line for line,
+  with three exceptions: the `// --- Section ---` banners and two tombstone comments about code
+  removed long ago (`navigate_focus`, the context's own hover highlight) are dropped, and
+  `propagate_event`'s doc paragraph, which sat glued to the front of `note_scroll_event`'s and
+  left `propagate_event` undocumented, is back on `propagate_event`. Clippy, the suite and
+  `cargo check --workspace --exclude cce-fx` pass.
 - **The colour getters are split by topic** (`color/`): `mod.rs` keeps the palette constants,
   the `style_slots!` block, the test overlay and `style_read` / `style_write`; the getters and
   setters move with the `StyleCell` statics they read into `surfaces` (pages, pane and root

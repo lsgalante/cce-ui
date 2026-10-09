@@ -193,7 +193,7 @@ the model cannot (visibility gating, the content rect, child recursion, registry
 route through `handle_event`; apps drain widget state through `Adapted<W>`'s inherent methods
 (`take_click`, `take_change`, …).
 
-**The registry owns its widgets** (`UiContext`, `src/context.rs`; tree in `scene::tree`):
+**The registry owns its widgets** (`UiContext`, `src/context/`; tree in `scene::tree`):
 
 - `ctx.insert(w)` moves a widget in and returns `Handle<W>` (`Copy`, typed). Reach it through the
   context: `ctx[h]`, `ctx.get(h)` / `get_mut(h)`, or `ctx.lend_h(h, |w, ctx| ..)` when you need
@@ -394,7 +394,8 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `touch.rs`, and the Wayland-only `window_runner/` (`EngineState`; its `mod.rs` has the table), `menu_popup.rs`,
   `dnd.rs`, `text_input.rs`, `a11y_unix.rs`. A routing change belongs in `driver.rs`, a frame
   content change in `frame.rs`, a pacing change in `shell.rs` — never in the Wayland code.
-- `context.rs` — `UiContext`: the widget registry, routing, hit-testing, focus, modals.
+- `context/` — `UiContext`: the widget registry, routing, hit-testing, focus, modals, popovers,
+  the context menu (its `mod.rs` has the table).
 - `scene/` — the core: `arena.rs` (generational forest), `tree.rs` (`WidgetTree`), `layout.rs`
   (the box model), `paint/` (`DisplayList`, `Prim`, `PaintCtx`, `Field`, `ControlPlate`,
   `PlateSpec`), `painter.rs` (the paint walk), `anim.rs` (`Animated<T>`), `material.rs`,
@@ -405,8 +406,8 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit.rs` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
-  concern (its `mod.rs` has the table). The largest files are now `UiContext`,
-  `src/context.rs` (largest file, ~1.5k lines), and the text shaping in `backend/text.rs`.
+  concern (its `mod.rs` has the table). The largest files are now the text shaping,
+  `src/backend/text.rs` (largest file, ~1.4k lines), and `LineEdit`.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
