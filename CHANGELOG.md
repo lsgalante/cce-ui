@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The path tracer's Vulkan side is a directory module** (`vk/rt/`): `mod.rs` (the tier,
+  `RtStage`'s construction, background, environment, staging and destroy, the tests), `scene`
+  (a scene's upload and image descriptors, the acceleration structures), `frame` (targets,
+  uniforms, `record`), `denoise`, `texture` and `offscreen` (`RtOffscreen`, re-exported). A pure
+  move, checked line for line; the moved impls' private methods and the moved structs' fields
+  are `pub(super)`. Clippy, the suite, and the tracer's `#[ignore]`d GPU tests pass on the
+  compute tier (`CCE_VK_RT=compute`), the default device and the NVIDIA device
+  (`VK_DRIVER_FILES` pinned, `CCE_VK_DEVICE=discrete`); `cargo check --workspace --exclude
+  cce-fx` builds.
 - **The Wayland runner is a directory module** (`backend/window_runner/`): `mod.rs` (the
   re-exports clients reach the runner through, `EngineState`, GPU init, geometry, resize),
   `present` (render, the text input's sync, the `Shell` impl), `layer` (a layer surface dropped
