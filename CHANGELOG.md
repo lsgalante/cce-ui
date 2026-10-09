@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The paint vocabulary is a directory module** (`scene/paint/`): `mod.rs` (`Prim`, the display
+  list, `PaintCtx`'s clip and translate stacks, `push`, `append_items`, `replay`, `finish`),
+  `surfaces` (`PlateSpec`, `PlateStance`, `Field`, `ControlPlate`), `relief` and `flat`
+  (`PaintCtx`'s emitters), `text`, `render_target` (`PaintCtx` as a flat host's target) and
+  `tests`; every public type re-exported, so `scene::paint::…` paths are unchanged. A pure move,
+  checked line for line; the module doc, which described the three paint routes the rebuild
+  replaced as "today", is rewritten for what the module is. Clippy, the suite and
+  `cargo check --workspace --exclude cce-fx` pass, and `tests/plate_golden.rs` tessellates to
+  the same bytes as this morning's golden from `fdd46b3`.
 - **`Graph` is a directory module** (`widget/display/graph/`): `mod.rs` (the node and port types,
   `node_wires`, the struct, its construction and setters, `impl Layout`), `geometry` (the
   lattice, node and port rects, a free cell, zoom), `wires` (styles, paths drawn and hit alike,

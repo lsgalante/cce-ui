@@ -32,7 +32,7 @@ that the tests, source paths and `(~N lines)` figures cited here and in the topi
   swash for text, shaped into the toolkit's own glyph atlas (`draw::glyphs`). No wgpu, no
   glyphon, no DOM. The UI is GPU primitives — quads, rounded rects, vectors, arcs, circles, and
   the lit **relief primitives** (bevels, plates, recesses, bosses, ridges, fillets, grooves,
-  fields, frames…; see the `Prim` enum in `src/scene/paint.rs`).
+  fields, frames…; see the `Prim` enum in `src/scene/paint/mod.rs`).
 - **Three shells over one `Driver`/`Pacer`**: Wayland (the real one), the browser (WebGPU on a
   `<canvas>`), and macOS (AppKit + MoltenVK, type-checked only — it has never run). See
   `docs/platforms.md`.
@@ -396,7 +396,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   content change in `frame.rs`, a pacing change in `shell.rs` — never in the Wayland code.
 - `context.rs` — `UiContext`: the widget registry, routing, hit-testing, focus, modals.
 - `scene/` — the core: `arena.rs` (generational forest), `tree.rs` (`WidgetTree`), `layout.rs`
-  (the box model), `paint.rs` (`DisplayList`, `Prim`, `PaintCtx`, `Field`, `ControlPlate`,
+  (the box model), `paint/` (`DisplayList`, `Prim`, `PaintCtx`, `Field`, `ControlPlate`,
   `PlateSpec`), `painter.rs` (the paint walk), `anim.rs` (`Animated<T>`), `material.rs`,
   `heightfield.rs`.
 - `widget/` — `mod.rs` (`WidgetHost`), `model.rs` (the narrow traits), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
@@ -405,8 +405,8 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit.rs` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
-  concern (its `mod.rs` has the table). The largest files are now the paint
-  vocabulary, `src/scene/paint.rs` (largest file, ~2.2k lines), the dropdown and the tree list.
+  concern (its `mod.rs` has the table). The largest files are now the dropdown,
+  `src/widget/input/dropdown.rs` (largest file, ~2k lines), the tree list and the ramp.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
