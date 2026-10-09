@@ -10,6 +10,20 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The Wayland runner is a directory module** (`backend/window_runner/`): `mod.rs` (the
+  re-exports clients reach the runner through, `EngineState`, GPU init, geometry, resize),
+  `present` (render, the text input's sync, the `Shell` impl), `layer` (a layer surface dropped
+  and re-attached), `handlers` (the SCTK handlers and delegates), `pointer`, `keyboard` (with
+  `text-input-v3`), `protocols` (the cce inspector and window management) and `session` (`run`,
+  reconnects, waiting out a compositor). A pure move, checked line for line. Clippy, the suite
+  and `cargo check --workspace --exclude cce-fx` pass; the demo built from this tree matches
+  `fdd46b3`'s to the pixel through the 13-step shadow script, and `CCE_UI_FAULT_RECONNECT=2`
+  drops and re-opens its session (a second toplevel from the same pid two seconds in).
+- **Found: a binary built together with examples reads no config.** Building `--example …` in
+  the same `cargo build` unifies cce-ui's dev-dependency on cce-core's `test-isolation` into the
+  binary, which then draws the default style — the draw_frame_2d A/B's builds were both made so
+  (a fair comparison, in the default style). `ccebuild` is unaffected (no examples). CLAUDE.md
+  ("Verify on screen") now says so, with the shadow-driving lessons from the same A/B.
 - **`widget/core.rs` is a directory module, and the context menu is split.** `core/mod.rs` keeps
   the `Widget` base, `clear_widget_references` and `impl_widget_base!`; the inline modules it
   carried are files — `hover_animation`, `clipboard`, `context_menu`, and the menu's four test

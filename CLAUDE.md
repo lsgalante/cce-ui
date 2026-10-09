@@ -115,6 +115,15 @@ same steps, screenshots diffed (`cce-shadow`; see WORKSPACE.md). Notes that cost
   otherwise), and the NVIDIA ICD loads only with `DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority`.
 - Never use sway's `hide_cursor` to clear the cursor for a diff (it clears pointer focus and the
   app drops its hover); mask the cursor's box instead.
+- **Build both sides of an A/B the same way.** A binary built in the same `cargo build` as an
+  example or test (`--example`, `--examples`, `--all-targets`) gets cce-core's `test-isolation`
+  through cce-ui's dev-dependency, so it reads NO config and draws the default style. Fine for
+  an A/B whose both sides were built so; misleading against one that was not, and wrong for a
+  binary you mean to run as the user's. (`ccebuild` builds `--release --workspace`, no examples.)
+- When driving a shadow with `ctl pointer-*`, wait for a closed window to be gone and for the
+  new one's geometry to hold still before clicking: a fresh window can be placed and then moved
+  to its restored spot, and clicks against the first position land on nothing. Check a contact
+  sheet of the shots before trusting a "no difference".
 - In-crate harnesses: `vk::plate_probe` renders a `DisplayList` offscreen through the live 2D
   pipeline for pixel assertions; `tests/plate_golden.rs` dumps and compares plates;
   `examples/probe*` and `scripts/web-probe/*` hold the Vulkan and WebGPU renderers to each
@@ -377,7 +386,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   touch — unit-tested with no compositor), `frame.rs` (`build_frame`, damage), `shell.rs` (the
   `Shell` trait and `Pacer`: one turn of the loop over any shell), `tessellate/` (its `mod.rs` has the table), `text.rs`,
   `dom.rs` / `appkit.rs` (the browser's and AppKit's input vocabularies, portable),
-  `touch.rs`, and the Wayland-only `window_runner.rs` (`EngineState`), `menu_popup.rs`,
+  `touch.rs`, and the Wayland-only `window_runner/` (`EngineState`; its `mod.rs` has the table), `menu_popup.rs`,
   `dnd.rs`, `text_input.rs`, `a11y_unix.rs`. A routing change belongs in `driver.rs`, a frame
   content change in `frame.rs`, a pacing change in `shell.rs` — never in the Wayland code.
 - `context.rs` — `UiContext`: the widget registry, routing, hit-testing, focus, modals.
@@ -391,8 +400,8 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit.rs` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
-  concern (its `mod.rs` has the table). The largest files are now the Wayland runner,
-  `src/backend/window_runner.rs` (largest file, ~2.5k lines), the path tracer and `layout/mod.rs`.
+  concern (its `mod.rs` has the table). The largest files are now the path tracer,
+  `src/vk/rt.rs` (largest file, ~2.3k lines), `layout/mod.rs` and the graph widget.
 - `layout/` — style getters and setters in `src/layout/mod.rs` (~2.3k lines), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
   (settings-page sections: `PageFlow`, `SectionContext`), `form.rs` (`Form`, `lay_row`).
