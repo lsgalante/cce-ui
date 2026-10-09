@@ -10,6 +10,20 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`draw_frame_2d` is its phases.** The 653-line method keeps the guards, the fence wait and
+  the command-buffer bracketing, and calls `want_snapshot`, `acquire`, `upload_frame`,
+  `record_backdrop` (the 3D and tracer passes and the backdrop copy), `frame_damage`,
+  `partial_region` (the damage grown around frosted plates), `record_ui_pass` (which calls
+  `record_display_list` and `record_overlay`), `submit`, `age_images` and `present`, in the
+  order the original recorded them. The image-quad scissor (written out three times) is
+  `image_scissor` / `record_image`, the batch scissor `batch_scissor`, the partial-region clip
+  `clip_to`. Verified by pixel A/B in two private shadow sessions, at scale 1 and scale 2, of
+  release builds before and after: the demo through 13 scripted steps (hover, toggle, a wheel
+  and a finger scroll on the slider, text focus, the dropdown opened and a theme picked — a full
+  repaint — the Options dialog opened and cancelled), the renderer probe (nearly every prim,
+  images, text, frosted plates), `frost_pair`, and `probe3d` raster and traced — identical to
+  the pixel, every shot. (One scale-2 "before" run of the demo landed its slider wheel
+  differently, an input-timing outlier; two further "before" runs matched "after" exactly.)
 - **The Vulkan renderer is a directory module.** `vk/renderer/`: `mod.rs` (`VkRenderer`, its
   `Frame`, the push-constant and window-info sizes, `Drop`), `init` (construction), `surface`
   (the swapchain: create, recreate, detach and attach, resize, surface loss, window info),
