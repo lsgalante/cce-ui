@@ -536,6 +536,34 @@ impl Input for ColorSelector {
         Some(self.value_hex())
     }
 
+    fn a11y_text(&self) -> Option<crate::a11y::A11yText> {
+        // The hex field: what it shows, its caret while it is being typed into.
+        let text = if self.editing { self.edit_buffer.clone() } else { self.value_hex() };
+        let caret = self.cursor_idx.min(text.chars().count());
+        Some(crate::a11y::A11yText {
+            text,
+            selection: self.editing.then_some((caret, caret)),
+            editable: true,
+            kind: Some(crate::l10n::tr("a11y-colour")),
+            ..Default::default()
+        })
+    }
+
+    fn a11y_set_text(&mut self, text: &str) -> bool {
+        // A colour, as the field takes one when typed: a hex it parses, or nothing.
+        let text = text.trim();
+        if self.set_value_string(text) {
+            return true;
+        }
+        // The colour it already holds, set while a half-typed hex is up: the field shows it.
+        if self.editing && parse_hex(text).is_some() && self.edit_buffer != self.value_hex() {
+            self.edit_buffer = self.value_hex();
+            self.cursor_idx = self.edit_buffer.chars().count();
+            return true;
+        }
+        false
+    }
+
     fn set_value_string(&mut self, val: &str) -> bool {
         if let Some(c) = parse_hex(val) {
             let target_color = [c[0], c[1], c[2]];

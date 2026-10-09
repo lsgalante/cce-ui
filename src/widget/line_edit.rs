@@ -570,6 +570,41 @@ impl LineEdit {
         true
     }
 
+    /// The field for a screen reader (`a11y::AppNodes::text_field`): what it holds — a
+    /// masked field as bullets, never an input method's composition — and, while it has the
+    /// keyboard (`editing`), its selection and caret. The caller adds what the field does
+    /// not know: its placeholder, whether it may be set.
+    pub fn a11y_text(&self, editing: bool) -> crate::a11y::A11yText {
+        let chars = |byte: usize| self.text[..byte.min(self.text.len())].chars().count();
+        let len = self.text.chars().count();
+        let text = if self.masked { "\u{2022}".repeat(len) } else { self.text.clone() };
+        let selection = editing.then(|| match self.selection {
+            // A selection is normalized; the caret is at one of its ends.
+            Some((a, b)) if self.cursor == a => (chars(b), chars(a)),
+            Some((a, b)) => (chars(a), chars(b)),
+            None => (chars(self.cursor), chars(self.cursor)),
+        });
+        crate::a11y::A11yText { text, selection, password: self.masked, editable: true, ..Default::default() }
+    }
+
+    /// Replace the text with what a screen reader set (AT-SPI's `SetTextContents`), as the
+    /// user replacing it would: undoable (a masked field keeps no history), the caret at its
+    /// end, any composition dropped. Whether it changed.
+    pub fn a11y_set_text(&mut self, text: &str) -> bool {
+        self.drop_composition();
+        if self.text == text {
+            return false;
+        }
+        if !self.masked {
+            let before = self.snapshot();
+            self.history.record(before);
+        }
+        self.text = text.to_string();
+        self.cursor = self.text.len();
+        self.selection = None;
+        true
+    }
+
     pub fn can_undo(&self) -> bool {
         self.history.can_undo()
     }
@@ -1325,5 +1360,23 @@ mod tests {
         assert_eq!(e.handle_key(&ctrl("c")), EditOutcome::Ignored);
         assert_eq!(e.handle_key(&ctrl("x")), EditOutcome::Ignored);
         assert_eq!(e.text, "hunter2", "cut must not have removed it");
+    }
+
+    /// A reader's edit replaces the text as the user's would: the caret at its end, a
+    /// selection dropped, one undo step back — and none for a masked field, which keeps no
+    /// history. The same text again changes nothing.
+    #[test]
+    fn a_readers_edit_replaces_the_text_undoably() {
+        let mut e = LineEdit::with_text("old");
+        e.selection = Some((0, 3));
+        assert!(e.a11y_set_text("new.org"));
+        assert_eq!((e.text.as_str(), e.cursor, e.selection), ("new.org", 7, None));
+        assert!(!e.a11y_set_text("new.org"));
+        assert!(e.undo());
+        assert_eq!(e.text, "old");
+        let mut p = LineEdit::masked();
+        assert!(p.a11y_set_text("hunter2"));
+        assert!(!p.undo(), "no history for a secret");
+        assert_eq!(p.a11y_text(false).text, "\u{2022}".repeat(7));
     }
 }

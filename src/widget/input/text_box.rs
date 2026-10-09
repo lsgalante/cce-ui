@@ -2159,6 +2159,7 @@ impl Input for TextBox {
             password: self.is_password,
             editable: !self.disabled,
             placeholder: self.placeholder.clone(),
+            kind: None,
         })
     }
 

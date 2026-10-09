@@ -81,6 +81,11 @@ pub struct A11yText {
     /// What it shows while empty ("Search..."): a hint, and the field's only words when it
     /// has no label.
     pub placeholder: Option<String>,
+    /// What kind of field it is, in words, when "text field" says too little: a colour
+    /// selector's hex field is a "colour". Published as the node's description, not a role
+    /// description: AccessKit makes a node with one AT-SPI's `Extended` role, and such a
+    /// node never registered on the bus (2026-10-09) — the field was gone from the reader.
+    pub kind: Option<String>,
 }
 
 /// A text field's text runs take the item indices from here up, one per line, so they never
@@ -108,21 +113,21 @@ fn text_lines(text: &str) -> Vec<&str> {
     lines
 }
 
-/// Char index `at` of a field's text as a position in its runs.
-fn run_position(id: WidgetId, lines: &[&str], at: usize) -> TextPosition {
+/// Char index `at` of a field's text as a position in its runs, named by `run_id`.
+fn run_position(run_id: &impl Fn(usize) -> NodeId, lines: &[&str], at: usize) -> TextPosition {
     let mut start = 0;
     for (i, line) in lines.iter().enumerate() {
         let len = line.chars().count();
         if at < start + len || i + 1 == lines.len() {
-            return TextPosition { node: text_run_id(id, i), character_index: at.saturating_sub(start).min(len) };
+            return TextPosition { node: run_id(i), character_index: at.saturating_sub(start).min(len) };
         }
         start += len;
     }
-    TextPosition { node: text_run_id(id, 0), character_index: 0 }
+    TextPosition { node: run_id(0), character_index: 0 }
 }
 
-/// The text run nodes of widget `id`'s field, in order.
-pub fn text_run_nodes(id: WidgetId, text: &A11yText) -> Vec<(NodeId, Node)> {
+/// A field's text runs, in order, named by `run_id` (the line's number).
+fn run_nodes(text: &A11yText, run_id: impl Fn(usize) -> NodeId) -> Vec<(NodeId, Node)> {
     text_lines(&text.text)
         .into_iter()
         .enumerate()
@@ -130,9 +135,46 @@ pub fn text_run_nodes(id: WidgetId, text: &A11yText) -> Vec<(NodeId, Node)> {
             let mut run = Node::new(Role::TextRun);
             run.set_value(line);
             run.set_character_lengths(line.chars().map(|c| c.len_utf8() as u8).collect::<Vec<u8>>());
-            (text_run_id(id, i), run)
+            (run_id(i), run)
         })
         .collect()
+}
+
+/// The text run nodes of widget `id`'s field, in order.
+pub fn text_run_nodes(id: WidgetId, text: &A11yText) -> Vec<(NodeId, Node)> {
+    run_nodes(text, |line| text_run_id(id, line))
+}
+
+/// The role a field that publishes `text` has: a text input of its kind, whatever the
+/// widget would be otherwise — only a text input has AT-SPI's EditableText.
+fn text_field_role(text: &A11yText) -> Role {
+    if text.password {
+        Role::PasswordInput
+    } else if text.multiline {
+        Role::MultilineTextInput
+    } else {
+        Role::TextInput
+    }
+}
+
+/// What a field's node says of its text, beside the runs that hold it: the selection in
+/// them, its hint and kind, and whether a reader may set it.
+fn describe_text_field(node: &mut Node, text: &A11yText, run_id: impl Fn(usize) -> NodeId) {
+    if let Some((anchor, focus)) = text.selection {
+        let lines = text_lines(&text.text);
+        node.set_text_selection(TextSelection { anchor: run_position(&run_id, &lines, anchor), focus: run_position(&run_id, &lines, focus) });
+    }
+    if let Some(hint) = text.placeholder.as_deref().filter(|h| !h.is_empty()) {
+        node.set_placeholder(hint);
+    }
+    if let Some(kind) = text.kind.as_deref().filter(|k| !k.is_empty()) {
+        node.set_description(kind);
+    }
+    if text.editable {
+        node.add_action(Action::SetValue);
+    } else {
+        node.set_read_only();
+    }
 }
 
 /// The node of item `idx` of widget `id` ([`A11yItem`]).
@@ -148,7 +190,7 @@ pub fn item_of(node: NodeId) -> Option<(WidgetId, usize)> {
 
 /// The context-menu row a node is, when it is one ([`menu_row_id`]'s inverse).
 pub fn menu_row_of(node: NodeId) -> Option<usize> {
-    (node.0 > MENU.0).then(|| (node.0 - MENU.0 - 1) as usize)
+    (node.0 > MENU.0 && node.0 < APP_RUN_BASE).then(|| (node.0 - MENU.0 - 1) as usize)
 }
 
 /// The open context menu's node, and the first of its rows' (`MENU + 1 + row`): far above any
@@ -162,6 +204,36 @@ pub fn menu_row_id(row: usize) -> NodeId {
 
 /// Where an app's own nodes ([`AppNodes::id`]) begin: above every widget's, below the menu's.
 const APP_BASE: u64 = 1 << 61;
+
+/// Where the text runs of an app's own fields ([`AppNodes::text_field`]) begin: above the
+/// menu's rows. `APP_RUN_BASE + (n << 15) + line` for the app's node `n`.
+const APP_RUN_BASE: u64 = 1 << 63;
+
+/// The node of line `line`'s text run in the app's own field `n`.
+fn app_text_run_id(n: u64, line: usize) -> NodeId {
+    NodeId(APP_RUN_BASE + ((n & ((1 << 48) - 1)) << 15) + line.min(RUN_BASE - 1) as u64)
+}
+
+/// The app's own number for a node it declared ([`AppNodes::id`]'s inverse).
+pub fn app_node_of(node: NodeId) -> Option<u64> {
+    (node.0 >= APP_BASE && node.0 < MENU.0).then(|| node.0 - APP_BASE)
+}
+
+/// What an assistive tool asks of one of the app's own nodes
+/// (`Application::accessibility_action`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum AppAction {
+    /// Put the keyboard on it.
+    Focus,
+    /// Press it.
+    Click,
+    /// Replace a field's text (AT-SPI's `SetTextContents`): as the user replacing it would.
+    SetText(String),
+    /// Set a value (AT-SPI's `SetCurrentValue`).
+    SetNumber(f64),
+    Increment,
+    Decrement,
+}
 
 /// The nodes an app declares itself, for what it draws without a [`UiContext`] — see
 /// [`Application::accessibility`](crate::backend::app::Application::accessibility). Ids come
@@ -195,6 +267,31 @@ impl AppNodes {
     /// The node the keyboard is on, when it is one of the app's own.
     pub fn set_focus(&mut self, id: NodeId) {
         self.focus = Some(id);
+    }
+
+    /// A text field the app draws itself — a `LineEdit` (`LineEdit::a11y_text`) — as node
+    /// `n`: a text input named `label`, at `bounds` (window px), whose text is runs this
+    /// pushes, so a reader reads it by character, follows its caret and sets it. The
+    /// field's node is returned for the app to place (`push_top`, or `push` under one of
+    /// its nodes) at [`AppNodes::id`]`(n)`. A reader's edit arrives as
+    /// `AppAction::SetText` on `n` (`Application::accessibility_action`), and a request
+    /// for the keyboard as `AppAction::Focus`.
+    pub fn text_field(&mut self, n: u64, label: &str, text: &A11yText, bounds: Option<crate::scene::layout::Rect>) -> Node {
+        let mut node = Node::new(text_field_role(text));
+        if !label.is_empty() {
+            node.set_label(label);
+        }
+        if let Some(r) = bounds {
+            node.set_bounds(Rect::new(r.x as f64, r.y as f64, (r.x + r.width) as f64, (r.y + r.height) as f64));
+        }
+        node.add_action(Action::Focus);
+        let runs = run_nodes(text, |line| app_text_run_id(n, line));
+        node.set_children(runs.iter().map(|(id, _)| *id).collect::<Vec<_>>());
+        for (id, run) in runs {
+            self.push(id, run);
+        }
+        describe_text_field(&mut node, text, |line| app_text_run_id(n, line));
+        node
     }
 }
 
@@ -240,10 +337,9 @@ pub fn role_for(type_name: &str, focus: FocusRole, explicit: Option<Role>) -> Ro
 pub fn widget_node(w: &dyn WidgetHost, children: Vec<NodeId>) -> Node {
     let focus = w.focus_role();
     let text = w.a11y_text();
-    let role = match (&text, role_for(w.type_name(), focus, w.a11y_role())) {
-        (Some(t), Role::TextInput) if t.password => Role::PasswordInput,
-        (Some(t), Role::TextInput) if t.multiline => Role::MultilineTextInput,
-        (_, role) => role,
+    let role = match &text {
+        Some(t) => text_field_role(t),
+        None => role_for(w.type_name(), focus, w.a11y_role()),
     };
     let mut node = Node::new(role);
     let name = w.base().accessible_name.clone().filter(|n| !n.is_empty());
@@ -251,21 +347,9 @@ pub fn widget_node(w: &dyn WidgetHost, children: Vec<NodeId>) -> Node {
         node.set_label(label);
     }
     if let Some(t) = &text {
-        // The text is the runs (`text_run_nodes`, the node's first children); the selection
-        // is in them.
+        // The text is the runs (`text_run_nodes`, the node's first children).
         let id = w.base().id();
-        if let Some((anchor, focus)) = t.selection {
-            let lines = text_lines(&t.text);
-            node.set_text_selection(TextSelection { anchor: run_position(id, &lines, anchor), focus: run_position(id, &lines, focus) });
-        }
-        if let Some(hint) = t.placeholder.as_deref().filter(|h| !h.is_empty()) {
-            node.set_placeholder(hint);
-        }
-        if t.editable {
-            node.add_action(Action::SetValue);
-        } else {
-            node.set_read_only();
-        }
+        describe_text_field(&mut node, t, |line| text_run_id(id, line));
     } else if let Some(value) = w.a11y_value() {
         match role {
             Role::CheckBox | Role::Switch => {
@@ -700,6 +784,55 @@ mod tests {
         assert_eq!(t.children().len(), 2);
         assert_eq!(node(&update, t.children()[1]).value(), Some(""));
         assert_eq!(t.text_selection().unwrap().focus, TextPosition { node: t.children()[1], character_index: 0 });
+    }
+
+    /// A colour selector's hex field is a text field too, said to be a colour.
+    #[test]
+    fn a_colour_selectors_hex_is_a_colour_field() {
+        let mut ctx = UiContext::new();
+        let c = ctx.insert(crate::widget::ColorSelector::new([0x40, 0x80, 0xff]).with_label("Accent"));
+        ctx[c].set_rect(10.0, 10.0, 200.0, 24.0);
+        let update = tree_update(&ctx, "", 1.0);
+        let n = node(&update, node_id(c.id()));
+        assert_eq!((n.role(), n.label(), n.description()), (Role::TextInput, Some("Accent"), Some("colour")));
+        assert_eq!(n.role_description(), None, "a role description would make it AT-SPI's Extended role, which never registers");
+        assert!(n.supports_action(Action::SetValue));
+        assert_eq!(node(&update, n.children()[0]).value(), Some("#4080ff"));
+    }
+
+    /// A field an app draws itself (a `LineEdit`) is published as one of its own nodes: a
+    /// text input whose runs and caret are where a widget's would be, its secret bulleted,
+    /// its runs' ids clear of every other kind of node.
+    #[test]
+    fn an_app_drawn_field_is_a_text_field_of_the_apps() {
+        use crate::widget::LineEdit;
+        let mut url = LineEdit::with_text("héllo.org");
+        url.cursor = 3; // after the é, a two-byte char: the caret is char 2
+        let mut pass = LineEdit::masked();
+        pass.a11y_set_text("hunter2");
+        let mut app = AppNodes::default();
+        let mut t = url.a11y_text(true);
+        t.placeholder = Some("Search or enter address".into());
+        let field = app.text_field(7, "Address", &t, Some(crate::scene::layout::Rect { x: 0.0, y: 0.0, width: 300.0, height: 30.0 }));
+        app.push_top(AppNodes::id(7), field);
+        let secret = app.text_field(8, "Password", &pass.a11y_text(false), None);
+        app.push_top(AppNodes::id(8), secret);
+        app.set_focus(AppNodes::id(7));
+        let update = window_tree(None, app, "", 1.0);
+
+        let f = node(&update, AppNodes::id(7));
+        assert_eq!((f.role(), f.label(), f.placeholder()), (Role::TextInput, Some("Address"), Some("Search or enter address")));
+        assert!(f.supports_action(Action::SetValue) && f.supports_action(Action::Focus));
+        let run = f.children()[0];
+        assert_eq!(node(&update, run).value(), Some("héllo.org"));
+        assert_eq!(f.text_selection().unwrap().focus, TextPosition { node: run, character_index: 2 });
+        assert_eq!(app_node_of(AppNodes::id(7)), Some(7));
+        assert_eq!((app_node_of(run), menu_row_of(run), widget_of(run), item_of(run)), (None, None, None, None), "a run is nobody's node");
+
+        let p = node(&update, AppNodes::id(8));
+        assert_eq!(p.role(), Role::PasswordInput);
+        assert_eq!(node(&update, p.children()[0]).value(), Some("\u{2022}".repeat(7).as_str()));
+        assert_eq!(p.text_selection(), None, "without the keyboard, no caret");
     }
 
     #[test]

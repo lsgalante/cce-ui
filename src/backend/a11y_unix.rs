@@ -81,6 +81,9 @@ pub enum Acted {
 ///   does (`WidgetHost::a11y_select_item`) and puts the keyboard on its widget.
 /// - **Click** on an open context menu's row presses it where it is drawn, so the menu runs
 ///   the row's action exactly as a pointer would.
+/// - Anything on one of the app's own nodes (`Application::accessibility`) is the app's:
+///   `Application::accessibility_action`, in its own terms (`a11y::AppAction`) — a reader
+///   setting a field the app draws (`AppNodes::text_field`) is `AppAction::SetText`.
 ///
 /// Anything else does nothing, as AccessKit requires of an action the app cannot perform.
 /// A key reaches the widget only through the app's `handle_key_input`, as every key does —
@@ -115,6 +118,9 @@ pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> Acted {
         }
         return Acted::Changed;
     }
+    if let Some(n) = crate::a11y::app_node_of(request.target_node) {
+        return if app_action(request).is_some_and(|action| app.accessibility_action(n, action)) { Acted::Changed } else { Acted::Nothing };
+    }
     let Some(id) = crate::a11y::widget_of(request.target_node) else { return Acted::Nothing };
     let Some(ctx) = app.ui_context_mut() else { return Acted::Nothing };
     if request.action == Action::SetValue {
@@ -133,6 +139,20 @@ pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> Acted {
         app.focus_stepped();
     }
     key.map_or(Acted::Changed, Acted::Key)
+}
+
+/// A request on one of the app's own nodes, in the app's terms (`Application::accessibility_action`).
+fn app_action(request: &ActionRequest) -> Option<crate::a11y::AppAction> {
+    use crate::a11y::AppAction;
+    Some(match (request.action, request.data.as_ref()) {
+        (Action::Focus, _) => AppAction::Focus,
+        (Action::Click, _) => AppAction::Click,
+        (Action::SetValue, Some(ActionData::Value(text))) => AppAction::SetText(text.to_string()),
+        (Action::SetValue, Some(ActionData::NumericValue(value))) => AppAction::SetNumber(*value),
+        (Action::Increment, _) => AppAction::Increment,
+        (Action::Decrement, _) => AppAction::Decrement,
+        _ => return None,
+    })
 }
 
 /// A reader's `SetValue` on widget `id`, where it is, focus untouched (a reader adjusting a
@@ -269,8 +289,25 @@ mod tests {
         assert!(ctx[name].context_action(crate::widget::ContextAction::Undo), "undoable");
         assert_eq!(ctx[name].a11y_text().unwrap().text, "Grace");
 
+        // A colour selector takes a colour as text, and nothing that is not one.
+        let accent = ctx.insert(crate::widget::ColorSelector::new([0x40, 0x80, 0xff]));
+        assert_eq!(set_value(&mut ctx, accent.id(), Some(&text("#00ff00"))), Acted::Changed);
+        assert_eq!(ctx[accent].a11y_value().as_deref(), Some("#00ff00"));
+        assert_eq!(set_value(&mut ctx, accent.id(), Some(&text("green-ish"))), Acted::Nothing);
+
         ctx[name].disabled = true;
         assert_eq!(set_value(&mut ctx, name.id(), Some(&text("Hopper"))), Acted::Nothing, "a disabled field");
         assert_eq!(set_value(&mut ctx, crate::widget::WidgetId(usize::MAX), Some(&text("x"))), Acted::Nothing, "nothing there");
+    }
+
+    /// What a reader asks of an app's own node reaches the app in its own terms.
+    #[test]
+    fn a_request_on_an_apps_node_is_the_apps_action() {
+        use crate::a11y::AppAction;
+        let req = |action, data| ActionRequest { action, target_tree: accesskit::TreeId::ROOT, target_node: crate::a11y::AppNodes::id(3), data };
+        assert_eq!(app_action(&req(Action::SetValue, Some(ActionData::Value("x.org".into())))), Some(AppAction::SetText("x.org".into())));
+        assert_eq!(app_action(&req(Action::SetValue, Some(ActionData::NumericValue(2.0)))), Some(AppAction::SetNumber(2.0)));
+        assert_eq!(app_action(&req(Action::Focus, None)), Some(AppAction::Focus));
+        assert_eq!(app_action(&req(Action::ScrollIntoView, None)), None);
     }
 }

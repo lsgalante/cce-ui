@@ -184,6 +184,28 @@ editor's whole text and caret read back, the search box set to "grid" filtering 
 there whether its popover was open or not, is hidden while it is closed: it was a field a
 reader found and a Tab stop nobody could see.
 
+**And so is every field where a person types (2026-10-09).** A field is published as a
+text input whatever the widget would be otherwise, since only a text input has
+EditableText: the `ColorSelector` answers `a11y_text` with its hex and `a11y_set_text` with
+what typing a hex does (a colour it parses, or nothing), described as a "colour"
+(`A11yText::kind`). As a DESCRIPTION, not a role description: AccessKit gives a node with a
+role description AT-SPI's `Extended` role, and such a node never registered on the bus —
+the gallery's two colour selectors were simply missing from the reader until it moved. A
+`Spinbox` stays a spin button: it is a number, which AT-SPI's Value interface sets
+(`SetCurrentValue`), as it already did. A field an APP draws — a `LineEdit` — is
+`AppNodes::text_field(n, label, &edit.a11y_text(has_keyboard), bounds)` among the app's own
+nodes (`Application::accessibility`; AccessKit is re-exported as `cce_ui::accesskit` for
+them), its runs in a range of their own (`APP_RUN_BASE`); a reader's edit, or its request
+for the keyboard, arrives as `Application::accessibility_action(n, AppAction::SetText(..) /
+Focus)` — the app's own nodes took no action at all until this — and `LineEdit::a11y_set_text`
+replaces the text undoably (a masked field keeps no history). cce-browser publishes its
+address bar, the bookmarks search, the vi command line and a dialog (modal, titled, its
+message as description) with its fields, and builds cce-ui's `a11y` feature, publishing
+with `CCE_A11Y=1` (not by default yet). Verified over AT-SPI on private buses: the
+browser's address bar set from the reader — the bar unfolds, takes the keyboard and shows
+it, the caret at its end — and the gallery's colour selector set to `#20c060`, its swatch
+green, "not a colour" refused.
+
 Next: the macOS adapter onto the AppKit view, and listening with Orca.
 
 - **Wayland / Linux:** AT-SPI over D-Bus. AccessKit's Unix adapter is the likely carrier

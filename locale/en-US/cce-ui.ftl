@@ -41,3 +41,7 @@ keybind-none = None
 ## The document editor's Properties table
 doc-properties = Properties
 doc-empty = Empty
+
+## Accessibility
+# What a colour selector's hex field is, said by a screen reader after its name.
+a11y-colour = colour

@@ -59,6 +59,9 @@ pub mod colors {
 /// Re-exporting also keeps every client on the one version cce-ui shapes with —
 /// a `FontSystem` handed across the boundary must be the same type.
 pub use cosmic_text;
+/// AccessKit, whose nodes an app pushes for what it draws itself
+/// (`Application::accessibility`, `a11y::AppNodes`), so it needs no dependency of its own.
+pub use accesskit;
 
 
 

@@ -342,6 +342,18 @@ pub trait Application: Sized + 'static {
         let _ = nodes;
     }
 
+    /// An assistive tool asked something of one of the app's own nodes
+    /// ([`accessibility`](Self::accessibility)), named by the app's own number `n`
+    /// (`AppNodes::id(n)`): a reader's edit of a field the app draws
+    /// (`AppAction::SetText`, for one published with `AppNodes::text_field`), a request
+    /// for the keyboard, a press. Do what the user doing it would, and answer whether
+    /// anything changed (the window is then redrawn and the tree republished). Default:
+    /// nothing.
+    fn accessibility_action(&mut self, n: u64, action: crate::a11y::AppAction) -> bool {
+        let _ = (n, action);
+        false
+    }
+
     fn ui_context(&self) -> Option<&crate::context::UiContext> {
         None
     }
