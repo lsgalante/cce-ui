@@ -405,8 +405,8 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit.rs` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
-  concern (its `mod.rs` has the table). The largest files are now the tree list,
-  `src/widget/container/treelist.rs` (largest file, ~1.9k lines), the ramp and `widget/model.rs`.
+  concern (its `mod.rs` has the table). The largest files are now the ramp,
+  `src/widget/input/ramp.rs` (largest file, ~1.9k lines), `widget/model.rs` and the spreadsheet.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`

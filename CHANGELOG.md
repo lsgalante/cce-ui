@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`TreeList` is a directory module** (`widget/container/treelist/`): `mod.rs` (the element
+  types, the struct, construction, its embedded fields and their placement, rebuilding,
+  selection, `impl Layout`), `tree` (key paths, the search match, building rows from the value;
+  copy, delete, expand, collapse), `paint`, `input` and `tests`; its five `impl TreeList` blocks
+  are now one per concern. A pure move, checked line for line; the module gained the doc it
+  lacked. Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **`Dropdown` is a directory module** (`widget/input/dropdown/`): `mod.rs` (the struct, its
   constants and associated constants, construction and setters, `impl Layout`), `text`
   (measuring the trigger's text), `popover` (the list's animation, geometry and rows), `paint`,
