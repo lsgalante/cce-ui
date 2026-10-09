@@ -231,7 +231,7 @@ the host implements it. `a_widget_glyph_reaches_a_flat_host` and
 
 ## Other widget notes
 
-- **`LineEdit`** (`widget/line_edit.rs`): the text, caret, selection and keymap of a one-line
+- **`LineEdit`** (`widget/line_edit/`): the text, caret, selection and keymap of a one-line
   field an app draws itself (cce-browser's URL bar and dialogs). The app reports the caret and
   composition (`docs/runtime.md`).
 - **Clipboard** (`widget::clipboard`): one synchronous text pair, `copy_to_clipboard` /

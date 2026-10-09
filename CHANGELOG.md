@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`LineEdit` is a directory module** (`widget/line_edit/`): `mod.rs` (the model, its
+  outcomes, char boundaries, construction, the display, selection helpers), `composition` (the
+  input method's composition and the index maps across it and a mask), `pointer` (presses,
+  drags, multi-clicks, word boundaries), `keys` (the keymap, undo and redo, the reader's text)
+  and `tests`. A pure move, checked line for line; the `// ---- section ----` banners are
+  dropped, and the pointer section's note on how the app hands in hit-tested offsets is now
+  `pointer`'s module doc. Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The runner's text shaping is a directory module** (`backend/text/`): `mod.rs` (vertical
   text), `cache` (the shaped-buffer cache), `fonts` (face aliases, rescans and the font-op log,
   family resolution, face snapping), `shape` (shaping a buffer, single run or laid out),

@@ -403,11 +403,11 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
 - `widget/` — `mod.rs` (`WidgetHost`), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
   `embedded.rs`, `container/` (params pane, tree list, spreadsheet, menus, scroll boxes…),
   `input/` (button, slider, text box, dropdown, ramp…), `display/` (label, graph, svg…),
-  `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit.rs` (`LineEdit`, a field an app
+  `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit/` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
-  concern (its `mod.rs` has the table). The largest files are now `LineEdit`,
-  `src/widget/line_edit.rs` (largest file, ~1.4k lines), and the 3D scene stage in `vk/scene.rs`.
+  concern (its `mod.rs` has the table). The largest files are now the 3D scene stage,
+  `src/vk/scene.rs` (largest file, ~1.4k lines), and the `DocEditor`.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
