@@ -47,20 +47,6 @@ impl SpatialGrid {
     }
 }
 
-/// `register_host` was handed a widget outside an `Owned` box: say so once per widget type, on
-/// stderr (most apps install no logger), so a missed field shows up without failing anything.
-fn warn_unowned(type_name: &'static str) {
-    thread_local! {
-        static WARNED: std::cell::RefCell<std::collections::HashSet<&'static str>> = Default::default();
-    }
-    if WARNED.with(|w| w.borrow_mut().insert(type_name)) {
-        eprintln!(
-            "cce-ui: register_host: a {type_name} is registered outside an Owned box; it must \
-             not move while registered (hold it as cce_ui::widget::Owned<..>)"
-        );
-    }
-}
-
 /// One open modal: who opened it, what is inside it, and where focus was before.
 #[derive(Debug, Clone)]
 struct ModalScope {
@@ -152,14 +138,21 @@ impl UiContext {
         self.tree.get_ptr(id).map(|ptr| unsafe { &mut *ptr })
     }
 
+    /// Every widget the context holds (and has not lent out), with its id, in no particular
+    /// order — for a sweep over the whole window (a focus heir, a hit search).
+    pub fn widgets(&self) -> impl Iterator<Item = (WidgetId, &(dyn WidgetHost + 'static))> + '_ {
+        // SAFETY: as `get_widget`: the context's own widgets, borrowed through `&self`.
+        self.tree.iter_registered().map(|(id, ptr)| (id, unsafe { &*ptr }))
+    }
+
     // ── Widgets the context owns, by handle (docs/rfc-owning-registry.md) ──────────────
 
     /// Take ownership of `widget`, register it under its own id, and hand back its handle.
     /// The widget lives in the context from here on; reach it with [`get`](Self::get) /
     /// [`get_mut`](Self::get_mut) (or `ctx[h]`), give it back with [`remove`](Self::remove).
     pub fn insert<W: WidgetHost + 'static>(&mut self, widget: W) -> Handle<W> {
-        // A widget that animates is ticked by the context (`tick`), as one registered by
-        // pointer is (`register_widget`): a tree list applies its search there.
+        // A widget that animates is ticked by the context (`tick`): a tree list applies its
+        // search there.
         let wants_tick = crate::widget::WidgetHostExt::wants_tick(&widget);
         let id = self.tree.insert_owned(widget);
         self.invalidate_coverage_cache();
@@ -537,13 +530,6 @@ impl UiContext {
                 return false;
             }
             if let Some(parent_id) = self.tree.parent_id(curr) {
-                if let Some(parent_ptr) = self.tree.get_ptr(parent_id) {
-                    unsafe {
-                        if !(*parent_ptr).is_child_visible(curr) {
-                            return false;
-                        }
-                    }
-                }
                 curr = parent_id;
             } else {
                 break;
@@ -577,35 +563,6 @@ impl UiContext {
     }
 
     // --- Focus management (id-keyed; Phase 6bc) ---
-    pub fn set_focused(&mut self, w: &mut dyn WidgetHost) {
-        let id = w.base().id();
-        // Refresh the registry with the pointer we were just handed, so focus on a
-        // not-yet-registered widget keeps working (the legacy code stored this pointer
-        // directly; the id must resolve for FocusOut/KeyInput dispatch to reach it).
-        let new_ptr = unsafe {
-            std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(w as *mut dyn WidgetHost)
-        };
-        // SAFETY: derived from the live borrow we were handed.
-        unsafe { self.tree.register(id, new_ptr) };
-        self.set_focused_id(id);
-    }
-
-    /// Transitional pointer form (TreeList focuses its adapter via `EventCtx::host_ptr`).
-    ///
-    /// # Safety
-    ///
-    /// `new_ptr` must be null or point to a live widget at the call. It is read to derive the
-    /// id and refresh the registry (see [`WidgetTree::register`](crate::scene::tree::WidgetTree::register)).
-    pub unsafe fn set_focused_ptr(&mut self, new_ptr: *mut (dyn WidgetHost + 'static)) {
-        if new_ptr.is_null() {
-            return;
-        }
-        // SAFETY: the caller's contract.
-        let id = unsafe { (*new_ptr).base().id() };
-        unsafe { self.tree.register(id, new_ptr) };
-        self.set_focused_id(id);
-    }
-
     pub fn set_focused_id(&mut self, id: WidgetId) {
         if self.focused_widget == Some(id) {
             return;
@@ -724,35 +681,12 @@ impl UiContext {
         self.focused_widget = Some(id);
     }
 
-    /// Focus `w` as a direct `w.focus()` did — the widget is told (`focus`), the holder before
-    /// it is told it lost focus (`unfocus`) — and record it as the window's focus, which a
-    /// direct call never did: the Tab walk and the accessibility tree read the record, and
-    /// went on pointing at the widget before. For an app that drives a widget's focus
-    /// itself (`docs/rfc-global-state.md`, phase 2); a focus change the context should
-    /// announce with FocusIn / FocusOut is [`set_focused_id`](Self::set_focused_id).
-    pub fn focus_widget(&mut self, w: &mut dyn WidgetHost) {
-        let id = w.base().id();
-        if let Some(old) = self.focused_widget.filter(|old| *old != id) {
-            if let Some(ptr) = self.tree.get_ptr(old) {
-                // SAFETY: a registry-resolved live widget, not `w` (a different id).
-                unsafe { (*ptr).unfocus() };
-            }
-        }
-        self.focused_widget = Some(id);
-        w.focus();
-    }
-
-    /// Unfocus `w` as a direct `w.unfocus()` did, and drop the window's record of focus if
-    /// it was `w` — which a direct call never did, leaving the Tab walk and the
-    /// accessibility tree on a widget that had let go.
-    pub fn unfocus_widget(&mut self, w: &mut dyn WidgetHost) {
-        if self.focused_widget == Some(w.base().id()) {
-            self.focused_widget = None;
-        }
-        w.unfocus();
-    }
-
-    /// [`focus_widget`](Self::focus_widget) by id — for a widget the context owns.
+    /// Focus `id` as a direct `w.focus()` did — the widget is told (`focus`), the holder
+    /// before it is told it lost focus (`unfocus`) — and record it as the window's focus,
+    /// which a direct call never did: the Tab walk and the accessibility tree read the
+    /// record. For an app that drives a widget's focus itself (`docs/rfc-global-state.md`,
+    /// phase 2); a focus change the context should announce with FocusIn / FocusOut is
+    /// [`set_focused_id`](Self::set_focused_id).
     pub fn focus_id(&mut self, id: WidgetId) {
         if let Some(old) = self.focused_widget.filter(|old| *old != id) {
             if let Some(w) = self.get_widget_mut(old) {
@@ -765,19 +699,15 @@ impl UiContext {
         }
     }
 
-    /// [`unfocus_widget`](Self::unfocus_widget) by id — for a widget the context owns.
+    /// Unfocus `id` as a direct `w.unfocus()` did, and drop the window's record of focus if
+    /// it was `id` — which a direct call never did, leaving the Tab walk and the
+    /// accessibility tree on a widget that had let go.
     pub fn unfocus_id(&mut self, id: WidgetId) {
         if self.focused_widget == Some(id) {
             self.focused_widget = None;
         }
         if let Some(w) = self.get_widget_mut(id) {
             w.unfocus();
-        }
-    }
-
-    pub fn clear_if_matches(&mut self, w: &dyn WidgetHost) {
-        if self.focused_widget == Some(w.base().id()) {
-            self.focused_widget = None;
         }
     }
 
@@ -964,67 +894,6 @@ impl UiContext {
     // walked an empty dummy context (provably inert). Section-level keyboard nav lives
     // app-side (settings' focused_section machinery).
 
-    /// Register a widget the app owns, by reference: `ctx.register_host(&mut self.button)`.
-    ///
-    /// Hold the widget in an [`Owned`](crate::widget::Owned) box: the registry then points at
-    /// the boxed widget, which stays put however the field or `Vec` holding the `Owned` moves,
-    /// and stops resolving it when the `Owned` drops. A bare widget is registered at its own
-    /// address, which is only good until it moves — so that is logged, once per widget type.
-    pub fn register_host(&mut self, w: &mut (dyn WidgetHost + 'static)) {
-        if w.stable_target().is_none() {
-            warn_unowned(w.type_name());
-        }
-        let id = w.base().id();
-        // SAFETY: derived from the live borrow we were handed.
-        unsafe { self.register_widget(id, w as *mut (dyn WidgetHost + 'static)) };
-    }
-
-    /// Register a widget that lives INSIDE another registered widget (a tree list's search box,
-    /// a paginator's menu): it is as stable as its parent's allocation, so no `Owned` of its own
-    /// is wanted and none is warned about.
-    pub(crate) fn register_embedded(&mut self, w: &mut (dyn WidgetHost + 'static)) {
-        let id = w.base().id();
-        // SAFETY: derived from the live borrow we were handed.
-        unsafe { self.register_widget(id, w as *mut (dyn WidgetHost + 'static)) };
-    }
-
-    /// Register a widget by raw pointer. Prefer [`register_host`](Self::register_host), which
-    /// takes a reference; this form is for the toolkit's own pointer-routed paths.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be null or point to a live widget at the call; it is read here (see
-    /// [`WidgetTree::register`](crate::scene::tree::WidgetTree::register)).
-    pub unsafe fn register_widget(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
-        // SAFETY: the caller's contract.
-        unsafe { self.tree.register(id, ptr) };
-        // A newcomer may itself have a popover rect, so the coverage memo can no
-        // longer be trusted. Pages that re-register a whole list do it before
-        // dispatching, so the memo is rebuilt once and then serves every root.
-        self.invalidate_coverage_cache();
-        unsafe {
-            if !ptr.is_null() && (*ptr).wants_tick() {
-                self.register_tick_receiver(id);
-            }
-        }
-    }
-
-    /// Drop `id`'s registration. **Apps that rebuild a `Vec` of widgets must call this for the
-    /// outgoing ids**, because `WidgetId`s are globally monotonic (`NEXT_WIDGET_ID.fetch_add`)
-    /// and are never reused: the replacements register under *new* ids, so re-registering does
-    /// not overwrite the old entries. Those keep raw pointers into the freed Vec, and several
-    /// paths walk the whole registry and dereference — `close_popovers_missed_by_press` runs on
-    /// every left press (`backend/window_runner.rs`), and `is_coordinate_covered` falls back to a
-    /// full scan — so a stale entry is a use-after-free, not just a leak.
-    ///
-    /// Apps that call [`clear_hierarchy`](Self::clear_hierarchy) every rebuild do not need this;
-    /// the wipe already drops the outgoing ids.
-    pub fn unregister_widget(&mut self, id: WidgetId) {
-        self.tree.remove(id);
-        self.unregister_tick_receiver(id);
-        self.invalidate_coverage_cache();
-    }
-
     pub fn link_ids(&mut self, parent: WidgetId, child: WidgetId) {
         self.tree.link(parent, child);
     }
@@ -1126,21 +995,9 @@ impl UiContext {
         })
     }
 
-    /// Register an open popover. Takes `&mut` so the registry can be refreshed with the
-    /// pointer we are handed (the occlusion walks resolve the stored id through the tree).
-    /// [`register_popover`](Self::register_popover) for a widget already registered — one
-    /// the context owns, named by its handle's id.
+    /// Register the open popover of the widget `id` names (the occlusion walks resolve it
+    /// through the tree).
     pub fn register_popover_id(&mut self, id: WidgetId) {
-        if !self.active_popovers.contains(&id) {
-            self.active_popovers.push(id);
-        }
-        self.invalidate_coverage_cache();
-    }
-
-    pub fn register_popover(&mut self, w: &mut (dyn WidgetHost + 'static)) {
-        let id = w.base().id();
-        // SAFETY: derived from the live borrow we were handed.
-        unsafe { self.tree.register(id, w as *mut (dyn WidgetHost + 'static)) };
         if !self.active_popovers.contains(&id) {
             self.active_popovers.push(id);
         }
@@ -1220,56 +1077,32 @@ impl UiContext {
         crate::widget::context_menu::is_visible()
     }
 
-    /// Open the shared context menu on `target`.
-    ///
-    /// # Safety
-    ///
-    /// `target` must be null or point to a live widget at the call.
-    pub unsafe fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn WidgetHost + 'static)) {
-        if target.is_null() {
-            return;
-        }
-        // SAFETY: the caller's contract.
-        let id = unsafe { (*target).base().id() };
-        unsafe { self.tree.register(id, target) };
-        crate::widget::context_menu::show(x, y, options, header_count, id);
+    /// Open the shared context menu on the widget `target`, which its actions go to.
+    pub fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: WidgetId) {
+        crate::widget::context_menu::show(x, y, options, header_count, target);
     }
 
     /// [`show_context_menu`](Self::show_context_menu) with each row's action beside its
     /// label (`None` for a header, or a row the host handles itself), so the label is only
     /// what is shown and a translated menu still does what it did.
-    ///
-    /// # Safety
-    ///
-    /// As for `show_context_menu`: `target` is null or a live widget at the call.
-    pub unsafe fn show_context_menu_rows(&mut self, x: f32, y: f32, rows: Vec<(String, Option<crate::widget::ContextAction>)>, header_count: usize, target: *mut (dyn WidgetHost + 'static)) {
+    pub fn show_context_menu_rows(&mut self, x: f32, y: f32, rows: Vec<(String, Option<crate::widget::ContextAction>)>, header_count: usize, target: WidgetId) {
         let (options, actions): (Vec<String>, Vec<Option<crate::widget::ContextAction>>) = rows.into_iter().unzip();
-        // SAFETY: the caller's contract, passed on.
-        unsafe { self.show_context_menu(x, y, options, header_count, target) };
+        self.show_context_menu(x, y, options, header_count, target);
         crate::widget::context_menu::set_row_actions(actions);
     }
 
-    /// Open the shared config context menu for a right-click on `target`.
-    ///
-    /// # Safety
-    ///
-    /// `target` must be null or point to a live widget at the call.
-    pub unsafe fn handle_right_click(&mut self, target: *mut (dyn WidgetHost + 'static), px: f32, py: f32) {
-        if target.is_null() {
-            return;
-        }
-        let name = unsafe { (*target).type_name() };
+    /// Open the shared config context menu for a right-click on `target` — the widget
+    /// itself, which the context has out on loan while it handles the press, so it is handed
+    /// over rather than looked up.
+    pub fn handle_right_click(&mut self, target: &dyn WidgetHost, px: f32, py: f32) {
+        let name = target.type_name();
         let label = if name == "Breadcrumb" {
-            unsafe {
-                if let Some(bc) = (*target).as_any().downcast_ref::<crate::widget::container::Breadcrumb>() {
-                    let idx = bc.right_clicked_seg.unwrap_or(bc.path.len());
-                    Some(bc.path_to_seg(idx))
-                } else {
-                    None
-                }
-            }
+            target.as_any().downcast_ref::<crate::widget::container::Breadcrumb>().map(|bc| {
+                let idx = bc.right_clicked_seg.unwrap_or(bc.path.len());
+                bc.path_to_seg(idx)
+            })
         } else {
-            unsafe { (*target).label() }
+            target.label()
         };
         let header = if let Some(lbl) = label {
             format!("[{}]: {}", name, lbl)
@@ -1279,7 +1112,7 @@ impl UiContext {
 
         let mut config_info = None;
         {
-            let b = unsafe { (*target).base() };
+            let b = target.base();
             if let (Some(ref file), Some(ref key)) = (&b.config_file, &b.config_key) {
                 config_info = Some((file.clone(), key.clone()));
             }
@@ -1299,38 +1132,30 @@ impl UiContext {
         }
 
         if name == "TextBox" {
-            let is_password = unsafe {
-                (*target)
-                    .as_any()
-                    .downcast_ref::<crate::widget::input::TextBox>()
-                    .is_some_and(|tb| tb.is_password)
-            };
+            let is_password = target
+                .as_any()
+                .downcast_ref::<crate::widget::input::TextBox>()
+                .is_some_and(|tb| tb.is_password);
             if !is_password {
                 rows.extend([row(tr("menu-cut"), CA::Cut), row(tr("menu-copy"), CA::Copy)]);
             }
             rows.extend([row(tr("menu-paste"), CA::Paste), row(tr("menu-select-all"), CA::SelectAll)]);
             // A search box says so (`with_search`); an English "Search..." placeholder is the
             // older sign, still read for the apps that set one themselves.
-            let is_search = unsafe {
-                if let Some(tb) = (*target).as_any().downcast_ref::<crate::widget::input::TextBox>() {
-                    tb.is_search || tb.placeholder.as_deref() == Some("Search...")
-                } else {
-                    false
-                }
-            };
+            let is_search = target
+                .as_any()
+                .downcast_ref::<crate::widget::input::TextBox>()
+                .is_some_and(|tb| tb.is_search || tb.placeholder.as_deref() == Some("Search..."));
             if is_search {
                 rows.push(row(tr("menu-clear"), CA::ClearText));
             }
         } else if name == "Breadcrumb" {
             rows.push(row(tr("menu-copy-path"), CA::CopyPath));
         } else if name == "Ramp" {
-            let collapsed = unsafe {
-                (*target)
-                    .as_any()
-                    .downcast_ref::<crate::widget::input::Ramp>()
-                    .map(|r| r.controls_collapsed)
-                    .unwrap_or(false)
-            };
+            let collapsed = target
+                .as_any()
+                .downcast_ref::<crate::widget::input::Ramp>()
+                .is_some_and(|r| r.controls_collapsed);
             let label = tr("menu-collapse-controls");
             let label = if collapsed { format!("{}{label}", crate::widget::context_menu::MARK_CHECK) } else { label };
             rows.push((label, Some(CA::ToggleRampControls)));
@@ -1341,8 +1166,7 @@ impl UiContext {
 
         let scroll_y = crate::widget::hover_animation::get_scroll_offset();
         let adjusted_py = py - scroll_y;
-        // SAFETY: the caller's contract, passed on.
-        unsafe { self.show_context_menu_rows(px, adjusted_py, rows, header_count, target) };
+        self.show_context_menu_rows(px, adjusted_py, rows, header_count, target.base().id());
     }
 
     pub fn hide_context_menu(&mut self) {
@@ -1495,12 +1319,9 @@ mod tests {
         use crate::widget::{ElementState, Event, MouseButton, Slider};
 
         let mut ctx = UiContext::new();
-        let mut slider = Slider::new();
-        WidgetHost::set_rect(&mut slider, 0.0, 0.0, 200.0, 30.0);
-        let ptr = slider.as_ptr_mut();
-        let id = slider.base().id();
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(id, ptr) };
+        let slider = ctx.insert(Slider::new());
+        WidgetHost::set_rect(&mut ctx[slider], 0.0, 0.0, 200.0, 30.0);
+        let id = slider.id();
 
         let press = Event::MouseButton {
             button: MouseButton::Left,
@@ -1511,8 +1332,8 @@ mod tests {
             local_y: 15.0,
         };
         assert!(ctx.propagate_event(&press, id), "press in the track arms the drag");
-        assert!(slider.is_dragging());
-        let v0 = slider.value;
+        assert!(ctx[slider].is_dragging());
+        let v0 = ctx[slider].value;
 
         // First move past the 3px threshold starts the drag; the next one updates it.
         let mv = |x: f32| Event::PointerMove { x, y: 15.0, local_x: x, local_y: 15.0 };
@@ -1520,10 +1341,10 @@ mod tests {
         assert!(ctx.is_dragging, "router crossed the drag threshold");
         ctx.propagate_event(&mv(140.0), id);
         assert!(
-            slider.value > v0 + 0.05,
+            ctx[slider].value > v0 + 0.05,
             "DragUpdate reached Input::drag_update (value {} -> {})",
             v0,
-            slider.value
+            ctx[slider].value
         );
 
         let release = Event::MouseButton {
@@ -1535,7 +1356,7 @@ mod tests {
             local_y: 15.0,
         };
         ctx.propagate_event(&release, id);
-        assert!(!slider.is_dragging(), "DragEnd reached Input::drag_end");
+        assert!(!ctx[slider].is_dragging(), "DragEnd reached Input::drag_end");
         assert!(!ctx.is_dragging);
     }
 
@@ -1547,15 +1368,10 @@ mod tests {
     #[test]
     fn multi_root_press_dispatch_keeps_the_drag_target() {
         let mut ctx = UiContext::new();
-        let mut slider = crate::widget::Slider::new().with_value(0.5);
+        let slider = ctx.insert(crate::widget::Slider::new().with_value(0.5));
         let id = slider.id();
-        ctx.register_host(&mut slider);
-        slider.set_rect(0.0, 0.0, 200.0, 30.0);
-        let mut other = Block { base: Widget::new_rect(300.0, 300.0, 50.0, 50.0) };
-        let other_ptr = &mut other as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
-        let other_id = other.base.id();
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(other_id, other_ptr) };
+        ctx[slider].set_rect(0.0, 0.0, 200.0, 30.0);
+        let other_id = ctx.insert(Block { base: Widget::new_rect(300.0, 300.0, 50.0, 50.0) }).id();
 
         let press = Event::MouseButton {
             button: MouseButton::Left,
@@ -1565,12 +1381,12 @@ mod tests {
             local_x: 100.0,
             local_y: 15.0,
         };
-        // The app loop: same press to both roots, slider first.
+        // The app loop: same press to both roots, the slider first.
         assert!(ctx.propagate_event(&press, id));
         ctx.propagate_event(&press, other_id);
         assert_eq!(ctx.drag_target, Some(id), "the second root's call must not wipe the armed target");
 
-        let v0 = slider.value;
+        let v0 = ctx[slider].value;
         let mv = |x: f32| Event::PointerMove { x, y: 15.0, local_x: x, local_y: 15.0 };
         for root in [id, other_id] {
             ctx.propagate_event(&mv(110.0), root);
@@ -1579,7 +1395,7 @@ mod tests {
             ctx.propagate_event(&mv(140.0), root);
         }
         assert!(ctx.is_dragging, "threshold crossed despite multi-root dispatch");
-        assert!(slider.value > v0 + 0.05, "DragUpdate drove the slider ({} -> {})", v0, slider.value);
+        assert!(ctx[slider].value > v0 + 0.05, "DragUpdate drove the slider ({} -> {})", v0, ctx[slider].value);
 
         let release = Event::MouseButton {
             button: MouseButton::Left,
@@ -1592,7 +1408,7 @@ mod tests {
         for root in [id, other_id] {
             ctx.propagate_event(&release, root);
         }
-        assert!(!slider.is_dragging());
+        assert!(!ctx[slider].is_dragging());
         assert!(!ctx.is_dragging);
     }
 
@@ -1609,10 +1425,7 @@ mod tests {
     #[test]
     fn drag_allowed_everywhere_except_blocking_widgets() {
         let mut ctx = UiContext::new();
-        let mut w = Block { base: Widget::new_rect(10.0, 10.0, 50.0, 50.0) };
-        let ptr = &mut w as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(w.base.id(), ptr) };
+        ctx.insert(Block { base: Widget::new_rect(10.0, 10.0, 50.0, 50.0) });
         ctx.rebuild_spatial_grid();
 
         assert!(ctx.drag_allowed_at(200.0, 200.0), "empty surface is draggable");
@@ -1638,13 +1451,9 @@ mod focus_step_tests {
         WidgetHost::set_rect(&mut b, 100.0, 16.0, 80.0, 12.0);
         WidgetHost::set_rect(&mut a, 10.0, 10.0, 80.0, 24.0);
         WidgetHost::set_rect(&mut t, 10.0, 50.0, 200.0, 24.0);
-        for w in [&mut b as &mut dyn WidgetHost, &mut a, &mut t] {
-            let (id, ptr) = (w.base().id(), w as *mut dyn WidgetHost);
-            let ptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(ptr) };
-            // SAFETY: a test widget, live for the whole test.
-            unsafe { ctx.register_widget(id, ptr) };
-        }
-        let (ia, ib, it) = (a.id(), b.id(), t.id());
+        let (ib, ia) = (ctx.insert(b).id(), ctx.insert(a).id());
+        let t = ctx.insert(t);
+        let it = t.id();
 
         assert!(ctx.focus_step(false));
         assert!(ctx.is_focused_id(ia), "first stop: the top-left plate");
@@ -1652,7 +1461,7 @@ mod focus_step_tests {
         assert!(ctx.is_focused_id(ib), "then the plate to its right");
         assert!(ctx.focus_step(false));
         assert!(ctx.is_focused_id(it), "then the well on the next row");
-        assert!(t.editing, "a well opens for typing when focused");
+        assert!(ctx[t].editing, "a well opens for typing when focused");
         assert!(ctx.focus_step(false));
         assert!(ctx.is_focused_id(ia), "wraps to the first stop");
         assert!(ctx.focus_step(true));
@@ -1666,11 +1475,7 @@ mod focus_step_tests {
         // A group's members walk together, where the group's first member falls:
         // grouping a and t (skipping b, which sits between them in reading order)
         // makes the walk a, t, b — and the group chord jumps a -> b -> a.
-        let mut g = crate::widget::Group::new(vec![ia, it]);
-        let (gid, gptr) = (g.base().id(), &mut g as *mut dyn WidgetHost);
-        let gptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(gptr) };
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(gid, gptr) };
+        let g = ctx.insert(crate::widget::Group::new(vec![ia, it]));
         assert_eq!(ctx.focus_clusters(), vec![vec![ia, it], vec![ib]]);
         ctx.set_focused_id(ia);
         assert!(ctx.focus_step(false));
@@ -1681,15 +1486,12 @@ mod focus_step_tests {
         assert!(ctx.is_focused_id(ia), "the group chord wraps to the group's first stop");
         assert!(ctx.focus_step_group(false));
         assert!(ctx.is_focused_id(ib), "then to the next run");
-        ctx.unregister_widget(gid);
+        ctx.remove(g);
 
         // A plate parked off-screen (the hidden-editor idiom) is not a stop either.
         let mut parked = Button::new(0.0, 0.0, 1.0, 1.0).with_label("parked");
         WidgetHost::set_rect(&mut parked, -1000.0, -1000.0, 1.0, 1.0);
-        let (pid, pptr) = (parked.base().id(), &mut parked as *mut dyn WidgetHost);
-        let pptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(pptr) };
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(pid, pptr) };
+        let pid = ctx.insert(parked).id();
         for _ in 0..4 {
             ctx.focus_step(false);
             assert!(!ctx.is_focused_id(pid), "the parked plate never takes focus");

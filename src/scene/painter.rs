@@ -178,8 +178,8 @@ mod tests {
         vis: bool,
     }
     impl P {
-        fn new(tag: f32) -> Box<P> {
-            Box::new(P { base: Widget::new(), tag, clips: false, vis: true })
+        fn new(tag: f32) -> P {
+            P { base: Widget::new(), tag, clips: false, vis: true }
         }
     }
     impl crate::widget::Paint for P {
@@ -204,14 +204,9 @@ mod tests {
         }
     }
 
-    type ElemPtr = *mut (dyn WidgetHost + 'static);
-
-    fn reg(ctx: &mut UiContext, w: &mut P) -> (crate::widget::WidgetId, ElemPtr) {
-        let ptr = &mut *w as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
-        let id = w.base.id();
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(id, ptr) };
-        (id, ptr)
+    fn reg(ctx: &mut UiContext, w: P) -> (crate::widget::WidgetId, crate::widget::Handle<P>) {
+        let h = ctx.insert(w);
+        (h.id(), h)
     }
 
     /// Tags of the emitted quads, in order.
@@ -229,18 +224,18 @@ mod tests {
     fn walks_parent_then_children_in_order() {
         let mut ctx = UiContext::new();
         let mut root = P::new(1.0);
-        let mut a = P::new(2.0);
-        let mut b = P::new(3.0);
+        let a = P::new(2.0);
+        let b = P::new(3.0);
         root.base.w = 100.0;
         root.base.h = 100.0;
 
-        let (root_id, root_ptr) = reg(&mut ctx, &mut root);
-        let (a_id, _) = reg(&mut ctx, &mut a);
-        let (b_id, _) = reg(&mut ctx, &mut b);
+        let (root_id, root) = reg(&mut ctx, root);
+        let (a_id, _) = reg(&mut ctx, a);
+        let (b_id, _) = reg(&mut ctx, b);
         ctx.link_ids(root_id, a_id);
         ctx.link_ids(root_id, b_id);
 
-        let list = paint_tree(&ctx, unsafe { &*root_ptr });
+        let list = paint_tree(&ctx, &ctx[root]);
         assert_eq!(tags(&list), vec![1.0, 2.0, 3.0], "parent, then children left-to-right");
         assert!(list.items.iter().all(|it| it.clip.is_none()), "no clipping widget => no clips");
     }
@@ -260,11 +255,11 @@ mod tests {
         child.base.w = 100.0;
         child.base.h = 100.0;
 
-        let (root_id, root_ptr) = reg(&mut ctx, &mut root);
-        let (child_id, _) = reg(&mut ctx, &mut child);
+        let (root_id, root) = reg(&mut ctx, root);
+        let (child_id, _) = reg(&mut ctx, child);
         ctx.link_ids(root_id, child_id);
 
-        let list = paint_tree(&ctx, unsafe { &*root_ptr });
+        let list = paint_tree(&ctx, &ctx[root]);
         // Root paints itself unclipped; the child is clipped to the root's rect.
         assert_eq!(list.items[0].clip, None, "root's own quad is not self-clipped");
         assert_eq!(
@@ -277,21 +272,21 @@ mod tests {
     #[test]
     fn invisible_subtree_is_skipped() {
         let mut ctx = UiContext::new();
-        let mut root = P::new(1.0);
+        let root = P::new(1.0);
         let mut mid = P::new(2.0);
         mid.vis = false; // invisible: itself and its child must be skipped
-        let mut leaf = P::new(3.0);
-        let mut sibling = P::new(4.0);
+        let leaf = P::new(3.0);
+        let sibling = P::new(4.0);
 
-        let (root_id, root_ptr) = reg(&mut ctx, &mut root);
-        let (mid_id, _) = reg(&mut ctx, &mut mid);
-        let (leaf_id, _) = reg(&mut ctx, &mut leaf);
-        let (sib_id, _) = reg(&mut ctx, &mut sibling);
+        let (root_id, root) = reg(&mut ctx, root);
+        let (mid_id, _) = reg(&mut ctx, mid);
+        let (leaf_id, _) = reg(&mut ctx, leaf);
+        let (sib_id, _) = reg(&mut ctx, sibling);
         ctx.link_ids(root_id, mid_id);
         ctx.link_ids(root_id, sib_id);
         ctx.link_ids(mid_id, leaf_id);
 
-        let list = paint_tree(&ctx, unsafe { &*root_ptr });
+        let list = paint_tree(&ctx, &ctx[root]);
         assert_eq!(tags(&list), vec![1.0, 4.0], "mid (invisible) and its leaf are skipped");
     }
 
@@ -312,13 +307,13 @@ mod tests {
         leaf.base.w = 200.0;
         leaf.base.h = 200.0;
 
-        let (root_id, root_ptr) = reg(&mut ctx, &mut root);
-        let (inner_id, _) = reg(&mut ctx, &mut inner);
-        let (leaf_id, _) = reg(&mut ctx, &mut leaf);
+        let (root_id, root) = reg(&mut ctx, root);
+        let (inner_id, _) = reg(&mut ctx, inner);
+        let (leaf_id, _) = reg(&mut ctx, leaf);
         ctx.link_ids(root_id, inner_id);
         ctx.link_ids(inner_id, leaf_id);
 
-        let list = paint_tree(&ctx, unsafe { &*root_ptr });
+        let list = paint_tree(&ctx, &ctx[root]);
         // inner's OWN quad is clipped by its parent (root) only — its own rect clips its children,
         // not itself. The leaf, a child of inner, is clipped to inner∩root = (50,50,50,50).
         assert_eq!(list.items[1].clip, Some(Rect { x: 0.0, y: 0.0, width: 100.0, height: 100.0 }));
@@ -350,11 +345,9 @@ mod tests {
         let mut w = Rounded { base: Widget::new() };
         w.base.w = 20.0;
         w.base.h = 10.0;
-        let ptr = &mut w as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(w.base.id(), ptr) };
+        let w = ctx.insert(w);
 
-        let list = paint_tree(&ctx, unsafe { &*ptr });
+        let list = paint_tree(&ctx, &ctx[w]);
         assert!(
             list.items.iter().any(|it| matches!(it.prim, Prim::RoundedRect { radius, .. } if radius == 4.0)),
             "default paint_self emits the rounded background",

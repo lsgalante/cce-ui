@@ -827,18 +827,17 @@ mod tests {
     #[test]
     fn spinbox_button_zones_step_the_value() {
         let mut ctx = UiContext::new();
-        let mut sb = Spinbox::new(0, -100, 100, 1);
-        ctx.register_host(&mut sb);
-        WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
+        let sb = ctx.insert(Spinbox::new(0, -100, 100, 1));
+        WidgetHost::set_rect(&mut ctx[sb], 10.0, 20.0, 100.0, 26.0);
 
         // Legacy test: click at (75, 33) lands in the decrement zone.
-        assert!(sb.mouse_input(MouseButton::Left, ElementState::Pressed, 75.0, 33.0, &mut ctx));
-        assert_eq!(sb.value, -1);
-        assert!(sb.take_change());
+        assert!(ctx.lend_h(sb, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 75.0, 33.0, ctx)).unwrap());
+        assert_eq!(ctx[sb].value, -1);
+        assert!(ctx[sb].take_change());
 
         // Increment zone (past 77.5% of the width).
-        assert!(sb.mouse_input(MouseButton::Left, ElementState::Pressed, 92.0, 33.0, &mut ctx));
-        assert_eq!(sb.value, 0);
+        assert!(ctx.lend_h(sb, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 92.0, 33.0, ctx)).unwrap());
+        assert_eq!(ctx[sb].value, 0);
     }
 
     #[test]
@@ -848,46 +847,44 @@ mod tests {
         // and refresh the buffer, or the value moves invisibly and the next
         // FocusOut commit resets it to the stale text.
         let mut ctx = UiContext::new();
-        let mut sb = Spinbox::new(6, 0, 100, 1);
-        ctx.register_host(&mut sb);
-        WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
-        sb.begin_edit(true);
-        assert_eq!(sb.edit_buffer, "6");
+        let sb = ctx.insert(Spinbox::new(6, 0, 100, 1));
+        WidgetHost::set_rect(&mut ctx[sb], 10.0, 20.0, 100.0, 26.0);
+        ctx[sb].begin_edit(true);
+        assert_eq!(ctx[sb].edit_buffer, "6");
 
-        assert!(sb.mouse_input(MouseButton::Left, ElementState::Pressed, 92.0, 33.0, &mut ctx));
-        assert_eq!(sb.value, 7);
-        assert_eq!(sb.edit_buffer, "7");
-        assert!(sb.take_change());
+        assert!(ctx.lend_h(sb, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 92.0, 33.0, ctx)).unwrap());
+        assert_eq!(ctx[sb].value, 7);
+        assert_eq!(ctx[sb].edit_buffer, "7");
+        assert!(ctx[sb].take_change());
 
         // FocusOut now commits the refreshed buffer — the step survives.
-        sb.handle_event(&Event::FocusOut, &mut ctx);
-        assert_eq!(sb.value, 7);
+        ctx.lend_h(sb, |w, ctx| w.handle_event(&Event::FocusOut, ctx)).unwrap();
+        assert_eq!(ctx[sb].value, 7);
     }
 
     #[test]
     fn spinbox_wheel_steps_by_notch_and_accumulates_fractions() {
         use crate::widget::MouseScrollDelta;
         let mut ctx = UiContext::new();
-        let mut sb = Spinbox::new(10, 0, 100, 5);
-        ctx.register_host(&mut sb);
-        WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
+        let sb = ctx.insert(Spinbox::new(10, 0, 100, 5));
+        WidgetHost::set_rect(&mut ctx[sb], 10.0, 20.0, 100.0, 26.0);
 
         // One notch up steps up, one notch down steps down — and the wheel is consumed.
-        assert!(sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 50.0, 33.0, &mut ctx));
-        assert_eq!(sb.value, 15);
-        assert!(sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 33.0, &mut ctx));
-        assert_eq!(sb.value, 10);
-        assert!(sb.take_change());
+        assert!(ctx.lend_h(sb, |w, ctx| w.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 50.0, 33.0, ctx)).unwrap());
+        assert_eq!(ctx[sb].value, 15);
+        assert!(ctx.lend_h(sb, |w, ctx| w.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 33.0, ctx)).unwrap());
+        assert_eq!(ctx[sb].value, 10);
+        assert!(ctx[sb].take_change());
 
         // Fractional (trackpad) notches accumulate to a whole step, consumed all the while.
-        assert!(sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 0.5), 50.0, 33.0, &mut ctx));
-        assert_eq!(sb.value, 10, "half a notch: no step yet");
-        assert!(sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 0.5), 50.0, 33.0, &mut ctx));
-        assert_eq!(sb.value, 15, "the second half completes the notch");
+        assert!(ctx.lend_h(sb, |w, ctx| w.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 0.5), 50.0, 33.0, ctx)).unwrap());
+        assert_eq!(ctx[sb].value, 10, "half a notch: no step yet");
+        assert!(ctx.lend_h(sb, |w, ctx| w.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 0.5), 50.0, 33.0, ctx)).unwrap());
+        assert_eq!(ctx[sb].value, 15, "the second half completes the notch");
 
         // Outside the rect the wheel is not the spinbox's (hit-gated by the adapter).
-        assert!(!sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 200.0, 200.0, &mut ctx));
-        assert_eq!(sb.value, 15);
+        assert!(!ctx.lend_h(sb, |w, ctx| w.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 200.0, 200.0, ctx)).unwrap());
+        assert_eq!(ctx[sb].value, 15);
     }
 
     #[test]

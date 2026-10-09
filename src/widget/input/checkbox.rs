@@ -647,19 +647,18 @@ mod tests {
     #[test]
     fn checkbox_click_toggles_and_polls_like_legacy() {
         let mut ctx = UiContext::new();
-        let mut cb = Checkbox::new();
+        let cb = ctx.insert(Checkbox::new());
         let id = cb.id();
-        ctx.register_host(&mut cb);
-        WidgetHost::set_rect(&mut cb, 0.0, 0.0, 20.0, 20.0);
+        WidgetHost::set_rect(&mut ctx[cb], 0.0, 0.0, 20.0, 20.0);
 
         assert!(ctx.propagate_event(&click_at(10.0, 10.0), id), "in-rect click consumed");
-        assert!(cb.checked(), "click checked it");
-        assert!(cb.take_click(), "take_click reads once");
-        assert!(!cb.take_click(), "...then clears");
-        assert!(cb.take_change());
+        assert!(ctx[cb].checked(), "click checked it");
+        assert!(ctx[cb].take_click(), "take_click reads once");
+        assert!(!ctx[cb].take_click(), "...then clears");
+        assert!(ctx[cb].take_change());
 
         assert!(!ctx.propagate_event(&click_at(100.0, 100.0), id), "miss is not consumed");
-        assert!(cb.checked(), "miss does not toggle");
+        assert!(ctx[cb].checked(), "miss does not toggle");
     }
 
     #[test]
@@ -768,10 +767,9 @@ mod tests {
     #[test]
     fn toggle_click_glides_the_run_across_its_field() {
         let mut ctx = UiContext::new();
-        let mut t = Toggle::new();
+        let t = ctx.insert(Toggle::new());
         let id = t.id();
-        ctx.register_host(&mut t);
-        WidgetHost::set_rect(&mut t, 0.0, 0.0, 60.0, 30.0);
+        WidgetHost::set_rect(&mut ctx[t], 0.0, 0.0, 60.0, 30.0);
 
         let rect = Rect { x: 0.0, y: 0.0, width: 60.0, height: 30.0 };
         let painted = |t: &Adapted<Toggle>| {
@@ -779,26 +777,26 @@ mod tests {
             crate::widget::Paint::paint(t.inner(), rect, &mut pc);
             pc.finish().items.into_iter().map(|i| format!("{:?}", i.prim)).collect::<Vec<_>>()
         };
-        let before = painted(&t);
+        let before = painted(&ctx[t]);
         let plate_x = |t: &Adapted<Toggle>| t.inner().field(rect).run_span().unwrap().0;
-        let left = plate_x(&t);
+        let left = plate_x(&ctx[t]);
 
         assert!(ctx.propagate_event(&click_at(30.0, 15.0), id), "toggle consumed the click");
-        assert!(t.toggled());
-        assert!(t.take_click());
+        assert!(ctx[t].toggled());
+        assert!(ctx[t].take_click());
 
         // A click sets the target; the plate GLIDES there (`tick`), so the
         // geometry only moves once time passes — the rocker's halves used to
         // swap on the press itself.
-        assert_eq!(plate_x(&t), left, "the click alone does not move the plate");
+        assert_eq!(plate_x(&ctx[t]), left, "the click alone does not move the plate");
         for _ in 0..60 {
-            crate::widget::Input::tick(t.inner_mut(), 1.0 / 60.0, rect);
+            crate::widget::Input::tick(ctx[t].inner_mut(), 1.0 / 60.0, rect);
         }
-        assert!(plate_x(&t) > left, "the plate glided toward the on end");
-        assert!(painted(&t) != before, "toggling changes the emitted geometry");
+        assert!(plate_x(&ctx[t]) > left, "the plate glided toward the on end");
+        assert!(painted(&ctx[t]) != before, "toggling changes the emitted geometry");
 
         // preferred_height forwards the legacy toggle height.
-        assert_eq!(crate::widget::WidgetHostExt::preferred_height(&t), Some(crate::layout::toggle_height()));
+        assert_eq!(crate::widget::WidgetHostExt::preferred_height(&ctx[t]), Some(crate::layout::toggle_height()));
     }
 
     /// The toggle is ONE field, the form a text row's picker and a spinbox's

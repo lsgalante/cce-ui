@@ -1001,36 +1001,33 @@ mod tests {
     /// app's key handling, which forwards it to the box, sees it) until Ctrl+Tab moves on.
     #[test]
     fn tab_walks_the_stops_but_a_multi_line_box_keeps_it() {
-        use crate::widget::{Owned, TextBox, WidgetHost};
+        use crate::widget::{TextBox, WidgetHost, WidgetHostExt};
         let tab = Key::Named(NamedKey::Tab);
         let (mut d, mut app, mut f) = (driver(), mock(), Flags { redraw: false, exit: false });
         let mut ctx = crate::context::UiContext::new();
-        let mut name = Owned::new(TextBox::new(String::new()));
-        name.set_rect(10.0, 10.0, 200.0, 24.0);
-        let mut notes = Owned::new(TextBox::new(String::new()).with_multiline(true));
-        notes.set_rect(10.0, 50.0, 200.0, 120.0);
-        let mut save = Owned::new(crate::widget::Button::new(10.0, 200.0, 80.0, 24.0).with_label("Save"));
-        ctx.register_host(&mut name);
-        ctx.register_host(&mut notes);
-        ctx.register_host(&mut save);
+        let name = ctx.insert(TextBox::new(String::new()));
+        ctx[name].set_rect(10.0, 10.0, 200.0, 24.0);
+        let notes = ctx.insert(TextBox::new(String::new()).with_multiline(true));
+        ctx[notes].set_rect(10.0, 50.0, 200.0, 120.0);
+        let save = ctx.insert(crate::widget::Button::new(10.0, 200.0, 80.0, 24.0).with_label("Save"));
         app.ctx = Some(ctx);
         assert!(app.plate_navigation(), "on by default");
         let focused = |app: &mut Mock| app.ctx.as_ref().unwrap().focused_widget;
 
         d.key(turn(&mut app, &mut f), tab.clone(), Some("\t".into()), ElementState::Pressed);
-        assert_eq!(focused(&mut app), Some(name.base().id()), "the first stop");
+        assert_eq!(focused(&mut app), Some(name.id()), "the first stop");
         d.key(turn(&mut app, &mut f), tab.clone(), Some("\t".into()), ElementState::Pressed);
-        assert_eq!(focused(&mut app), Some(notes.base().id()), "Tab leaves a one-line field");
+        assert_eq!(focused(&mut app), Some(notes.id()), "Tab leaves a one-line field");
         assert!(!app.seen.iter().any(|s| matches!(s, Seen::Key(k, _) if *k == tab)), "the walk took both");
-        assert!(notes.keeps_tab(), "focused, the multi-line box is editing");
+        assert!(app.ctx.as_ref().unwrap()[notes].keeps_tab(), "focused, the multi-line box is editing");
 
         d.key(turn(&mut app, &mut f), tab.clone(), Some("\t".into()), ElementState::Pressed);
-        assert_eq!(focused(&mut app), Some(notes.base().id()), "the box keeps Tab");
+        assert_eq!(focused(&mut app), Some(notes.id()), "the box keeps Tab");
         assert_eq!(app.seen.last(), Some(&Seen::Key(tab.clone(), false)), "and the app hands it on");
 
         d.set_modifiers(&mut app, Modifiers { ctrl: true, shift: false, alt: false, logo: false });
         d.key(turn(&mut app, &mut f), tab.clone(), None, ElementState::Pressed);
-        assert_eq!(focused(&mut app), Some(save.base().id()), "Ctrl+Tab leaves it");
+        assert_eq!(focused(&mut app), Some(save.id()), "Ctrl+Tab leaves it");
     }
 
     /// A driver with known chords, whatever the machine's input.kdl says.

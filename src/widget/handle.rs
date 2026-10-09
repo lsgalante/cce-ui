@@ -168,9 +168,9 @@ mod tests {
         assert!(ctx.get(h).is_some());
     }
 
-    /// A widget that animates is ticked by the context once it is inserted, as one
-    /// registered by pointer was, and leaves the tick list when it is removed. Without it an
-    /// inserted tree list never applied its search (it does so in its tick).
+    /// A widget that animates is ticked by the context once it is inserted, and leaves the
+    /// tick list when it is removed. Without it an inserted tree list never applied its
+    /// search (it does so in its tick).
     #[test]
     fn an_inserted_widget_that_ticks_is_ticked() {
         let mut ctx = UiContext::new();

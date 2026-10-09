@@ -85,43 +85,17 @@ pub trait Layout {
     /// re-clamps its scroll, the legacy `set_rect` side effect. Default: ignore.
     fn rect_assigned(&mut self, _rect: Rect) {}
 
-    // --- Container concern (transitional). Legacy containers own `Vec<*mut dyn WidgetHost>`
-    // children (child-arranging `set_rect` has no ctx to reach the tree) and every one
-    // hand-copies the same subtree plumbing: geometry/text aggregation, tick/popover/text-item
-    // recursion, hit-through-children. A migrated container keeps the pointer Vec in its model
-    // (exposed through these hooks) and the ADAPTER does the shared plumbing once, filtered by
-    // `child_visible`. What stays per-widget: child arrangement (`arrange_children` /
-    // `layout_children_ctx`) and any event proxying (in `on_event`, via `EventCtx::ui`).
-    // Dies with `WidgetHost`: the arena owns the tree and the scene walk owns recursion.
-
-    /// Whether this widget is a container serving
-    /// [`container_children`](Layout::container_children). Cheap gate, checked per getter.
-    fn has_container_children(&self) -> bool {
-        false
-    }
-
-    /// The container's child pointers, in stacking order.
-    fn container_children(&self) -> Vec<*mut (dyn WidgetHost + 'static)> {
-        Vec::new()
-    }
-
     /// Adjust a rect assignment before it lands on the base (Switcher clamps to its parent).
     /// Default: identity.
     fn adjust_rect(&self, requested: Rect) -> Rect {
         requested
     }
 
-    /// Position children after a `set_rect` (no ctx available — use the owned pointers).
-    /// Called only while the widget is visible, matching the legacy overrides. `host` is the
-    /// adapter's `*mut dyn WidgetHost` — widgets that embed a legacy child (MenuBar's
-    /// ButtonStrip) parent it back to the host so legacy parent-chain styling walks work.
-    fn arrange_children(&mut self, _rect: Rect, _host: *mut (dyn WidgetHost + 'static)) {}
-
-    /// Per-child visibility policy for the adapter's subtree plumbing (Switcher exposes only
-    /// the active child). Default: every child.
-    fn child_visible(&self, _child: *mut (dyn WidgetHost + 'static)) -> bool {
-        true
-    }
+    /// Position children after a `set_rect`. Called only while the widget is visible. There
+    /// is no context here: a child the context holds (`widget::Embedded`) is placed in
+    /// [`register_embedded_children`](Layout::register_embedded_children) from the rect
+    /// kept here.
+    fn arrange_children(&mut self, _rect: Rect) {}
 
     /// Legacy `WidgetHost::z_index` (host render ordering; MenuBar's dropdowns layer at 100+).
     fn z_order(&self) -> i32 {
@@ -302,7 +276,23 @@ pub struct EventCtx<'a> {
     /// The routing context, when routed. **Transitional** — narrow widgets should only touch the
     /// legacy shared fields (scroll gesture state) until those get typed helpers here.
     pub ui: Option<&'a mut UiContext>,
-    self_ptr: Option<*mut (dyn WidgetHost + 'static)>,
+    /// Where [`open_context_menu`](EventCtx::open_context_menu) asked for the menu: the
+    /// adapter opens it once the widget has handled the event, handing itself over.
+    menu_at: Option<(f32, f32)>,
+}
+
+impl<'a> EventCtx<'a> {
+    pub(crate) fn new(rect: Rect, id: WidgetId, ui: Option<&'a mut UiContext>) -> Self {
+        EventCtx { rect, id, ui, menu_at: None }
+    }
+
+    /// Open the context menu a widget asked for while it handled the event, on `host` (the
+    /// widget's adapter, done handling it).
+    pub(crate) fn open_requested_menu(self, host: &dyn WidgetHost) {
+        if let (Some((px, py)), Some(ui)) = (self.menu_at, self.ui) {
+            ui.handle_right_click(host, px, py);
+        }
+    }
 }
 
 impl EventCtx<'_> {
@@ -337,20 +327,12 @@ impl EventCtx<'_> {
     /// for widgets that must do work *before* the menu opens — Breadcrumb records which segment
     /// was right-clicked first, so the menu header can show that segment's path.
     /// [`Input::opens_context_menu`] can't express that: the adapter's gate runs instead of
-    /// `on_event`, not after it. No-op outside a routed path (no ctx or no self pointer).
+    /// `on_event`, not after it. The menu opens when the widget has handled the event (the
+    /// adapter hands itself to the context then). No-op outside a routed path.
     pub fn open_context_menu(&mut self, px: f32, py: f32) {
-        if let (Some(ptr), Some(ui)) = (self.self_ptr, self.ui.as_deref_mut()) {
-            // SAFETY: `self_ptr` is the routed widget's own adapter, live for the event.
-            unsafe { ui.handle_right_click(ptr, px, py) };
+        if self.ui.is_some() {
+            self.menu_at = Some((px, py));
         }
-    }
-
-    /// The adapter's pointer, for legacy sites that must hand it onward — TreeList makes
-    /// itself the focus target (`set_focused_ptr`) and the context-menu target
-    /// (`show_context_menu`) with the pointer hosts registered. Transitional; dies with
-    /// `WidgetHost`. None outside a routed path.
-    pub(crate) fn host_ptr(&self) -> Option<*mut (dyn WidgetHost + 'static)> {
-        self.self_ptr
     }
 }
 
@@ -417,12 +399,6 @@ pub trait Input {
     /// multi-line text box that is editing types it. The group chord (`focus_next_group`,
     /// Ctrl+Tab by default) still leaves it. Default false: Tab leaves a widget.
     fn keeps_tab(&self) -> bool {
-        false
-    }
-
-    /// Container hit policy: hit whenever any [`Layout::child_visible`] child hits (Layer,
-    /// Switcher). The container's own rect is not consulted. Default: own-rect hit.
-    fn hits_through_children(&self) -> bool {
         false
     }
 
@@ -767,17 +743,6 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
 }
 
 impl<W: Layout + Paint + Input + 'static> Adapted<W> {
-    /// This widget as a type-erased host pointer (off the `WidgetHost` trait — the
-    /// plumbing retype). Registration-bridge material: derived from a live borrow at the
-    /// call, stored only in the `WidgetTree` registry.
-    pub fn as_ptr(&self) -> *mut (dyn WidgetHost + 'static) {
-        self as *const Self as *mut Self as *mut (dyn WidgetHost + 'static)
-    }
-
-    pub fn as_ptr_mut(&mut self) -> *mut (dyn WidgetHost + 'static) {
-        self as *mut Self as *mut (dyn WidgetHost + 'static)
-    }
-
     /// Whether a press here may start a drag (off `WidgetHost` — the ControlPanel
     /// endgame; forwards to the narrow `Input` hook with the laid-out content rect).
     pub fn draggable(&self) -> bool {
@@ -827,6 +792,15 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// rect gate would clip exactly the fringe the halo exists to catch
     /// (`ParametersBg`'s slider forwarding). The widget's own on_event still
     /// applies its fine-grained zone test.
+    /// Offer `event` to the widget's `on_event`, routed (with the context), and open the
+    /// context menu it asked for, if any, once it is done.
+    fn offer(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
+        let mut ectx = EventCtx::new(self.content_rect(), self.base.id(), Some(ctx));
+        let consumed = Input::on_event(&mut self.inner, event, &mut ectx);
+        ectx.open_requested_menu(&*self);
+        consumed
+    }
+
     pub fn mouse_wheel_ungated(
         &mut self,
         delta: &crate::widget::MouseScrollDelta,
@@ -834,15 +808,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         py: f32,
         ctx: &mut UiContext,
     ) -> bool {
-        let rect = self.content_rect();
-        let id = self.base.id();
-        let self_ptr = self.as_ptr_mut();
-        let mut ectx = EventCtx { rect, id, ui: Some(ctx), self_ptr: Some(self_ptr) };
-        Input::on_event(
-            &mut self.inner,
-            &Event::MouseWheel { delta: *delta, x: px, y: py, local_x: px, local_y: py },
-            &mut ectx,
-        )
+        self.offer(&Event::MouseWheel { delta: *delta, x: px, y: py, local_x: px, local_y: py }, ctx)
     }
     pub fn keyboard_input(&mut self, event: &crate::widget::KeyEvent, ctx: &mut UiContext) -> bool {
         self.handle_event(&Event::KeyInput(event.clone()), ctx)
@@ -886,12 +852,8 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// unconsumed move twice, which is fine — a hover recompute is idempotent (anything
     /// that changed on the first call consumed it there).
     pub fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        let rect = self.content_rect();
-        let id = self.base.id();
-        let self_ptr = self.as_ptr_mut();
-        let mut ectx = EventCtx { rect, id, ui: Some(ctx), self_ptr: Some(self_ptr) };
         let event = Event::PointerMove { x: px, y: py, local_x: px, local_y: py };
-        if Input::on_event(&mut self.inner, &event, &mut ectx) {
+        if self.offer(&event, ctx) {
             return true;
         }
         let was = self.base.hovered;
@@ -906,18 +868,9 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         }
     }
 
-    /// Register + (un)link this widget under a parent (off `WidgetHost` in 6bd batch 4).
-    pub fn set_parent(&mut self, parent: Option<&mut (dyn WidgetHost + 'static)>, ctx: &mut UiContext) {
-        // Replica of the old WidgetHost default: symmetric tree link.
-        let id = self.base.id();
-        if let Some(p) = parent {
-            let p_id = p.base().id();
-            ctx.register_embedded(p);
-            ctx.register_embedded(self);
-            ctx.tree.set_parent(id, Some(p_id));
-        } else {
-            ctx.tree.set_parent(id, None);
-        }
+    /// Link this widget under `parent`, or unlink it from its parent (`None`).
+    pub fn set_parent(&mut self, parent: Option<WidgetId>, ctx: &mut UiContext) {
+        ctx.tree.set_parent(self.base.id(), parent);
     }
 
     /// The model's intrinsic content size (off the `WidgetHost` trait since 6bd — the concrete
@@ -1076,25 +1029,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         self.visible
     }
 
-    // --- Container concern: tree lifecycle, child layout, and subtree recursion. The tree
-    // itself stays in `ctx.tree` (the WidgetHost defaults' store); a container model additionally
-    // keeps its own pointer Vec via the `Layout` hooks, because `set_rect`-time arrangement
-    // has no ctx to reach the tree.
-
-    fn is_child_visible(&self, child_id: WidgetId) -> bool {
-        if !Layout::has_container_children(&self.inner) {
-            return true;
-        }
-        for child in Layout::container_children(&self.inner) {
-            if unsafe { (*child).base().id() } == child_id {
-                return Layout::child_visible(&self.inner, child);
-            }
-        }
-        false
-    }
-
-
-
     fn focused(&self, _ctx: &UiContext) -> bool {
         Input::is_focused(&self.inner, self.base.focused)
     }
@@ -1118,9 +1052,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         if self.visible() {
             let rect = self.content_rect();
             Paint::prepare_text(&mut self.inner, fs, rect);
-            for child in self.visible_children() {
-                unsafe { (*child).prepare_text(fs) };
-            }
         }
     }
 
@@ -1129,7 +1060,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
             return None;
         }
         Paint::popover(&self.inner, self.content_rect())
-            .or_else(|| self.visible_children().into_iter().find_map(|c| unsafe { &*c }.popover_rect()))
     }
 
     fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
@@ -1137,9 +1067,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
             return;
         }
         Paint::draw_popover(&self.inner, self.content_rect(), pc);
-        for child in self.visible_children() {
-            unsafe { &*child }.render_popover(pc);
-        }
     }
 
     // --- Legacy structural conventions the adapter owns on the widget's behalf ---
@@ -1162,8 +1089,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         // overrides); hidden containers skip it, like the legacy impls.
         if self.visible {
             let content = self.content_rect();
-            let host = self.as_ptr_mut();
-            Layout::arrange_children(&mut self.inner, content, host);
+            Layout::arrange_children(&mut self.inner, content);
         }
     }
 
@@ -1328,22 +1254,15 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     }
 
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
-        // Legacy value-owning containers healed their children's registry entries every tick
-        // (addresses move with the owning struct); same cadence here.
+        // A composite places the children the context holds from the rect it kept: every
+        // tick, as on every layout.
         let host_id = self.base.id();
         Layout::register_embedded_children(&mut self.inner, host_id, ctx);
         let rect = self.content_rect();
         let mut changed = Input::tick(&mut self.inner, dt, rect);
-        {
-            let self_ptr = self.as_ptr_mut();
-            let mut ectx = EventCtx { rect, id: host_id, ui: Some(&mut *ctx), self_ptr: Some(self_ptr) };
-            changed |= Input::tick_ctx(&mut self.inner, dt, &mut ectx);
-        }
-        if self.visible {
-            for child in self.visible_children() {
-                changed |= unsafe { &mut *child }.tick(dt, ctx);
-            }
-        }
+        let mut ectx = EventCtx::new(rect, host_id, Some(ctx));
+        changed |= Input::tick_ctx(&mut self.inner, dt, &mut ectx);
+        ectx.open_requested_menu(&*self);
         changed
     }
     /// Focus set/cleared directly (hosts call `w.focus()`/`w.unfocus()`): keep the base flag
@@ -1354,16 +1273,14 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         if Input::tracks_base_focus(&self.inner) {
             self.base.focused = true;
         }
-        let self_ptr = self.as_ptr_mut();
-        let mut ectx = EventCtx { rect: self.content_rect(), id: self.base.id(), ui: None, self_ptr: Some(self_ptr) };
+        let mut ectx = EventCtx::new(self.content_rect(), self.base.id(), None);
         Input::on_event(&mut self.inner, &Event::FocusIn, &mut ectx);
     }
     fn unfocus(&mut self) {
         if Input::tracks_base_focus(&self.inner) {
             self.base.focused = false;
         }
-        let self_ptr = self.as_ptr_mut();
-        let mut ectx = EventCtx { rect: self.content_rect(), id: self.base.id(), ui: None, self_ptr: Some(self_ptr) };
+        let mut ectx = EventCtx::new(self.content_rect(), self.base.id(), None);
         Input::on_event(&mut self.inner, &Event::FocusOut, &mut ectx);
     }
 
@@ -1373,15 +1290,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         // every widget (the designer) and rely on hidden ones rejecting the hit.
         if !self.visible() {
             return false;
-        }
-        // Containers with a hit-through policy delegate entirely to their visible children
-        // (each child runs its own coverage check) — the legacy Layer/Switcher pattern, which
-        // never consulted the container's own rect or coverage.
-        if Input::hits_through_children(&self.inner) {
-            return self
-                .visible_children()
-                .into_iter()
-                .any(|c| unsafe { &*c }.hit_test(px, py, ctx));
         }
         // Preserve the legacy occlusion check (a covering layer swallows the hit), then delegate
         // the geometric test to the narrow trait instead of the row/label-offset machinery.
@@ -1404,17 +1312,9 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
         let rect = self.content_rect();
-        let id = self.base.id();
-        let self_ptr = self.as_ptr_mut();
-        macro_rules! ectx {
-            () => {
-                EventCtx { rect, id, ui: Some(ctx), self_ptr: Some(self_ptr) }
-            };
-        }
         match event {
-            // A hit right-press on a context-menu widget routes to the shared config menu —
-            // `on_event` can't (that policy needs the target's WidgetHost pointer), so the adapter
-            // owns it.
+            // A hit right-press on a context-menu widget routes to the shared config menu,
+            // which reads the widget itself, so the adapter owns it.
             Event::MouseButton {
                 button: crate::widget::MouseButton::Right,
                 state: crate::widget::ElementState::Pressed,
@@ -1423,8 +1323,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 ..
             } if Input::opens_context_menu(&self.inner) => {
                 if self.hit_test(*px, *py, ctx) {
-                    // SAFETY: `self_ptr` is this adapter, derived from `&mut self` above.
-                    unsafe { ctx.handle_right_click(self_ptr, *px, *py) };
+                    ctx.handle_right_click(&*self, *px, *py);
                     return true;
                 }
                 false
@@ -1440,20 +1339,20 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 if !Input::gates_presses(&self.inner) =>
             {
                 let _ = (px, py);
-                Input::on_event(&mut self.inner, event, &mut ectx!())
+                self.offer(event, ctx)
             }
             Event::MouseButton { state: crate::widget::ElementState::Pressed, x: px, y: py, .. }
             | Event::MouseWheel { x: px, y: py, .. } => {
-                self.hit_test(*px, *py, ctx) && Input::on_event(&mut self.inner, event, &mut ectx!())
+                self.hit_test(*px, *py, ctx) && self.offer(event, ctx)
             }
             Event::MouseButton { state: crate::widget::ElementState::Released, .. } => {
-                Input::on_event(&mut self.inner, event, &mut ectx!())
+                self.offer(event, ctx)
             }
             // Offer the raw move to the widget; if unconsumed, run the legacy hover bookkeeping
             // (base.hovered + MouseEnter/MouseLeave synthesis, which re-enters this method and
             // reaches `on_event` through the arm below).
             Event::PointerMove { x: px, y: py, .. } => {
-                if Input::on_event(&mut self.inner, event, &mut ectx!()) {
+                if self.offer(event, ctx) {
                     return true;
                 }
                 let (px, py) = (*px, *py);
@@ -1466,14 +1365,14 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
             // on_event default and every ROUTED drag was silently dead (the reason each app
             // historically kept its own held-drag index and called drag_update directly).
             Event::DragStart { start_x, start_y } => {
-                if Input::on_event(&mut self.inner, event, &mut ectx!()) {
+                if self.offer(event, ctx) {
                     return true;
                 }
                 Input::drag_begin(&mut self.inner, *start_x, *start_y, rect);
                 true
             }
             Event::DragUpdate { x, y, .. } => {
-                if Input::on_event(&mut self.inner, event, &mut ectx!()) {
+                if self.offer(event, ctx) {
                     return true;
                 }
                 if let Some((nx, ny)) = Input::drag_reposition(&mut self.inner, *x, *y, rect) {
@@ -1484,7 +1383,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 Input::drag_update(&mut self.inner, *x, *y, rect)
             }
             Event::DragEnd => {
-                if Input::on_event(&mut self.inner, event, &mut ectx!()) {
+                if self.offer(event, ctx) {
                     return true;
                 }
                 Input::drag_end(&mut self.inner);
@@ -1498,7 +1397,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
             // Everything else (KeyInput, Tick, Enter/Leave, Focus*) forwards directly —
             // the legacy default dispatch would route these to leaf handlers Adapted never
             // overrides, so there is no behavior to fall back to.
-            _ => Input::on_event(&mut self.inner, event, &mut ectx!()),
+            _ => self.offer(event, ctx),
         }
     }
 }
@@ -1568,8 +1467,8 @@ mod tests {
     }
     impl Input for Col {}
 
-    fn rect_of(ptr: *mut (dyn WidgetHost + 'static)) -> Rect {
-        let (x, y, w, h) = unsafe { (*ptr).rect() };
+    fn rect_of(w: &dyn WidgetHost) -> Rect {
+        let (x, y, w, h) = w.rect();
         Rect { x, y, width: w, height: h }
     }
 
@@ -1613,34 +1512,22 @@ mod tests {
         // the existing bridge and painted by the existing painter — proving a widget that never
         // touches `WidgetHost` participates in both live passes.
         let mut ctx = UiContext::new();
-        let mut root = Box::new(Adapted::new(Col));
-        let mut a = Box::new(Adapted::new(Dot { color: [1.0, 0.0, 0.0, 1.0], size: Size::new(10.0, 10.0) }));
-        let mut b = Box::new(Adapted::new(Dot { color: [0.0, 1.0, 0.0, 1.0], size: Size::new(10.0, 20.0) }));
-
-        let (root_id, root_ptr) = (root.id(), root.as_ptr_mut());
-        let (a_id, a_ptr) = (a.id(), a.as_ptr_mut());
-        let (b_id, b_ptr) = (b.id(), b.as_ptr_mut());
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(root_id, root_ptr) };
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(a_id, a_ptr) };
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(b_id, b_ptr) };
-        ctx.link_ids(root_id, a_id);
-        ctx.link_ids(root_id, b_id);
+        let root = ctx.insert(Adapted::new(Col));
+        let a = ctx.insert(Adapted::new(Dot { color: [1.0, 0.0, 0.0, 1.0], size: Size::new(10.0, 10.0) }));
+        let b = ctx.insert(Adapted::new(Dot { color: [0.0, 1.0, 0.0, 1.0], size: Size::new(10.0, 20.0) }));
+        ctx.link_ids(root.id(), a.id());
+        ctx.link_ids(root.id(), b.id());
 
         // Layout by hand (the Phase-2b bridge is gone; apps drive the solver directly) —
         // the same column-of-two placement the bridge used to compute.
-        unsafe {
-            (*root_ptr).set_rect(0.0, 0.0, 100.0, 100.0);
-            (*a_ptr).set_rect(0.0, 0.0, 10.0, 10.0);
-            (*b_ptr).set_rect(0.0, 14.0, 10.0, 20.0);
-        }
-        assert_eq!(rect_of(a_ptr), Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0 });
-        assert_eq!(rect_of(b_ptr), Rect { x: 0.0, y: 14.0, width: 10.0, height: 20.0 });
+        ctx[root].set_rect(0.0, 0.0, 100.0, 100.0);
+        ctx[a].set_rect(0.0, 0.0, 10.0, 10.0);
+        ctx[b].set_rect(0.0, 14.0, 10.0, 20.0);
+        assert_eq!(rect_of(&ctx[a]), Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0 });
+        assert_eq!(rect_of(&ctx[b]), Rect { x: 0.0, y: 14.0, width: 10.0, height: 20.0 });
 
         // Paint: each Dot's `Paint::paint` default emits one quad at its laid-out rect, in colour.
-        let list = paint_tree(&ctx, unsafe { &*root_ptr });
+        let list = paint_tree(&ctx, &ctx[root]);
         let quads: Vec<_> = list
             .items
             .iter()
@@ -1697,11 +1584,9 @@ mod tests {
     fn narrow_widget_receives_routed_events_through_the_adapter() {
         use crate::widget::{ElementState, MouseButton};
         let mut ctx = UiContext::new();
-        let mut w = Box::new(Adapted::new(Clicker { clicks: 0, entered: 0, left: 0 }));
+        let w = ctx.insert(Adapted::new(Clicker { clicks: 0, entered: 0, left: 0 }));
         let id = w.id();
-        ctx.register_host(&mut *w);
-        let ptr = w.as_ptr_mut();
-        unsafe { (*ptr).set_rect(10.0, 10.0, 40.0, 20.0) };
+        ctx[w].set_rect(10.0, 10.0, 40.0, 20.0);
 
         let click_at = |x: f32, y: f32| Event::MouseButton {
             button: MouseButton::Left,
@@ -1716,16 +1601,16 @@ mod tests {
         assert!(ctx.propagate_event(&click_at(20.0, 15.0), id), "in-rect click is consumed");
         // A click outside never reaches on_event (the adapter's hit gate rejects it).
         assert!(!ctx.propagate_event(&click_at(200.0, 200.0), id), "out-of-rect click passes through");
-        assert_eq!(w.inner().clicks, 1, "only the in-rect click was counted");
+        assert_eq!(ctx[w].inner().clicks, 1, "only the in-rect click was counted");
 
         // Hover: moving inside synthesizes MouseEnter (via the legacy bookkeeping the adapter
         // preserves) and sets the base hover flag; moving away synthesizes MouseLeave.
         ctx.propagate_event(&Event::PointerMove { x: 20.0, y: 15.0, local_x: 20.0, local_y: 15.0 }, id);
-        assert_eq!(w.inner().entered, 1, "MouseEnter reached on_event");
-        assert!(unsafe { (*ptr).base().hovered }, "base hover flag set through the adapter");
+        assert_eq!(ctx[w].inner().entered, 1, "MouseEnter reached on_event");
+        assert!(ctx[w].base().hovered, "base hover flag set through the adapter");
         ctx.propagate_event(&Event::PointerMove { x: 200.0, y: 200.0, local_x: 200.0, local_y: 200.0 }, id);
-        assert_eq!(w.inner().left, 1, "MouseLeave reached on_event");
-        assert!(!unsafe { (*ptr).base().hovered }, "base hover flag cleared");
+        assert_eq!(ctx[w].inner().left, 1, "MouseLeave reached on_event");
+        assert!(!ctx[w].base().hovered, "base hover flag cleared");
     }
 
     /// A narrow widget that is also a controller: the controller trait is reached through the
@@ -1787,12 +1672,10 @@ mod tests {
         impl Input for Tag {}
 
         let mut ctx = UiContext::new();
-        let mut w = Box::new(Adapted::new(Tag));
-        ctx.register_host(&mut *w);
-        let ptr = w.as_ptr_mut();
-        unsafe { (*ptr).set_rect(10.0, 20.0, 100.0, 30.0) };
+        let w = ctx.insert(Adapted::new(Tag));
+        ctx[w].set_rect(10.0, 20.0, 100.0, 30.0);
 
-        let list = paint_tree(&ctx, unsafe { &*ptr });
+        let list = paint_tree(&ctx, &ctx[w]);
         let texts: Vec<_> = list
             .items
             .iter()
@@ -1827,12 +1710,10 @@ mod tests {
         impl Input for Tag {}
 
         let mut ctx = UiContext::new();
-        let mut w = Box::new(Adapted::new(Tag).with_label("Name"));
-        ctx.register_host(&mut *w);
-        let ptr = w.as_ptr_mut();
-        unsafe { (*ptr).set_rect(10.0, 20.0, 100.0, 60.0) };
+        let w = ctx.insert(Adapted::new(Tag).with_label("Name"));
+        ctx[w].set_rect(10.0, 20.0, 100.0, 60.0);
 
-        let list = paint_tree(&ctx, unsafe { &*ptr });
+        let list = paint_tree(&ctx, &ctx[w]);
         let bounds_of = |want: &str| {
             list.items.iter().find_map(|it| match &it.prim {
                 Prim::Text { text, bounds, .. } if text == want => Some(*bounds),

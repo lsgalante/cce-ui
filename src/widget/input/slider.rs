@@ -1133,31 +1133,26 @@ fn probe_slider_bridge() {
     #[test]
     fn slider_press_drag_and_wheel() {
         let mut ctx = UiContext::new();
-        let mut sl = Slider::new().with_value(0.5);
+        let sl = ctx.insert(Slider::new().with_value(0.5));
         let id = sl.id();
-        ctx.register_host(&mut sl);
-        WidgetHost::set_rect(&mut sl, 0.0, 0.0, 100.0, 20.0);
+        WidgetHost::set_rect(&mut ctx[sl], 0.0, 0.0, 100.0, 20.0);
 
         // Press on the track grabs the thumb.
         assert!(ctx.propagate_event(
             &Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x: 50.0, y: 10.0, local_x: 50.0, local_y: 10.0 },
             id,
         ));
-        assert!(sl.is_dragging());
-        assert!(sl.drag_update(80.0, 10.0));
-        assert!(sl.inner().value() > 0.5);
-        sl.drag_end();
+        assert!(ctx[sl].is_dragging());
+        assert!(ctx[sl].drag_update(80.0, 10.0));
+        assert!(ctx[sl].inner().value() > 0.5);
+        ctx[sl].drag_end();
 
         // Wheel adjusts value when the gesture starts fresh.
         ctx.scroll_gesture_new = true;
-        let before = sl.inner().value();
-        assert!(sl.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0),
-            50.0,
-            10.0,
-            &mut ctx,
-        ));
-        assert!(sl.inner().value() > before, "a wheel notch up is more");
-        assert!(sl.take_change());
+        let before = ctx[sl].inner().value();
+        assert!(ctx.lend_h(sl, |w, ctx| w.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 50.0, 10.0, ctx)).unwrap());
+        assert!(ctx[sl].inner().value() > before, "a wheel notch up is more");
+        assert!(ctx[sl].take_change());
     }
 
     /// A notch steps 2% of the range up to a 20-wide one, exactly as it
@@ -1168,16 +1163,15 @@ fn probe_slider_bridge() {
     fn a_wide_range_steps_by_the_values_magnitude() {
         let notch = |min: f32, max: f32, at: f32| -> f32 {
             let mut ctx = UiContext::new();
-            let mut sl = Slider::new().with_range(min, max);
-            ctx.register_host(&mut sl);
-            WidgetHost::set_rect(&mut sl, 0.0, 0.0, 200.0, 20.0);
-            sl.inner_mut().set_scaled_value(at);
-            let before = sl.inner().get_scaled_value();
+            let sl = ctx.insert(Slider::new().with_range(min, max));
+            WidgetHost::set_rect(&mut ctx[sl], 0.0, 0.0, 200.0, 20.0);
+            ctx[sl].inner_mut().set_scaled_value(at);
+            let before = ctx[sl].inner().get_scaled_value();
             ctx.scroll_gesture_new = true;
             // Over the band at the value, where the halo is.
-            let x = 200.0 * sl.inner().value();
-            assert!(sl.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), x.clamp(1.0, 199.0), 10.0, &mut ctx));
-            sl.inner().get_scaled_value() - before
+            let x = 200.0 * ctx[sl].inner().value();
+            assert!(ctx.lend_h(sl, |w, ctx| w.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), x.clamp(1.0, 199.0), 10.0, ctx)).unwrap());
+            ctx[sl].inner().get_scaled_value() - before
         };
         let close = |got: f32, want: f32| (got - want).abs() <= want * 0.01 + 1e-3;
         // Ordinary ranges: 2% of the range, untouched.
@@ -1213,15 +1207,14 @@ fn probe_slider_bridge() {
     #[test]
     fn a_slider_hovers_under_the_pointer() {
         let mut ctx = UiContext::new();
-        let mut sl = Slider::new();
-        ctx.register_host(&mut sl);
-        WidgetHost::set_rect(&mut sl, 0.0, 0.0, 100.0, 20.0);
-        assert!(!sl.inner().hovered());
-        assert!(sl.on_cursor_moved(50.0, 10.0, &mut ctx), "entering is a change");
-        assert!(sl.inner().hovered());
-        assert!(!sl.on_cursor_moved(60.0, 10.0, &mut ctx), "moving within is not");
-        assert!(sl.on_cursor_moved(500.0, 10.0, &mut ctx), "leaving is");
-        assert!(!sl.inner().hovered());
+        let sl = ctx.insert(Slider::new());
+        WidgetHost::set_rect(&mut ctx[sl], 0.0, 0.0, 100.0, 20.0);
+        assert!(!ctx[sl].inner().hovered());
+        assert!(ctx.lend_h(sl, |w, ctx| w.on_cursor_moved(50.0, 10.0, ctx)).unwrap(), "entering is a change");
+        assert!(ctx[sl].inner().hovered());
+        assert!(!ctx.lend_h(sl, |w, ctx| w.on_cursor_moved(60.0, 10.0, ctx)).unwrap(), "moving within is not");
+        assert!(ctx.lend_h(sl, |w, ctx| w.on_cursor_moved(500.0, 10.0, ctx)).unwrap(), "leaving is");
+        assert!(!ctx[sl].inner().hovered());
 
         let mut f = crate::widget::display::Float3::new();
         WidgetHost::set_rect(&mut f, 0.0, 0.0, 200.0, crate::widget::display::Float3::preferred_height(false));

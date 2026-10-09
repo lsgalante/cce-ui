@@ -92,11 +92,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
-  # The registry's pointers into app-owned widgets, under Miri: the aliasing rules a
-  # compiler does not check. Narrow on purpose (Miri interprets, slowly): the `Owned`
-  # tests, which take turns between the app's access and the registry's, under both of
-  # Miri's aliasing models. Until 2026-10-08 `Owned` held its widget in a `Box`, and every
-  # app access invalidated the registry's pointer.
+  # The registry's own widgets, under Miri: the aliasing rules a compiler does not check.
+  # The context owns every widget as a raw root and lends it out; these tests take turns
+  # between an app's access by handle, the context's dispatch, a lent widget reaching back,
+  # and embedded children moving in and out, under both of Miri's aliasing models. Narrow
+  # on purpose (Miri interprets, slowly).
   miri:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -116,9 +116,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo miri setup
       - name: Stacked Borrows
-        run: cargo miri test --lib -- widget::owned widget::handle
+        run: cargo miri test --lib -- widget::handle widget::embedded scene::tree
       - name: Tree Borrows
-        run: cargo miri test --lib -- widget::owned widget::handle
+        run: cargo miri test --lib -- widget::handle widget::embedded scene::tree
         env:
           MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-tree-borrows
 

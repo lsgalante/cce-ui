@@ -239,45 +239,41 @@ impl Input for Dialog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Button, Owned, TextBox};
+    use crate::widget::{Button, TextBox};
 
     /// A dialog traps the Tab walk among its members, covers what is behind it, and gives
     /// focus back on close.
     #[test]
     fn a_dialog_traps_focus_covers_the_window_and_gives_focus_back() {
         let mut ctx = UiContext::new();
-        let mut behind = Owned::new(Button::new(10.0, 10.0, 80.0, 24.0).with_label("Behind"));
-        let mut name = Owned::new(TextBox::new(String::new()).with_label("Name"));
-        name.set_rect(120.0, 120.0, 200.0, 24.0);
-        let mut ok = Owned::new(Button::new(120.0, 160.0, 80.0, 24.0).with_label("OK"));
-        let mut dialog = Owned::new(Dialog::new().with_label("Rename"));
-        ctx.register_host(&mut behind);
-        ctx.register_host(&mut dialog);
-        ctx.register_host(&mut name);
-        ctx.register_host(&mut ok);
-        ctx.set_focused_id(behind.base().id());
+        let behind = ctx.insert(Button::new(10.0, 10.0, 80.0, 24.0).with_label("Behind"));
+        let name = ctx.insert(TextBox::new(String::new()).with_label("Name"));
+        ctx[name].set_rect(120.0, 120.0, 200.0, 24.0);
+        let ok = ctx.insert(Button::new(120.0, 160.0, 80.0, 24.0).with_label("OK"));
+        let dialog = ctx.insert(Dialog::new().with_label("Rename"));
+        ctx.set_focused_id(behind.id());
 
-        dialog.open(&mut ctx, vec![name.base().id(), ok.base().id()]);
-        assert_eq!(ctx.modal_owner(), Some(dialog.base().id()));
-        assert_eq!(ctx.focused_widget, Some(name.base().id()), "focus moves in");
+        ctx.lend_h(dialog, |d, ctx| d.open(ctx, vec![name.id(), ok.id()]));
+        assert_eq!(ctx.modal_owner(), Some(dialog.id()));
+        assert_eq!(ctx.focused_widget, Some(name.id()), "focus moves in");
         ctx.focus_step(false);
-        assert_eq!(ctx.focused_widget, Some(ok.base().id()));
+        assert_eq!(ctx.focused_widget, Some(ok.id()));
         ctx.focus_step(false);
-        assert_eq!(ctx.focused_widget, Some(name.base().id()), "the walk wraps inside, never to Behind");
-        assert!(!behind.hit_test(20.0, 20.0, &ctx), "behind the dialog nothing hits");
-        assert!(ok.hit_test(130.0, 170.0, &ctx), "inside it does");
+        assert_eq!(ctx.focused_widget, Some(name.id()), "the walk wraps inside, never to Behind");
+        assert!(!ctx[behind].hit_test(20.0, 20.0, &ctx), "behind the dialog nothing hits");
+        assert!(ctx[ok].hit_test(130.0, 170.0, &ctx), "inside it does");
 
-        let plate = dialog.inner().plate(&ctx).expect("a plate round the members");
-        let (p, top) = (dialog.inner().padding(), dialog.inner().headroom());
+        let plate = ctx[dialog].inner().plate(&ctx).expect("a plate round the members");
+        let (p, top) = (ctx[dialog].inner().padding(), ctx[dialog].inner().headroom());
         assert_eq!((plate.x, plate.y), (120.0 - p, 120.0 - top), "the title band is above the members");
-        assert_eq!(dialog.rect(), (plate.x, plate.y, plate.width, plate.height), "opening fits it");
-        assert_eq!(ctx.tree.child_ids(dialog.base().id()), vec![name.base().id(), ok.base().id()]);
+        assert_eq!(ctx[dialog].rect(), (plate.x, plate.y, plate.width, plate.height), "opening fits it");
+        assert_eq!(ctx.tree.child_ids(dialog.id()), vec![name.id(), ok.id()]);
 
-        dialog.close(&mut ctx);
+        ctx.lend_h(dialog, |w, ctx| w.close(ctx)).unwrap();
         assert_eq!(ctx.modal_owner(), None);
-        assert_eq!(ctx.focused_widget, Some(behind.base().id()), "focus goes back");
-        assert!(behind.hit_test(20.0, 20.0, &ctx));
-        assert!(ctx.tree.child_ids(dialog.base().id()).is_empty(), "the members are unlinked");
+        assert_eq!(ctx.focused_widget, Some(behind.id()), "focus goes back");
+        assert!(ctx[behind].hit_test(20.0, 20.0, &ctx));
+        assert!(ctx.tree.child_ids(dialog.id()).is_empty(), "the members are unlinked");
     }
 
     /// The dialog paints its plate, then its members on it.
@@ -285,17 +281,15 @@ mod tests {
     fn a_dialog_paints_its_plate_then_its_members() {
         use crate::scene::paint::Prim;
         let mut ctx = UiContext::new();
-        let mut ok = Owned::new(Button::new(120.0, 160.0, 80.0, 24.0).with_label("OK"));
-        let mut dialog = Owned::new(Dialog::new().with_label("Rename"));
-        ctx.register_host(&mut dialog);
-        ctx.register_host(&mut ok);
+        let ok = ctx.insert(Button::new(120.0, 160.0, 80.0, 24.0).with_label("OK"));
+        let dialog = ctx.insert(Dialog::new().with_label("Rename"));
         let mut pc = PaintCtx::new();
-        crate::scene::painter::paint_root_into(&ctx, &*dialog, &mut pc);
+        crate::scene::painter::paint_root_into(&ctx, &ctx[dialog], &mut pc);
         assert!(pc.finish().items.is_empty(), "closed, it paints nothing");
 
-        dialog.open(&mut ctx, vec![ok.base().id()]);
+        ctx.lend_h(dialog, |d, ctx| d.open(ctx, vec![ok.id()]));
         let mut pc = PaintCtx::new();
-        crate::scene::painter::paint_root_into(&ctx, &*dialog, &mut pc);
+        crate::scene::painter::paint_root_into(&ctx, &ctx[dialog], &mut pc);
         let prims: Vec<Prim> = pc.finish().items.into_iter().map(|i| i.prim).collect();
         let texts: Vec<&str> = prims
             .iter()

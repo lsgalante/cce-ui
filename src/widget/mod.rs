@@ -241,14 +241,6 @@ pub trait WidgetHost {
     fn base(&self) -> &Widget;
     fn base_mut(&mut self) -> &mut Widget;
 
-    /// Where the registry should point for this widget, and the token that says the address
-    /// still holds it — `Some` only for a widget whose address cannot move under the registry
-    /// ([`Owned`]). `None` (every other widget) registers the widget's own address, watched by
-    /// its base's liveness token, which catches a drop but not a move.
-    fn stable_target(&mut self) -> Option<(*mut (dyn WidgetHost + 'static), std::sync::Weak<()>)> {
-        None
-    }
-
     /// The height of the detached-label strip above this widget's content: zero for
     /// unlabeled widgets and for those whose base label IS their content
     /// ([`Layout::inline_label`]). A widget's rect is always its content plus this
@@ -389,7 +381,7 @@ pub trait WidgetHost {
     
 
     /// Emit this widget's OWN primitives (non-recursive) into the single paint pass (Phase 3).
-    /// Every production host overrides this (`Adapted`, and `Owned` forwarding to it); the
+    /// Every production host overrides this (`Adapted`); the
     /// default serves a host with no widget of its own (the test shims): its plate — a solid
     /// border, or a rounded fill in its colour where its corner style rounds — then what its
     /// model paints, text aside. Recursion into children and clipping are the paint walk's
@@ -452,7 +444,6 @@ pub trait WidgetHost {
     fn set_visible(&mut self, _visible: bool) {}
     fn visible(&self) -> bool { true }
     fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool { false }
-    fn is_child_visible(&self, _child_id: WidgetId) -> bool { true }
 
     /// Put the widget's embedded children (`widget::Embedded`) into `ctx`: what
     /// `UiContext::insert` calls once the widget is in. The adapter forwards to
@@ -465,13 +456,9 @@ pub trait WidgetHost {
     fn release_embedded(&mut self, _ctx: &mut UiContext) {}
 
     // `set_parent`/`add_child` are GONE from the trait (6bd batch 4): linking is a tree
-    // operation — concrete callers ride the inherent `Adapted` methods, dyn callers go
-    // through `focus::link_parent_child` or `ctx.tree` directly. `parent`/`children` are
-    // GONE too (the plumbing retype): tree structure is read off `ctx.tree`
-    // (`parent_id`/`parent_ptr`/`child_ids`/`children_ptrs`) — the trait no longer
-    // proxies it, and no trait method returns a raw pointer. Paginator's field-derived
-    // child (the one `Layout::container_children` implementor) reaches the walks through
-    // the tree link its per-tick `register_embedded_children` maintains.
+    // operation, by id (`UiContext::link_ids`, `ctx.tree`). `parent`/`children` are GONE
+    // too: tree structure is read off `ctx.tree` (`parent_id` / `child_ids`), and no trait
+    // method returns a raw pointer.
 
 
 
@@ -496,7 +483,7 @@ pub trait WidgetHost {
 /// Implemented for every host, `dyn WidgetHost` included, so `w.focus_role()` reads as it
 /// always did — with this trait in scope (`use cce_ui::widget::WidgetHostExt`). Until
 /// 2026-10-08 each of these was a `WidgetHost` method that `Adapted` overrode with a one-line
-/// forward and `Owned` forwarded again.
+/// forward.
 pub trait WidgetHostExt: WidgetHost {
     /// This widget's part in keyboard navigation — `Input::focus_role` through
     /// the adapter; `FocusRole::None` for anything that is not a plate or a well.
@@ -620,12 +607,8 @@ pub trait WidgetHostExt: WidgetHost {
             return;
         }
         b.dirty = true;
-        if let Some(id) = b.id.get() {
-            if let Some(parent_ptr) = ctx.tree.parent_ptr(id) {
-                unsafe {
-                    (*parent_ptr).mark_dirty(ctx);
-                }
-            }
+        if let Some(parent) = b.id.get().and_then(|id| ctx.tree.parent_id(id)) {
+            ctx.lend(parent, |p, ctx| p.mark_dirty(ctx));
         }
     }
 
@@ -649,16 +632,6 @@ pub trait WidgetHostExt: WidgetHost {
         let mut pc = crate::scene::paint::PaintCtx::new();
         self.paint_model().paint(self.content_rect(), &mut pc);
         pc.finish().items.into_iter().map(|item| item.prim).collect()
-    }
-
-    /// The container's children that pass its [`Layout::child_visible`] policy; empty for a
-    /// non-container.
-    fn visible_children(&self) -> Vec<*mut (dyn WidgetHost + 'static)> {
-        let model = self.layout_model();
-        if !model.has_container_children() {
-            return Vec::new();
-        }
-        model.container_children().into_iter().filter(|c| model.child_visible(*c)).collect()
     }
 }
 
@@ -755,7 +728,6 @@ impl EmbedImage {
 pub mod doc_editor;
 pub mod line_edit;
 pub mod model;
-pub mod owned;
 pub mod handle;
 pub mod embedded;
 pub mod scroll_region;
@@ -769,11 +741,9 @@ pub use self::scroll_region::{ScrollRegion, ScrollbarActivity};
 pub use self::side_swipe::{SideSwipe, SwipeDir};
 pub use self::scroll_motion::{Bounds, ScrollAxis, ScrollMotion, ScrollPhase, ScrollSettings, LINE_PX};
 pub use self::model::{Adapted, EventCtx, Input, Layout, Paint};
-pub use self::owned::Owned;
 pub use self::handle::Handle;
 pub use self::embedded::Embedded;
-pub use self::core::{Widget, focus, hover_animation, clipboard, context_menu, clear_widget_references};
-pub use self::core::focus::link_parent_child;
+pub use self::core::{Widget, hover_animation, clipboard, context_menu, clear_widget_references};
 pub use self::input::{
     Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, RadioGroup, Slider, RangeSlider,
     ColorSelector, Finger, Trackpad, get_font_db, ActiveThumb, FontSelector,

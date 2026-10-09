@@ -316,12 +316,9 @@ mod tests {
     use super::*;
     use crate::widget::{Button, DotStatus, Slider, StatusDot, WidgetHost};
 
-    fn register(ctx: &mut UiContext, w: &mut dyn WidgetHost) -> WidgetId {
-        let id = w.base().id();
-        let ptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(w as *mut dyn WidgetHost) };
-        // SAFETY: a test widget, live for the whole test.
-        unsafe { ctx.register_widget(id, ptr) };
-        id
+    /// Put `w` in the context, as laid out; its id.
+    fn register<W: WidgetHost + 'static>(ctx: &mut UiContext, w: W) -> WidgetId {
+        ctx.insert(w).id()
     }
 
     /// The frame is the members' hull plus the padding; a parked member is not in it.
@@ -334,7 +331,7 @@ mod tests {
         WidgetHost::set_rect(&mut a, 100.0, 50.0, 80.0, 24.0);
         WidgetHost::set_rect(&mut b, 200.0, 90.0, 60.0, 30.0);
         WidgetHost::set_rect(&mut parked, -1000.0, -1000.0, 1.0, 1.0);
-        let ids = vec![register(&mut ctx, &mut a), register(&mut ctx, &mut b), register(&mut ctx, &mut parked)];
+        let ids = vec![register(&mut ctx, a), register(&mut ctx, b), register(&mut ctx, parked)];
         let g = Group::new(ids).with_padding(10.0);
         let f = g.inner().frame(&ctx).expect("members on screen");
         assert_eq!((f.body.x, f.body.y, f.body.width, f.body.height), (90.0, 40.0, 180.0, 90.0));
@@ -351,7 +348,7 @@ mod tests {
         assert!(strip > 0.0, "a detached label has a strip");
         // The block: strip + control, as `layout` lands it.
         WidgetHost::set_rect(&mut s, 100.0, 50.0, 160.0, 16.0 + strip);
-        let ids = vec![register(&mut ctx, &mut s)];
+        let ids = vec![register(&mut ctx, s)];
         let g = Group::new(ids).with_padding(10.0);
         let f = g.inner().frame(&ctx).unwrap();
         assert_eq!(f.body.y, 40.0, "one padding above the block, not a strip more");
@@ -369,7 +366,7 @@ mod tests {
         WidgetHost::set_rect(&mut dot, 100.0, 50.0, size, size + strip);
         let label = dot.detached_label_rect().expect("a detached label");
         assert!(label.width > size, "the label text is wider than the dot");
-        let ids = vec![register(&mut ctx, &mut dot)];
+        let ids = vec![register(&mut ctx, dot)];
         let g = Group::new(ids).with_padding(10.0);
         let f = g.inner().frame(&ctx).unwrap();
         assert_eq!(f.body.x, 90.0, "the left is the rect's");
@@ -384,7 +381,8 @@ mod tests {
         let mut ctx = UiContext::new();
         let mut a = Button::new(0.0, 0.0, 80.0, 24.0);
         WidgetHost::set_rect(&mut a, 20.0, 20.0, 80.0, 24.0);
-        let ids = vec![register(&mut ctx, &mut a)];
+        let a_id = a.base().id();
+        let ids = vec![register(&mut ctx, a)];
         let plate = Rect { x: 0.0, y: 0.0, width: 400.0, height: 300.0 };
         let g = Group::new(ids).with_padding(10.0).with_plate(plate, 16.0).with_fit(true).with_snap(24.0);
         let f = g.inner().frame(&ctx).unwrap();
@@ -393,7 +391,7 @@ mod tests {
         // A member inside the padding zone keeps the frame outside itself, up to the edge.
         let mut edge = Button::new(0.0, 0.0, 80.0, 24.0);
         WidgetHost::set_rect(&mut edge, 4.0, 60.0, 80.0, 24.0);
-        let eid = register(&mut ctx, &mut edge);
+        let eid = register(&mut ctx, edge);
         let ge = Group::new(vec![eid]).with_padding(10.0).with_plate(plate, 16.0).with_fit(true).with_snap(24.0);
         let fe = ge.inner().frame(&ctx).unwrap();
         assert_eq!(fe.body.x, 0.0, "clamped to the plate's own edge, never inside the member");
@@ -402,7 +400,7 @@ mod tests {
         assert_eq!(f.radii.0, 6.0, "the top-left corner is the plate's, concentric (16 - 10)");
         assert_eq!(f.radii.2, crate::layout::plate_corner_radius(), "the far corner keeps the section radius");
         // Unfitted, the same group hugs its member.
-        let loose = Group::new(vec![a.base().id()]).with_padding(10.0).with_plate(plate, 16.0);
+        let loose = Group::new(vec![a_id]).with_padding(10.0).with_plate(plate, 16.0);
         assert_eq!(loose.inner().frame(&ctx).unwrap().body.x, 10.0);
         assert_eq!(loose.inner().frame(&ctx).unwrap().radii.0, crate::layout::plate_corner_radius());
     }
@@ -414,7 +412,7 @@ mod tests {
         let mut ctx = UiContext::new();
         let mut a = Button::new(0.0, 0.0, 80.0, 24.0);
         WidgetHost::set_rect(&mut a, 0.0, 0.0, 80.0, 24.0);
-        let ids = vec![register(&mut ctx, &mut a)];
+        let ids = vec![register(&mut ctx, a)];
         let plate = Rect { x: 0.0, y: 0.0, width: 400.0, height: 300.0 };
         let g = Group::new(ids).with_label("Tab").with_padding(10.0).with_plate(plate, 16.0).with_fit(true);
         let f = g.inner().frame(&ctx).unwrap();
@@ -428,7 +426,7 @@ mod tests {
         let (head, pad) = (g.inner().headroom(), g.inner().padding());
         let mut seated = Button::new(0.0, 0.0, 80.0, 24.0);
         WidgetHost::set_rect(&mut seated, 2.0 * pad, head + pad, 80.0, 24.0);
-        let sid = register(&mut ctx, &mut seated);
+        let sid = register(&mut ctx, seated);
         let gs = Group::new(vec![sid]).with_label("Tab").with_padding(10.0).with_plate(plate, 16.0).with_fit(true);
         let fs = gs.inner().frame(&ctx).unwrap();
         assert_eq!((fs.body.x, fs.body.y), (pad, head), "on the seat: one padding in, the tab's room above");
@@ -441,7 +439,7 @@ mod tests {
         let mut ctx = UiContext::new();
         let mut a = Button::new(0.0, 0.0, 80.0, 24.0);
         WidgetHost::set_rect(&mut a, 100.0, 100.0, 80.0, 24.0);
-        let ids = vec![register(&mut ctx, &mut a)];
+        let ids = vec![register(&mut ctx, a)];
         let g = Group::new(ids).with_label("Group");
         let f = g.inner().frame(&ctx).unwrap();
         let t = f.tab.expect("a tab");

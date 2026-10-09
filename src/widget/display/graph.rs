@@ -1802,58 +1802,55 @@ mod tests {
     #[test]
     fn double_click_survives_the_between_press_node_resync() {
         let mut ctx = UiContext::new();
-        let mut g = two_nodes();
-        ctx.register_host(&mut g);
+        let g = ctx.insert(two_nodes());
 
         // First press on node a, then the host re-syncs (same content),
         // then the second press: this is the real event sequence.
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
-        g.mouse_input(MouseButton::Left, ElementState::Released, 110.0, 120.0, &mut ctx);
-        let nodes = g.get_nodes();
-        g.set_nodes(&nodes);
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, ctx)).unwrap());
+        ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Released, 110.0, 120.0, ctx)).unwrap();
+        let nodes = ctx[g].get_nodes();
+        ctx[g].set_nodes(&nodes);
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, ctx)).unwrap());
 
-        assert_eq!(g.double_clicked_node(), Some(0), "double-click lost across set_nodes");
-        g.clear_double_clicked_node();
-        assert_eq!(g.double_clicked_node(), None);
+        assert_eq!(ctx[g].double_clicked_node(), Some(0), "double-click lost across set_nodes");
+        ctx[g].clear_double_clicked_node();
+        assert_eq!(ctx[g].double_clicked_node(), None);
     }
 
     /// Two presses on DIFFERENT nodes are not a double-click, id-keyed or not.
     #[test]
     fn presses_on_two_nodes_are_not_a_double_click() {
         let mut ctx = UiContext::new();
-        let mut g = two_nodes();
-        ctx.register_host(&mut g);
+        let g = ctx.insert(two_nodes());
 
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
-        g.mouse_input(MouseButton::Left, ElementState::Released, 110.0, 120.0, &mut ctx);
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, ctx)).unwrap());
+        ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Released, 110.0, 120.0, ctx)).unwrap();
         // Node b sits one grid step down-right of a.
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 210.0, 180.0, &mut ctx));
-        assert_eq!(g.double_clicked_node(), None);
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 210.0, 180.0, ctx)).unwrap());
+        assert_eq!(ctx[g].double_clicked_node(), None);
     }
 
     #[test]
     fn node_press_selects_arms_drag_and_commit_snaps_to_grid() {
         let mut ctx = UiContext::new();
-        let mut g = two_nodes();
-        ctx.register_host(&mut g);
+        let g = ctx.insert(two_nodes());
 
         // Node a occupies (100, 100, 80, 40). Press its body (away from ports/toggle).
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
-        assert_eq!(g.selected_node(), Some(0));
-        assert!(g.is_dragging() && g.draggable());
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, ctx)).unwrap());
+        assert_eq!(ctx[g].selected_node(), Some(0));
+        assert!(ctx[g].is_dragging() && ctx[g].draggable());
 
         // Drag one pitch right (pitch_x = 100): snap puts the node at column 1, and cell
         // (1, 0) is free so it lands there.
-        g.drag_begin(110.0, 120.0);
-        assert!(g.drag_update(210.0, 120.0));
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 120.0, &mut ctx));
-        assert!(!g.is_dragging());
-        assert_eq!(g.get_nodes()[0].position, (1.0, 0.0));
+        ctx[g].drag_begin(110.0, 120.0);
+        assert!(ctx[g].drag_update(210.0, 120.0));
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 120.0, ctx)).unwrap());
+        assert!(!ctx[g].is_dragging());
+        assert_eq!(ctx[g].get_nodes()[0].position, (1.0, 0.0));
 
         // An empty-space press clears the selection and is NOT consumed (legacy contract).
-        assert!(!g.mouse_input(MouseButton::Left, ElementState::Pressed, 700.0, 550.0, &mut ctx));
-        assert_eq!(g.selected_node(), None);
+        assert!(!ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 700.0, 550.0, ctx)).unwrap());
+        assert_eq!(ctx[g].selected_node(), None);
     }
 
     /// Dropping a dragged node onto a wire splices it in: the drop reports
@@ -1875,13 +1872,13 @@ mod tests {
     fn a_node_dropped_on_a_node_swaps_with_it() {
         let build = |swap: bool| {
             let mut ctx = UiContext::new();
-            let mut g = Graph::new();
-            WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
-            g.set_grid_pitch(100.0, 60.0);
-            g.set_node_size(80.0, 40.0);
-            g.set_grid_origin(140.0, 120.0);
-            g.set_grid_snap_enabled(true);
-            g.set_swap_on_drop(swap);
+            let g = ctx.insert(Graph::new());
+            WidgetHost::set_rect(&mut ctx[g], 0.0, 0.0, 800.0, 600.0);
+            ctx[g].set_grid_pitch(100.0, 60.0);
+            ctx[g].set_node_size(80.0, 40.0);
+            ctx[g].set_grid_origin(140.0, 120.0);
+            ctx[g].set_grid_snap_enabled(true);
+            ctx[g].set_swap_on_drop(swap);
             let node = |id: &str, name: &str, col: f32, row: f32, input: &str| GraphNode {
                 id: id.into(),
                 name: name.into(),
@@ -1893,49 +1890,48 @@ mod tests {
                 outputs: 1,
             };
             // alpha above beta, beta reading alpha.
-            g.set_nodes(&[node("a", "alpha", 0.0, 0.0, ""), node("b", "beta", 0.0, 2.0, "alpha")]);
-            ctx.register_host(&mut g);
+            ctx[g].set_nodes(&[node("a", "alpha", 0.0, 0.0, ""), node("b", "beta", 0.0, 2.0, "alpha")]);
             // Drag alpha by its middle onto beta's middle.
-            assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 140.0, 120.0, &mut ctx));
-            g.drag_begin(140.0, 120.0);
-            assert!(g.drag_update(140.0, 240.0));
+            assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 140.0, 120.0, ctx)).unwrap());
+            ctx[g].drag_begin(140.0, 120.0);
+            assert!(ctx[g].drag_update(140.0, 240.0));
             (g, ctx)
         };
 
-        let (mut g, mut ctx) = build(true);
-        assert_eq!(g.swap_target_idx(), Some(1), "beta is the swap target while the ghost is on it");
-        assert_eq!(g.node_rect(0), g.node_rect(1), "the ghost sits on beta's cell, where a swap lands");
-        assert_eq!(g.drop_target_cell_rect(), g.node_rect(1), "and its cell is where the drop lands");
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 140.0, 240.0, &mut ctx));
-        assert_eq!(GraphController::take_pending_swap(&mut *g), Some(("a".to_string(), "b".to_string())));
-        assert_eq!(GraphController::take_pending_swap(&mut *g), None, "take-once");
-        assert_eq!(GraphController::take_pending_splice(&mut *g), None, "a swap is not a splice");
-        let nodes = GraphController::get_nodes(&*g);
+        let (g, mut ctx) = build(true);
+        assert_eq!(ctx[g].swap_target_idx(), Some(1), "beta is the swap target while the ghost is on it");
+        assert_eq!(ctx[g].node_rect(0), ctx[g].node_rect(1), "the ghost sits on beta's cell, where a swap lands");
+        assert_eq!(ctx[g].drop_target_cell_rect(), ctx[g].node_rect(1), "and its cell is where the drop lands");
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Released, 140.0, 240.0, ctx)).unwrap());
+        assert_eq!(GraphController::take_pending_swap(&mut *ctx[g]), Some(("a".to_string(), "b".to_string())));
+        assert_eq!(GraphController::take_pending_swap(&mut *ctx[g]), None, "take-once");
+        assert_eq!(GraphController::take_pending_splice(&mut *ctx[g]), None, "a swap is not a splice");
+        let nodes = GraphController::get_nodes(&*ctx[g]);
         assert_eq!((nodes[0].position, nodes[1].position), ((0.0, 2.0), (0.0, 0.0)), "the two traded cells");
 
-        let (mut g, mut ctx) = build(false);
-        assert_eq!(g.swap_target_idx(), None);
+        let (g, mut ctx) = build(false);
+        assert_eq!(ctx[g].swap_target_idx(), None);
         // No swap to make: the ghost snaps to the free cell a drop walks to,
         // not over beta, where it could not stay.
-        let ghost = g.node_rect(0).unwrap();
-        assert_ne!(Some(ghost), g.node_rect(1), "the ghost does not sit on a taken cell");
-        assert_eq!(Some(ghost), g.drop_target_cell_rect(), "it sits where the drop lands");
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 140.0, 240.0, &mut ctx));
-        assert_eq!(GraphController::take_pending_swap(&mut *g), None);
-        let nodes = GraphController::get_nodes(&*g);
+        let ghost = ctx[g].node_rect(0).unwrap();
+        assert_ne!(Some(ghost), ctx[g].node_rect(1), "the ghost does not sit on a taken cell");
+        assert_eq!(Some(ghost), ctx[g].drop_target_cell_rect(), "it sits where the drop lands");
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Released, 140.0, 240.0, ctx)).unwrap());
+        assert_eq!(GraphController::take_pending_swap(&mut *ctx[g]), None);
+        let nodes = GraphController::get_nodes(&*ctx[g]);
         assert_eq!(nodes[1].position, (0.0, 2.0), "beta stays");
         assert_ne!(nodes[0].position, (0.0, 2.0), "alpha walks off the taken cell");
     }
 
     fn node_dropped_on_a_wire_reports_a_splice_in(style: WireStyle) {
         let mut ctx = UiContext::new();
-        let mut g = Graph::new();
-        g.set_wire_style(Some(style));
-        WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
-        g.set_grid_pitch(100.0, 60.0);
-        g.set_node_size(80.0, 40.0);
-        g.set_grid_origin(140.0, 120.0);
-        g.set_grid_snap_enabled(true);
+        let g = ctx.insert(Graph::new());
+        ctx[g].set_wire_style(Some(style));
+        WidgetHost::set_rect(&mut ctx[g], 0.0, 0.0, 800.0, 600.0);
+        ctx[g].set_grid_pitch(100.0, 60.0);
+        ctx[g].set_node_size(80.0, 40.0);
+        ctx[g].set_grid_origin(140.0, 120.0);
+        ctx[g].set_grid_snap_enabled(true);
         let node = |id: &str, name: &str, col: f32, row: f32, params: Vec<(String, String, String)>| GraphNode {
             id: id.into(),
             name: name.into(),
@@ -1949,35 +1945,34 @@ mod tests {
         let p = |v: &str| vec![("Input".to_string(), v.to_string(), "text".to_string())];
         // alpha → beta wire runs through the empty cell (1, 0) between them;
         // gamma sits below, unwired.
-        g.set_nodes(&[
+        ctx[g].set_nodes(&[
             node("a", "alpha", 0.0, 0.0, Vec::new()),
             node("b", "beta", 2.0, 0.0, p("alpha")),
             node("c", "gamma", 0.0, 2.0, p("")),
         ]);
-        ctx.register_host(&mut g);
 
         // Drag gamma's body onto the wire's horizontal run (cell (1, 0)).
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 240.0, &mut ctx));
-        g.drag_begin(110.0, 240.0);
-        assert!(g.drag_update(210.0, 140.0));
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 140.0, &mut ctx));
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 240.0, ctx)).unwrap());
+        ctx[g].drag_begin(110.0, 240.0);
+        assert!(ctx[g].drag_update(210.0, 140.0));
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 140.0, ctx)).unwrap());
 
-        let splice = GraphController::take_pending_splice(&mut *g);
+        let splice = GraphController::take_pending_splice(&mut *ctx[g]);
         assert_eq!(
             splice,
             Some(("c".to_string(), "alpha".to_string(), "b".to_string())),
             "{style:?}: drop on the wire must report (dragged, upstream name, downstream id)"
         );
-        assert_eq!(GraphController::take_pending_splice(&mut *g), None, "take-once");
+        assert_eq!(GraphController::take_pending_splice(&mut *ctx[g]), None, "take-once");
 
         // A drop in open space reports nothing. Gamma landed in cell (1, 0)
         // — the free cell its splice drop resolved to — so drag it from
         // there down to open space clear of the wire.
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 210.0, 110.0, &mut ctx));
-        g.drag_begin(210.0, 110.0);
-        assert!(g.drag_update(210.0, 230.0));
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 230.0, &mut ctx));
-        assert_eq!(GraphController::take_pending_splice(&mut *g), None);
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, 210.0, 110.0, ctx)).unwrap());
+        ctx[g].drag_begin(210.0, 110.0);
+        assert!(ctx[g].drag_update(210.0, 230.0));
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 230.0, ctx)).unwrap());
+        assert_eq!(GraphController::take_pending_splice(&mut *ctx[g]), None);
     }
 
     /// A cell a wire runs through names that wire, in every style; a cell
@@ -2191,20 +2186,19 @@ mod tests {
     #[test]
     fn port_click_starts_and_completes_a_connection() {
         let mut ctx = UiContext::new();
-        let mut g = two_nodes();
-        ctx.register_host(&mut g);
+        let g = ctx.insert(two_nodes());
 
         // Ports float OUTSIDE the node box (port_center): node a's output
         // hangs below the bottom-center of (100,100,80,40), node b's input
         // above the top-center of (200,160,80,40).
-        let (ax, ay) = g.port_center(0, PortType::Output, 0).expect("node a output port");
+        let (ax, ay) = ctx[g].port_center(0, PortType::Output, 0).expect("node a output port");
         assert!(ay > 140.0, "output port sits below the node's bottom edge");
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, ax, ay, &mut ctx));
-        let (bx, by) = g.port_center(1, PortType::Input, 0).expect("node b input port");
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, ax, ay, ctx)).unwrap());
+        let (bx, by) = ctx[g].port_center(1, PortType::Input, 0).expect("node b input port");
         assert!(by < 160.0, "input port sits above the node's top edge");
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, bx, by, &mut ctx));
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, bx, by, ctx)).unwrap());
 
-        let pending = GraphController::take_pending_connection(&mut *g);
+        let pending = GraphController::take_pending_connection(&mut *ctx[g]);
         assert_eq!(pending, Some(("b".to_string(), "alpha".to_string())));
     }
 
@@ -2214,8 +2208,7 @@ mod tests {
     #[test]
     fn every_node_parameter_is_a_wire_into_its_own_port() {
         let mut ctx = UiContext::new();
-        let mut g = two_nodes();
-        ctx.register_host(&mut g);
+        let g = ctx.insert(two_nodes());
         let wire = |n: &str, v: &str| (n.to_string(), v.to_string(), "node".to_string());
         let node = |id: &str, col: f32, row: f32, parameters: Vec<(String, String, String)>, inputs: usize| GraphNode {
             id: id.into(),
@@ -2227,22 +2220,22 @@ mod tests {
             inputs,
             outputs: 1,
         };
-        g.set_nodes(&[
+        ctx[g].set_nodes(&[
             node("a", 0.0, 0.0, vec![], 0),
             node("b", 2.0, 0.0, vec![], 0),
             node("sw", 1.0, 2.0, vec![wire("Input", "a"), wire("Input 2", "b"), wire("Input 3", ""), ("Index".into(), "1".into(), "spinbox".into())], 3),
             node("old", 3.0, 2.0, vec![("input".into(), "b".into(), "string".into())], 1),
         ]);
-        assert_eq!(g.wire_pairs(), vec![(0, 2, 0), (1, 2, 1), (1, 3, 0)], "two wires into the switch, each its port; the untyped host's one");
-        let (_, end) = g.wire_endpoints(1, 2, 1).unwrap();
-        assert_eq!(Some(end), g.port_center(2, PortType::Input, 1), "into its own port");
+        assert_eq!(ctx[g].wire_pairs(), vec![(0, 2, 0), (1, 2, 1), (1, 3, 0)], "two wires into the switch, each its port; the untyped host's one");
+        let (_, end) = ctx[g].wire_endpoints(1, 2, 1).unwrap();
+        assert_eq!(Some(end), ctx[g].port_center(2, PortType::Input, 1), "into its own port");
 
         // Dropped on the switch's third port: port 2.
-        let (ax, ay) = g.port_center(0, PortType::Output, 0).unwrap();
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, ax, ay, &mut ctx));
-        let (px, py) = g.port_center(2, PortType::Input, 2).unwrap();
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, px, py, &mut ctx));
-        assert_eq!(GraphController::take_pending_connection_to_port(&mut *g), Some(("sw".to_string(), "a".to_string(), 2)));
+        let (ax, ay) = ctx[g].port_center(0, PortType::Output, 0).unwrap();
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, ax, ay, ctx)).unwrap());
+        let (px, py) = ctx[g].port_center(2, PortType::Input, 2).unwrap();
+        assert!(ctx.lend_h(g, |w, ctx| w.mouse_input(MouseButton::Left, ElementState::Pressed, px, py, ctx)).unwrap());
+        assert_eq!(GraphController::take_pending_connection_to_port(&mut *ctx[g]), Some(("sw".to_string(), "a".to_string(), 2)));
     }
 
     #[test]

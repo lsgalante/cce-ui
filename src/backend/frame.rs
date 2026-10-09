@@ -99,20 +99,19 @@ pub fn build_frame<A: Application>(
     // cce-list, cce-secrets, and the reference DemoApp all forgot, so their carets fell
     // back to `measure_text_width("M")`, an inked extent that drifts off the glyphs).
     // The flat path shapes in `layout::render_widget`; apps that hand-shape still work —
-    // their call and this one hit the same shaped-buffer cache. Pointers are collected
-    // first so the registry borrow ends before any widget is mutated (the missed-press
-    // walk dereferences the same registry the same way).
+    // their call and this one hit the same shaped-buffer cache. Through the shared
+    // `ui_context`, which every app with widgets answers (several have no `_mut`): the
+    // widgets live in the context's own allocations, reached by their raw roots, and no
+    // reference to one is live while it is shaped.
     {
         let ptrs: Vec<*mut (dyn crate::widget::WidgetHost + 'static)> = app
             .ui_context()
             .map(|ctx| ctx.tree.iter_registered().map(|(_, p)| p).collect())
             .unwrap_or_default();
         for ptr in ptrs {
-            unsafe {
-                if let Some(w) = ptr.as_mut() {
-                    w.prepare_text(fs);
-                }
-            }
+            // SAFETY: a widget the context holds and has not lent out, reached by its root;
+            // the borrow of the context that found it has ended.
+            unsafe { (*ptr).prepare_text(fs) };
         }
     }
 
@@ -196,13 +195,9 @@ pub fn build_frame<A: Application>(
     let mut overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
     if let Some(ctx) = app.ui_context() {
         for &pop_id in &ctx.active_popovers {
-            if let Some(ptr) = ctx.tree.get_ptr(pop_id) {
-                unsafe {
-                    if let Some((x, y, w, h)) = (*ptr).popover_rect() {
-                        let (dx, dy) = app.popover_offset(pop_id);
-                        overlay_rects.push((x + dx, y + dy, w, h));
-                    }
-                }
+            if let Some((x, y, w, h)) = ctx.get_widget(pop_id).and_then(|w| w.popover_rect()) {
+                let (dx, dy) = app.popover_offset(pop_id);
+                overlay_rects.push((x + dx, y + dy, w, h));
             }
         }
     }

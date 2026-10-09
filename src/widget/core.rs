@@ -1,38 +1,5 @@
 use crate::widget::WidgetHost;
 
-/// Keyboard focus lives in the window's [`crate::context::UiContext`]
-/// (`focused_widget`, `set_focused_id`, `clear_focus`, `is_focused_id`, `has_focus`): ONE
-/// store, which the Tab walk, the accessibility tree and every widget read. Until
-/// 2026-10-08 this module kept a second, per-thread, that widgets claimed in `FocusIn`
-/// and apps set directly — kept in step by convention, and apt to disagree with the
-/// context on any path that skipped the event (`docs/rfc-global-state.md`, phase 1).
-pub mod focus {
-    use super::WidgetHost;
-
-    pub fn link_parent_child(parent: &mut dyn WidgetHost, child: &mut dyn WidgetHost, ctx: &mut crate::context::UiContext) {
-        let parent_ptr = unsafe {
-            std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(parent as *mut dyn WidgetHost)
-        };
-        let child_ptr = unsafe {
-            std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(child as *mut dyn WidgetHost)
-        };
-        let (p_id, c_id) = (parent.base().id(), child.base().id());
-        // SAFETY: both derived from the live borrows we were handed.
-        unsafe {
-            ctx.register_widget(p_id, parent_ptr);
-            ctx.register_widget(c_id, child_ptr);
-        }
-        // The old add_child + set_parent pair, as the tree ops they always were.
-        ctx.tree.link(p_id, c_id);
-        ctx.tree.set_parent(c_id, Some(p_id));
-    }
-
-    // `navigate_focus` is DELETED (the plumbing retype): it resolved parent/children
-    // through a freshly-made EMPTY UiContext, so the parent-based arms (ctrl+u/j/k) could
-    // never fire and ctrl+i only fired for a focused container-children widget (Paginator
-    // — never focusable). Its one caller (settings) already runs its own section nav.
-}
-
 pub mod hover_animation {
     use std::cell::RefCell;
 
@@ -1271,13 +1238,10 @@ pub mod context_menu {
                     if idx >= self.header_count {
                         let opt = self.options[idx].clone();
                         if let (Some(target_id), Some(ctx)) = (self.target, ctx) {
-                            if let Some(target_ptr) = ctx.tree.get_ptr(target_id) {
-                                unsafe {
-                                    let target = &mut *target_ptr;
-                                    let action = self.actions.get(idx).copied().flatten().or_else(|| legacy_action_for_label(&opt));
-                                    if let Some(action) = action {
-                                        let _ = target.context_action(action);
-                                    }
+                            if let Some(target) = ctx.get_widget_mut(target_id) {
+                                let action = self.actions.get(idx).copied().flatten().or_else(|| legacy_action_for_label(&opt));
+                                if let Some(action) = action {
+                                    let _ = target.context_action(action);
                                 }
                             }
                         }
@@ -1942,49 +1906,6 @@ pub struct Widget {
     pub dirty: bool,
     pub config_file: Option<String>,
     pub config_key: Option<String>,
-    /// Lives exactly as long as this base: the registry holds a watch on it and will
-    /// not hand out the widget's pointer once it is gone. See [`Liveness`].
-    pub(crate) live: Liveness,
-}
-
-/// A token owned by a widget's [`Widget`] base, watched by the [`UiContext`] registry
-/// (`scene::tree::WidgetTree`).
-///
-/// The registry holds raw pointers to widgets the APP owns, so an app that drops a
-/// widget without unregistering it (a rebuilt `Vec` of rows — the case
-/// `UiContext::unregister_widget` warns about) used to leave a dangling pointer that
-/// the next registry sweep dereferenced. The registry now keeps a [`Weak`] to this
-/// token beside each pointer and resolves the pointer only while the token is alive,
-/// so a dropped widget reads back as unregistered instead.
-///
-/// It does NOT catch a widget that was MOVED while registered (a `Vec` that
-/// reallocated, a struct returned by value): the token moves with it, and the stored
-/// pointer still names the old address. That is what [`Owned`](crate::widget::Owned) is
-/// for: a box whose ALLOCATION carries the token the registry watches instead.
-///
-/// A clone is a different widget at a different address, so it gets a fresh token —
-/// not a share of the original's, which would keep a dropped original "alive".
-///
-/// [`UiContext`]: crate::context::UiContext
-/// [`Weak`]: std::sync::Weak
-#[derive(Debug)]
-pub(crate) struct Liveness(std::sync::Arc<()>);
-
-impl Liveness {
-    pub(crate) fn new() -> Self {
-        Liveness(std::sync::Arc::new(()))
-    }
-
-    /// A watch that reports whether this token still exists.
-    pub(crate) fn watch(&self) -> std::sync::Weak<()> {
-        std::sync::Arc::downgrade(&self.0)
-    }
-}
-
-impl Clone for Liveness {
-    fn clone(&self) -> Self {
-        Liveness::new()
-    }
 }
 
 impl Widget {
@@ -2004,7 +1925,6 @@ impl Widget {
             dirty: true,
             config_file: None,
             config_key: None,
-            live: Liveness::new(),
         }
     }
 
@@ -2024,7 +1944,6 @@ impl Widget {
             dirty: true,
             config_file: None,
             config_key: None,
-            live: Liveness::new(),
         }
     }
 
@@ -2616,7 +2535,7 @@ mod context_menu_page_tests {
 mod context_menu_action_tests {
     use super::context_menu::{self, ROW_H};
     use crate::context::UiContext;
-    use crate::widget::{ContextAction, ElementState, MouseButton, Owned, Widget, WidgetHost};
+    use crate::widget::{ContextAction, ElementState, MouseButton, Widget, WidgetHost};
 
     /// A widget that remembers the last action a menu ran on it.
     struct Recorder {
@@ -2644,38 +2563,34 @@ mod context_menu_action_tests {
     #[test]
     fn a_row_runs_its_action_whatever_its_label_says() {
         let mut ctx = UiContext::new();
-        let mut w = Owned::new(Recorder { base: Widget::new(), got: None });
-        ctx.register_host(&mut w);
-        let id = w.base().id();
+        let w = ctx.insert(Recorder { base: Widget::new(), got: None });
+        let id = w.id();
 
         // A label the English table has never seen: only the row's action can say what it is.
         context_menu::show(0.0, 0.0, vec!["[Recorder]".into(), "Kopieren".into()], 1, id);
         context_menu::set_row_actions(vec![None, Some(ContextAction::Copy)]);
         press_row(&mut ctx, 1);
-        assert_eq!(w.got, Some(ContextAction::Copy));
+        assert_eq!(ctx[w].got, Some(ContextAction::Copy));
 
         // A row with an action and an English label that names ANOTHER: the action wins.
-        w.got = None;
+        ctx[w].got = None;
         context_menu::show(0.0, 0.0, vec!["[Recorder]".into(), "Paste".into()], 1, id);
         context_menu::set_row_actions(vec![None, Some(ContextAction::SelectAll)]);
         press_row(&mut ctx, 1);
-        assert_eq!(w.got, Some(ContextAction::SelectAll));
+        assert_eq!(ctx[w].got, Some(ContextAction::SelectAll));
 
         // A menu built without actions still works in English, through the fallback.
-        w.got = None;
+        ctx[w].got = None;
         context_menu::show(0.0, 0.0, vec!["[Recorder]".into(), "Paste".into()], 1, id);
         press_row(&mut ctx, 1);
-        assert_eq!(w.got, Some(ContextAction::Paste));
+        assert_eq!(ctx[w].got, Some(ContextAction::Paste));
     }
 
     #[test]
     fn the_toolkits_own_menus_carry_their_actions() {
         let mut ctx = UiContext::new();
-        let mut tb = Owned::new(crate::widget::TextBox::new(String::new()).with_label("Name"));
-        ctx.register_host(&mut tb);
-        let ptr = &mut *tb as &mut (dyn WidgetHost + 'static) as *mut (dyn WidgetHost + 'static);
-        // SAFETY: `tb` is live and registered for the whole test.
-        unsafe { ctx.handle_right_click(ptr, 5.0, 5.0) };
+        let tb = ctx.insert(crate::widget::TextBox::new(String::new()).with_label("Name"));
+        ctx.lend_h(tb, |w, ctx| ctx.handle_right_click(w, 5.0, 5.0));
         let options = context_menu::options();
         let header = context_menu::header_count();
         assert!(options.len() > header, "a text box's menu has rows");

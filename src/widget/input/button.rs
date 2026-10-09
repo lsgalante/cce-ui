@@ -756,12 +756,11 @@ mod tests {
     fn intrinsic_size_holds_the_label_as_the_walk_draws_it() {
         use crate::scene::paint::Prim;
         let mut ctx = UiContext::new();
-        let mut b = Button::new(0.0, 0.0, 0.0, 0.0).with_label("Load Images");
-        ctx.register_host(&mut b);
-        let size = b.intrinsic_size().unwrap();
-        WidgetHost::set_rect(&mut b, 10.0, 20.0, size.width, size.height);
+        let b = ctx.insert(Button::new(0.0, 0.0, 0.0, 0.0).with_label("Load Images"));
+        let size = ctx[b].intrinsic_size().unwrap();
+        WidgetHost::set_rect(&mut ctx[b], 10.0, 20.0, size.width, size.height);
 
-        let list = crate::scene::painter::paint_tree(&ctx, &b);
+        let list = crate::scene::painter::paint_tree(&ctx, &ctx[b]);
         let text = list
             .items
             .iter()
@@ -771,7 +770,7 @@ mod tests {
             })
             .expect("the walk emits the label");
         assert_eq!(text.0, "Load Images");
-        assert_eq!(text.3, Paint::widget_font(&*b), "the walk draws the label in widget_font");
+        assert_eq!(text.3, Paint::widget_font(&*ctx[b]), "the walk draws the label in widget_font");
 
         // Shape it as the renderer will (that font string, that size) and
         // check it ends 8px short of the plate's right edge, as it starts
@@ -814,22 +813,21 @@ mod tests {
         let mut ctx = UiContext::new();
         let fired = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let fired2 = fired.clone();
-        let mut b = Button::new(10.0, 10.0, 80.0, 24.0)
+        let b = ctx.insert(Button::new(10.0, 10.0, 80.0, 24.0)
             .with_label("Go")
-            .on_click(move || { fired2.fetch_add(1, std::sync::atomic::Ordering::SeqCst); });
+            .on_click(move || { fired2.fetch_add(1, std::sync::atomic::Ordering::SeqCst); }));
         let id = b.id();
-        ctx.register_host(&mut b);
 
         // Press in, release in -> click.
         assert!(ctx.propagate_event(&press(20.0, 20.0), id));
         assert!(ctx.propagate_event(&release(25.0, 20.0), id), "release consumed (was pressed)");
-        assert!(b.take_click());
+        assert!(ctx[b].take_click());
         assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1, "callback fired");
 
         // Press in, release OUT -> cancelled, no click, but release still consumed.
         assert!(ctx.propagate_event(&press(20.0, 20.0), id));
         assert!(ctx.propagate_event(&release(500.0, 500.0), id), "cancelling release consumed");
-        assert!(!b.take_click(), "no click on out-of-rect release");
+        assert!(!ctx[b].take_click(), "no click on out-of-rect release");
         assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1, "callback not re-fired");
 
         // Release without a press is not consumed.

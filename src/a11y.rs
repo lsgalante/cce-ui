@@ -276,13 +276,11 @@ pub fn window_tree(ctx: Option<&UiContext>, app: AppNodes, title: &str, scale: f
             &empty
         }
     };
-    // The widgets, read once. Registered pointers name live widgets (the registry resolves
-    // only those: `widget::Owned`, `widget::core::Liveness`), and nothing mutates them while
-    // this borrows the context.
+    // The widgets, read once: the context owns them, and nothing mutates them while this
+    // borrows it.
     let widgets: Vec<(WidgetId, &dyn WidgetHost)> = ctx
-        .tree
-        .iter_registered()
-        .map(|(id, ptr)| (id, unsafe { &*ptr } as &dyn WidgetHost))
+        .widgets()
+        .map(|(id, w)| (id, w as &dyn WidgetHost))
         .filter(|(_, w)| shown_on_screen(*w))
         .collect();
     let shown: std::collections::HashSet<WidgetId> = widgets.iter().map(|(id, _)| *id).collect();
@@ -413,7 +411,7 @@ fn push_context_menu(nodes: &mut Vec<(NodeId, Node)>) -> Option<NodeId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Button, Checkbox, Owned, RangeSlider, Slider, Spinbox, TextBox};
+    use crate::widget::{Button, Checkbox, RangeSlider, Slider, Spinbox, TextBox};
 
     /// An open dialog is a modal `Dialog` node holding its members; a radio group in it is a
     /// `RadioGroup` of `RadioButton` items, the chosen one checked and, with the group
@@ -422,22 +420,19 @@ mod tests {
     fn a_dialog_is_modal_and_a_radio_group_is_its_radio_buttons() {
         use crate::widget::{Dialog, RadioGroup};
         let mut ctx = UiContext::new();
-        let mut size = Owned::new(RadioGroup::new(["Small", "Medium", "Large"]).with_selected(1));
-        size.set_rect(120.0, 120.0, 200.0, 100.0);
-        let mut ok = Owned::new(Button::new(120.0, 240.0, 80.0, 24.0).with_label("OK"));
-        let mut dialog = Owned::new(Dialog::new().with_label("Size"));
-        ctx.register_host(&mut dialog);
-        ctx.register_host(&mut size);
-        ctx.register_host(&mut ok);
-        dialog.open(&mut ctx, vec![size.base().id(), ok.base().id()]);
+        let size = ctx.insert(RadioGroup::new(["Small", "Medium", "Large"]).with_selected(1));
+        ctx[size].set_rect(120.0, 120.0, 200.0, 100.0);
+        let ok = ctx.insert(Button::new(120.0, 240.0, 80.0, 24.0).with_label("OK"));
+        let dialog = ctx.insert(Dialog::new().with_label("Size"));
+        ctx.lend_h(dialog, |d, ctx| d.open(ctx, vec![size.id(), ok.id()]));
 
         let update = tree_update(&ctx, "App", 1.0);
-        let d = node(&update, node_id(dialog.base().id()));
+        let d = node(&update, node_id(dialog.id()));
         assert_eq!((d.role(), d.label(), d.is_modal()), (Role::Dialog, Some("Size"), true));
-        assert_eq!(d.children(), &[node_id(size.base().id()), node_id(ok.base().id())]);
-        assert_eq!(node(&update, WINDOW).children(), &[node_id(dialog.base().id())], "the members hang from it");
+        assert_eq!(d.children(), &[node_id(size.id()), node_id(ok.id())]);
+        assert_eq!(node(&update, WINDOW).children(), &[node_id(dialog.id())], "the members hang from it");
 
-        let g = node(&update, node_id(size.base().id()));
+        let g = node(&update, node_id(size.id()));
         assert_eq!(g.role(), Role::RadioGroup);
         assert!(!g.supports_action(Action::Click), "clicked through its buttons");
         let buttons: Vec<(Option<&str>, Option<Toggled>)> = g
@@ -451,9 +446,9 @@ mod tests {
             buttons,
             [(Some("Small"), Some(Toggled::False)), (Some("Medium"), Some(Toggled::True)), (Some("Large"), Some(Toggled::False))]
         );
-        assert_eq!(update.focus, item_id(size.base().id(), 1), "the dialog's first stop, on its chosen button");
-        assert_eq!(item_of(item_id(size.base().id(), 2)), Some((size.base().id(), 2)));
-        assert_eq!(widget_of(item_id(size.base().id(), 2)), None, "an item is not a widget");
+        assert_eq!(update.focus, item_id(size.id(), 1), "the dialog's first stop, on its chosen button");
+        assert_eq!(item_of(item_id(size.id(), 2)), Some((size.id(), 2)));
+        assert_eq!(widget_of(item_id(size.id(), 2)), None, "an item is not a widget");
     }
 
     /// A node offers the actions the Linux adapter can carry out, and each by the key a
@@ -513,46 +508,42 @@ mod tests {
     #[test]
     fn a_window_of_widgets_is_a_tree_of_what_they_are() {
         let mut ctx = UiContext::new();
-        let mut save = Owned::new(Button::new(10.0, 40.0, 80.0, 24.0).with_label("Save"));
-        let mut name = Owned::new(TextBox::new("Ada".to_string()).with_label("Name"));
-        name.set_rect(10.0, 10.0, 200.0, 24.0);
-        let mut wrap = Owned::new(Checkbox::new().with_label("Wrap lines"));
-        wrap.set_rect(10.0, 70.0, 200.0, 24.0);
-        wrap.set_value_string("true");
-        let mut zoom = Owned::new(Slider::new().with_label("Zoom"));
-        zoom.set_rect(10.0, 100.0, 200.0, 24.0);
-        ctx.register_host(&mut save);
-        ctx.register_host(&mut name);
-        ctx.register_host(&mut wrap);
-        ctx.register_host(&mut zoom);
-        ctx.set_focused(&mut *name);
+        let save = ctx.insert(Button::new(10.0, 40.0, 80.0, 24.0).with_label("Save"));
+        let name = ctx.insert(TextBox::new("Ada".to_string()).with_label("Name"));
+        ctx[name].set_rect(10.0, 10.0, 200.0, 24.0);
+        let wrap = ctx.insert(Checkbox::new().with_label("Wrap lines"));
+        ctx[wrap].set_rect(10.0, 70.0, 200.0, 24.0);
+        ctx[wrap].set_value_string("true");
+        let zoom = ctx.insert(Slider::new().with_label("Zoom"));
+        ctx[zoom].set_rect(10.0, 100.0, 200.0, 24.0);
+        ctx.set_focused_id(name.id());
 
         let update = tree_update(&ctx, "Editor", 2.0);
         let window = node(&update, WINDOW);
         assert_eq!(window.role(), Role::Window);
         assert_eq!(window.label(), Some("Editor"));
         assert_eq!(window.transform(), Some(&Affine::scale(2.0)), "the scale is the window's");
-        let order: Vec<NodeId> = [&*name as &dyn WidgetHost, &*save, &*wrap, &*zoom]
+        let order: Vec<NodeId> = [&ctx[name] as &dyn WidgetHost, &ctx[save], &ctx[wrap], &ctx[zoom]]
             .iter()
             .map(|w| node_id(w.base().id()))
             .collect();
         assert_eq!(window.children(), &order[..], "reading order: top to bottom");
         assert_eq!(update.tree.as_ref().map(|t| t.root), Some(WINDOW));
-        assert_eq!(update.focus, node_id(name.base().id()), "focus follows the context");
+        assert_eq!(update.focus, node_id(name.id()), "focus follows the context");
 
-        let b = node(&update, node_id(save.base().id()));
+        let b = node(&update, node_id(save.id()));
         assert_eq!((b.role(), b.label()), (Role::Button, Some("Save")));
         assert!(b.supports_action(Action::Click) && b.supports_action(Action::Focus));
         assert_eq!(b.bounds(), Some(Rect::new(10.0, 40.0, 90.0, 64.0)), "logical px");
 
-        let t = node(&update, node_id(name.base().id()));
+        let t = node(&update, node_id(name.id()));
         assert_eq!((t.role(), t.label(), t.value()), (Role::TextInput, Some("Name"), Some("Ada")));
         assert!(!t.supports_action(Action::Click), "a well is not pressed");
 
-        let c = node(&update, node_id(wrap.base().id()));
+        let c = node(&update, node_id(wrap.id()));
         assert_eq!((c.role(), c.toggled()), (Role::CheckBox, Some(Toggled::True)));
 
-        let s = node(&update, node_id(zoom.base().id()));
+        let s = node(&update, node_id(zoom.id()));
         assert_eq!(s.role(), Role::Slider);
         assert!(s.numeric_value().is_some(), "a slider's value is a number");
     }
@@ -560,10 +551,9 @@ mod tests {
     #[test]
     fn hidden_widgets_are_not_in_the_tree_and_focus_falls_back_to_the_window() {
         let mut ctx = UiContext::new();
-        let mut hidden = Owned::new(Button::new(0.0, 0.0, 10.0, 10.0).with_label("Ghost"));
-        hidden.set_visible(false);
-        ctx.register_host(&mut hidden);
-        ctx.set_focused(&mut *hidden);
+        let hidden = ctx.insert(Button::new(0.0, 0.0, 10.0, 10.0).with_label("Ghost"));
+        ctx[hidden].set_visible(false);
+        ctx.set_focused_id(hidden.id());
         let update = tree_update(&ctx, "", 1.0);
         assert_eq!(update.nodes.len(), 1, "only the window");
         assert_eq!(update.focus, WINDOW);
@@ -633,14 +623,11 @@ mod tests {
     #[test]
     fn parked_and_sizeless_widgets_are_not_on_screen() {
         let mut ctx = UiContext::new();
-        let mut parked = Owned::new(Button::new(-10_000.0, 0.0, 80.0, 24.0).with_label("Parked"));
-        let mut empty = Owned::new(Button::new(10.0, 10.0, 0.0, 0.0).with_label("Empty"));
-        let mut shown = Owned::new(Button::new(10.0, 10.0, 80.0, 24.0).with_label("Shown"));
-        ctx.register_host(&mut parked);
-        ctx.register_host(&mut empty);
-        ctx.register_host(&mut shown);
+        ctx.insert(Button::new(-10_000.0, 0.0, 80.0, 24.0).with_label("Parked"));
+        ctx.insert(Button::new(10.0, 10.0, 0.0, 0.0).with_label("Empty"));
+        let shown = ctx.insert(Button::new(10.0, 10.0, 80.0, 24.0).with_label("Shown"));
         let update = tree_update(&ctx, "", 1.0);
-        assert_eq!(node(&update, WINDOW).children(), &[node_id(shown.base().id())][..]);
+        assert_eq!(node(&update, WINDOW).children(), &[node_id(shown.id())][..]);
     }
 
     #[test]

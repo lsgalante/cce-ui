@@ -201,10 +201,9 @@ mod tests {
     #[test]
     fn click_reports_once() {
         let mut ctx = UiContext::new();
-        let mut p = BevelPreview::new();
+        let p = ctx.insert(BevelPreview::new());
         let id = p.id();
-        ctx.register_host(&mut p);
-        WidgetHost::set_rect(&mut p, 0.0, 0.0, 125.0, 26.0);
+        WidgetHost::set_rect(&mut ctx[p], 0.0, 0.0, 125.0, 26.0);
         let ev = Event::MouseButton {
             button: MouseButton::Left,
             state: ElementState::Pressed,
@@ -214,7 +213,7 @@ mod tests {
             local_y: 10.0,
         };
         assert!(ctx.propagate_event(&ev, id));
-        assert!(p.take_click());
-        assert!(!p.take_click());
+        assert!(ctx[p].take_click());
+        assert!(!ctx[p].take_click());
     }
 }

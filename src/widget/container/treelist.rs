@@ -447,7 +447,7 @@ impl TreeList {
         }
     }
 
-    fn mouse_body(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext, host: Option<*mut (dyn WidgetHost + 'static)>, host_id: WidgetId) -> bool {
+    fn mouse_body(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext, host_id: WidgetId) -> bool {
         let _ = host_id;
         if self.editing_key_idx.is_some() {
             if button == MouseButton::Left && state == ElementState::Pressed {
@@ -632,8 +632,7 @@ impl TreeList {
                             ];
 
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
-                            // SAFETY: as above — our own adapter, live while its event is routed.
-                            if let Some(h) = host { unsafe { ui.show_context_menu_rows(px, py - scroll_offset, rows, 1, h) }; }
+                            ui.show_context_menu_rows(px, py - scroll_offset, rows, 1, host_id);
                             changed = true;
                         }
                         TreeElement::Leaf { original_idx, ref path, ref name, indent, ref val } => {
@@ -654,8 +653,7 @@ impl TreeList {
                                 (tr("tree-delete"), Some(CA::DeleteKey)),
                             ];
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
-                            // SAFETY: as above — our own adapter, live while its event is routed.
-                            if let Some(h) = host { unsafe { ui.show_context_menu_rows(px, py - scroll_offset, rows, 1, h) }; }
+                            ui.show_context_menu_rows(px, py - scroll_offset, rows, 1, host_id);
                             changed = true;
                         }
                     }
@@ -727,7 +725,7 @@ impl Layout for TreeList {
     /// content rect — fields placed from the block sat one strip above the well, the
     /// search box straddling its top edge over the label and the header row's text
     /// clipped away outside its bounds (the gallery's labelled tree).
-    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn WidgetHost + 'static)) {
+    fn arrange_children(&mut self, rect: Rect) {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
         self.base.x = x;
         self.base.y = y;
@@ -1273,13 +1271,12 @@ impl Input for TreeList {
     }
 
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
-        let host = ectx.host_ptr();
         let host_id = ectx.id;
         match event {
             Event::MouseButton { button, state, x, y, .. } => {
                 let (button, state, px, py) = (*button, *state, *x, *y);
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
-                self.mouse_body(button, state, px, py, ui, host, host_id)
+                self.mouse_body(button, state, px, py, ui, host_id)
             }
             Event::PointerMove { x, y, .. } => {
                 let (px, py) = (*x, *y);
@@ -1727,10 +1724,9 @@ mod tests {
         // root plate container is DELETED: dissolved windows ask `drag_allowed_at` instead — same
         // walk, minus the registered-movable-root plate container requirement.
         let mut ctx = UiContext::new();
-        let mut tree_list = TreeList::new();
-        tree_list.set_rect(10.0, 52.0, 380.0, 500.0);
+        let tree_list = ctx.insert(TreeList::new());
+        ctx[tree_list].set_rect(10.0, 52.0, 380.0, 500.0);
 
-        ctx.register_host(&mut tree_list);
         ctx.tick(0.016);
         ctx.clear_dirty();
 
@@ -1742,14 +1738,13 @@ mod tests {
     fn test_exact_app_layout_blocks_drag() {
         // The data-editor shape: a parentless tree registered directly (dissolved root).
         let mut ctx = UiContext::new();
-        let mut tree_list = TreeList::new();
+        let tree_list = ctx.insert(TreeList::new());
 
-        ctx.register_host(&mut tree_list);
         ctx.rebuild_spatial_grid();
 
         let list_top = 52.0;
         let list_bottom = 600.0 - 180.0;
-        tree_list.set_rect(10.0, list_top, 380.0, list_bottom - list_top);
+        ctx[tree_list].set_rect(10.0, list_top, 380.0, list_bottom - list_top);
         ctx.rebuild_spatial_grid();
 
         assert!(!ctx.drag_allowed_at(100.0, 200.0), "clicking the TreeList under the app layout must block the drag");

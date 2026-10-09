@@ -159,7 +159,7 @@ impl PageSelector for Paginator {
 impl Layout for Paginator {
     /// Keep the rect the strip is placed from (the strip is the context's, and `set_rect`
     /// has none: it is placed in `register_embedded_children`, or here while held by value).
-    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn WidgetHost + 'static)) {
+    fn arrange_children(&mut self, rect: Rect) {
         self.rect = rect;
         let sidebar_w = self.sidebar_w();
         if let Some(strip) = self.sidebar_menu.here_mut() {
@@ -354,7 +354,7 @@ mod tests {
         // grid feeds off it — the registered strip is what blocks root plate drags over the
         // sidebar, and the walks reach it through the link).
         let strip_id = ctx[h].sidebar_menu.id();
-        assert!(ctx.tree.is_owned(strip_id), "the strip is the context's");
+        assert!(ctx.tree.is_registered(strip_id), "the strip is the context's");
         assert!(ctx.tree.child_ids(h.id()).contains(&strip_id), "linked under the paginator");
     }
 

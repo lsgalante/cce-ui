@@ -1,6 +1,6 @@
 # RFC: a registry that owns its widgets
 
-Status: in progress (opened 2026-10-08). Phases below carry DONE notes as they land.
+Status: done (opened and closed 2026-10-08). Each phase below carries its DONE note.
 
 ## Why
 
@@ -109,3 +109,23 @@ itself, reaching back through the context — can reach it a second time.
    or the apps registers a widget by pointer any more but tests that build widgets on the stack.
 5. **Delete the pointer path**: `Owned`, `register_host` / `register_widget` / `set_focused_ptr`
    and the other `unsafe fn`s, `Liveness`, `stable_target`. The tree holds owned slots only.
+   **DONE (2026-10-08).** Gone: `Owned`, `register_host`, `register_embedded`,
+   `register_widget`, `unregister_widget`, `set_focused` / `set_focused_ptr`, `focus_widget` /
+   `unfocus_widget` (use `focus_id` / `unfocus_id`), `register_popover` (`register_popover_id`),
+   `link_parent_child`, `WidgetTree::register`, `Liveness` and `Widget::live`,
+   `WidgetHost::stable_target`, and the container-children raw-pointer channel
+   (`Layout::container_children` / `child_visible`, `Input::hits_through_children`,
+   `WidgetHost::is_child_visible`), which nothing implemented any more. `show_context_menu(_rows)`
+   take the target's id; `handle_right_click` takes the widget by reference, and a widget asking
+   for the menu mid-event (`EventCtx::open_context_menu`) has it opened by the adapter once it is
+   done, so `EventCtx` carries no pointer to its host. `Adapted::set_parent` takes an id;
+   `Layout::arrange_children` no host pointer; `render_widget` no longer registers. The tree
+   holds widgets only (`Entry { id, slot, lent }`), and its pointer accessors are crate-private;
+   apps that used them (the data editor, mail, graph and system interface's popover paint, the
+   gallery's parent check, the designer's child walk) use `get_widget`, `widgets()`,
+   `parent_id` and `child_ids`. `take_owned` leaves a removed widget's children as roots where
+   it dropped its subtree (which dropped a linked child the context owned with its parent).
+   Every test that registered a stack widget inserts it instead. Shadow A/B
+   against the phase-4 build: the data editor's tree-list, search-box and editor menus (open,
+   Collapse, Select All), cce-files' breadcrumb menu, the gallery's text-box and breadcrumb
+   right-clicks, the designer's views and its dialog dropdown — identical to the pixel.

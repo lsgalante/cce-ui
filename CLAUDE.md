@@ -1711,8 +1711,6 @@ plate alone now; it drew the widget's arcs too, which a host painting the widget
 drew twice. A method stays ON the trait only when the host
 adds something the model cannot (visibility gating, the content rect, child recursion,
 registry state). `plate_bevel` is gone: nothing overrode it, so it was always `None`.
-`Owned` forwards the trait's methods and the four accessors; the extension trait needs no
-forwarding.
 
 ### Global state has a plan (`docs/rfc-global-state.md`)
 
@@ -1739,116 +1737,69 @@ code runs reads its own; a thread with no window (a worker) reads the process-wi
 which every setter also writes, so one window in a process reads exactly what it did.
 `units::metric` asks cce-ui first (`units::set_metric_resolver`); a runner reports a
 metric through `window_state::set_metric`. An app
-that drives a widget's focus itself calls `UiContext::focus_widget` / `unfocus_widget`
-rather than `w.focus()` / `w.unfocus()`, so the window's record of focus follows. Do not
+that drives a widget's focus itself calls `UiContext::focus_id` / `unfocus_id` rather than
+`w.focus()` / `w.unfocus()`, so the window's record of focus follows. Do not
 add a static for state that belongs to a window: give it a field in `WindowState`.
 
-### The registry holds pointers, and knows when they die
+### The registry owns its widgets (`docs/rfc-owning-registry.md`, done 2026-10-08)
 
-`UiContext`'s tree (`scene::tree::WidgetTree`) does not own its widgets: the app does, and
-registers raw pointers to them. Every entry keeps a watch on a liveness token beside its pointer,
-and every accessor (`get_ptr`, `children_ptrs`, `iter_registered`, …) resolves a pointer only
-while that token exists.
+`UiContext`'s tree (`scene::tree::WidgetTree`) owns every widget in it. `ctx.insert(w)` moves
+a widget in and returns a `Handle<W>` (`Copy`, typed); the app reaches it through the context
+— `ctx[h]`, `ctx.get(h)` / `get_mut(h)`, `ctx.lend_h(h, |w, ctx| ..)` when it needs the widget
+and the context together (`Dialog::open`, `fit`) — so the borrow checker refuses an app access
+that overlaps a context call. `ctx.remove(h)` gives it back by value (its children stay, as
+roots); dropping the context drops the rest; `clear_hierarchy` drops links only. Every call the
+context makes into a widget that hands it the context goes through `lend`, which takes the
+widget out of reach for the call: a widget reaching itself through the context mid-event gets
+`None`, never a second `&mut`. The tree holds each widget as a raw ROOT, never a `Box` across
+accesses (a `Box` is a unique pointer, and every reborrow through it would invalidate the
+references the context hands out).
 
-**App widgets lived in `Owned` boxes** (`widget::Owned<W>`, 2026-10-07; since 2026-10-08 they
-are `Handle`s into the context, below, and `Owned` remains for the toolkit's embedded children
-until phase 5). An `Owned` keeps
-the widget in a heap allocation of its own and carries a token for that ALLOCATION. Moving the
-`Owned` (a `Vec` reallocating, a struct returned by value) does not move the widget, and the token
-dies only when the box is freed. `Owned` is itself a `WidgetHost`, forwarding every trait method, and
-reports the boxed widget through `WidgetHost::stable_target`. So `register_host(&mut self.x)`,
-`set_focused`, `render_widget` and `link_parent_child` all record the boxed widget and the box's
-token without the caller doing anything. `Deref`/`DerefMut` reach the widget, so
-`self.x.set_text(..)` reads as before. Fields are `Owned<Adapted<X>>`, and are built with
-`Owned::new(..)` or `.into()`.
+What a host uses: `render_widget_h`, `Form::widget_h` / `widget_w_h`, `register_popover_id`,
+`focus_id` / `unfocus_id` / `set_focused_id`, `link_ids`, `paint_root_into(ctx, &ctx[h], pc)`;
+`get_widget(id)` / `get_widget_mut(id)` / `widgets()` for a widget known by id, and
+`tree.parent_id` / `child_ids` for structure. The tree's raw-pointer accessors (`get_ptr`,
+`children_ptrs`, `iter_registered`) are crate-private.
 
-A widget registered OUTSIDE an `Owned` falls back to its own address and its base's `Liveness`
-token. That catches a drop but not a move, so `register_host` prints once per widget type to
-stderr: `cce-ui: register_host: a <Type> is registered outside an Owned box`. A clean run of every
-app prints none. The toolkit's own embedded children (a tree list's fields, a paginator's menu)
-sit inside their parent's allocation and register through the crate-private
-`register_embedded`, which does not warn.
+**A composite's children are `widget::Embedded`**: held by value until the composite is
+inserted, then in the context under their own id (`Layout::register_embedded_children`
+attaches, `release_embedded_children` takes them back on `remove`, so a composite leaves
+whole). A composite's `set_rect` has no context, so it keeps the rect and places its children
+in that hook, which runs on insert, every layout and every tick. A Ramp's fields are never
+inserted: the focus record names the field with the keyboard and the ramp routes to it. A
+widget used only as a paint STAMP (the designer dialog's colour selectors) stays a bare
+`Adapted` and is never inserted.
 
-Two shapes the sweep met:
-- A widget used only as a paint STAMP and never registered (the designer dialog's
-  toggle/slider/dropdown stamps) stays a bare `Adapted`.
-- A roster that compares widget ADDRESSES compares the boxed widget, which is what the registry
-  holds. The designer's `get_dyn` hands out the inner widget for that reason; its `get_dyn_mut`
-  hands out the `Owned`, so registering through it records the box.
+**A context menu is opened on a widget by id or by reference.** `show_context_menu(_rows)`
+take the target's id; a widget asking for the config menu while it handles a press
+(`EventCtx::open_context_menu`: Breadcrumb, TextBox, Ramp) has the request recorded, and the
+adapter opens it once the widget is done, handing itself to `handle_right_click(&dyn
+WidgetHost, ..)`.
 
-The pointer-taking entry points say so:
-- `WidgetTree::register`, `UiContext::register_widget`, `set_focused_ptr`,
-  `show_context_menu` and `handle_right_click` are `unsafe fn`.
-- `Adapted::set_parent` takes its parent by reference.
-- **Register a widget with `register_host(&mut w)`.** Every app uses it.
-- `register_widget` remains for the paths that only have a pointer: `link_parent_child`,
-  whose trait objects are not `'static`, and tests that exercise raw pointers.
-- The demo's `register_roots` is the pattern to copy.
+Things the move taught:
 
-**The aliasing is sound since 2026-10-08, and checked by Miri.** Three things were not:
+- **An inserted widget that `wants_tick` is a tick receiver.** Until the fix `insert` skipped
+  it, and an inserted tree list never applied its search (it does so in its tick) — the data
+  editor's A/B caught it.
+- **A widget made per frame is inserted, placed and removed** (a status dot in a timer row, a
+  usage bar), and a row list rebuilt on data removes the outgoing handles (`ctx.remove`) and
+  inserts the new ones; nothing re-registers each frame.
+- **A value built where there is no context** — a page state a worker fetches, merged field by
+  field into the app's copy — holds `Handle::none()` (also `Handle`'s `Default`), which names
+  no widget and is never read.
+- **Two widgets with one id cannot both be inserted.** A clone of a widget whose id was already
+  drawn copies the id; a debug build asserts on the second insert.
 
-- **`Owned` held its widget in a `Box`.** A `Box` is a unique pointer to the language, so every
-  reborrow of the widget through it — each `self.button.take_click()` — invalidated the raw
-  pointer the registry had taken, and the registry's next dispatch was undefined behaviour,
-  every frame in every app. Miri reported it ("trying to retag … but that tag does not exist in
-  the borrow stack", at the registry's write). `Owned` now holds the allocation as a raw
-  `NonNull` ROOT, which the app's `Deref` and the registry both derive their references from.
-- **A registration from inside a widget replaced that root.** Opening a context menu
-  (`show_context_menu`), focusing by pointer (`set_focused_ptr`), `set_parent` and the like
-  re-registered the widget with a pointer taken from its own `&mut self` — a reborrow the next
-  app access invalidates. `WidgetTree::register` now KEEPS a live `Owned` root against a
-  pointer to the same address (compared by address, never read through); a widget swapped out
-  of its box is elsewhere and registers as usual.
-- **A widget focused itself through the registry mid-event.** The tree list's click handler
-  called `set_focused_ptr` on itself, and the context delivered FocusIn back through the
-  registry — a second `&mut` while its own was live. `UiContext::claim_focus` records the
-  focus and tells the old holder without re-entering the claimant (what
-  `EventCtx::request_focus` does too); the widget sets its own focused state.
+**Until 2026-10-08 the registry held pointers.** The app owned its widgets and registered raw
+pointers to them, each watched by a liveness token (`Owned` boxes, `register_host`,
+`register_widget`, `set_focused_ptr`, `Liveness`, `stable_target`, `link_parent_child`). It
+was made sound (a raw-root `Owned`, checked by Miri) and then replaced: the RFC's five phases
+moved every app and the toolkit's own children onto handles and deleted the pointer path. A
+real bug went with it: cce-files' prompt focused a stack-local `TextBox` by pointer and then
+moved it into its box, and a second prompt corrupted the heap.
 
-The toolkit's embedded children (the tree list's search box, add-key button and popover,
-inline editor; the paginator's menu) are `Owned` fields now, so they have roots of their own.
-The rule left is the ordinary one: a `&mut` reached through the registry must not overlap one
-taken through the `Owned` — an app does not hold `&mut self.x` across a `UiContext` call that
-reaches `x`, and a `UiContext` call handed the widget uses what it was handed. The end state
-that makes even that the compiler's job is a registry that owns its widgets and lends them out
-by handle; it would touch every widget access in every app.
-
-**The registry can own its widgets** (since 2026-10-08, `docs/rfc-owning-registry.md`, the
-end state the rule above points at). `ctx.insert(w)` moves a widget into the context and
-returns a `Handle<W>` (`Copy`, typed); the app reaches it through the context —
-`ctx[h]`, `ctx.get(h)` / `get_mut(h)`, `ctx.lend_h(h, |w, ctx| ..)` when it needs the
-widget and the context together (`Dialog::open`, `fit`) — so the borrow checker refuses an
-app access that overlaps a context call. `ctx.remove(h)` gives it back by value; dropping
-the context drops the rest; `clear_hierarchy` keeps them. And every call the context makes
-into a widget that hands it the context goes through `lend`, which takes the widget out of
-reach for the call: a widget reaching itself through the context mid-event gets `None`,
-for owned and pointer entries alike. **Every app is on handles** (phase 3, 2026-10-08), and so
-are the toolkit's embedded children (phase 4): a composite holds each in a `widget::Embedded`,
-by value until the composite is inserted and then in the context under its own id
-(`Layout::register_embedded_children` attaches, `release_embedded_children` takes it back on
-`remove`); a composite's `set_rect` has no context, so it keeps the rect and places its
-children in that hook, which runs on insert, every layout and every tick. A ramp's fields are
-never registered: the focus record names the field with the keyboard and the ramp routes to
-it. Only tests still register by pointer, and then `Owned` and the pointer API go (phase 5). New code uses handles: `render_widget_h`,
-`Form::widget_h` / `widget_w_h`, `register_popover_id`, `focus_id` / `unfocus_id` /
-`set_focused_id`, `link_ids`, `paint_root_into(ctx, &ctx[h], pc)`. Three things the apps'
-move taught:
-
-- **An inserted widget that `wants_tick` is a tick receiver**, as one registered by pointer
-  always was. Until the fix `insert` skipped it, and an inserted tree list never applied
-  its search (it does so in its tick) — the data editor's A/B caught it.
-- **A widget made per frame is inserted, placed and removed** (a status dot in a timer
-  row, a usage bar), and a row list rebuilt on data removes the outgoing handles
-  (`ctx.remove`) and inserts the new ones; nothing re-registers each frame any more.
-- **A value built where there is no context** — a page state a worker fetches, merged
-  field by field into the app's copy — holds `Handle::none()` (also `Handle`'s
-  `Default`), which names no widget and is never read.
-
-`a_dropped_widget_is_never_handed_out`, `a_clone_has_a_liveness_of_its_own`,
-`an_owned_widget_survives_its_vec_reallocating`,
-`swapping_the_widget_out_of_its_box_never_leaves_a_dangling_entry`,
-`an_app_and_the_registry_take_turns_soundly` and `an_inner_registration_keeps_the_root` are
-the tests; CI's `miri` job runs the `widget::owned` ones under Stacked and Tree Borrows.
+`widget::handle` (an app and the context taking turns, lending, removal), `widget::embedded`
+and `scene::tree` are the tests; CI's `miri` job runs all three under Stacked and Tree Borrows.
 
 **Runtime verification matters here.** Several scene changes are "compiles + tests pass; runtime
 verification pending" per the RFC — the headless tests can't catch paint/event regressions. When

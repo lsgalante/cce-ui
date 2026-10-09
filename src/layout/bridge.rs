@@ -187,7 +187,6 @@ pub fn render_widget_h<T: WidgetHost + 'static>(
 }
 
 pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
-    ctx.register_host(w);
     // The flat-host contract, the same block `set_rect` takes: `(x, y)` is the top of
     // the detached label and `wh` the block height, label strip included. `layout`
     // takes the CONTENT origin and height, so step down by the strip.
@@ -491,7 +490,7 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
         emit_rounded(pc, frect, fradii, fill);
     }
     if w.popover_rect().is_some() {
-        ctx.register_popover(w);
+        ctx.register_popover_id(w.base().id());
     }
 }
 
