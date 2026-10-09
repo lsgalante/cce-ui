@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The runner's text shaping is a directory module** (`backend/text/`): `mod.rs` (vertical
+  text), `cache` (the shaped-buffer cache), `fonts` (face aliases, rescans and the font-op log,
+  family resolution, face snapping), `shape` (shaping a buffer, single run or laid out),
+  `runs` (shaped runs and clusters, bidi levels and visual order), `display` (the display
+  list's text for the glyph pass, the popover-occlusion clamp), and the two test modules as
+  files. Items the siblings share are `pub(super)` and glob-imported; every public item is
+  re-exported, so `backend::text::…` paths are unchanged. A pure move, checked line for line.
+  Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass; `check-wasm` was not
+  run (no wasm32 target here), so CI's wasm job is the first browser build of it.
 - **`UiContext` is a directory module** (`context/`): `mod.rs` (the struct, the registry —
   insert, get, remove, lend — delivery, dirty state, ticks, the hierarchy, `ctx[h]`), `spatial`
   (`SpatialGrid`), `events` (dispatch and the scroll-gesture bookkeeping), `focus` (focus by id,

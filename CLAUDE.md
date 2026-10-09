@@ -389,7 +389,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `app.rs` (the `Application` trait, `AppSender`), `driver.rs` (input state and routing:
   modifiers, key repeat, undo/redo and Tab chords, CSD hit zones, popover close, scroll phase,
   touch — unit-tested with no compositor), `frame.rs` (`build_frame`, damage), `shell.rs` (the
-  `Shell` trait and `Pacer`: one turn of the loop over any shell), `tessellate/` (its `mod.rs` has the table), `text.rs`,
+  `Shell` trait and `Pacer`: one turn of the loop over any shell), `tessellate/` (its `mod.rs` has the table), `text/` (shaping, the buffer cache, fonts, bidi),
   `dom.rs` / `appkit.rs` (the browser's and AppKit's input vocabularies, portable),
   `touch.rs`, and the Wayland-only `window_runner/` (`EngineState`; its `mod.rs` has the table), `menu_popup.rs`,
   `dnd.rs`, `text_input.rs`, `a11y_unix.rs`. A routing change belongs in `driver.rs`, a frame
@@ -406,8 +406,8 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit.rs` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
-  concern (its `mod.rs` has the table). The largest files are now the text shaping,
-  `src/backend/text.rs` (largest file, ~1.4k lines), and `LineEdit`.
+  concern (its `mod.rs` has the table). The largest files are now `LineEdit`,
+  `src/widget/line_edit.rs` (largest file, ~1.4k lines), and the 3D scene stage in `vk/scene.rs`.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
