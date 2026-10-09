@@ -10,6 +10,14 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The `DocEditor` is split by concern** (`widget/doc_editor/`): beside `buffer`, `layout` and
+  `preview`, its `mod.rs` keeps the struct, construction and the text in and out, and the rest
+  of `impl DocEditor` moves into `incremental` (which lines show raw, line heights, keeping
+  layouts in step), `composition`, `caret` (geometry, the position at a point, vertical moves),
+  `keys` (the keymap, edits, undo and redo), `pointer` (presses, drags, links, the wheel and
+  tick) and `paint`, and the tests into a file. A pure move, checked line for line; the
+  `// ---- section ----` banners are dropped. Clippy, the suite and `cargo check --workspace
+  --exclude cce-fx` pass.
 - **The Vulkan 3D scene stage is a directory module** (`vk/scene/`): `mod.rs` (the stage's
   state, staging a frame, teardown), `pipelines` (`SceneStage::new` — render pass, layouts,
   pipelines, per-frame buffers — and the descriptor write), `targets` (the backdrop and depth
