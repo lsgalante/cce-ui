@@ -10,6 +10,14 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The widget model is a directory module** (`widget/model/`): `mod.rs` (the `Adapted` struct,
+  `Drop`, `Default`, `Deref`), `layout`, `paint` and `input` (one trait each; `input` also holds
+  `FocusRole` and `EventCtx`), `adapted` (`Adapted`'s inherent API), `host` (`impl WidgetHost
+  for Adapted`) and `tests`; every public item re-exported, so `widget::model::…` paths are
+  unchanged. A pure move, checked line for line. The module doc, which narrated the Phase 5
+  migration in the future tense ("when the last widget is migrated, `WidgetHost` and this
+  adapter are deleted"), now describes the traits and the adapter as they stand. Clippy, the
+  suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The ramp editors are a directory module** (`widget/input/ramp/`): `mod.rs` (the float
   `Ramp`: its key, construction, presets, the spec in and out, `impl Layout`), `geometry` (the
   plot, key rings, rolled rim, where a dragged key lands, the controls' places), `paint`,

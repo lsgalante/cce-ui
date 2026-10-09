@@ -184,7 +184,7 @@ Rules of the contract:
 
 **Traits.** `WidgetHost` (`src/widget/mod.rs`, 31 methods) is what the machinery — routing, paint
 walk, render loop — sees. Its one production implementor is `Adapted<W>`. A widget's behaviour
-lives on the narrow traits in `src/widget/model.rs`: `Layout`, `Paint`, `Input`. The host hands
+lives on the narrow traits in `src/widget/model/`: `Layout`, `Paint`, `Input`. The host hands
 those out (`layout_model()`, `paint_model()`, `input_model[_mut]()`), and `WidgetHostExt`
 (blanket-implemented, `dyn` included) carries the derived reads — `focus_role`, `label`,
 `corner_radii`, `painted_prims`, `preferred_height`, `z_index`, … — so import
@@ -399,14 +399,14 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   (the box model), `paint/` (`DisplayList`, `Prim`, `PaintCtx`, `Field`, `ControlPlate`,
   `PlateSpec`), `painter.rs` (the paint walk), `anim.rs` (`Animated<T>`), `material.rs`,
   `heightfield.rs`.
-- `widget/` — `mod.rs` (`WidgetHost`), `model.rs` (the narrow traits), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
+- `widget/` — `mod.rs` (`WidgetHost`), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
   `embedded.rs`, `container/` (params pane, tree list, spreadsheet, menus, scroll boxes…),
   `input/` (button, slider, text box, dropdown, ramp…), `display/` (label, graph, svg…),
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit.rs` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
-  concern (its `mod.rs` has the table). The largest files are now the narrow traits,
-  `src/widget/model.rs` (largest file, ~1.7k lines), and the spreadsheet.
+  concern (its `mod.rs` has the table). The largest files are now the spreadsheet,
+  `src/widget/container/spreadsheet.rs` (largest file, ~1.7k lines), and the colour getters.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
