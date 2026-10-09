@@ -10,6 +10,16 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The params pane's flat views are split.** `plain_quads` is `push_section_outline_quads`,
+  `push_row_quads` per row, and a viewport clip; a code row's chrome (box, gutter, error band,
+  selection, caret, border) is `push_code_row_quads` in `code.rs`. `reliefs` is
+  `push_section_reliefs` (the section well's edge-suppressed pieces, unchanged) and
+  `push_row_relief`, which drops a `(&dyn WidgetHost, radius, raised)` plumbing only text rows
+  ever filled (always with `raised` false) for a plain dispatch: text well, spinbox well without
+  its run, colour well. The tuple is named `Relief`. Verified by dumping both views from a pane
+  with every row type — sections open and collapsed, a focused code row with a selection and an
+  error line, relief on and off, full and scrolled viewport — on the previous commit and on
+  this one: byte-identical.
 - **The params pane's press and key handling are staged.** `on_mouse_button` offers an event to
   `press_scrollbar`, `press_section_title`, `press_open_popovers`, `press_row_controls` and
   `focus_on_press` in turn; `on_key` sends a code row's keys to `code_key` and the rest to

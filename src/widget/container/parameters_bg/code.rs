@@ -113,6 +113,72 @@ impl ParametersBg {
         editor.cursor_idx = at;
         self.code_editor = Some(editor);
     }
+
+    /// A code row's chrome (`r` its row rect): the box, the gutter's edge, the error band
+    /// under a flagged line, and while focused the selection bands and the caret; then the
+    /// border — amber while edits are pending, blue while focused and applied, grey at rest,
+    /// so it says whether what the node runs is what the box shows.
+    pub(super) fn push_code_row_quads(&self, i: usize, r: (f32, f32, f32, f32), out: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) {
+        let (bx, by, bw, bh) = (r.0, r.1 + Self::CODE_BOX_TOP, r.2, r.3 - Self::CODE_BOX_TOP);
+        out.push((bx, by, bw, bh, [0.08, 0.08, 0.10, 1.0]));
+        let focused = self.focused_param == Some(i);
+        // Amber while edits are pending, blue while focused and
+        // applied, grey at rest: the border says whether what the
+        // node runs is what the box shows.
+        let border_color = if focused && self.code_is_dirty() {
+            [0.85, 0.60, 0.25, 1.0]
+        } else if focused {
+            [0.25, 0.45, 0.85, 1.0]
+        } else {
+            [0.20, 0.20, 0.25, 1.0]
+        };
+        let text_x = self.code_text_x(r);
+        let col_w = self.code_col_w();
+        let line_y = |l: usize| by + (Self::CODE_TOP - Self::CODE_BOX_TOP) + l as f32 * Self::CODE_LINE_H;
+        // The gutter's edge.
+        out.push((text_x - col_w * 0.5, by + 1.0, 1.0, bh - 2.0, [0.16, 0.16, 0.20, 1.0]));
+        // The error band, under the flagged line.
+        if let Some(err_line) = self.code_error_line {
+            let y = line_y(err_line);
+            if y >= by && y + Self::CODE_LINE_H <= by + bh {
+                out.push((bx + 1.0, y, bw - 2.0, Self::CODE_LINE_H, [0.45, 0.12, 0.10, 1.0]));
+            }
+        }
+        if focused {
+            if let Some(ref editor) = self.code_editor {
+                // Selection: one band per line it covers.
+                if let Some((start, end)) = editor.selected_range() {
+                    let (sl, sc) = get_cursor_line_col(&editor.buffer, start);
+                    let (el, ec) = get_cursor_line_col(&editor.buffer, end);
+                    let line_len = |l: usize| editor.buffer.split('\n').nth(l).map_or(0, |s| s.chars().count());
+                    for l in sl..=el {
+                        let c0 = if l == sl { sc } else { 0 };
+                        let c1 = if l == el { ec } else { line_len(l) + 1 };
+                        let y = line_y(l);
+                        if y >= by && y + Self::CODE_LINE_H <= by + bh && c1 > c0 {
+                            out.push((
+                                text_x + c0 as f32 * col_w,
+                                y,
+                                (c1 - c0) as f32 * col_w,
+                                Self::CODE_LINE_H,
+                                [0.22, 0.32, 0.55, 1.0],
+                            ));
+                        }
+                    }
+                }
+                let (cursor_l, cursor_c) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                let cursor_x = text_x + (cursor_c as f32 * col_w);
+                let cursor_y = line_y(cursor_l) + (Self::CODE_LINE_H - 13.0) / 2.0;
+                if cursor_y >= by && cursor_y + 13.0 <= by + bh {
+                    out.push((cursor_x, cursor_y, 1.5, 13.0, [0.80, 0.80, 0.85, 1.0]));
+                }
+            }
+        }
+        out.push((bx, by, bw, 1.0, border_color));
+        out.push((bx, by + bh - 1.0, bw, 1.0, border_color));
+        out.push((bx, by, 1.0, bh, border_color));
+        out.push((bx + bw - 1.0, by, 1.0, bh, border_color));
+    }
 }
 
 /// What one key did to the code editor: whether it was the editor's at all, whether it

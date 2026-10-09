@@ -1,4 +1,5 @@
 use super::*;
+use super::code::get_cursor_line_col;
 use crate::context::UiContext;
 
 fn panel_with(params: &[(&str, &str, &str)]) -> Adapted<ParametersBg> {

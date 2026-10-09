@@ -3,6 +3,12 @@
 
 use super::*;
 
+/// One relief step a flat host draws for the pane (`ParametersBg::reliefs`): (x, y, w, h,
+/// per-corner radii (tl, tr, br, bl), depth, raised, walls (top, right, bottom, left)).
+/// Raised maps to `PaintCtx::boss_edges`, flat to `recess_edges`; radii and walls are per
+/// entry because a section's well is composed of edge-suppressed pieces.
+pub type Relief = (f32, f32, f32, f32, (f32, f32, f32, f32), f32, bool, (bool, bool, bool, bool));
+
 impl ParametersBg {
 
     /// Each section's boxes: the title box, plus the box wrapping its rows (`None` when the
@@ -354,167 +360,102 @@ impl ParametersBg {
         }
     }
 
-    /// The pane's plain quads: section border boxes, every row's chrome (slider/spinbox
-    /// backgrounds read via `rect()`+`color()`, the code editor's box/border/cursor), the
-    /// controls' own plain quads, all clipped to the viewport — plus the unclipped scrollbar.
+    /// The pane's plain quads: section outlines (when relief is off), every row's chrome
+    /// (slider and spinbox backgrounds read via `rect()` + `color()`, a separator's hairline,
+    /// the code editor's box), and the controls' own plain quads — all clipped to the
+    /// viewport. The scrollbar is not here: the host draws it via `scrollbar_quads`, above or
+    /// below the pane plate depending on `scrollbar_active`.
     pub(super) fn plain_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if !self.visible {
             return Vec::new();
         }
         let mut quads = Vec::new();
+        if !crate::layout::control_relief() {
+            self.push_section_outline_quads(&mut quads);
+        }
         let rects = self.get_param_rects();
+        let hidden = self.hidden_rows();
+        for i in 0..self.display_params.len() {
+            if !hidden[i] {
+                self.push_row_quads(i, rects[i], &mut quads);
+            }
+        }
+        // Clipped vertically to the viewport, less 4 px at each end.
         let view_min = self.rect.y + 4.0;
         let view_max = self.rect.y + self.rect.height - 4.0;
-
-        let clip_quad = |q: (f32, f32, f32, f32, [f32; 4])| -> Option<(f32, f32, f32, f32, [f32; 4])> {
-            let (qx, qy, qw, qh, qc) = q;
-            let y1 = qy.max(view_min);
-            let y2 = (qy + qh).min(view_max);
-            if y1 < y2 {
-                Some((qx, y1, qw, y2 - y1, qc))
-            } else {
-                None
-            }
-        };
-
-        let mut param_quads = Vec::new();
-
-        // Each section is drawn as ONE continuous outline — around the title, down the
-        // neck, around the content rows — whose straight runs are these quads; its corner
-        // fillets ride `arcs()`, which the host draws under the same clip. Under
-        // `control_relief` the outline is replaced by the inset carves served
-        // through `reliefs` (title tab + content body recessed).
-        if !crate::layout::control_relief() {
-            for (title, content) in self.section_boxes() {
-                let (runs, _) = self.section_outline(title, content);
-                param_quads.extend(runs.into_iter().map(|(x, y, w, h)| (x, y, w, h, SECTION_BORDER_COLOR)));
-            }
-        }
-
-        let hidden = self.hidden_rows();
-        for (i, p) in self.display_params.iter().enumerate() {
-            if hidden[i] {
-                continue;
-            }
-            let r = rects[i];
-            if p.2.starts_with("slider") {
-                if let Some(s) = &self.sliders[i] {
-                    let (sx, sy, sw, sh) = s.rect();
-                    param_quads.push((sx, sy, sw, sh, s.color()));
-                    param_quads.extend(crate::widget::shown_quads(s));
-                }
-            } else if p.2 == "section" {
-                // Section header line is handled by the border box top border now
-            } else if p.2 == SEPARATOR {
-                // A hairline across the row, inset from the pane's edges.
-                let c = crate::colors::active_theme().surface_border;
-                param_quads.push((r.0 + 6.0, r.1, (r.2 - 12.0).max(0.0), 1.0, [c[0], c[1], c[2], c[3] * 0.8]));
-            } else if is_vec_row(&p.2) {
-                if let Some(f) = &self.float3s[i] {
-                    param_quads.extend(crate::widget::shown_quads(f));
-                }
-            } else if p.2 == "code" {
-                let (bx, by, bw, bh) = (r.0, r.1 + Self::CODE_BOX_TOP, r.2, r.3 - Self::CODE_BOX_TOP);
-                param_quads.push((bx, by, bw, bh, [0.08, 0.08, 0.10, 1.0]));
-                let focused = self.focused_param == Some(i);
-                // Amber while edits are pending, blue while focused and
-                // applied, grey at rest: the border says whether what the
-                // node runs is what the box shows.
-                let border_color = if focused && self.code_is_dirty() {
-                    [0.85, 0.60, 0.25, 1.0]
-                } else if focused {
-                    [0.25, 0.45, 0.85, 1.0]
-                } else {
-                    [0.20, 0.20, 0.25, 1.0]
-                };
-                let text_x = self.code_text_x(r);
-                let col_w = self.code_col_w();
-                let line_y = |l: usize| by + (Self::CODE_TOP - Self::CODE_BOX_TOP) + l as f32 * Self::CODE_LINE_H;
-                // The gutter's edge.
-                param_quads.push((text_x - col_w * 0.5, by + 1.0, 1.0, bh - 2.0, [0.16, 0.16, 0.20, 1.0]));
-                // The error band, under the flagged line.
-                if let Some(err_line) = self.code_error_line {
-                    let y = line_y(err_line);
-                    if y >= by && y + Self::CODE_LINE_H <= by + bh {
-                        param_quads.push((bx + 1.0, y, bw - 2.0, Self::CODE_LINE_H, [0.45, 0.12, 0.10, 1.0]));
-                    }
-                }
-                if focused {
-                    if let Some(ref editor) = self.code_editor {
-                        // Selection: one band per line it covers.
-                        if let Some((start, end)) = editor.selected_range() {
-                            let (sl, sc) = get_cursor_line_col(&editor.buffer, start);
-                            let (el, ec) = get_cursor_line_col(&editor.buffer, end);
-                            let line_len = |l: usize| editor.buffer.split('\n').nth(l).map_or(0, |s| s.chars().count());
-                            for l in sl..=el {
-                                let c0 = if l == sl { sc } else { 0 };
-                                let c1 = if l == el { ec } else { line_len(l) + 1 };
-                                let y = line_y(l);
-                                if y >= by && y + Self::CODE_LINE_H <= by + bh && c1 > c0 {
-                                    param_quads.push((
-                                        text_x + c0 as f32 * col_w,
-                                        y,
-                                        (c1 - c0) as f32 * col_w,
-                                        Self::CODE_LINE_H,
-                                        [0.22, 0.32, 0.55, 1.0],
-                                    ));
-                                }
-                            }
-                        }
-                        let (cursor_l, cursor_c) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                        let cursor_x = text_x + (cursor_c as f32 * col_w);
-                        let cursor_y = line_y(cursor_l) + (Self::CODE_LINE_H - 13.0) / 2.0;
-                        if cursor_y >= by && cursor_y + 13.0 <= by + bh {
-                            param_quads.push((cursor_x, cursor_y, 1.5, 13.0, [0.80, 0.80, 0.85, 1.0]));
-                        }
-                    }
-                }
-                param_quads.push((bx, by, bw, 1.0, border_color));
-                param_quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));
-                param_quads.push((bx, by, 1.0, bh, border_color));
-                param_quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));
-            } else if is_text_row(&p.2) {
-                if let Some(tb) = &self.texts[i] {
-                    param_quads.extend(crate::widget::shown_quads(tb));
-                }
-                if let Some(d) = &self.choices[i] {
-                    param_quads.extend(crate::widget::shown_quads(d));
-                }
-            } else if p.2.starts_with("choice") {
-                if let Some(d) = &self.choices[i] {
-                    param_quads.extend(crate::widget::shown_quads(d));
-                }
-            } else if p.2 == "button" {
-                if let Some(b) = &self.buttons[i] {
-                    param_quads.extend(crate::widget::shown_quads(b));
-                }
-            } else if p.2.starts_with("spinbox") {
-                if let Some(sb) = &self.spinboxes[i] {
-                    { let (bx, by, bw, bh) = sb.rect(); param_quads.push((bx, by, bw, bh, sb.color())); }
-                    param_quads.extend(crate::widget::shown_quads(sb));
-                }
-            } else if p.2 == "toggle" || p.2 == "checkbox" {
-                if let Some(cb) = &self.toggles[i] {
-                    param_quads.extend(crate::widget::shown_quads(cb));
-                }
-            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
-                if let Some(c) = &self.colors[i] {
-                    param_quads.extend(crate::widget::shown_quads(c));
-                }
-            }
-        }
-
-        // Clip all parameter quads vertically
-        for q in param_quads {
-            if let Some(clipped) = clip_quad(q) {
-                quads.push(clipped);
-            }
-        }
-
-        // The scrollbar is NOT emitted here: the host draws it via `scrollbar_quads`, above
-        // or below the pane plate depending on `scrollbar_active`.
-
         quads
+            .into_iter()
+            .filter_map(|(qx, qy, qw, qh, qc)| {
+                let y1 = qy.max(view_min);
+                let y2 = (qy + qh).min(view_max);
+                (y1 < y2).then_some((qx, y1, qw, y2 - y1, qc))
+            })
+            .collect()
+    }
+
+    /// Each section is drawn as ONE continuous outline — around the title, down the
+    /// neck, around the content rows — whose straight runs are these quads; its corner
+    /// fillets ride `arcs()`, which the host draws under the same clip. Under
+    /// `control_relief` the outline is replaced by the inset carves served
+    /// through `reliefs` (title tab + content body recessed).
+    fn push_section_outline_quads(&self, out: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) {
+        for (title, content) in self.section_boxes() {
+            let (runs, _) = self.section_outline(title, content);
+            out.extend(runs.into_iter().map(|(x, y, w, h)| (x, y, w, h, SECTION_BORDER_COLOR)));
+        }
+    }
+
+    /// Row `i`'s plain chrome (`r` its row rect), by row type.
+    fn push_row_quads(&self, i: usize, r: (f32, f32, f32, f32), out: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) {
+        let kind = self.display_params[i].2.as_str();
+        if kind.starts_with("slider") {
+            if let Some(s) = &self.sliders[i] {
+                let (sx, sy, sw, sh) = s.rect();
+                out.push((sx, sy, sw, sh, s.color()));
+                out.extend(crate::widget::shown_quads(s));
+            }
+        } else if kind == "section" {
+            // A section's line is its outline's, above.
+        } else if kind == SEPARATOR {
+            // A hairline across the row, inset from the pane's edges.
+            let c = crate::colors::active_theme().surface_border;
+            out.push((r.0 + 6.0, r.1, (r.2 - 12.0).max(0.0), 1.0, [c[0], c[1], c[2], c[3] * 0.8]));
+        } else if is_vec_row(kind) {
+            if let Some(f) = &self.float3s[i] {
+                out.extend(crate::widget::shown_quads(f));
+            }
+        } else if kind == "code" {
+            self.push_code_row_quads(i, r, out);
+        } else if is_text_row(kind) {
+            if let Some(tb) = &self.texts[i] {
+                out.extend(crate::widget::shown_quads(tb));
+            }
+            if let Some(d) = &self.choices[i] {
+                out.extend(crate::widget::shown_quads(d));
+            }
+        } else if kind.starts_with("choice") {
+            if let Some(d) = &self.choices[i] {
+                out.extend(crate::widget::shown_quads(d));
+            }
+        } else if kind == "button" {
+            if let Some(b) = &self.buttons[i] {
+                out.extend(crate::widget::shown_quads(b));
+            }
+        } else if kind.starts_with("spinbox") {
+            if let Some(sb) = &self.spinboxes[i] {
+                let (bx, by, bw, bh) = sb.rect();
+                out.push((bx, by, bw, bh, sb.color()));
+                out.extend(crate::widget::shown_quads(sb));
+            }
+        } else if kind == "toggle" || kind == "checkbox" {
+            if let Some(cb) = &self.toggles[i] {
+                out.extend(crate::widget::shown_quads(cb));
+            }
+        } else if kind.starts_with("color") || kind == "rgb" || kind == "rgba" {
+            if let Some(c) = &self.colors[i] {
+                out.extend(crate::widget::shown_quads(c));
+            }
+        }
     }
 
     /// The rounded companion to [`Self::plain_quads`]: the row controls whose boxes are
@@ -591,27 +532,31 @@ impl ParametersBg {
     /// faces, exactly the widgets' own transparent-fill bevel→boss degradation.
     /// Returned unclipped; the host clips to the pane's scroll viewport and
     /// draws these AFTER the flat quads, so the walls' shading modulates the
-    /// fills they cross (the order the widgets' own paints use). Tuple:
-    /// (x, y, w, h, per-corner radii, depth, raised, walls) — raised maps to
-    /// `PaintCtx::boss_edges`, flat to `recess_edges`; a toggle's well and
-    /// the plate standing in it are why radii/walls are per-entry.
-    #[allow(clippy::type_complexity)]
-    pub fn reliefs(
-        &self,
-    ) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32, bool, (bool, bool, bool, bool))> {
+    /// fills they cross (the order the widgets' own paints use). See [`Relief`].
+    pub fn reliefs(&self) -> Vec<Relief> {
         if !self.visible || !crate::layout::control_relief() {
             return Vec::new();
         }
         let mut out = Vec::new();
+        self.push_section_reliefs(&mut out);
+        let hidden = self.hidden_rows();
+        for i in 0..self.display_params.len() {
+            if !hidden[i] {
+                self.push_row_relief(i, &mut out);
+            }
+        }
+        out
+    }
 
-        // Sections as inset panels (the flat outline+fillet path is the
-        // non-relief style): ONE union-shaped recess per section — a
-        // title-text-width tab strip flush with the body's left edge, opening
-        // into the full-width body below. Composed from three edge-suppressed
-        // pieces (the tab with its bottom open, the body with its top open,
-        // and the top-wall run right of the tab's throat) so no wall crosses
-        // the union's interior and the whole section reads as a single well.
-        // Collapsed sections keep the title-box carve.
+    /// Sections as inset panels (the flat outline+fillet path is the
+    /// non-relief style): ONE union-shaped recess per section — a
+    /// title-text-width tab strip flush with the body's left edge, opening
+    /// into the full-width body below. Composed from three edge-suppressed
+    /// pieces (the tab with its bottom open, the body with its top open,
+    /// and the top-wall run right of the tab's throat) so no wall crosses
+    /// the union's interior and the whole section reads as a single well.
+    /// Collapsed sections keep the title-box carve.
+    fn push_section_reliefs(&self, out: &mut Vec<Relief>) {
         let all = (true, true, true, true);
         let r4 = |r: f32| (r, r, r, r);
         let r = SECTION_R;
@@ -655,12 +600,12 @@ impl ParametersBg {
                     // fillet span down to the body's own fade-in.
                     out.push((tx, ty, tw, (cy - rho) - ty + depth, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
                     out.push((tx, cy - rho, tw, rho + depth, (0.0, 0.0, 0.0, 0.0), depth, false, (false, false, false, true)));
-                    body_lr(throat_r + rho - depth, &mut out);
+                    body_lr(throat_r + rho - depth, out);
                 } else {
                     // Too narrow for the fillet: the plain square throat.
                     out.push((tx, ty, tw, th + depth, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
                     if cx + cw > throat_r + 0.5 {
-                        body_lr(throat_r - depth, &mut out);
+                        body_lr(throat_r - depth, out);
                     } else {
                         // The tab spans the body: no top wall at all.
                         out.push((cx, cy, cw, ch, (0.0, 0.0, r, r), depth, false, (false, true, true, true)));
@@ -671,90 +616,53 @@ impl ParametersBg {
                 out.push((tx, ty, tw, th, r4(SECTION_R), depth, false, all));
             }
         }
+    }
 
-        let hidden = self.hidden_rows();
-        for (i, p) in self.display_params.iter().enumerate() {
-            if hidden[i] {
-                continue;
+    /// Row `i`'s plain well, if it has one: a text box (unless it is joined to its picker,
+    /// half of a field), a spinbox with no -/+ run, a colour selector's well. The other rows
+    /// draw none here: a choice trigger, a button and a toggle are fields ([`Self::fields`]),
+    /// as are a textpick row and a spinbox with its run; sliders and vector rows are bands,
+    /// their wells hand-shaded quads that follow the band's contour (the plain-quad view).
+    /// Every well keeps its top label band outside the relief, as every host does.
+    fn push_row_relief(&self, i: usize, out: &mut Vec<Relief>) {
+        let all = (true, true, true, true);
+        let r4 = |r: f32| (r, r, r, r);
+        let kind = self.display_params[i].2.as_str();
+        if is_text_row(kind) {
+            let Some(tb) = &self.texts[i] else { return };
+            let (x, y, w, h) = tb.rect();
+            if w <= 0.0 || h <= 0.0 || tb.inner().joined_right {
+                return;
             }
-            // (control, its configured corner radius, raised vs recessed)
-            let ctl: Option<(&dyn WidgetHost, f32, bool)> = if is_text_row(&p.2) {
-                // The textpick picker is NOT in this list: with it the row is
-                // a field ([`Self::fields`]) — a well ending in a flush run.
-                self.texts[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::textbox_corner_radius(), false))
-            } else if p.2.starts_with("choice") {
-                // The dropdown trigger is a FLUSH control, a field that is all
-                // run ([`Self::fields`]). A boss here read as a raised island
-                // the widget itself never draws.
-                None
-            } else if p.2 == "button" {
-                // A flush control with a field run's edge, as its own paint
-                // draws it ([`Self::fields`]) — it was a boss here, a raised
-                // island the button itself never drew.
-                None
-            } else if p.2 == "toggle" || p.2 == "checkbox" {
-                // A toggle is a field ([`Self::fields`]): its well and the
-                // flush run gliding in it, one outline round both.
-                None
-            } else if p.2.starts_with("spinbox") {
-                // A plain well only when there is no -/+ run; with one the
-                // control is a field ([`Self::fields`]) and its -/+ seam a
-                // groove ([`Self::grooves`]). Same side-label inset, same
-                // content band, same depth cap as its paint.
-                if let Some(sb) = &self.spinboxes[i] {
-                    let (x, y, w, h) = sb.rect();
-                    let ty = sb.label_strip();
-                    let band = Rect { x, y: y + ty, width: w, height: h - ty };
-                    if w > 0.0 && h > 0.0 {
-                        let r = crate::layout::spinbox_corner_radius();
-                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                        // With its -/+ run the control is a field
-                        // ([`Self::fields`]); without, a plain well.
-                        if let Some(rel) = sb.inner().relief_parts(band) {
-                            if rel.run.is_none() {
-                                out.push((x, y + ty, w, h - ty, r4(r), depth, false, all));
-                            }
-                        }
-                    }
-                }
-                None
-            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
-                // The control's one well (`ColorSelector::field_relief`, the
-                // same geometry its paint carves); the swatch is a fill on its
-                // floor and the seam a groove, both on the widget's paint.
-                if let Some(c) = &self.colors[i] {
-                    let (x, y, w, h) = c.rect();
-                    let ty = c.label_strip();
-                    if let Some((rx, ry, rw, rh, rr, rd)) =
-                        c.inner().field_relief(Rect { x, y: y + ty, width: w, height: h - ty })
-                    {
-                        out.push((rx, ry, rw, rh, r4(rr), rd, false, all));
-                    }
-                }
-                None
-            } else {
-                // Sliders (and Float3's three rows) are bands: their well is
-                // hand-shaded quads that follow the band's contour, which reach
-                // a flat host through the plain-quad view — no rect carve.
-                None
-            };
-            if let Some((w, radius, raised)) = ctl {
-                let (x, y, ww, h) = w.rect();
-                if ww <= 0.0 || h <= 0.0 {
-                    continue;
-                }
-                // The top-label band stays outside the relief like every other host.
-                let ty = w.label_strip();
+            let ty = tb.label_strip();
+            let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
+            out.push((x, y + ty, w, h - ty, r4(crate::layout::textbox_corner_radius()), depth, false, all));
+        } else if kind.starts_with("spinbox") {
+            // Same side-label inset, content band and depth cap as its paint.
+            let Some(sb) = &self.spinboxes[i] else { return };
+            let (x, y, w, h) = sb.rect();
+            let ty = sb.label_strip();
+            let band = Rect { x, y: y + ty, width: w, height: h - ty };
+            if w > 0.0 && h > 0.0 {
+                let r = crate::layout::spinbox_corner_radius();
                 let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                // A text box joined to its picker is half of a field
-                // ([`Self::fields`]), drawn there.
-                if is_text_row(&p.2) && self.texts[i].as_ref().is_some_and(|t| t.inner().joined_right) {
-                    continue;
+                if let Some(rel) = sb.inner().relief_parts(band) {
+                    if rel.run.is_none() {
+                        out.push((x, y + ty, w, h - ty, r4(r), depth, false, all));
+                    }
                 }
-                out.push((x, y + ty, ww, h - ty, r4(radius), depth, raised, all));
+            }
+        } else if kind.starts_with("color") || kind == "rgb" || kind == "rgba" {
+            // The control's one well (`ColorSelector::field_relief`, the same geometry its
+            // paint carves); the swatch is a fill on its floor and the seam a groove, both
+            // on the widget's paint.
+            let Some(c) = &self.colors[i] else { return };
+            let (x, y, w, h) = c.rect();
+            let ty = c.label_strip();
+            if let Some((rx, ry, rw, rh, rr, rd)) = c.inner().field_relief(Rect { x, y: y + ty, width: w, height: h - ty }) {
+                out.push((rx, ry, rw, rh, r4(rr), rd, false, all));
             }
         }
-        out
     }
 
     /// The rows that are ONE field with a run ([`Field`]: a sunken well

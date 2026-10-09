@@ -42,7 +42,6 @@ mod rows;
 mod tests;
 
 pub use rows::SEPARATOR;
-use code::*;
 use rows::*;
 
 use crate::colors;
