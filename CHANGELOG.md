@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The params pane's `fields` is a loop over `row_field(i)`**, one `Option`-returning arm per
+  row type (textpick, button, choice, spinbox, toggle/checkbox). A control's band — its rect
+  below the label strip — and the wall depth carved into it (the roll width capped at a fifth of
+  the band) are `control_band` and `wall_depth`, used by `fields` and `push_row_relief`. Verified
+  by dumping `fields`, `reliefs` and `plain_quads` from a pane of every row type (relief on and
+  off, full and scrolled) on the previous commit and on this one: byte-identical, every field
+  kind present.
 - **The params pane's row press dispatch is flat.** `press_row_controls` is a loop over
   `press_row_control(i, …)`, one early-returning arm per row type, with a text row's picker-then-
   box handling in `press_text_row`. Two rules written out several times are functions:

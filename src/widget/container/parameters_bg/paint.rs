@@ -635,8 +635,7 @@ impl ParametersBg {
                 return;
             }
             let ty = tb.label_strip();
-            let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-            out.push((x, y + ty, w, h - ty, r4(crate::layout::textbox_corner_radius()), depth, false, all));
+            out.push((x, y + ty, w, h - ty, r4(crate::layout::textbox_corner_radius()), wall_depth(h - ty), false, all));
         } else if kind.starts_with("spinbox") {
             // Same side-label inset, content band and depth cap as its paint.
             let Some(sb) = &self.spinboxes[i] else { return };
@@ -645,10 +644,9 @@ impl ParametersBg {
             let band = Rect { x, y: y + ty, width: w, height: h - ty };
             if w > 0.0 && h > 0.0 {
                 let r = crate::layout::spinbox_corner_radius();
-                let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
                 if let Some(rel) = sb.inner().relief_parts(band) {
                     if rel.run.is_none() {
-                        out.push((x, y + ty, w, h - ty, r4(r), depth, false, all));
+                        out.push((x, y + ty, w, h - ty, r4(r), wall_depth(h - ty), false, all));
                     }
                 }
             }
@@ -665,99 +663,70 @@ impl ParametersBg {
         }
     }
 
-    /// The rows that are ONE field with a run ([`Field`]: a sunken well
-    /// holding a flush run, one outline round both), drawn AFTER
-    /// [`Self::reliefs`]. A textpick row is its text box's well ending in its
-    /// picker, a spinbox its value's well ending in its -/+ run
-    /// ([`Field::ending_in_run`]); a dropdown or button row, a field that is
-    /// all run ([`Field::run`]); a toggle, its own sliding field
-    /// (`Toggle::field`). So every flush control in the pane has the same
-    /// edge. The plain wells are not here — they are [`Self::reliefs`], which
-    /// group into the pane's plate. They replaced
-    /// `troughs()` on 2026-10-01. On the pane's own rule for wells and
-    /// troughs: the content band as the outline, the wall straddling it.
-    #[allow(clippy::type_complexity)]
+    /// The rows that are ONE field with a run ([`Field`]: a sunken well holding a flush run,
+    /// one outline round both), drawn AFTER [`Self::reliefs`], so every flush control in the
+    /// pane has the same edge. The plain wells are not here: they are [`Self::reliefs`], which
+    /// group into the pane's plate. Each field is drawn on its control's band, the wall
+    /// straddling the band's outline.
     pub fn fields(&self) -> Vec<Field> {
         if !self.visible || !crate::layout::control_relief() {
             return Vec::new();
         }
-        let mut out = Vec::new();
         let hidden = self.hidden_rows();
-        for (i, p) in self.display_params.iter().enumerate() {
-            if hidden[i] {
-                continue;
+        (0..self.display_params.len())
+            .filter(|&i| !hidden[i])
+            .filter_map(|i| self.row_field(i))
+            .collect()
+    }
+
+    /// Row `i`'s field, if it is one: a textpick row, its text box's well ending in its picker
+    /// ([`Field::ending_in_run`]); a spinbox, its value's well ending in its -/+ run; a button or
+    /// a dropdown trigger, a field that is all run ([`Field::run`]) as its own flush plate
+    /// draws it (`PaintCtx::inset_plate`); a toggle or checkbox, its own sliding field
+    /// (`Toggle::field`), which IS the control (it paints no fill).
+    fn row_field(&self, i: usize) -> Option<Field> {
+        let kind = self.display_params[i].2.as_str();
+        if kind.starts_with("textpick") {
+            let (tb, d) = (self.texts[i].as_ref()?, self.choices[i].as_ref()?);
+            if !tb.inner().joined_right {
+                return None;
             }
-            if p.2.starts_with("textpick") {
-                if let (Some(tb), Some(d)) = (&self.texts[i], &self.choices[i]) {
-                    if !tb.inner().joined_right {
-                        continue;
-                    }
-                    let (x, y, w, h) = tb.rect();
-                    let (dx, _, dw, _) = d.rect();
-                    let ty = tb.label_strip();
-                    if w > 0.0 && h - ty > 0.0 && dw > 0.0 {
-                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                        let r = crate::layout::textbox_corner_radius();
-                        let outline = Rect { x, y: y + ty, width: dx + dw - x, height: h - ty };
-                        out.push(Field::ending_in_run(outline, (r, r, r, r), depth, dx));
-                    }
-                }
-            } else if p.2 == "button" {
-                // A button: a field that is all run, as its own flush plate
-                // (`Button::plate`, `PaintCtx::inset_plate`) on its
-                // band, at the button radius.
-                if let Some(b) = &self.buttons[i] {
-                    let (x, y, w, h) = b.rect();
-                    let ty = b.label_strip();
-                    if w > 0.0 && h - ty > 0.0 {
-                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                        let r = crate::layout::button_corner_radius();
-                        out.push(Field::run(Rect { x, y: y + ty, width: w, height: h - ty }, (r, r, r, r), depth));
-                    }
-                }
-            } else if p.2.starts_with("choice") {
-                // The dropdown trigger: a field that is all run — the
-                // widget's own raised paint (`PaintCtx::inset_plate`)
-                // on the same band, radius and depth cap. Until 2026-10-01
-                // a trough, whose edge differed from the run's at the end of
-                // a text row's field.
-                if let Some(d) = &self.choices[i] {
-                    let (x, y, w, h) = d.rect();
-                    let ty = d.label_strip();
-                    if w > 0.0 && h - ty > 0.0 {
-                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                        let r = crate::layout::dropdown_corner_radius();
-                        out.push(Field::run(Rect { x, y: y + ty, width: w, height: h - ty }, (r, r, r, r), depth));
-                    }
-                }
-            } else if p.2.starts_with("spinbox") {
-                if let Some(sb) = &self.spinboxes[i] {
-                    let (x, y, w, h) = sb.rect();
-                    let ty = sb.label_strip();
-                    let band = Rect { x, y: y + ty, width: w, height: h - ty };
-                    if let Some(rel) = sb.inner().relief_parts(band) {
-                        if let Some((split, _)) = rel.run {
-                            let r = rel.radius;
-                            out.push(Field::ending_in_run(band, (r, r, r, r), rel.depth, split));
-                        }
-                    }
-                }
-            } else if p.2 == "toggle" || p.2 == "checkbox" {
-                // The toggle's own field (`Toggle::field`) —
-                // exactly what its paint draws, on its band. It paints no
-                // fill, so this IS the control.
-                if let Some(t) = &self.toggles[i] {
-                    let (x, y, w, h) = t.rect();
-                    let ty = t.label_strip();
-                    if w > 0.0 && h - ty > 0.0 {
-                        // The pane's hover is the tint here, as on every field.
-                        let band = Rect { x, y: y + ty, width: w, height: h - ty };
-                        out.push(t.inner().field(band).with_tint(None));
-                    }
-                }
-            }
+            let band = control_band(tb.rect(), tb.label_strip());
+            let (dx, _, dw, _) = d.rect();
+            (band.width > 0.0 && band.height > 0.0 && dw > 0.0).then(|| {
+                let r = crate::layout::textbox_corner_radius();
+                let outline = Rect { width: dx + dw - band.x, ..band };
+                Field::ending_in_run(outline, (r, r, r, r), wall_depth(band.height), dx)
+            })
+        } else if kind == "button" {
+            let b = self.buttons[i].as_ref()?;
+            let band = control_band(b.rect(), b.label_strip());
+            (band.width > 0.0 && band.height > 0.0).then(|| {
+                let r = crate::layout::button_corner_radius();
+                Field::run(band, (r, r, r, r), wall_depth(band.height))
+            })
+        } else if kind.starts_with("choice") {
+            let d = self.choices[i].as_ref()?;
+            let band = control_band(d.rect(), d.label_strip());
+            (band.width > 0.0 && band.height > 0.0).then(|| {
+                let r = crate::layout::dropdown_corner_radius();
+                Field::run(band, (r, r, r, r), wall_depth(band.height))
+            })
+        } else if kind.starts_with("spinbox") {
+            let sb = self.spinboxes[i].as_ref()?;
+            let band = control_band(sb.rect(), sb.label_strip());
+            let rel = sb.inner().relief_parts(band)?;
+            let (split, _) = rel.run?;
+            let r = rel.radius;
+            Some(Field::ending_in_run(band, (r, r, r, r), rel.depth, split))
+        } else if kind == "toggle" || kind == "checkbox" {
+            let t = self.toggles[i].as_ref()?;
+            let band = control_band(t.rect(), t.label_strip());
+            // The pane's hover is the tint here, as on every field.
+            (band.width > 0.0 && band.height > 0.0).then(|| t.inner().field(band).with_tint(None))
+        } else {
+            None
         }
-        out
     }
 
     /// The engraved seams companion — `(a, b, width, depth, host)` for
@@ -1069,4 +1038,15 @@ pub(super) fn fit_tail(text: &str, avail: f32, family: &str, size: f32) -> Strin
         .map(|n| truncate_tail(text, n))
         .find(|t| fits(t))
         .unwrap_or_default()
+}
+
+/// A control's band: its rect below its top label strip — what its relief is drawn on.
+fn control_band((x, y, w, h): (f32, f32, f32, f32), label_strip: f32) -> Rect {
+    Rect { x, y: y + label_strip, width: w, height: h - label_strip }
+}
+
+/// The wall a control's relief carves into a band `band_h` tall: the DE's roll width, capped
+/// at a fifth of the band, the cap every control's own paint uses.
+fn wall_depth(band_h: f32) -> f32 {
+    crate::layout::bevel_width().min(band_h * 0.2)
 }
