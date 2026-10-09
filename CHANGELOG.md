@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The layout getters are split by topic.** `layout/mod.rs` (2.3k lines) keeps the style slots,
+  the shared constants, text-line metrics and `reload_config`; the getters and setters are
+  `relief` (light, bevel and roll geometry, corner shape and window radii, carve depth, the
+  profile tables and their tests), `spacing` (the ladder and label margins), `fonts`, `controls`
+  (heights, radii, opacities, scrollbar sizes) and `graph`, each re-exported whole so every
+  `crate::layout::…` path is unchanged; the registry's typed reads (`registry_float`,
+  `registry_bool`, `registry_string`, `parsed_font`) moved into `registry.rs` beside the
+  registry; the tests are `tests.rs`. A pure move, checked line for line across both files.
+  Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The path tracer's Vulkan side is a directory module** (`vk/rt/`): `mod.rs` (the tier,
   `RtStage`'s construction, background, environment, staging and destroy, the tests), `scene`
   (a scene's upload and image descriptors, the acceleration structures), `frame` (targets,

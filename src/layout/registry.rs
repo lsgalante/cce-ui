@@ -477,3 +477,50 @@ pub fn split_font_string(s: &str) -> (&str, Option<f32>) {
     }
     (s, None)
 }
+
+/// One style-registry float, initialising the registry on first use — the
+/// one read every rung getter goes through.
+///
+/// The guard is released before this returns, which is why a getter whose
+/// unset slot falls back to ANOTHER getter must read through here:
+/// `get_style_registry().read().unwrap().get_float(k).unwrap_or_else(g)`
+/// holds its guard to the end of the statement, so `g`'s read nests inside
+/// it, and std's `RwLock` queues a reader behind a waiting writer — a
+/// `reload_config` arriving between the two reads parks both, and every
+/// reader in the process behind them. That hung cce-designer's suite
+/// (2026-09-25); `tests/style_registry_reentrancy.rs` is the check.
+pub(super) fn registry_float(slot: &str) -> Option<f32> {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float(slot)
+}
+
+/// [`registry_float`] for a switch: a number is on when it is not zero (`set_*` writes
+/// 1 or 0), a word when it is `true`.
+pub(super) fn registry_bool(key: &str) -> Option<bool> {
+    registry_float(key).map(|v| v != 0.0).or_else(|| registry_string(key).map(|v| v == "true"))
+}
+
+/// A configured font string parsed into (family, size; 12 when the string names none),
+/// cached against the string it was parsed from — a reload, a setter or a test's
+/// per-thread overlay that changes the string parses it again.
+pub(super) fn parsed_font(cache: &crate::style::StyleCell<Option<(String, (String, f32))>>, font: String) -> (String, f32) {
+    if let Ok(c) = cache.read() {
+        if let Some((src, val)) = &*c {
+            if *src == font {
+                return val.clone();
+            }
+        }
+    }
+    let (family, size) = parse_font_string(&font);
+    let val = (family, size.unwrap_or(12.0));
+    if let Ok(mut c) = cache.write() {
+        *c = Some((font, val.clone()));
+    }
+    val
+}
+
+/// [`registry_float`] for a string key (a font), with the same guard discipline.
+pub(super) fn registry_string(key: &str) -> Option<String> {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_string(key)
+}
