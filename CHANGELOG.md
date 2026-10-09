@@ -10,6 +10,18 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The Vulkan renderer is a directory module.** `vk/renderer/`: `mod.rs` (`VkRenderer`, its
+  `Frame`, the push-constant and window-info sizes, `Drop`), `init` (construction), `surface`
+  (the swapchain: create, recreate, detach and attach, resize, surface loss, window info),
+  `frame` (`draw_frame_2d`, uploads, text), `snapshot` (the blur snapshot and its mip chain, the
+  backdrop and snapshot targets), `stage3d` (meshes, lit meshes, the tracer's scene, the
+  `Stage3D` / `LitStage3D` impls), `pipeline` (`create_ui_pipeline`), `shaders`, `damage`,
+  `images` and `buffers`. A pure move, done by script at item and method boundaries and checked
+  line for line against the old file; `renderer/mod.rs` re-exports the helpers, so every
+  `super::renderer::…` path in `vk` resolves as before. Clippy, the suite, the GPU tests
+  (`vk::plate_probe`, `vk::compute`) and the path tracer's ignored tests on both tiers pass;
+  `cargo check --workspace` builds. `draw_frame_2d` (653 lines) is unchanged: splitting it is a
+  logic change to every app's frame path, for a live pixel A/B.
 - **The tessellator's carve arm is a `Carve` and five methods.** The recess / boss / ridge /
   trough SDF arm (about 250 lines) is now 18: `Carve::of` reads the prim; `carve_host` decides
   grouping; `group_carve` appends the CSG feature; `overlay_carve` builds the overlay's cover
