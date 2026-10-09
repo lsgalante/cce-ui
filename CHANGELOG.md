@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The sliders are a directory module** (`widget/input/slider/`): `mod.rs` (`Slider`: its
+  geometry, construction and setters, value stepping, the readout's commit, `impl Layout`, the
+  label strip), `band` (the band's profile and shape, public for app-owned scrubbers), `paint`,
+  `input`, `range` (`RangeSlider` whole), and the two test modules as files. A pure move,
+  checked line for line; the module doc is rewritten without its migration-era notes. Clippy,
+  the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The `DocEditor` is split by concern** (`widget/doc_editor/`): beside `buffer`, `layout` and
   `preview`, its `mod.rs` keeps the struct, construction and the text in and out, and the rest
   of `impl DocEditor` moves into `incremental` (which lines show raw, line heights, keeping
