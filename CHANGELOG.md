@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`TextBox` is a directory module** (`widget/input/text_box/`): `mod.rs` (the struct,
+  construction and setters, `impl Layout`, the shared font database), `shaping` (advances, wrap,
+  x ↔ column ↔ index), `geometry` (border, padding, clip, content width, scrolling to the
+  caret), `editing` (editor state, undo, clipboard, selection, keys), `composition` (the
+  input-method run), `paint` and `input`, and `tests`. A pure move, checked line for line; the
+  module doc, which still described the deleted `extra_quads` / `all_rounded_quads` render
+  paths, is rewritten. Clippy, the suite (the text box's tests included) and
+  `cargo check --workspace --exclude cce-fx` pass (the compositor's C build fails against this
+  machine's wlroots headers, independently of this change).
 - **`draw_frame_2d` is its phases.** The 653-line method keeps the guards, the fence wait and
   the command-buffer bracketing, and calls `want_snapshot`, `acquire`, `upload_frame`,
   `record_backdrop` (the 3D and tracer passes and the backdrop copy), `frame_damage`,
