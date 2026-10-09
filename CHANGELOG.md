@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The params pane's row press dispatch is flat.** `press_row_controls` is a loop over
+  `press_row_control(i, …)`, one early-returning arm per row type, with a text row's picker-then-
+  box handling in `press_text_row`. Two rules written out several times are functions:
+  `hold_focus` (the row holds the param focus while its control is open or editing, four sites)
+  and `fill_from_pick` (a textpick pick fills the row's text box, three sites: the open popover,
+  the press and the key path). Verified by replaying 2,074 events (press/release pairs on a grid
+  over a pane of every pressable row type, with ArrowDown + Enter between, at two heights) on the
+  previous commit and on this one, recording the return, the focused row, every value, the open
+  dropdowns and the editing fields after each: byte-identical.
 - **The params pane's wheel handler is staged**: `wheel_owner` (the latched control, else the
   nearest value control under the pointer, unless the pane holds the gesture), `wheel_control`
   (that row's control takes the event and its value is written back) and `wheel_pane` (the

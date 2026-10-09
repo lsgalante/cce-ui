@@ -335,15 +335,11 @@ impl ParametersBg {
                     if consumed {
                         if d.take_change() {
                             if let Some(val) = d.get_value_string() {
-                                // A textpick row's pick fills its
-                                // TextBox — the box IS the value.
                                 if self.display_params[i].2.starts_with("textpick") {
-                                    if let Some(tb) = &mut self.texts[i] {
-                                        tb.text = val.clone();
-                                        tb.edit_buffer = val.clone();
-                                    }
+                                    fill_from_pick(&mut self.texts[i], &mut self.display_params[i].1, val);
+                                } else {
+                                    self.display_params[i].1 = val;
                                 }
-                                self.display_params[i].1 = val;
                             }
                         }
                         return true;
@@ -369,143 +365,123 @@ impl ParametersBg {
         false
     }
 
-    /// The rows' controls, in row order: the first that takes the event claims it, and its
-    /// value is written back into its row (and the row focused while it is open or editing).
+    /// The rows' controls, in row order: the first that takes the event claims it.
     fn press_row_controls(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext, hidden: &[bool]) -> bool {
-        for (i, p) in self.display_params.iter_mut().enumerate() {
-            if hidden[i] {
-                continue;
-            }
-            if p.2.starts_with("choice") {
-                if let Some(d) = &mut self.choices[i] {
-                    if d.mouse_input(button, state, px, py, ui) {
-                        // Claim the param focus while the dropdown is
-                        // open — the KeyInput arm above is gated on
-                        // `focused_param`, and without this the choice
-                        // row was the ONE row type that never set it,
-                        // so Escape/arrows/Enter could not reach an
-                        // open params dropdown (found via cce-designer).
-                        if d.open {
-                            self.focused_param = Some(i);
-                        } else if self.focused_param == Some(i) {
-                            self.focused_param = None;
-                        }
-                        if d.take_change() {
-                            if let Some(val) = d.get_value_string() {
-                                p.1 = val;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            } else if p.2 == "button" {
-                if let Some(b) = &mut self.buttons[i] {
-                    if b.mouse_input(button, state, px, py, ui) {
-                        if std::env::var("CCE_PARAM_DEBUG").is_ok() {
-                            eprintln!("[pdbg] press ({px:.0},{py:.0}) BUTTON[{i}] '{}' consumed", p.0);
-                        }
-                        if b.take_click() {
-                            p.1 = "clicked".to_string();
-                        }
-                        return true;
-                    }
-                }
-            } else if is_text_row(&p.2) {
-                if let Some(d) = &mut self.choices[i] {
-                    // The picker acts on PRESSES only; the release
-                    // over the button is swallowed. Releases used to
-                    // reach the dropdown, and one arriving before the
-                    // open animation's first frame (a fast or
-                    // injected click) read as an outside press and
-                    // closed the menu it had just opened.
-                    let (bx, by, bw, bh) = d.rect();
-                    let on_button =
-                        px >= bx && px <= bx + bw && py >= by && py <= by + bh;
-                    if state == ElementState::Pressed {
-                        if d.mouse_input(button, state, px, py, ui) {
-                            if d.take_change() {
-                                if let Some(val) = d.get_value_string() {
-                                    if let Some(tb) = &mut self.texts[i] {
-                                        tb.text = val.clone();
-                                        tb.edit_buffer = val.clone();
-                                    }
-                                    p.1 = val;
-                                }
-                            }
-                            return true;
-                        }
-                    } else if on_button {
-                        return true;
-                    }
-                }
-                if let Some(tb) = &mut self.texts[i] {
-                    if tb.mouse_input(button, state, px, py, ui) {
-                        if tb.editing {
-                            self.focused_param = Some(i);
-                        } else {
-                            if self.focused_param == Some(i) {
-                                self.focused_param = None;
-                            }
-                        }
-                        if tb.take_change() {
-                            if let Some(val) = tb.get_value_string() {
-                                p.1 = val;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            } else if p.2.starts_with("spinbox") {
-                if let Some(sb) = &mut self.spinboxes[i] {
-                    if sb.mouse_input(button, state, px, py, ui) {
-                        p.1 = sb.value.to_string();
-                        if sb.editing {
-                            self.focused_param = Some(i);
-                        } else {
-                            if self.focused_param == Some(i) {
-                                self.focused_param = None;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            } else if p.2 == "toggle" || p.2 == "checkbox" {
-                if let Some(cb) = &mut self.toggles[i] {
-                    if cb.mouse_input(button, state, px, py, ui) {
-                        if cb.take_change() {
-                            if let Some(val) = cb.get_value_string() {
-                                p.1 = val;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
-                if let Some(c) = &mut self.colors[i] {
-                    if c.mouse_input(button, state, px, py, ui) {
-                        if let Some(val) = c.get_value_string() {
-                            p.1 = val;
-                        }
-                        if c.editing {
-                            self.focused_param = Some(i);
-                        } else {
-                            if self.focused_param == Some(i) {
-                                self.focused_param = None;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            } else if p.2 == "ramp" {
-                if let Some(rp) = &mut self.ramps[i] {
-                    if rp.mouse_input(button, state, px, py, ui) {
-                        p.1 = rp.inner().spec_string();
-                        return true;
-                    }
-                }
+        for i in 0..self.display_params.len() {
+            if !hidden[i] && self.press_row_control(i, button, state, px, py, ui) {
+                return true;
             }
         }
         false
+    }
+
+    /// Row `i`'s control takes a press or release, if it is its. The row's value is written
+    /// back from the control, and the row holds the param focus while its control is open or
+    /// editing ([`hold_focus`]): the key path is gated on `focused_param`, so a control that
+    /// never set it (an open choice dropdown, once) was out of reach of Escape, the arrows and
+    /// Enter.
+    fn press_row_control(&mut self, i: usize, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext) -> bool {
+        let p = &mut self.display_params[i];
+        if p.2.starts_with("choice") {
+            let Some(d) = &mut self.choices[i] else { return false };
+            if !d.mouse_input(button, state, px, py, ui) {
+                return false;
+            }
+            hold_focus(&mut self.focused_param, i, d.open);
+            if d.take_change() {
+                if let Some(val) = d.get_value_string() {
+                    p.1 = val;
+                }
+            }
+            true
+        } else if p.2 == "button" {
+            let Some(b) = &mut self.buttons[i] else { return false };
+            if !b.mouse_input(button, state, px, py, ui) {
+                return false;
+            }
+            if std::env::var("CCE_PARAM_DEBUG").is_ok() {
+                eprintln!("[pdbg] press ({px:.0},{py:.0}) BUTTON[{i}] '{}' consumed", p.0);
+            }
+            if b.take_click() {
+                p.1 = "clicked".to_string();
+            }
+            true
+        } else if is_text_row(&p.2) {
+            self.press_text_row(i, button, state, px, py, ui)
+        } else if p.2.starts_with("spinbox") {
+            let Some(sb) = &mut self.spinboxes[i] else { return false };
+            if !sb.mouse_input(button, state, px, py, ui) {
+                return false;
+            }
+            p.1 = sb.value.to_string();
+            hold_focus(&mut self.focused_param, i, sb.editing);
+            true
+        } else if p.2 == "toggle" || p.2 == "checkbox" {
+            let Some(cb) = &mut self.toggles[i] else { return false };
+            if !cb.mouse_input(button, state, px, py, ui) {
+                return false;
+            }
+            if cb.take_change() {
+                if let Some(val) = cb.get_value_string() {
+                    p.1 = val;
+                }
+            }
+            true
+        } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
+            let Some(c) = &mut self.colors[i] else { return false };
+            if !c.mouse_input(button, state, px, py, ui) {
+                return false;
+            }
+            if let Some(val) = c.get_value_string() {
+                p.1 = val;
+            }
+            hold_focus(&mut self.focused_param, i, c.editing);
+            true
+        } else if p.2 == "ramp" {
+            let Some(rp) = &mut self.ramps[i] else { return false };
+            if !rp.mouse_input(button, state, px, py, ui) {
+                return false;
+            }
+            p.1 = rp.inner().spec_string();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// A press or release on text row `i`: its picker first (a textpick row), then its box.
+    /// The picker acts on PRESSES only, and a release over its button is swallowed: a release
+    /// reaching the dropdown before the open animation's first frame (a fast or injected
+    /// click) read as an outside press and closed the menu it had just opened.
+    fn press_text_row(&mut self, i: usize, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext) -> bool {
+        let p = &mut self.display_params[i];
+        if let Some(d) = &mut self.choices[i] {
+            let (bx, by, bw, bh) = d.rect();
+            let on_button = px >= bx && px <= bx + bw && py >= by && py <= by + bh;
+            if state == ElementState::Pressed {
+                if d.mouse_input(button, state, px, py, ui) {
+                    if d.take_change() {
+                        if let Some(val) = d.get_value_string() {
+                            fill_from_pick(&mut self.texts[i], &mut p.1, val);
+                        }
+                    }
+                    return true;
+                }
+            } else if on_button {
+                return true;
+            }
+        }
+        let Some(tb) = &mut self.texts[i] else { return false };
+        if !tb.mouse_input(button, state, px, py, ui) {
+            return false;
+        }
+        hold_focus(&mut self.focused_param, i, tb.editing);
+        if tb.take_change() {
+            if let Some(val) = tb.get_value_string() {
+                p.1 = val;
+            }
+        }
+        true
     }
 
     /// A left press nothing else claimed: it focuses the code box, slider readout or vector
@@ -582,11 +558,7 @@ impl ParametersBg {
                 if d.open && d.keyboard_input(event, ui) {
                     if d.take_change() {
                         if let Some(val) = d.get_value_string() {
-                            if let Some(tb) = &mut self.texts[idx] {
-                                tb.text = val.clone();
-                                tb.edit_buffer = val.clone();
-                            }
-                            p.1 = val;
+                            fill_from_pick(&mut self.texts[idx], &mut p.1, val);
                         }
                     }
                     return true;
@@ -1091,4 +1063,23 @@ impl Input for ParametersBg {
             _ => false,
         }
     }
+}
+
+/// The param focus names row `i` while its control is open or editing (`holding`), and lets
+/// it go when the control stops — only if it still names `i`.
+fn hold_focus(focused: &mut Option<usize>, i: usize, holding: bool) {
+    if holding {
+        *focused = Some(i);
+    } else if *focused == Some(i) {
+        *focused = None;
+    }
+}
+
+/// A pick from a textpick row's picker fills its text box: the box IS the row's value.
+fn fill_from_pick(tb: &mut Option<Adapted<TextBox>>, value: &mut String, val: String) {
+    if let Some(tb) = tb {
+        tb.text = val.clone();
+        tb.edit_buffer = val.clone();
+    }
+    *value = val;
 }
