@@ -92,7 +92,7 @@ mod test_overlay {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct StyleRegistry {
     pub floats: HashMap<String, f32>,
     pub strings: HashMap<String, String>,
@@ -193,12 +193,30 @@ impl StyleRegistry {
     pub fn load_string(&mut self, key: &str, val: String) {
         self.strings.insert(key.to_string(), val);
     }
+
+    /// Land a write's change of the registry, from `base` to `mine`, on `newest` — the
+    /// registry as another write left it meanwhile — key by key, so neither write loses the
+    /// other's keys (a key both wrote ends with `mine`'s value). [`STYLE_REGISTRY`]'s merge.
+    pub(crate) fn merge(base: &Self, mine: Self, newest: &mut Self) {
+        fn keys<V: PartialEq>(base: &HashMap<String, V>, mine: HashMap<String, V>, newest: &mut HashMap<String, V>) {
+            newest.retain(|k, _| !base.contains_key(k) || mine.contains_key(k));
+            for (k, v) in mine {
+                if base.get(&k) != Some(&v) {
+                    newest.insert(k, v);
+                }
+            }
+        }
+        keys(&base.floats, mine.floats, &mut newest.floats);
+        keys(&base.strings, mine.strings, &mut newest.strings);
+        keys(&base.lens, mine.lens, &mut newest.lens);
+    }
 }
 
 /// The registry is a field of the one style snapshot (`crate::style`); this is its handle,
-/// with the `RwLock` API it had.
+/// with the `RwLock` API it had. Its writers each change a few keys, so two writes held at
+/// once merge key by key rather than the later reverting the earlier.
 pub static STYLE_REGISTRY: crate::style::StyleCell<StyleRegistry> =
-    crate::style::StyleCell::new(|s| &s.registry, |s| &mut s.registry);
+    crate::style::StyleCell::merging(|s| &s.registry, |s| &mut s.registry, StyleRegistry::merge);
 
 pub fn get_style_registry() -> &'static crate::style::StyleCell<StyleRegistry> {
     &STYLE_REGISTRY

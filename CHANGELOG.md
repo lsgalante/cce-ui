@@ -10,6 +10,38 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **A style write outside a batch lands its change on the newest snapshot, not the copy it
+  took.** `StyleCell::write` outside a `style::batch` returned a guard holding a clone of the
+  field from the snapshot current at `write()`, and its drop installed that clone whole — so a
+  write to the same field another thread published while the guard was held was reverted.
+  Under the per-slot `RwLock`s the one-snapshot refactor (2026-10-08) replaced, a write guard
+  held its slot's lock and same-slot read-modify-writes were serialised. The visible case was
+  the registry: two setters on different keys lost one, and under `cfg(test)` a registry
+  setter (which writes this thread's overlay and changes nothing) re-installed its stale copy
+  of the whole registry over a load made meanwhile. Guards still never wait on each other —
+  serialising them again would have meant a lock held across the caller's code, with the
+  deadlocks that brings and an end to nesting writes on one field. Instead the guard keeps the
+  snapshot it copied from, and its drop (`style::land`) publishes nothing when the copy is
+  unchanged, installs it when the newest snapshot's field still equals the one it copied, and
+  otherwise hands the change to the cell's merge: a plain value is a store (the last guard to
+  drop wins, a serial order of stores); `StyleCell::merging` declares another, and
+  `STYLE_REGISTRY` merges key by key (`StyleRegistry::merge`: a key the guard added, changed or
+  removed relative to its copy is applied to the newest registry; every other key is left as
+  the newest has it). `write` now needs `T: PartialEq` (every slot type has it; the registry
+  derives it). Untouched: a batch still carries its fields whole onto the newest snapshot (a
+  field both wrote ends with the batch's value), and a read-then-`style_write` pair, as the
+  material setters in `color/materials.rs` do, is two guards, not one, and can still interleave.
+  Three tests, each failing on the old guard every run:
+  `a_write_keeps_what_another_thread_published_to_its_field_meanwhile` (a merging probe field
+  and an unchanged scalar guard, sequenced with channels),
+  `a_registry_setter_does_not_revert_a_load_meanwhile` (the real registry, the `cfg(test)`
+  case above) and `writes_to_one_field_nest` (an outer guard merging over an inner one's
+  publish, removals included). Verified: the three fail on every run against the old guard
+  (3 of 3); fixed, 0 failures in 200 `cargo test --all-features --lib` runs and 30 full
+  `cargo test --all-features` runs (`tests/style_registry_reentrancy.rs`, which hammers the
+  registry's getters and setters across threads outside `cfg(test)`, among them); clippy
+  clean.
+
 - **`style::batch` publishes the fields it wrote, not the snapshot it began from.** A batch
   cloned the whole style when it began and published that clone whole when it ended, so every
   change another thread published while it ran was reverted — even in fields the batch never

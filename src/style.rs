@@ -12,9 +12,13 @@
 //!
 //! - **`.read()`** derefs into the current snapshot. Taking it costs no lock: each thread
 //!   keeps the last snapshot it saw and checks a generation counter.
-//! - **`.write()`** gives a copy of the field to change; when the guard drops, a new snapshot
-//!   with that field changed is published. Guards never wait on each other, so writes may
-//!   nest as freely as before.
+//! - **`.write()`** gives a copy of the field to change; when the guard drops, the change is
+//!   published as a new snapshot. A guard that changed nothing publishes nothing. One that did
+//!   lands its field on the NEWEST snapshot, not the one it copied from: whole when no other
+//!   write changed that field meanwhile, and otherwise through the cell's merge — a plain value
+//!   is a store (the last guard to drop wins), the registry merges key by key
+//!   ([`StyleCell::merging`]), so a write published while a guard was held is not reverted.
+//!   Guards never wait on each other, so writes may nest, even on one field.
 //! - **[`batch`]** runs a reload as one change: inside it, on its thread, writes go to one
 //!   pending snapshot and reads see it; the snapshot is published once when the batch ends.
 //!   A reload is atomic now. What it publishes is the newest snapshot with the fields the
@@ -37,7 +41,9 @@ pub struct Style {
     pub(crate) registry: crate::layout::StyleRegistry,
     /// Fields no production code touches, so a test below sees only its own writes.
     #[cfg(test)]
-    probe: [u32; 5],
+    probe: [u32; 6],
+    #[cfg(test)]
+    probe_registry: crate::layout::StyleRegistry,
 }
 
 static GLOBAL: RwLock<Option<Arc<Style>>> = RwLock::new(None);
@@ -156,6 +162,21 @@ pub fn batch<R>(f: impl FnOnce() -> R) -> R {
 pub struct StyleCell<T: 'static> {
     get: fn(&Style) -> &T,
     get_mut: fn(&mut Style) -> &mut T,
+    /// `merge(base, mine, newest)`: land a guard's change of the field, from `base` to `mine`,
+    /// on `newest`, the field as another write left it meanwhile.
+    merge: fn(&T, T, &mut T),
+}
+
+impl<T> Clone for StyleCell<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T> Copy for StyleCell<T> {}
+
+/// The default merge: a write is a store, so the guard's value replaces the other's.
+fn overwrite<T>(_base: &T, mine: T, newest: &mut T) {
+    *newest = mine;
 }
 
 /// A style slot cannot fail to read or write; the `Result` is the `RwLock` API's shape.
@@ -164,7 +185,18 @@ pub struct StyleError;
 
 impl<T: Clone + 'static> StyleCell<T> {
     pub const fn new(get: fn(&Style) -> &T, get_mut: fn(&mut Style) -> &mut T) -> StyleCell<T> {
-        StyleCell { get, get_mut }
+        StyleCell { get, get_mut, merge: overwrite::<T> }
+    }
+
+    /// A cell whose writes are not plain stores — a collection that writers change piece by
+    /// piece — with the `merge(base, mine, newest)` that lands a guard's change, from `base`
+    /// to `mine`, on `newest`: the field as another write left it while the guard was held.
+    pub const fn merging(
+        get: fn(&Style) -> &T,
+        get_mut: fn(&mut Style) -> &mut T,
+        merge: fn(&T, T, &mut T),
+    ) -> StyleCell<T> {
+        StyleCell { get, get_mut, merge }
     }
 
     /// The field in the current snapshot (or this thread's pending one, in a batch).
@@ -178,6 +210,13 @@ impl<T: Clone + 'static> StyleCell<T> {
         }
     }
 
+    /// The field's value now.
+    pub fn get(&self) -> T {
+        self.read().map(|v| v.clone()).unwrap_or_else(|_| unreachable!())
+    }
+}
+
+impl<T: Clone + PartialEq + 'static> StyleCell<T> {
     /// The field to change: published when the guard drops (in a batch, changed in place).
     pub fn write(&self) -> Result<StyleMut<T>, StyleError> {
         match pending() {
@@ -186,14 +225,32 @@ impl<T: Clone + 'static> StyleCell<T> {
                 // SAFETY: as in `read`.
                 Ok(StyleMut::Pending((self.get_mut)(unsafe { &mut *p }) as *mut T))
             }
-            None => Ok(StyleMut::Copy(Some((self.get)(&current()).clone()), self.get_mut)),
+            None => {
+                let base = current();
+                let value = (self.get)(&base).clone();
+                Ok(StyleMut::Copy { cell: *self, base, value: Some(value), land: land::<T> })
+            }
         }
     }
+}
 
-    /// The field's value now.
-    pub fn get(&self) -> T {
-        self.read().map(|v| v.clone()).unwrap_or_else(|_| unreachable!())
+/// Publish what a guard on `cell` changed: its copy, `value`, of the field it took from
+/// `base`. Nothing, when the copy is unchanged; otherwise the newest snapshot with the field
+/// set to `value` when no other write changed it since `base`, or with `value`'s change merged
+/// onto it when one did.
+fn land<T: Clone + PartialEq>(cell: StyleCell<T>, base: &Style, value: T) {
+    let was = (cell.get)(base);
+    if value == *was {
+        return;
     }
+    change(|style| {
+        let field = (cell.get_mut)(style);
+        if *field == *was {
+            *field = value;
+        } else {
+            (cell.merge)(was, value, field);
+        }
+    });
 }
 
 /// A read of one style field.
@@ -215,8 +272,9 @@ impl<T> std::ops::Deref for StyleRef<T> {
 
 /// A write of one style field.
 pub enum StyleMut<T: 'static> {
-    /// Outside a batch: a copy, published into a new snapshot on drop.
-    Copy(Option<T>, fn(&mut Style) -> &mut T),
+    /// Outside a batch: a copy of the field in `base`, the snapshot it was taken from;
+    /// published on drop by `land` (see [`StyleCell::write`]).
+    Copy { cell: StyleCell<T>, base: Arc<Style>, value: Option<T>, land: fn(StyleCell<T>, &Style, T) },
     /// In a batch: the pending snapshot's field.
     Pending(*mut T),
 }
@@ -225,7 +283,7 @@ impl<T> std::ops::Deref for StyleMut<T> {
     type Target = T;
     fn deref(&self) -> &T {
         match self {
-            StyleMut::Copy(v, _) => v.as_ref().expect("taken only on drop"),
+            StyleMut::Copy { value, .. } => value.as_ref().expect("taken only on drop"),
             // SAFETY: see `StyleCell::read`.
             StyleMut::Pending(p) => unsafe { &**p },
         }
@@ -235,7 +293,7 @@ impl<T> std::ops::Deref for StyleMut<T> {
 impl<T> std::ops::DerefMut for StyleMut<T> {
     fn deref_mut(&mut self) -> &mut T {
         match self {
-            StyleMut::Copy(v, _) => v.as_mut().expect("taken only on drop"),
+            StyleMut::Copy { value, .. } => value.as_mut().expect("taken only on drop"),
             // SAFETY: see `StyleCell::read`.
             StyleMut::Pending(p) => unsafe { &mut **p },
         }
@@ -244,10 +302,9 @@ impl<T> std::ops::DerefMut for StyleMut<T> {
 
 impl<T: 'static> Drop for StyleMut<T> {
     fn drop(&mut self) {
-        if let StyleMut::Copy(v, get_mut) = self {
-            if let Some(value) = v.take() {
-                let get_mut = *get_mut;
-                change(|s| *get_mut(s) = value);
+        if let StyleMut::Copy { cell, base, value, land } = self {
+            if let Some(value) = value.take() {
+                land(*cell, base, value);
             }
         }
     }
@@ -271,6 +328,8 @@ pub(crate) use style_slots;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::StyleRegistry;
+    use std::sync::mpsc::channel;
 
     // Handles on `Style::probe`, which nothing but these tests writes: what each test reads back
     // is its own, whatever the tests running beside it publish.
@@ -279,6 +338,9 @@ mod tests {
     static C: StyleCell<u32> = StyleCell::new(|s| &s.probe[2], |s| &mut s.probe[2]);
     static X: StyleCell<u32> = StyleCell::new(|s| &s.probe[3], |s| &mut s.probe[3]);
     static Y: StyleCell<u32> = StyleCell::new(|s| &s.probe[4], |s| &mut s.probe[4]);
+    static Z: StyleCell<u32> = StyleCell::new(|s| &s.probe[5], |s| &mut s.probe[5]);
+    static R: StyleCell<StyleRegistry> =
+        StyleCell::merging(|s| &s.probe_registry, |s| &mut s.probe_registry, StyleRegistry::merge);
 
     /// A write publishes; a batch publishes once, and its own reads see its writes before.
     #[test]
@@ -317,5 +379,69 @@ mod tests {
         published.send(()).unwrap();
         reload.join().unwrap();
         assert_eq!((X.get(), Y.get()), (1, 7));
+    }
+
+    /// A write lands its change on the newest snapshot, not the one it copied from: a write to
+    /// the same field published while its guard was held survives the guard's drop (merged key
+    /// by key, for a merging cell), and a guard that changed nothing publishes nothing.
+    #[test]
+    fn a_write_keeps_what_another_thread_published_to_its_field_meanwhile() {
+        let (held, wait_held) = channel();
+        let (published, wait_published) = channel::<()>();
+        let writer = std::thread::spawn(move || {
+            let mut r = R.write().unwrap();
+            r.load_float("held", 1.0);
+            let unchanged = Z.write().unwrap();
+            held.send(()).unwrap();
+            wait_published.recv().unwrap();
+            drop(unchanged);
+            drop(r);
+        });
+        wait_held.recv().unwrap();
+        R.write().unwrap().load_float("meanwhile", 2.0);
+        *Z.write().unwrap() = 7;
+        published.send(()).unwrap();
+        writer.join().unwrap();
+        let r = R.read().unwrap();
+        assert_eq!((r.floats.get("held"), r.floats.get("meanwhile")), (Some(&1.0), Some(&2.0)));
+        assert_eq!(Z.get(), 7, "the guard that changed nothing did not put back its 0");
+    }
+
+    /// The case that showed it: under `cfg(test)` a registry setter writes this thread's
+    /// overlay, so its guard changes nothing — and must not re-publish the registry it copied
+    /// over a load another thread made meanwhile.
+    #[test]
+    fn a_registry_setter_does_not_revert_a_load_meanwhile() {
+        let (held, wait_held) = channel();
+        let (published, wait_published) = channel::<()>();
+        let setter = std::thread::spawn(move || {
+            let mut r = crate::layout::get_style_registry().write().unwrap();
+            r.set_float("style-test-set", 1.0);
+            held.send(()).unwrap();
+            wait_published.recv().unwrap();
+        });
+        wait_held.recv().unwrap();
+        crate::layout::get_style_registry().write().unwrap().load_float("style-test-loaded", 2.0);
+        published.send(()).unwrap();
+        setter.join().unwrap();
+        let r = crate::layout::get_style_registry().read().unwrap();
+        assert_eq!(r.floats.get("style-test-loaded"), Some(&2.0));
+    }
+
+    /// Writes to one field nest on one thread: the outer guard's drop merges onto what the
+    /// inner one published, removals included, rather than putting back its copy.
+    #[test]
+    fn writes_to_one_field_nest() {
+        R.write().unwrap().load_float("nest-moved", 0.5);
+        let mut outer = R.write().unwrap();
+        // `load_len` moves the key from the floats to the lens: a removal and an insertion.
+        outer.load_len("nest-moved", crate::units::Len::px(3.0));
+        R.write().unwrap().load_float("nest-inner", 2.0);
+        drop(outer);
+        let r = R.read().unwrap();
+        assert_eq!(
+            (r.floats.get("nest-moved"), r.lens.get("nest-moved"), r.floats.get("nest-inner")),
+            (None, Some(&crate::units::Len::px(3.0)), Some(&2.0))
+        );
     }
 }
