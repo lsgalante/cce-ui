@@ -10,6 +10,14 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`ParametersBg` is a directory module split by concern** (`widget/container/parameters_bg/`:
+  `mod.rs`, `rows`, `geometry`, `paint`, `input`, `code`, `controller`, `tests`), where it was one
+  5.1k-line file. A pure move, done by script at method boundaries and checked line for line
+  (every line of the old file is in exactly one new file); moved private items are `pub(super)`,
+  and the pane-wide associated constants sit in `mod.rs`. `on_event`'s 930-line match is now one
+  handler per event kind (`on_pointer_move`, `on_mouse_button`, `on_key`, `on_wheel`), each arm's
+  body unchanged. The module doc, which still described a raw-pointer child list and a
+  `window_runner` downcast, was rewritten. Tests, clippy, and cce-designer / cce-files builds pass.
 - **Docs: `CLAUDE.md` is a reference; history moved here.** The 200 KB file (≈50k tokens loaded by
   every session in this crate, mostly dated narrative) became a short reference plus four topic
   docs (`docs/runtime.md`, `surfaces.md`, `widgets.md`, `platforms.md`). `tests/doc_claims.rs`

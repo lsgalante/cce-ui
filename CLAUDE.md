@@ -390,7 +390,9 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `input/` (button, slider, text box, dropdown, ramp…), `display/` (label, graph, svg…),
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit.rs` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
-  `src/widget/container/parameters_bg.rs` (largest file, ~5.1k lines) is the designer's and cce-files' parameter pane.
+  `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
+  concern (its `mod.rs` has the table). The largest files are now the tessellator,
+  `src/backend/tessellate.rs` (largest file, ~3.1k lines), the Vulkan renderer and `TextBox`.
 - `layout/` — style getters and setters in `src/layout/mod.rs` (~2.3k lines), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
   (settings-page sections: `PageFlow`, `SectionContext`), `form.rs` (`Form`, `lay_row`).
