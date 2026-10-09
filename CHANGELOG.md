@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`Dropdown` is a directory module** (`widget/input/dropdown/`): `mod.rs` (the struct, its
+  constants and associated constants, construction and setters, `impl Layout`), `text`
+  (measuring the trigger's text), `popover` (the list's animation, geometry and rows), `paint`,
+  `input` and `tests`. A pure move, checked line for line; the module doc's migration-era
+  "parity notes" are rewritten in the present tense, keeping what still holds (the parent
+  snapshot, the hit, the auto-width measure). Clippy, the suite and `cargo check --workspace
+  --exclude cce-fx` pass.
 - **The paint vocabulary is a directory module** (`scene/paint/`): `mod.rs` (`Prim`, the display
   list, `PaintCtx`'s clip and translate stacks, `push`, `append_items`, `replay`, `finish`),
   `surfaces` (`PlateSpec`, `PlateStance`, `Field`, `ControlPlate`), `relief` and `flat`
