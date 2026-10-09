@@ -10,6 +10,14 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The colour getters are split by topic** (`color/`): `mod.rs` keeps the palette constants,
+  the `style_slots!` block, the test overlay and `style_read` / `style_write`; the getters and
+  setters move with the `StyleCell` statics they read into `surfaces` (pages, pane and root
+  plates, the well frame, menus, frost and finish, the theme), `controls`, `lists` and `graph`,
+  and the two test modules into files. The statics are `pub(super)` and glob-imported, so `load`
+  and `chords` still write them through `use super::*`; every getter is re-exported, so
+  `color::…` paths are unchanged. A pure move, checked line for line; the module gained the doc
+  it lacked. Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **`Spreadsheet` is a directory module** (`widget/container/spreadsheet/`): `mod.rs` (the
   struct, its constants and scroll geometries, construction, column widths, taking a table,
   `SpreadsheetController`), `column` (`SheetColumn`), `scroll` (both scroll geometries and the

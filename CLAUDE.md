@@ -405,14 +405,15 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit.rs` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
-  concern (its `mod.rs` has the table). The largest files are now the colour getters,
-  `src/color/mod.rs` (largest file, ~1.6k lines), and `UiContext`.
+  concern (its `mod.rs` has the table). The largest files are now `UiContext`,
+  `src/context.rs` (largest file, ~1.5k lines), and the text shaping in `backend/text.rs`.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
   (settings-page sections: `PageFlow`, `SectionContext`), `form.rs` (`Form`, `lay_row`).
-- `color/` — colour constants and getters (`mod.rs`), `load.rs` (config → colours,
-  `retired_surface_keys`), `math.rs` (sRGB/linear, OKLab), `materials.rs`, `chords.rs`.
+- `color/` — the palette constants and the style slots (`mod.rs`, with the table), the getters
+  and setters by topic (`surfaces.rs`, `controls.rs`, `lists.rs`, `graph.rs`), `load.rs` (config →
+  colours, `retired_surface_keys`), `math.rs` (sRGB/linear, OKLab), `materials.rs`, `chords.rs`.
 - `style.rs` (the snapshot), `window_state.rs`, `ime.rs` (composition shared by widgets and
   shells), `text_input.rs` (the per-frame field claim), `history.rs` (`History<T>`), `a11y.rs`,
   `l10n.rs`, `compute.rs` (what a compute job is, device-free).

@@ -1,3 +1,23 @@
+//! The toolkit's colours: the built-in palette (linear constants), the colour and surface slots of
+//! the style snapshot with their getters and setters, and loading them from the config.
+//!
+//! A slot is a `StyleCell` static beside the getter that reads it (the few with no getter of
+//! their own stay here); `load` writes them from `config.kdl`. A setter writes through
+//! `style_write`, which under `cfg(test)` lands in a per-thread overlay, so a test that pins a
+//! colour pins it for its own thread only.
+//!
+//! | module | holds |
+//! |---|---|
+//! | `mod.rs` | the palette constants, the `style_slots!` block, the test overlay, `style_read` / `style_write` |
+//! | `surfaces` | pages and layers, the pane and root plates, the well frame, menus and popovers, frost and finish, the theme |
+//! | `controls` | buttons, text boxes, dropdowns, sliders, spinboxes, progress bars, control labels, the ramp |
+//! | `lists` | lists, breadcrumbs, the tree list, scrollbars |
+//! | `graph` | the node graph: nodes, wires, connectors, its grid |
+//! | `load` | reading the config into the slots, retired surface keys, reloads |
+//! | `math` | sRGB / linear, OKLab, the perceptual fade |
+//! | `materials` | named materials and the rung bindings |
+//! | `chords` | the tree and list search chords |
+
 mod load;
 pub use load::*;
 mod math;
@@ -7,28 +27,61 @@ pub use chords::*;
 mod materials;
 pub use materials::*;
 
+mod controls;
+pub use controls::*;
+mod graph;
+pub use graph::*;
+mod lists;
+pub use lists::*;
+mod surfaces;
+pub use surfaces::*;
+
 pub const HEADER_BG: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
+
 pub const HEADER_ACCENT: [f32; 4] = [0.60, 0.40, 0.20, 1.0];
+
 pub const SIDEBAR_BG: [f32; 4] = [0.10, 0.10, 0.13, 1.0];
+
 pub const CONTENT_BG: [f32; 4] = [0.13, 0.13, 0.16, 0.2];
+
 pub const PANEL_IDLE: [f32; 4] = [0.14, 0.70, 0.38, 1.0];
+
 pub const PANEL_DRAG: [f32; 4] = [0.24, 0.85, 0.50, 1.0];
+
 pub const NODE_IDLE: [f32; 4] = [0.10, 0.45, 0.70, 1.0];
+
 pub const NODE_SELECTED: [f32; 4] = [0.20, 0.65, 0.90, 1.0];
+
 pub const NODE_DRAG: [f32; 4] = [0.30, 0.80, 1.00, 1.0];
+
 pub const BUTTON_IDLE: [f32; 4] = [0.20, 0.40, 0.65, 0.4];
+
 pub const BUTTON_HOVER: [f32; 4] = [0.30, 0.52, 0.78, 0.6];
+
 pub const BUTTON_PRESS: [f32; 4] = [0.12, 0.28, 0.50, 0.8];
+
 pub const STATUS_BG: [f32; 4] = [0.06, 0.06, 0.10, 1.0];
+
 pub const STATUS_ACCENT: [f32; 4] = [0.20, 0.20, 0.25, 1.0];
+
 pub const RESET_BTN_IDLE: [f32; 4] = [0.55, 0.20, 0.20, 0.4];
+
 pub const RESET_BTN_HOVER: [f32; 4] = [0.70, 0.30, 0.30, 0.6];
+
 pub const RESET_BTN_PRESS: [f32; 4] = [0.40, 0.12, 0.12, 0.8];
+
 pub const TOGGLE_OFF: [f32; 4] = [0.25, 0.25, 0.30, 1.0];
+
 pub const TOGGLE_ON: [f32; 4] = [0.14, 0.70, 0.38, 1.0];
+
 pub const TOGGLE_HOVER: [f32; 4] = [0.30, 0.30, 0.35, 1.0];
+
 pub const SLIDER_TRACK: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
 
+// The toggle's own palette (enabled/disabled/background) is RETIRED: a toggle
+// inherits the plate it sits on and marks state with light and relief, so
+// there is nothing left to tint. The `TOGGLE_*` consts above survive for the
+// graph's node geometry switch, which is a different control.
 
 // This module's part of the one style snapshot (`crate::style`): every slot below,
 // with its default. Each slot's `static` handle stands where its lock did.
@@ -183,1421 +236,82 @@ fn style_write<T: Clone + PartialEq + 'static>(cell: &'static crate::style::Styl
     }
 }
 
-
-static PAGE_LOW_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.PAGE_LOW_COLOR, |s| &mut s.color.PAGE_LOW_COLOR);
-static COLOR_BORDERS_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.COLOR_BORDERS_COLOR, |s| &mut s.color.COLOR_BORDERS_COLOR);
-static NODE_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.NODE_COLOR, |s| &mut s.color.NODE_COLOR);
-static NODE_SELECTED_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.NODE_SELECTED_COLOR, |s| &mut s.color.NODE_SELECTED_COLOR);
-static NODE_DRAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.NODE_DRAG_COLOR, |s| &mut s.color.NODE_DRAG_COLOR);
 static SIDEBAR_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SIDEBAR_BG_COLOR, |s| &mut s.color.SIDEBAR_BG_COLOR);
+
 static HIGHLIGHT_PRIMARY_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.HIGHLIGHT_PRIMARY_COLOR, |s| &mut s.color.HIGHLIGHT_PRIMARY_COLOR);
+
 static MENUBAR_TAB_LABEL_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.MENUBAR_TAB_LABEL_COLOR, |s| &mut s.color.MENUBAR_TAB_LABEL_COLOR); // sRGB [230, 230, 242] linear
-static CONTROL_LABEL_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.CONTROL_LABEL_COLOR, |s| &mut s.color.CONTROL_LABEL_COLOR); // sRGB [204, 204, 212]
-static CONTROL_LABEL_COLOR_DETACHED: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.CONTROL_LABEL_COLOR_DETACHED, |s| &mut s.color.CONTROL_LABEL_COLOR_DETACHED); // sRGB [131, 131, 138]
-static CONTROL_LABEL_HOVER_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.CONTROL_LABEL_HOVER_COLOR, |s| &mut s.color.CONTROL_LABEL_HOVER_COLOR);
-static CONTROL_LABEL_FOCUS_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.CONTROL_LABEL_FOCUS_COLOR, |s| &mut s.color.CONTROL_LABEL_FOCUS_COLOR);
-static OPACITY: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.color.OPACITY, |s| &mut s.color.OPACITY);
-static ROOT_PLATE_OPACITY: crate::style::StyleCell<Option<f32>> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_OPACITY, |s| &mut s.color.ROOT_PLATE_OPACITY);
-static LIST_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.LIST_BG_COLOR, |s| &mut s.color.LIST_BG_COLOR);
-static LIST_ENTRY_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.LIST_ENTRY_BG_COLOR, |s| &mut s.color.LIST_ENTRY_BG_COLOR);
-static LIST_ENTRY_HIGHLIGHT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.LIST_ENTRY_HIGHLIGHT_COLOR, |s| &mut s.color.LIST_ENTRY_HIGHLIGHT_COLOR);
-static LIST_FONT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.LIST_FONT_COLOR, |s| &mut s.color.LIST_FONT_COLOR);
-static BREADCRUMB_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.BREADCRUMB_BG_COLOR, |s| &mut s.color.BREADCRUMB_BG_COLOR);
-static POPOVER_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.POPOVER_BG_COLOR, |s| &mut s.color.POPOVER_BG_COLOR);
-static PAGE_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.PAGE_COLOR, |s| &mut s.color.PAGE_COLOR);
-static LAYER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.LAYER_COLOR, |s| &mut s.color.LAYER_COLOR);
-static ROOT_PLATE_CORNER_RADIUS: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_CORNER_RADIUS, |s| &mut s.color.ROOT_PLATE_CORNER_RADIUS);
-
-// Transparent by default (alpha 0): a dropdown picks up the surface it sits
-// on, and its closed-state chrome is the flush inset trough alone — the
-// cce-files treatment, DE-wide. A configured `dropdown color=` opts a theme
-// back into a filled face (the paint path judges the RAW alpha).
-static DROPDOWN_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.DROPDOWN_BACKGROUND_COLOR, |s| &mut s.color.DROPDOWN_BACKGROUND_COLOR);
-
-static TEXTBOX_PLACEHOLDER_TEXT_COLOR: crate::style::StyleCell<[u8; 3]> = crate::style::StyleCell::new(|s| &s.color.TEXTBOX_PLACEHOLDER_TEXT_COLOR, |s| &mut s.color.TEXTBOX_PLACEHOLDER_TEXT_COLOR);
-static TEXTBOX_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXTBOX_BACKGROUND_COLOR, |s| &mut s.color.TEXTBOX_BACKGROUND_COLOR);
-static TEXTBOX_BACKGROUND_EDIT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXTBOX_BACKGROUND_EDIT_COLOR, |s| &mut s.color.TEXTBOX_BACKGROUND_EDIT_COLOR);
-
-static ROOT_PLATE_MENUBAR_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_MENUBAR_COLOR, |s| &mut s.color.ROOT_PLATE_MENUBAR_COLOR);
-static ROOT_PLATE_MENUBAR_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_MENUBAR_TEXT_COLOR, |s| &mut s.color.ROOT_PLATE_MENUBAR_TEXT_COLOR);
-static ROOT_PLATE_MENUBAR_BLUR: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_MENUBAR_BLUR, |s| &mut s.color.ROOT_PLATE_MENUBAR_BLUR);
-/// Tint strength of frosted menus/popovers over the blurred backdrop:
-/// 1.0 is fully opaque (frost invisible), lower shows more content through.
-static MENU_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.MENU_OPACITY, |s| &mut s.color.MENU_OPACITY);
-/// Backdrop compression of frosted menus/popovers (`style.surface.menu.
-/// compression`, 0..1): how hard the blurred content beneath a menu is
-/// pulled toward the menu's own key, so the menu holds its legibility over
-/// whatever it opens above. Menu-scoped, overriding the DE recipe's
-/// `plate.backdrop_compression` for popovers only; a menu is read while
-/// something else is going on beneath it, which a pane is not.
-static MENU_COMPRESSION: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.MENU_COMPRESSION, |s| &mut s.color.MENU_COMPRESSION);
-/// The colour a menu's face is tinted with (`style.surface.menu.color`),
-/// when the config names one; `None` follows the root plate colour
-/// (`page_low_color`), which is what every menu wore before the key
-/// existed. The alpha is ignored — `menu.opacity` is the tint strength —
-/// so a menu can be dark on a light window without the window's own
-/// plate going dark with it.
-static MENU_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.MENU_COLOR, |s| &mut s.color.MENU_COLOR);
-
-static ROOT_PLATE_STATUSBAR_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_STATUSBAR_COLOR, |s| &mut s.color.ROOT_PLATE_STATUSBAR_COLOR);
-static ROOT_PLATE_STATUSBAR_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_STATUSBAR_TEXT_COLOR, |s| &mut s.color.ROOT_PLATE_STATUSBAR_TEXT_COLOR);
-static ROOT_PLATE_STATUSBAR_BLUR: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.color.ROOT_PLATE_STATUSBAR_BLUR, |s| &mut s.color.ROOT_PLATE_STATUSBAR_BLUR);
-static BUTTON_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.BUTTON_BACKGROUND_COLOR, |s| &mut s.color.BUTTON_BACKGROUND_COLOR);
-static RAMP_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.RAMP_BACKGROUND_COLOR, |s| &mut s.color.RAMP_BACKGROUND_COLOR);
-static RAMP_BORDER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.RAMP_BORDER_COLOR, |s| &mut s.color.RAMP_BORDER_COLOR);
-static CONTROL_PANEL_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.CONTROL_PANEL_COLOR, |s| &mut s.color.CONTROL_PANEL_COLOR); // default #13151cff
-static CONTROL_PANEL_BORDER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.CONTROL_PANEL_BORDER_COLOR, |s| &mut s.color.CONTROL_PANEL_BORDER_COLOR); // default #292c37ff
-
-static PROGRESS_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.PROGRESS_BG_COLOR, |s| &mut s.color.PROGRESS_BG_COLOR);
-static PROGRESS_FILL_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.PROGRESS_FILL_COLOR, |s| &mut s.color.PROGRESS_FILL_COLOR);
-static SPINBOX_DISPLAY_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SPINBOX_DISPLAY_COLOR, |s| &mut s.color.SPINBOX_DISPLAY_COLOR);
-static SPINBOX_BUTTON_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SPINBOX_BUTTON_COLOR, |s| &mut s.color.SPINBOX_BUTTON_COLOR);
-static SPINBOX_BUTTON_HOVER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SPINBOX_BUTTON_HOVER_COLOR, |s| &mut s.color.SPINBOX_BUTTON_HOVER_COLOR);
-static SPINBOX_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SPINBOX_TEXT_COLOR, |s| &mut s.color.SPINBOX_TEXT_COLOR);
-
-static BUTTON_BORDER_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.BUTTON_BORDER_COLOR, |s| &mut s.color.BUTTON_BORDER_COLOR);
-
-static DROPDOWN_BORDER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.DROPDOWN_BORDER_COLOR, |s| &mut s.color.DROPDOWN_BORDER_COLOR);
-static DROPDOWN_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.DROPDOWN_TEXT_COLOR, |s| &mut s.color.DROPDOWN_TEXT_COLOR);
-
-static SLIDER_THUMB_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SLIDER_THUMB_COLOR, |s| &mut s.color.SLIDER_THUMB_COLOR);
-static SLIDER_THUMB_DRAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SLIDER_THUMB_DRAG_COLOR, |s| &mut s.color.SLIDER_THUMB_DRAG_COLOR);
-
-static RANGE_SLIDER_THUMB_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.RANGE_SLIDER_THUMB_COLOR, |s| &mut s.color.RANGE_SLIDER_THUMB_COLOR);
-static RANGE_SLIDER_THUMB_DRAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.RANGE_SLIDER_THUMB_DRAG_COLOR, |s| &mut s.color.RANGE_SLIDER_THUMB_DRAG_COLOR);
-
-static TREE_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_BACKGROUND_COLOR, |s| &mut s.color.TREE_BACKGROUND_COLOR);
-static TREE_BORDER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_BORDER_COLOR, |s| &mut s.color.TREE_BORDER_COLOR);
-static TREE_BORDER_HOVER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_BORDER_HOVER_COLOR, |s| &mut s.color.TREE_BORDER_HOVER_COLOR);
-static TREE_BORDER_FOCUS_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_BORDER_FOCUS_COLOR, |s| &mut s.color.TREE_BORDER_FOCUS_COLOR);
-static TREE_OPEN_SEARCH_KEY: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.color.TREE_OPEN_SEARCH_KEY, |s| &mut s.color.TREE_OPEN_SEARCH_KEY);
-static LIST_OPEN_SEARCH_KEY: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.color.LIST_OPEN_SEARCH_KEY, |s| &mut s.color.LIST_OPEN_SEARCH_KEY);
-static LIST_CLOSE_SEARCH_KEY: crate::style::StyleCell<String> = crate::style::StyleCell::new(|s| &s.color.LIST_CLOSE_SEARCH_KEY, |s| &mut s.color.LIST_CLOSE_SEARCH_KEY);
-
-static TREE_SECTION_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_SECTION_BG_COLOR, |s| &mut s.color.TREE_SECTION_BG_COLOR);
-static TREE_SECTION_BG_HOVER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_SECTION_BG_HOVER_COLOR, |s| &mut s.color.TREE_SECTION_BG_HOVER_COLOR);
-
-static TREE_LEAF_BG_EVEN_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_BG_EVEN_COLOR, |s| &mut s.color.TREE_LEAF_BG_EVEN_COLOR);
-static TREE_LEAF_BG_ODD_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_BG_ODD_COLOR, |s| &mut s.color.TREE_LEAF_BG_ODD_COLOR);
-static TREE_LEAF_BG_HOVER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_BG_HOVER_COLOR, |s| &mut s.color.TREE_LEAF_BG_HOVER_COLOR);
-static TREE_LEAF_BG_SELECTED_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_BG_SELECTED_COLOR, |s| &mut s.color.TREE_LEAF_BG_SELECTED_COLOR);
-
-static TREE_SECTION_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_SECTION_TEXT_COLOR, |s| &mut s.color.TREE_SECTION_TEXT_COLOR);
-static TREE_LEAF_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_TEXT_COLOR, |s| &mut s.color.TREE_LEAF_TEXT_COLOR);
-static TREE_LEAF_TEXT_SELECTED_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_LEAF_TEXT_SELECTED_COLOR, |s| &mut s.color.TREE_LEAF_TEXT_SELECTED_COLOR);
-
-static TREE_TYPE_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_TYPE_TEXT_COLOR, |s| &mut s.color.TREE_TYPE_TEXT_COLOR);
-static TREE_VALUE_TEXT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_VALUE_TEXT_COLOR, |s| &mut s.color.TREE_VALUE_TEXT_COLOR);
-static TREE_SEPARATOR_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TREE_SEPARATOR_COLOR, |s| &mut s.color.TREE_SEPARATOR_COLOR);
-
-static SCROLLBAR_TRACK_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SCROLLBAR_TRACK_COLOR, |s| &mut s.color.SCROLLBAR_TRACK_COLOR);
-static SCROLLBAR_THUMB_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SCROLLBAR_THUMB_COLOR, |s| &mut s.color.SCROLLBAR_THUMB_COLOR);
-
-static GRAPH_GRID_COLOR: crate::style::StyleCell<[f32; 3]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_GRID_COLOR, |s| &mut s.color.GRAPH_GRID_COLOR);
-static GRAPH_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.GRAPH_OPACITY, |s| &mut s.color.GRAPH_OPACITY);
-/// Opacity of the graph's NODE-domain content (node bodies, wires, connectors,
-/// node text) — `style.surface.graph.node.opacity`, deliberately independent of
-/// `GRAPH_OPACITY`, which fades only the pane surface (grid cells/gaps).
-static GRAPH_NODE_OPACITY: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.GRAPH_NODE_OPACITY, |s| &mut s.color.GRAPH_NODE_OPACITY);
-
-static GRAPH_NODE_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_NODE_COLOR, |s| &mut s.color.GRAPH_NODE_COLOR);
-static GRAPH_NODE_SELECTED_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_NODE_SELECTED_COLOR, |s| &mut s.color.GRAPH_NODE_SELECTED_COLOR);
-static GRAPH_NODE_DRAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_NODE_DRAG_COLOR, |s| &mut s.color.GRAPH_NODE_DRAG_COLOR);
-
-static GRAPH_WIRE_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_WIRE_COLOR, |s| &mut s.color.GRAPH_WIRE_COLOR);
-static GRAPH_WIRE_HIGHLIGHT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_WIRE_HIGHLIGHT_COLOR, |s| &mut s.color.GRAPH_WIRE_HIGHLIGHT_COLOR);
-
-static GRAPH_CONNECTOR_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_CONNECTOR_COLOR, |s| &mut s.color.GRAPH_CONNECTOR_COLOR);
-static GRAPH_CONNECTOR_HIGHLIGHT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.GRAPH_CONNECTOR_HIGHLIGHT_COLOR, |s| &mut s.color.GRAPH_CONNECTOR_HIGHLIGHT_COLOR);
-
-pub fn button_background_color() -> [f32; 4] {
-    style_read(&BUTTON_BACKGROUND_COLOR)
-}
-
-pub fn set_button_background_color(color: [f32; 4]) {
-    style_write(&BUTTON_BACKGROUND_COLOR, color);
-}
-
-pub fn button_hover_color() -> [f32; 4] {
-    let base = button_background_color();
-    let mut oklab = linear_srgb_to_oklab([base[0], base[1], base[2]]);
-    oklab[0] = (oklab[0] + 0.05).min(1.0); // increase lightness slightly
-    let rgb = oklab_to_linear_srgb(oklab);
-    [
-        rgb[0].clamp(0.0, 1.0),
-        rgb[1].clamp(0.0, 1.0),
-        rgb[2].clamp(0.0, 1.0),
-        (base[3] + 0.20).min(1.0),
-    ]
-}
-
-pub fn button_press_color() -> [f32; 4] {
-    let base = button_background_color();
-    let mut oklab = linear_srgb_to_oklab([base[0], base[1], base[2]]);
-    oklab[0] = (oklab[0] - 0.07).max(0.0); // decrease lightness
-    let rgb = oklab_to_linear_srgb(oklab);
-    [
-        rgb[0].clamp(0.0, 1.0),
-        rgb[1].clamp(0.0, 1.0),
-        rgb[2].clamp(0.0, 1.0),
-        (base[3] + 0.40).min(1.0),
-    ]
-}
-
-pub fn node_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&NODE_COLOR)
-}
-
-pub fn set_node_color(color: [f32; 4]) {
-    style_write(&NODE_COLOR, color);
-}
-
-pub fn node_selected_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&NODE_SELECTED_COLOR)
-}
-
-pub fn set_node_selected_color(color: [f32; 4]) {
-    style_write(&NODE_SELECTED_COLOR, color);
-}
-
-pub fn node_drag_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&NODE_DRAG_COLOR)
-}
-
-pub fn set_node_drag_color(color: [f32; 4]) {
-    style_write(&NODE_DRAG_COLOR, color);
-}
-
-pub fn textbox_placeholder_text_color() -> [u8; 3] {
-    load_colors_once();
-    style_read(&TEXTBOX_PLACEHOLDER_TEXT_COLOR)
-}
-
-pub fn set_textbox_placeholder_text_color(color: [u8; 3]) {
-    style_write(&TEXTBOX_PLACEHOLDER_TEXT_COLOR, color);
-}
-
-pub fn textbox_background_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&TEXTBOX_BACKGROUND_COLOR)
-}
-
-pub fn set_textbox_background_color(color: [f32; 4]) {
-    style_write(&TEXTBOX_BACKGROUND_COLOR, color);
-}
-
-pub fn textbox_background_edit_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&TEXTBOX_BACKGROUND_EDIT_COLOR)
-}
-
-pub fn set_textbox_background_edit_color(color: [f32; 4]) {
-    style_write(&TEXTBOX_BACKGROUND_EDIT_COLOR, color);
-}
-
-pub fn graph_wire_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&GRAPH_WIRE_COLOR)
-}
-
-pub fn set_graph_wire_color(color: [f32; 4]) {
-    style_write(&GRAPH_WIRE_COLOR, color);
-}
-
-pub fn graph_wire_highlight_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&GRAPH_WIRE_HIGHLIGHT_COLOR)
-}
-
-pub fn set_graph_wire_highlight_color(color: [f32; 4]) {
-    style_write(&GRAPH_WIRE_HIGHLIGHT_COLOR, color);
-}
-
-pub fn graph_connector_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&GRAPH_CONNECTOR_COLOR)
-}
-
-pub fn set_graph_connector_color(color: [f32; 4]) {
-    style_write(&GRAPH_CONNECTOR_COLOR, color);
-}
-
-pub fn graph_connector_highlight_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&GRAPH_CONNECTOR_HIGHLIGHT_COLOR)
-}
-
-pub fn set_graph_connector_highlight_color(color: [f32; 4]) {
-    style_write(&GRAPH_CONNECTOR_HIGHLIGHT_COLOR, color);
-}
-
-pub fn graph_node_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&GRAPH_NODE_COLOR)
-}
-
-pub fn set_graph_node_color(color: [f32; 4]) {
-    style_write(&GRAPH_NODE_COLOR, color);
-}
-
-pub fn graph_node_selected_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&GRAPH_NODE_SELECTED_COLOR)
-}
-
-pub fn set_graph_node_selected_color(color: [f32; 4]) {
-    style_write(&GRAPH_NODE_SELECTED_COLOR, color);
-}
-
-pub fn graph_node_drag_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&GRAPH_NODE_DRAG_COLOR)
-}
-
-pub fn set_graph_node_drag_color(color: [f32; 4]) {
-    style_write(&GRAPH_NODE_DRAG_COLOR, color);
-}
-
-/// The colour of a graph's grid lines (`style.surface.graph.grid_color`).
-pub fn graph_grid_color() -> [f32; 3] {
-    load_colors_once();
-    style_read(&GRAPH_GRID_COLOR)
-}
-
-pub fn set_graph_grid_color(color: [f32; 3]) {
-    style_write(&GRAPH_GRID_COLOR, color);
-}
-
-pub fn graph_opacity() -> f32 {
-    load_colors_once();
-    style_read(&GRAPH_OPACITY)
-}
-
-pub fn graph_node_opacity() -> f32 {
-    load_colors_once();
-    style_read(&GRAPH_NODE_OPACITY)
-}
-
-pub fn set_graph_node_opacity(opacity: f32) {
-    style_write(&GRAPH_NODE_OPACITY, opacity);
-}
-
-pub fn set_graph_opacity(opacity: f32) {
-    style_write(&GRAPH_OPACITY, opacity);
-}
-
-pub fn page_low_color() -> [f32; 4] {
-    load_colors_once();
-    let mut color = *PAGE_LOW_COLOR.read().unwrap();
-    if let Some(opacity) = read_root_plate_opacity_if_configured() {
-        color[3] = opacity;
-    }
-    color
-}
-
-pub fn set_page_low_color(color: [f32; 4]) {
-    style_write(&PAGE_LOW_COLOR, color);
-}
-
-pub fn page_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&PAGE_COLOR)
-}
-
-pub fn set_page_color(color: [f32; 4]) {
-    style_write(&PAGE_COLOR, color);
-}
-
-pub fn layer_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&LAYER_COLOR)
-}
-
-pub fn set_layer_color(color: [f32; 4]) {
-    style_write(&LAYER_COLOR, color);
-}
-
-
-pub fn color_borders_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&COLOR_BORDERS_COLOR)
-}
-
-pub fn set_color_borders_color(color: [f32; 4]) {
-    style_write(&COLOR_BORDERS_COLOR, color);
-}
 
 pub const SLIDER_THUMB: [f32; 4] = [0.60, 0.60, 0.65, 1.0];
+
 pub const SLIDER_THUMB_DRAG: [f32; 4] = [0.80, 0.80, 0.85, 1.0];
+
 pub const PROGRESS_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
+
 pub const PROGRESS_FILL: [f32; 4] = [0.20, 0.50, 0.75, 1.0];
 
 pub const HIGHLIGHT_PRIMARY: [f32; 4] = [1.0, 1.0, 1.0, 0.12];
+
 pub const HIGHLIGHT_SECONDARY: [f32; 4] = [1.0, 1.0, 1.0, 0.06];
 
 pub const SPINBOX_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
+
 pub const SPINBOX_BUTTON: [f32; 4] = [0.25, 0.25, 0.32, 1.0];
+
 pub const SPINBOX_BUTTON_HOVER: [f32; 4] = [0.35, 0.35, 0.42, 1.0];
+
 pub const SPINBOX_DISPLAY: [f32; 4] = [0.12, 0.12, 0.16, 1.0];
 
 pub const CANVAS_BG: [f32; 4] = [0.05, 0.05, 0.10, 1.0];
+
 pub const VIEWPORT_BG: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+
 pub const PARAM_BG: [f32; 4] = [0.10, 0.10, 0.14, 0.25];
 
-/// The params pane's plate tint (linear rgba) — [`PARAM_BG`] made live:
-/// `style.surface.param.color` in config overrides it, and apps can retint at
-/// runtime (the designer's Style section "Plate Color"). Alpha doubles as the
-/// frost strength under plate blur.
-static PARAM_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.PARAM_BG_COLOR, |s| &mut s.color.PARAM_BG_COLOR);
-/// Whether the pane tint came in as `style.surface.plate.pane.color` — the
-/// spelling whose alpha IS the tint strength — rather than the legacy
-/// `style.surface.param.color`, which the top-level `plate_opacity` line
-/// still multiplies (`Material::pane_legacy`). Two spellings, one tint.
-static PANE_COLOR_WHOLE: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.color.PANE_COLOR_WHOLE, |s| &mut s.color.PANE_COLOR_WHOLE);
-
-pub fn param_bg_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&PARAM_BG_COLOR)
-}
-
-/// Whether the pane tint was spelled `style.surface.plate.pane.color`, in
-/// which case its alpha is the whole tint strength and `plate_opacity` does
-/// not multiply it. See `PANE_COLOR_WHOLE`.
-pub fn pane_color_is_whole() -> bool {
-    load_colors_once();
-    style_read(&PANE_COLOR_WHOLE)
-}
-
-pub fn set_param_bg_color(color: [f32; 4]) {
-    style_write(&PARAM_BG_COLOR, color);
-}
-
-/// The params plate's final fill as the renderer consumes it: the pane rung's
-/// material ([`crate::scene::Material::pane`] — the tint at the global plate
-/// opacity, frosted under plate blur) encoded for a nested plate. The single
-/// source both `ParametersBg`'s own plate and any surface that wants to match
-/// it (the designer's node bodies) draw from, so they track a live retint /
-/// opacity / blur toggle together.
-pub fn param_plate_fill() -> [f32; 4] {
-    use crate::scene::material::{Material, PlateRole};
-    Material::pane().fill(PlateRole::Nested)
-}
-
 pub const PANEL_MENU_BG: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
+
 pub const PANEL_MENU_HOVER: [f32; 4] = [0.18, 0.18, 0.25, 1.0];
+
 pub const PANEL_MENU_FOCUSED: [f32; 4] = [0.08, 0.16, 0.28, 1.0];
 
 pub const SPLITTER_IDLE: [f32; 4] = [0.20, 0.20, 0.27, 1.0];
+
 pub const SPLITTER_HOVER: [f32; 4] = [0.40, 0.40, 0.50, 1.0];
+
 pub const SPLITTER_DRAG: [f32; 4] = [0.50, 0.50, 0.60, 1.0];
 
 pub const TEXT_FG: [f32; 4] = [0.80, 0.80, 0.85, 1.0];
+
 pub const TEXT_DIM: [f32; 4] = [0.53, 0.53, 0.60, 1.0];
 
 /// A canvas well's floor: the plate darkened, not a fill of its own, so every
 /// opening you look into — Trackpad, Slider2D, the bevel and ramp previews —
 /// is cut from the one material ([`crate::scene::paint::PaintCtx::well_floor`]).
 pub const WELL_FLOOR: [f32; 4] = [0.0, 0.0, 0.0, 0.18];
+
 /// [`WELL_FLOOR`] risen toward the plate: a clickable canvas's hover cue.
 pub const WELL_FLOOR_LIFTED: [f32; 4] = [0.0, 0.0, 0.0, 0.10];
+
 /// The hairline a well is framed with when relief is off, idle; see
 /// [`well_frame_color`].
 pub const WELL_FRAME: [f32; 4] = [0.18, 0.18, 0.24, 1.0];
+
 /// [`WELL_FRAME`] under the pointer.
 pub const WELL_FRAME_HOVER: [f32; 4] = [0.25, 0.25, 0.35, 1.0];
 
-/// The frame a flat well is drawn in — the one hairline every well (text,
-/// keybind, colour and font fields, the canvases) wears when relief is off:
-/// neutral greys idle and hovered, the highlight accent while the well is
-/// active (editing, recording, pressed) — the colour the relief wells light
-/// their rims with, so the two styles share one focus cue. A flat well has no
-/// floor of its own any more than a relief one: the plate is the floor.
-pub fn well_frame_color(hovered: bool, active: bool) -> [f32; 4] {
-    if active {
-        let c = highlight_primary_color();
-        [c[0], c[1], c[2], 1.0]
-    } else if hovered {
-        WELL_FRAME_HOVER
-    } else {
-        WELL_FRAME
-    }
-}
 pub const TEXT_HEADER: [f32; 4] = [0.90, 0.90, 0.95, 1.0];
+
 pub const TEXT_ACCENT: [f32; 4] = [0.56, 0.83, 0.56, 1.0];
 
-pub fn read_opacity_if_configured() -> Option<f32> {
-    load_colors_once();
-    style_read(&OPACITY)
-}
-
-/// Tint strength for frosted menus/popovers (`/style/surface/menu/opacity`,
-/// default 0.8): the |alpha| of the blur-behind sentinel their plates carry.
-pub fn menu_opacity() -> f32 {
-    load_colors_once();
-    style_read(&MENU_OPACITY)
-}
-
-/// Backdrop compression of frosted menus/popovers
-/// (`/style/surface/menu/compression`, default 0.6) — see `MENU_COMPRESSION`.
-pub fn menu_compression() -> f32 {
-    load_colors_once();
-    style_read(&MENU_COMPRESSION)
-}
-
-pub fn set_menu_compression(c: f32) {
-    style_write(&MENU_COMPRESSION, c.clamp(0.0, 1.0));
-}
-
-/// The colour a menu's face is tinted with: `style.surface.menu.color` when
-/// configured, else the root plate colour (`page_low_color`) — the face
-/// every menu wore before the key existed, so an unconfigured menu looks as
-/// it always did. Its alpha is not the tint strength; `menu_opacity` is
-/// (`Material::popover` reads both).
-pub fn menu_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&MENU_COLOR).unwrap_or_else(page_low_color)
-}
-
-pub fn set_menu_color(c: Option<[f32; 4]>) {
-    style_write(&MENU_COLOR, c);
-}
-
-pub fn read_root_plate_opacity_if_configured() -> Option<f32> {
-    load_colors_once();
-    style_read(&ROOT_PLATE_OPACITY)
-}
-
-// The toggle's own palette (enabled/disabled/background) is RETIRED: a toggle
-// inherits the plate it sits on and marks state with light and relief, so
-// there is nothing left to tint. The `TOGGLE_*` consts above survive for the
-// graph's node geometry switch, which is a different control.
-
-pub fn list_bg_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&LIST_BG_COLOR)
-}
-
-pub fn set_list_bg_color(color: [f32; 4]) {
-    if let Ok(mut lock) = LIST_BG_COLOR.write() {
-        *lock = [color[0], color[1], color[2], 0.3];
-    }
-}
-
-pub fn list_entry_bg_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&LIST_ENTRY_BG_COLOR)
-}
-
-pub fn set_list_entry_bg_color(color: [f32; 4]) {
-    style_write(&LIST_ENTRY_BG_COLOR, color);
-}
-
-pub fn list_entry_highlight_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&LIST_ENTRY_HIGHLIGHT_COLOR)
-}
-
-pub fn set_list_entry_highlight_color(color: [f32; 4]) {
-    style_write(&LIST_ENTRY_HIGHLIGHT_COLOR, color);
-}
-
-pub fn list_font_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&LIST_FONT_COLOR)
-}
-
-pub fn set_list_font_color(color: [f32; 4]) {
-    style_write(&LIST_FONT_COLOR, color);
-}
-
-pub fn breadcrumb_bg_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&BREADCRUMB_BG_COLOR)
-}
-
-pub fn set_breadcrumb_bg_color(color: [f32; 4]) {
-    if let Ok(mut lock) = BREADCRUMB_BG_COLOR.write() {
-        *lock = [color[0], color[1], color[2], 1.0];
-    }
-}
-
-pub fn popover_bg_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&POPOVER_BG_COLOR)
-}
-
-pub fn set_popover_bg_color(color: [f32; 4]) {
-    if let Ok(mut lock) = POPOVER_BG_COLOR.write() {
-        *lock = [color[0], color[1], color[2], 1.0];
-    }
-}
-
-/// Corner radius of the root plate (`style.surface.plate.root.corner_radius`).
-/// The window silhouette value — the compositor clips windows from the SHARED
-/// copy of this.
-pub fn root_plate_corner_radius() -> f32 {
-    load_colors_once();
-    style_read(&ROOT_PLATE_CORNER_RADIUS)
-}
-
-pub fn ramp_background_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&RAMP_BACKGROUND_COLOR)
-}
-
-pub fn ramp_border_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&RAMP_BORDER_COLOR)
-}
-
-pub fn control_panel_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&CONTROL_PANEL_COLOR)
-}
-
-pub fn set_control_panel_color(color: [f32; 4]) {
-    style_write(&CONTROL_PANEL_COLOR, color);
-}
-
-pub fn control_panel_border_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&CONTROL_PANEL_BORDER_COLOR)
-}
-
-pub fn set_control_panel_border_color(color: [f32; 4]) {
-    style_write(&CONTROL_PANEL_BORDER_COLOR, color);
-}
-
-pub fn progress_bg() -> [f32; 4] {
-    load_colors_once();
-    style_read(&PROGRESS_BG_COLOR)
-}
-
-pub fn set_progress_bg(color: [f32; 4]) {
-    style_write(&PROGRESS_BG_COLOR, color);
-}
-
-pub fn progress_fill() -> [f32; 4] {
-    load_colors_once();
-    style_read(&PROGRESS_FILL_COLOR)
-}
-
-pub fn set_progress_fill(color: [f32; 4]) {
-    style_write(&PROGRESS_FILL_COLOR, color);
-}
-
-pub fn button_border_color() -> Option<[f32; 4]> {
-    load_colors_once();
-    style_read(&BUTTON_BORDER_COLOR)
-}
-
-pub fn set_button_border_color(color: [f32; 4]) {
-    if let Ok(mut lock) = BUTTON_BORDER_COLOR.write() {
-        *lock = Some(color);
-    }
-}
-
-pub fn dropdown_border_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&DROPDOWN_BORDER_COLOR)
-}
-
-pub fn set_dropdown_border_color(color: [f32; 4]) {
-    style_write(&DROPDOWN_BORDER_COLOR, color);
-}
-
-pub fn dropdown_text_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&DROPDOWN_TEXT_COLOR)
-}
-
-pub fn set_dropdown_text_color(color: [f32; 4]) {
-    style_write(&DROPDOWN_TEXT_COLOR, color);
-}
-
-
-pub fn slider_thumb() -> [f32; 4] {
-    load_colors_once();
-    style_read(&SLIDER_THUMB_COLOR)
-}
-
-pub fn set_slider_thumb(color: [f32; 4]) {
-    style_write(&SLIDER_THUMB_COLOR, color);
-}
-
-pub fn slider_thumb_drag() -> [f32; 4] {
-    load_colors_once();
-    style_read(&SLIDER_THUMB_DRAG_COLOR)
-}
-
-pub fn set_slider_thumb_drag(color: [f32; 4]) {
-    style_write(&SLIDER_THUMB_DRAG_COLOR, color);
-}
-
-pub fn rangeslider_thumb() -> [f32; 4] {
-    load_colors_once();
-    style_read(&RANGE_SLIDER_THUMB_COLOR)
-}
-
-pub fn set_rangeslider_thumb(color: [f32; 4]) {
-    style_write(&RANGE_SLIDER_THUMB_COLOR, color);
-}
-
-pub fn rangeslider_thumb_drag() -> [f32; 4] {
-    load_colors_once();
-    style_read(&RANGE_SLIDER_THUMB_DRAG_COLOR)
-}
-
-pub fn set_rangeslider_thumb_drag(color: [f32; 4]) {
-    style_write(&RANGE_SLIDER_THUMB_DRAG_COLOR, color);
-}
-
-pub fn spinbox_display() -> [f32; 4] {
-    load_colors_once();
-    style_read(&SPINBOX_DISPLAY_COLOR)
-}
-
-pub fn set_spinbox_display(color: [f32; 4]) {
-    style_write(&SPINBOX_DISPLAY_COLOR, color);
-}
-
-pub fn spinbox_button() -> [f32; 4] {
-    load_colors_once();
-    style_read(&SPINBOX_BUTTON_COLOR)
-}
-
-pub fn set_spinbox_button(color: [f32; 4]) {
-    style_write(&SPINBOX_BUTTON_COLOR, color);
-}
-
-pub fn spinbox_button_hover() -> [f32; 4] {
-    load_colors_once();
-    style_read(&SPINBOX_BUTTON_HOVER_COLOR)
-}
-
-pub fn set_spinbox_button_hover(color: [f32; 4]) {
-    style_write(&SPINBOX_BUTTON_HOVER_COLOR, color);
-}
-
-pub fn spinbox_text_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&SPINBOX_TEXT_COLOR)
-}
-
-pub fn set_spinbox_text_color(color: [f32; 4]) {
-    style_write(&SPINBOX_TEXT_COLOR, color);
-}
-
-pub fn set_root_plate_corner_radius(radius: f32) {
-    style_write(&ROOT_PLATE_CORNER_RADIUS, radius);
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Theme {
-    pub surface_bg: [f32; 4],
-    pub surface_border: [f32; 4],
-    pub primary_accent: [f32; 4],
-    pub press_overlay: [f32; 4],
-    pub hover_overlay: [f32; 4],
-}
-
-pub fn active_theme() -> Theme {
-    Theme {
-        surface_bg: popover_bg_color(),
-        surface_border: [0.25, 0.25, 0.35, 0.8],
-        primary_accent: [0.20, 0.50, 0.75, 1.0],
-        press_overlay: [1.0, 1.0, 1.0, 0.15],
-        hover_overlay: [1.0, 1.0, 1.0, 0.08],
-    }
-}
-
-pub fn active_window_mode() -> String {
-    let app_id = crate::scale::app_id();
-    if app_id.is_empty() {
-        return "floating".to_string();
-    }
-
-    let config_path = crate::config::get_config_path();
-    let content = match std::fs::read_to_string(&config_path) {
-        Ok(c) => c,
-        Err(_) => return "floating".to_string(),
-    };
-    let val = crate::config::parse_kdl_to_json(&content);
-
-    if let Some(mode_rules) = val.get("mode_rule").and_then(|r| r.as_array()) {
-        for rule in mode_rules {
-            if rule.get("app_id").and_then(|id| id.as_str()) == Some(&app_id) {
-                if let Some(mode) = rule.get("mode").and_then(|m| m.as_str()) {
-                    return mode.to_string();
-                }
-            }
-        }
-    }
-
-    let mut default_tile_mode = "cascade".to_string();
-    if let Some(tag_layouts) = val.get("tag_layout").and_then(|l| l.as_array()) {
-        for tl in tag_layouts {
-            if tl.get("tag").and_then(|t| t.as_u64()) == Some(1) {
-                if let Some(m) = tl.get("mode").and_then(|m| m.as_str()) {
-                    default_tile_mode = m.to_string();
-                }
-            }
-        }
-    }
-
-    if crate::scale::is_fullscreen() {
-        return "fullscreen".to_string();
-    }
-    if crate::scale::is_maximized() {
-        return default_tile_mode;
-    }
-
-    "floating".to_string()
-}
-
-/// Opacity of the root plate's fill (the alpha of the root-plate color).
-pub fn root_plate_opacity() -> f32 {
-    page_low_color()[3]
-}
-
-pub fn tree_background_color() -> [f32; 4] {
-    style_read(&TREE_BACKGROUND_COLOR)
-}
-pub fn tree_border_color() -> [f32; 4] {
-    style_read(&TREE_BORDER_COLOR)
-}
-pub fn tree_border_hover_color() -> [f32; 4] {
-    style_read(&TREE_BORDER_HOVER_COLOR)
-}
-pub fn tree_border_focus_color() -> [f32; 4] {
-    style_read(&TREE_BORDER_FOCUS_COLOR)
-}
-
-pub fn tree_section_bg_color() -> [f32; 4] {
-    style_read(&TREE_SECTION_BG_COLOR)
-}
-pub fn tree_section_bg_hover_color() -> [f32; 4] {
-    style_read(&TREE_SECTION_BG_HOVER_COLOR)
-}
-
-pub fn tree_leaf_bg_even_color() -> [f32; 4] {
-    style_read(&TREE_LEAF_BG_EVEN_COLOR)
-}
-pub fn tree_leaf_bg_odd_color() -> [f32; 4] {
-    style_read(&TREE_LEAF_BG_ODD_COLOR)
-}
-pub fn tree_leaf_bg_hover_color() -> [f32; 4] {
-    style_read(&TREE_LEAF_BG_HOVER_COLOR)
-}
-pub fn tree_leaf_bg_selected_color() -> [f32; 4] {
-    style_read(&TREE_LEAF_BG_SELECTED_COLOR)
-}
-
-pub fn tree_section_text_color() -> [f32; 4] {
-    style_read(&TREE_SECTION_TEXT_COLOR)
-}
-pub fn tree_leaf_text_color() -> [f32; 4] {
-    style_read(&TREE_LEAF_TEXT_COLOR)
-}
-pub fn tree_leaf_text_selected_color() -> [f32; 4] {
-    style_read(&TREE_LEAF_TEXT_SELECTED_COLOR)
-}
-
-pub fn tree_type_text_color() -> [f32; 4] {
-    style_read(&TREE_TYPE_TEXT_COLOR)
-}
-pub fn tree_value_text_color() -> [f32; 4] {
-    style_read(&TREE_VALUE_TEXT_COLOR)
-}
-pub fn tree_separator_color() -> [f32; 4] {
-    style_read(&TREE_SEPARATOR_COLOR)
-}
-
-pub fn set_tree_background_color(c: [f32; 4]) {
-    style_write(&TREE_BACKGROUND_COLOR, c);
-}
-pub fn set_tree_border_color(c: [f32; 4]) {
-    style_write(&TREE_BORDER_COLOR, c);
-}
-pub fn set_tree_border_hover_color(c: [f32; 4]) {
-    style_write(&TREE_BORDER_HOVER_COLOR, c);
-}
-pub fn set_tree_border_focus_color(c: [f32; 4]) {
-    style_write(&TREE_BORDER_FOCUS_COLOR, c);
-}
-
-pub fn set_tree_section_bg_color(c: [f32; 4]) {
-    style_write(&TREE_SECTION_BG_COLOR, c);
-}
-pub fn set_tree_section_bg_hover_color(c: [f32; 4]) {
-    style_write(&TREE_SECTION_BG_HOVER_COLOR, c);
-}
-
-pub fn set_tree_leaf_bg_even_color(c: [f32; 4]) {
-    style_write(&TREE_LEAF_BG_EVEN_COLOR, c);
-}
-pub fn set_tree_leaf_bg_odd_color(c: [f32; 4]) {
-    style_write(&TREE_LEAF_BG_ODD_COLOR, c);
-}
-pub fn set_tree_leaf_bg_hover_color(c: [f32; 4]) {
-    style_write(&TREE_LEAF_BG_HOVER_COLOR, c);
-}
-pub fn set_tree_leaf_bg_selected_color(c: [f32; 4]) {
-    style_write(&TREE_LEAF_BG_SELECTED_COLOR, c);
-}
-
-pub fn set_tree_section_text_color(c: [f32; 4]) {
-    style_write(&TREE_SECTION_TEXT_COLOR, c);
-}
-pub fn set_tree_leaf_text_color(c: [f32; 4]) {
-    style_write(&TREE_LEAF_TEXT_COLOR, c);
-}
-pub fn set_tree_leaf_text_selected_color(c: [f32; 4]) {
-    style_write(&TREE_LEAF_TEXT_SELECTED_COLOR, c);
-}
-
-pub fn set_tree_type_text_color(c: [f32; 4]) {
-    style_write(&TREE_TYPE_TEXT_COLOR, c);
-}
-pub fn set_tree_value_text_color(c: [f32; 4]) {
-    style_write(&TREE_VALUE_TEXT_COLOR, c);
-}
-pub fn set_tree_separator_color(c: [f32; 4]) {
-    style_write(&TREE_SEPARATOR_COLOR, c);
-}
-
-pub fn scrollbar_track_color() -> [f32; 4] {
-    style_read(&SCROLLBAR_TRACK_COLOR)
-}
-pub fn set_scrollbar_track_color(c: [f32; 4]) {
-    style_write(&SCROLLBAR_TRACK_COLOR, c);
-}
-pub fn scrollbar_thumb_color() -> [f32; 4] {
-    style_read(&SCROLLBAR_THUMB_COLOR)
-}
-pub fn set_scrollbar_thumb_color(c: [f32; 4]) {
-    style_write(&SCROLLBAR_THUMB_COLOR, c);
-}
-
-pub fn root_plate_menubar_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&ROOT_PLATE_MENUBAR_COLOR)
-}
-
-pub fn set_root_plate_menubar_color(c: [f32; 4]) {
-    style_write(&ROOT_PLATE_MENUBAR_COLOR, c);
-}
-
-pub fn root_plate_menubar_text_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&ROOT_PLATE_MENUBAR_TEXT_COLOR)
-}
-
-pub fn set_root_plate_menubar_text_color(c: [f32; 4]) {
-    style_write(&ROOT_PLATE_MENUBAR_TEXT_COLOR, c);
-}
-
-pub fn root_plate_menubar_blur() -> bool {
-    load_colors_once();
-    style_read(&ROOT_PLATE_MENUBAR_BLUR)
-}
-
-pub fn set_root_plate_menubar_blur(b: bool) {
-    style_write(&ROOT_PLATE_MENUBAR_BLUR, b);
-}
-
-pub fn root_plate_statusbar_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&ROOT_PLATE_STATUSBAR_COLOR)
-}
-
-pub fn set_root_plate_statusbar_color(c: [f32; 4]) {
-    style_write(&ROOT_PLATE_STATUSBAR_COLOR, c);
-}
-
-pub fn root_plate_statusbar_text_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&ROOT_PLATE_STATUSBAR_TEXT_COLOR)
-}
-
-pub fn set_root_plate_statusbar_text_color(c: [f32; 4]) {
-    style_write(&ROOT_PLATE_STATUSBAR_TEXT_COLOR, c);
-}
-
-pub fn root_plate_statusbar_blur() -> bool {
-    load_colors_once();
-    style_read(&ROOT_PLATE_STATUSBAR_BLUR)
-}
-
-pub fn set_root_plate_statusbar_blur(b: bool) {
-    style_write(&ROOT_PLATE_STATUSBAR_BLUR, b);
-}
-
-static PLATE_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.PLATE_COLOR, |s| &mut s.color.PLATE_COLOR);
-static PLATE_BORDER_COLOR: crate::style::StyleCell<Option<[f32; 4]>> = crate::style::StyleCell::new(|s| &s.color.PLATE_BORDER_COLOR, |s| &mut s.color.PLATE_BORDER_COLOR);
-static PLATE_BORDER_THICKNESS: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.PLATE_BORDER_THICKNESS, |s| &mut s.color.PLATE_BORDER_THICKNESS);
-pub fn plate_color() -> Option<[f32; 4]> {
-    load_colors_once();
-    style_read(&PLATE_COLOR)
-}
-
-pub fn set_plate_color(c: Option<[f32; 4]>) {
-    style_write(&PLATE_COLOR, c);
-}
-
-pub fn plate_border_color() -> Option<[f32; 4]> {
-    load_colors_once();
-    style_read(&PLATE_BORDER_COLOR)
-}
-
-pub fn set_plate_border_color(c: Option<[f32; 4]>) {
-    style_write(&PLATE_BORDER_COLOR, c);
-}
-
-pub fn plate_border_thickness() -> f32 {
-    load_colors_once();
-    style_read(&PLATE_BORDER_THICKNESS)
-}
-
-pub fn set_plate_border_thickness(t: f32) {
-    style_write(&PLATE_BORDER_THICKNESS, t);
-}
-
-/// Roll width of a beveled pane plate (the control_relief replacement for the
-/// flat border line), in logical px.
-///
-/// **This is `style.surface.relief.width`** — the one roll width, the same
-/// number the root plate rolls over, every control wall runs, and
-/// `relief.edge.height` is a rise against. Until 2026-09-28 it was a second
-/// width of its own (`style.surface.plate.bevel_width`, default 6 against the
-/// relief's 9.3), so a `PlateSpec` pane plate and an `append_widget_plate`
-/// pane plate rolled over different widths in one window, the designer's
-/// panes could not be made to match its own window lip by editing one key,
-/// and the edge height was expressed against a width the panes did not use.
-/// The old key was an explicit override for the rest of that day and is
-/// RETIRED: a config still carrying it is reported by path
-/// (`retired_surface_keys`) and the key is not read. The getter survives
-/// as the name the plate painters call, so a caller need not know which
-/// registry key a roll is.
-pub fn plate_bevel_width() -> f32 {
-    crate::layout::bevel_width()
-}
-
-/// How hard a frosted plate pulls its backdrop's LUMINANCE toward its own key
-/// before tinting: 0 = the backdrop passes through untouched, 1 = flat.
-///
-/// This is the plate's legibility control, and it is NOT opacity. Blur
-/// destroys a backdrop's spatial detail but preserves its mean luminance, and
-/// text contrast is a mean-luminance property — so a frosted plate over
-/// something bright washes out however hard it is blurred, which is the whole
-/// of the "liquid glass" legibility problem. Compression remaps the backdrop's
-/// luminance toward the plate's own, symmetrically: a bright backdrop comes
-/// down and a DARK one comes up, so the plate stops swinging through the ink's
-/// luminance while its hue, chroma and movement still read.
-///
-/// Default 0.0 — the behavior every existing config already has.
-static PLATE_BACKDROP_COMPRESSION: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.PLATE_BACKDROP_COMPRESSION, |s| &mut s.color.PLATE_BACKDROP_COMPRESSION);
-
-pub fn plate_backdrop_compression() -> f32 {
-    load_colors_once();
-    style_read(&PLATE_BACKDROP_COMPRESSION)
-}
-
-pub fn set_plate_backdrop_compression(c: f32) {
-    style_write(&PLATE_BACKDROP_COMPRESSION, c.clamp(0.0, 1.0));
-}
-
-/// How far a frosted plate's roll bends what it samples, and how much clearer
-/// its rim is than its frosted body: 0 = a flat window, 1 = full.
-///
-/// This buys no legibility and is not meant to — see
-/// [`plate_backdrop_compression`] for that. What it buys is the plate reading
-/// as an OBJECT: a curved edge displaces the view through it, so the
-/// silhouette stops being where the haze ends and becomes where a slab with a
-/// thickness begins. The two are complementary, and on a dark desktop
-/// especially: compression flattens the body toward the tint, which leaves the
-/// rim as the only place the material can still say what it is.
-///
-/// Default 0.0 — no existing config changes appearance.
-static PLATE_REFRACTION: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.PLATE_REFRACTION, |s| &mut s.color.PLATE_REFRACTION);
-
-pub fn plate_refraction() -> f32 {
-    load_colors_once();
-    style_read(&PLATE_REFRACTION)
-}
-
-pub fn set_plate_refraction(r: f32) {
-    style_write(&PLATE_REFRACTION, r.clamp(0.0, 1.0));
-}
-
-/// Whether the default plate material is frosted at all — the switch on
-/// `Frost::from_style`. Spelled `style.surface.plate.frost` (a block, the
-/// knobs inside it; see the loader). The older `style.surface.plate.blur`
-/// bool is retired and reported, not read.
-static PLATE_BLUR: crate::style::StyleCell<bool> = crate::style::StyleCell::new(|s| &s.color.PLATE_BLUR, |s| &mut s.color.PLATE_BLUR);
-
-/// The finish's three fixed terms — specular strength, shininess exponent,
-/// curvature/AO strength — as `scene::material::Finish::from_style` reads
-/// them. Until 2026-09-20 these were literals in the finish constructor
-/// (0.4 / 24 / 0.2); the getters exist so the DE's plastic can be edited and
-/// so a named material (RFC material, step 4) has somewhere to land. No config
-/// path yet: the defaults ARE the shipped look.
-static FINISH_SPEC: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.FINISH_SPEC, |s| &mut s.color.FINISH_SPEC);
-static FINISH_SHININESS: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.FINISH_SHININESS, |s| &mut s.color.FINISH_SHININESS);
-static FINISH_CURVATURE: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.FINISH_CURVATURE, |s| &mut s.color.FINISH_CURVATURE);
 /// The finish a config without `relief spec` / `shininess` / `curvature`
 /// gets: the literals the shader shipped with.
 pub(crate) const FINISH_SPEC_DEFAULT: f32 = 0.4;
+
 pub(crate) const FINISH_SHININESS_DEFAULT: f32 = 24.0;
+
 pub(crate) const FINISH_CURVATURE_DEFAULT: f32 = 0.2;
 
-/// The default material's blur radius (`style.surface.plate.frost.radius`,
-/// the kernel sigma in logical px) — [`crate::scene::Frost::DEFAULT_RADIUS`]
-/// unless config says otherwise.
-static PLATE_FROST_RADIUS: crate::style::StyleCell<f32> = crate::style::StyleCell::new(|s| &s.color.PLATE_FROST_RADIUS, |s| &mut s.color.PLATE_FROST_RADIUS);
-
-pub fn plate_frost_radius() -> f32 {
-    load_colors_once();
-    style_read(&PLATE_FROST_RADIUS)
-}
-pub fn set_plate_frost_radius(r: f32) {
-    style_write(&PLATE_FROST_RADIUS, r.max(0.0));
-}
-
-pub fn finish_spec() -> f32 {
-    style_read(&FINISH_SPEC)
-}
-pub fn set_finish_spec(v: f32) {
-    style_write(&FINISH_SPEC, v.max(0.0));
-}
-pub fn finish_shininess() -> f32 {
-    style_read(&FINISH_SHININESS)
-}
-pub fn set_finish_shininess(v: f32) {
-    style_write(&FINISH_SHININESS, v.max(1.0));
-}
-pub fn finish_curvature() -> f32 {
-    style_read(&FINISH_CURVATURE)
-}
-pub fn set_finish_curvature(v: f32) {
-    style_write(&FINISH_CURVATURE, v.max(0.0));
-}
-
-pub fn plate_blur() -> bool {
-    load_colors_once();
-    style_read(&PLATE_BLUR)
-}
-
-pub fn set_plate_blur(b: bool) {
-    style_write(&PLATE_BLUR, b);
-}
-
-pub fn control_label_color() -> [f32; 4] {
-    style_read(&CONTROL_LABEL_COLOR)
-}
-
-pub fn control_label_color_u8() -> [u8; 3] {
-    let c = control_label_color();
-    [
-        (linear_to_srgb(c[0]) * 255.0).round() as u8,
-        (linear_to_srgb(c[1]) * 255.0).round() as u8,
-        (linear_to_srgb(c[2]) * 255.0).round() as u8,
-    ]
-}
-
-pub fn set_control_label_color(color: [f32; 4]) {
-    style_write(&CONTROL_LABEL_COLOR, color);
-}
-
-pub fn control_label_hover_color() -> Option<[f32; 4]> {
-    style_read(&CONTROL_LABEL_HOVER_COLOR)
-}
-
-pub fn control_label_focus_color() -> Option<[f32; 4]> {
-    style_read(&CONTROL_LABEL_FOCUS_COLOR)
-}
-
-pub fn control_label_color_for_state(hovered: bool, focused: bool) -> [u8; 3] {
-    let c = if focused {
-        control_label_focus_color().unwrap_or_else(control_label_color)
-    } else if hovered {
-        control_label_hover_color().unwrap_or_else(control_label_color)
-    } else {
-        control_label_color()
-    };
-    [
-        (linear_to_srgb(c[0]) * 255.0).round() as u8,
-        (linear_to_srgb(c[1]) * 255.0).round() as u8,
-        (linear_to_srgb(c[2]) * 255.0).round() as u8,
-    ]
-}
-
-pub fn control_label_color_detached() -> [f32; 4] {
-    style_read(&CONTROL_LABEL_COLOR_DETACHED)
-}
-
-pub fn control_label_color_detached_u8() -> [u8; 3] {
-    let c = control_label_color_detached();
-    [
-        (linear_to_srgb(c[0]) * 255.0).round() as u8,
-        (linear_to_srgb(c[1]) * 255.0).round() as u8,
-        (linear_to_srgb(c[2]) * 255.0).round() as u8,
-    ]
-}
-
-pub fn set_control_label_color_detached(color: [f32; 4]) {
-    style_write(&CONTROL_LABEL_COLOR_DETACHED, color);
-}
-
-pub fn control_label_color_detached_for_state(hovered: bool, focused: bool) -> [u8; 3] {
-    let c = if focused {
-        control_label_focus_color().unwrap_or_else(control_label_color_detached)
-    } else if hovered {
-        control_label_hover_color().unwrap_or_else(control_label_color_detached)
-    } else {
-        control_label_color_detached()
-    };
-    [
-        (linear_to_srgb(c[0]) * 255.0).round() as u8,
-        (linear_to_srgb(c[1]) * 255.0).round() as u8,
-        (linear_to_srgb(c[2]) * 255.0).round() as u8,
-    ]
-}
-
 #[cfg(test)]
-mod color_tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_hex_rgba() {
-        // 6-digit → alpha 1.0, raw sRGB
-        assert_eq!(parse_hex_rgba("#ff0000"), Some([1.0, 0.0, 0.0, 1.0]));
-        // 8-digit → explicit alpha
-        assert_eq!(parse_hex_rgba("#00ff0080"), Some([0.0, 1.0, 0.0, 128.0 / 255.0]));
-        // leading '#' optional; quotes/whitespace tolerated
-        assert_eq!(parse_hex_rgba("\" ffffff \""), Some([1.0, 1.0, 1.0, 1.0]));
-        assert_eq!(parse_hex_rgba("000000"), Some([0.0, 0.0, 0.0, 1.0]));
-        // invalid
-        assert_eq!(parse_hex_rgba("#fff"), None);
-        assert_eq!(parse_hex_rgba("nothex"), None);
-        assert_eq!(parse_hex_rgba(""), None);
-        // rgb drops alpha; linear applies gamma to rgb only
-        assert_eq!(parse_hex_rgb("#ff0000"), Some([1.0, 0.0, 0.0]));
-        assert_eq!(parse_hex_rgba_linear("#000000ff"), Some([0.0, 0.0, 0.0, 1.0]));
-        // byte primitive
-        assert_eq!(parse_hex_bytes("#010203"), Some([1, 2, 3, 255]));
-        assert_eq!(parse_hex_bytes("#01020304"), Some([1, 2, 3, 4]));
-        assert_eq!(parse_hex_bytes("#fff"), None);
-    }
-
-    #[test]
-    fn perceptual_fade_alpha_walks_lightness_not_luminance() {
-        let overlay = [0.62, 0.70, 0.95];
-        let backdrop = [0.028, 0.028, 0.041];
-        let a = |t: f32| perceptual_fade_alpha(t, overlay, backdrop, 1.0);
-
-        // Endpoints are the plain ones, and the ramp only ever falls.
-        assert!((a(0.0) - 1.0).abs() < 1e-4);
-        assert!(a(1.0).abs() < 1e-4);
-        for i in 1..=20 {
-            assert!(a(i as f32 / 20.0) <= a((i - 1) as f32 / 20.0));
-        }
-
-        // The correction runs BELOW the straight ramp — that ramp's excess brightness
-        // through the middle is the bow the eye reads as non-linear.
-        assert!(a(0.5) < 0.5 - 0.1, "midpoint {} should sit well under 0.5", a(0.5));
-
-        // What it buys: composited lightness lands on a straight line. cbrt(luminance) is
-        // the same proxy the implementation uses, checked here end to end through blending.
-        let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-        let l_at = |t: f32| {
-            let a = a(t);
-            let y: f32 = a * lum(overlay) + (1.0 - a) * lum(backdrop);
-            y.cbrt()
-        };
-        let (top, bottom) = (l_at(0.0), l_at(1.0));
-        for i in 0..=10 {
-            let t = i as f32 / 10.0;
-            let ideal = top + (bottom - top) * t;
-            assert!((l_at(t) - ideal).abs() < 1e-3, "t={t}: {} vs {ideal}", l_at(t));
-        }
-
-        // No lightness contrast to shape: falls back to the straight ramp.
-        let flat = perceptual_fade_alpha(0.5, overlay, overlay, 1.0);
-        assert!((flat - 0.5).abs() < 1e-4);
-    }
-
-    #[test]
-    fn test_print_active_config() {
-        let path = crate::config::get_config_path();
-        println!("ACTIVE CONFIG PATH: {:?}", path);
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            println!("FILE READ OK! Length: {}", content.len());
-            let val = crate::config::parse_kdl_to_json(&content);
-            println!("PARSED JSON POINTER: {:?}", val.pointer("/style/control/dropdown/color"));
-        } else {
-            println!("FILE READ FAILED!");
-        }
-        println!("DROPDOWN COLOR GETTER: {:?}", dropdown_background_color());
-        println!("LIST FONT COLOR GETTER: {:?}", list_font_color());
-        println!("PLATE COLOR: {:?}", plate_color());
-        println!("PLATE BORDER COLOR: {:?}", plate_border_color());
-        println!("PLATE BORDER THICKNESS: {:?}", plate_border_thickness());
-        println!("PLATE BLUR: {:?}", plate_blur());
-    }
-}
-
-
+mod color_tests;
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The hex that pins a built-in colour is NOT its floats times 255.
-    ///
-    /// The style loader gamma-decodes every config hex; the constants in this
-    /// file are already linear. So `PARAM_BG = [0.10, 0.10, 0.14]` is spelled
-    /// `#595969` in config, and the naive `#1a1a24` decodes to a plate ten
-    /// times darker — silently, both being valid config. Pinned here because
-    /// it cost a measurement round: a sweep meant to hold the tint constant
-    /// was quietly sweeping it, and the two halves disagreed by 3x.
-    #[test]
-    fn the_hex_that_pins_a_default_round_trips_through_the_gamma_decode() {
-        let decoded = parse_hex_rgba_linear("#595969").expect("valid hex");
-        // RGB only — a 6-digit hex carries no alpha, which the asserts at the
-        // bottom cover as its own hazard.
-        for (got, want) in decoded.iter().take(3).zip(PARAM_BG.iter().take(3)) {
-            assert!(
-                (got - want).abs() < 0.005,
-                "#595969 decodes to {decoded:?}, PARAM_BG is {PARAM_BG:?}"
-            );
-        }
-
-        // The naive spelling, and how far off it lands.
-        let naive = parse_hex_rgba_linear("#1a1a24").expect("valid hex");
-        assert!(
-            naive[0] < PARAM_BG[0] / 5.0,
-            "#1a1a24 was supposed to be nowhere near PARAM_BG, got {naive:?}"
-        );
-
-        // Alpha is NOT decoded, and a 6-digit hex means OPAQUE — dropping the
-        // last byte off a translucent plate colour does not leave it alone.
-        assert!((parse_hex_rgba_linear("#05050840").unwrap()[3] - 0.251).abs() < 0.002);
-        assert_eq!(parse_hex_rgba_linear("#050508").unwrap()[3], 1.0);
-    }
-
-    /// Rim refraction defaults OFF and clamps, like its neighbour.
-    /// The pane plates roll over the relief width — the one roll width —
-    /// and nothing, a loaded `plate.bevel_width` included, moves them off it.
-    #[test]
-    fn the_pane_roll_is_the_relief_width() {
-        let _lock = test_color_state_lock();
-        crate::layout::lazy_init_style_registry();
-        let _ = plate_blur();
-        reload_colors("style {\n surface {\n plate bevel_width=(f64)12.0\n }\n}\n");
-        assert_eq!(plate_bevel_width(), crate::layout::bevel_width(), "a retired key moves nothing");
-        assert_eq!(
-            retired_surface_keys(&crate::config::parse_kdl_to_json("style {\n surface {\n plate bevel_width=(f64)12.0\n }\n}\n")),
-            vec!["style.surface.plate.bevel_width"]
-        );
-        reload_colors("");
-    }
-
-    /// The four flat frost keys, the `backdrop_compression` spelling inside
-    /// a `frost` child, `plate.bevel_width`, `depth` (on the relief, or in a
-    /// material's `finish`), the relief's flat geometry keys and the
-    /// window_manager bevel spellings are reported by path; the blocks
-    /// themselves and a material's `compression` / `light` are not.
-    #[test]
-    fn retired_surface_keys_are_named_by_path_and_the_block_is_not() {
-        let clean: serde_json::Value = serde_json::json!({ "style": { "surface": {
-            "plate": { "frost": { "radius": 5.5, "compression": 0.0, "refraction": 0.0 }, "color": "#6c6c7bf2" },
-            "relief": { "light": 0.15, "wall": { "height": 1.0, "profile": "a" }, "edge": { "height": 2.0, "profile": "b" } },
-            "material": { "glass": { "frost": { "compression": 0.6 }, "finish": { "light": 0.2 } } }
-        } }, "window_manager": { "corner_shape": 4.5, "control_relief": true } });
-        assert!(retired_surface_keys(&clean).is_empty());
-        let old: serde_json::Value = serde_json::json!({ "style": { "surface": {
-            "plate": { "blur": true, "radius": 1.5, "backdrop_compression": 0.85, "refraction": 0.3,
-                       "bevel_width": 12.0, "frost": { "backdrop_compression": 0.2 } },
-            "relief": { "depth": 0.15, "height": 1.0, "profile": "a", "edge_height": 2.0, "edge_profile": "b" },
-            "material": { "glass": { "frost": { "backdrop_compression": 0.6 }, "finish": { "depth": 0.2 } } }
-        } }, "window_manager": { "bevel_depth": 0.15, "bevel_width": 9.3, "bevel_shader": 0 } });
-        let mut old = old;
-        old["style"]["surface"]["graph"] = serde_json::json!({ "cell_color": "#545467", "gap_color": "#48485b", "grid_color": "#48485b", "uniform_background": false });
-        assert_eq!(retired_surface_keys(&old), vec![
-            "style.surface.plate.blur",
-            "style.surface.plate.radius",
-            "style.surface.plate.backdrop_compression",
-            "style.surface.plate.refraction",
-            "style.surface.plate.bevel_width",
-            "style.surface.plate.frost.backdrop_compression",
-            "style.surface.relief.depth",
-            "style.surface.relief.height",
-            "style.surface.relief.profile",
-            "style.surface.relief.edge_height",
-            "style.surface.relief.edge_profile",
-            "window_manager.bevel_depth",
-            "window_manager.bevel_width",
-            "window_manager.bevel_shader",
-            "style.surface.material.glass.frost.backdrop_compression",
-            "style.surface.material.glass.finish.depth",
-            "style.surface.graph.cell_color",
-            "style.surface.graph.gap_color",
-            "style.surface.graph.uniform_background",
-        ]);
-        assert!(retired_surface_keys(&serde_json::json!({})).is_empty());
-    }
-
-    #[test]
-    fn plate_refraction_defaults_off_and_clamps() {
-        assert_eq!(plate_refraction(), 0.0, "off unless a config asks");
-        set_plate_refraction(0.6);
-        assert_eq!(plate_refraction(), 0.6);
-        set_plate_refraction(9.0);
-        assert_eq!(plate_refraction(), 1.0);
-        set_plate_refraction(-0.5);
-        assert_eq!(plate_refraction(), 0.0);
-    }
-
-    /// The plate's backdrop compression defaults OFF and clamps.
-    ///
-    /// Off is load-bearing: it is the behaviour every config already in the
-    /// wild has, and a toolkit-wide default that changed how every frosted
-    /// surface in the DE looks would arrive unannounced in eighteen apps.
-    /// Opting in is a per-app `style.surface.plate { frost compression=… }`.
-    #[test]
-    fn backdrop_compression_defaults_off_and_clamps() {
-        assert_eq!(plate_backdrop_compression(), 0.0, "off unless a config asks");
-
-        set_plate_backdrop_compression(0.85);
-        assert_eq!(plate_backdrop_compression(), 0.85);
-
-        // The shader clamps too, but a nonsense config value should not be
-        // able to reach it and make the plate flat or inverted.
-        set_plate_backdrop_compression(4.0);
-        assert_eq!(plate_backdrop_compression(), 1.0);
-        set_plate_backdrop_compression(-1.0);
-        assert_eq!(plate_backdrop_compression(), 0.0);
-    }
-
-    /// A colour pinned by one test is invisible to a test beside it.
-    ///
-    /// The invariant that ends the parallel-flake class here. These statics
-    /// are process-wide, and `test_graph_style_configuration` pins a dozen of
-    /// them without restoring any; before `style_write` became per-thread
-    /// under `cfg(test)`, every test running alongside it saw those values.
-    #[test]
-    fn a_pinned_colour_is_private_to_its_thread() {
-        let base = node_color();
-        let pinned = [0.123, 0.456, 0.789, 1.0];
-        assert_ne!(base, pinned, "pick a value the config cannot already hold");
-
-        set_node_color(pinned);
-        assert_eq!(node_color(), pinned, "the pinning thread sees its own value");
-
-        let elsewhere = std::thread::spawn(node_color).join().unwrap();
-        assert_eq!(elsewhere, base, "a thread beside it must still see the shared base");
-    }
-}
+mod tests;
