@@ -10,6 +10,18 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The params pane's wheel handler is staged**: `wheel_owner` (the latched control, else the
+  nearest value control under the pointer, unless the pane holds the gesture), `wheel_control`
+  (that row's control takes the event and its value is written back) and `wheel_pane` (the
+  pane's own scroll, and swallowing every wheel over the opaque pane). Removed as dead: the
+  `finger` test and `pane_takes` — the row loop acted only on the owner row, so with no owner it
+  did nothing whatever `finger` said, and with an owner `pane_takes` reduced to `pane_owns`, which
+  cannot hold beside one (a latch names one id). Also gone: the comment block describing the
+  2026-09-21 "a finger gesture is the pane's from anywhere" rule, superseded on 09-28. Verified
+  by replaying 4,932 wheel events (notches and finger scrolls on a grid over a pane of every
+  value-row type, gestures beginning, continuing and drifting, with and without overflow) on
+  the previous commit and on this one, recording the return, every row's value, the scroll and
+  the gesture's owner after each: byte-identical.
 - **The params pane's flat views are split.** `plain_quads` is `push_section_outline_quads`,
   `push_row_quads` per row, and a viewport clip; a code row's chrome (box, gutter, error band,
   selection, caret, border) is `push_code_row_quads` in `code.rs`. `reliefs` is
