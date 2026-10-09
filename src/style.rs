@@ -17,11 +17,14 @@
 //!   nest as freely as before.
 //! - **[`batch`]** runs a reload as one change: inside it, on its thread, writes go to one
 //!   pending snapshot and reads see it; the snapshot is published once when the batch ends.
-//!   A reload is atomic now.
+//!   A reload is atomic now. What it publishes is the newest snapshot with the fields the
+//!   batch wrote carried onto it, so a write another thread published meanwhile is kept
+//!   (field by field: a field both wrote ends with the batch's value).
 //!
 //! The per-thread test overlays (`color::style_write`, the registry's) are unchanged: they
 //! key on a cell's address, which a `StyleCell` has as a `static` as the lock did.
 
+use std::any::TypeId;
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -32,6 +35,9 @@ pub struct Style {
     pub(crate) color: crate::color::Slots,
     pub(crate) layout: crate::layout::Slots,
     pub(crate) registry: crate::layout::StyleRegistry,
+    /// Fields no production code touches, so a test below sees only its own writes.
+    #[cfg(test)]
+    probe: [u32; 5],
 }
 
 static GLOBAL: RwLock<Option<Arc<Style>>> = RwLock::new(None);
@@ -43,6 +49,24 @@ thread_local! {
     /// A batch in progress on this thread: its pending snapshot and its depth.
     static PENDING: Cell<*mut Style> = const { Cell::new(std::ptr::null_mut()) };
     static DEPTH: Cell<u32> = const { Cell::new(0) };
+    /// The fields that batch has written (see [`touch`]).
+    static TOUCHED: RefCell<Vec<Touched>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A field a batch wrote: its getter's address and type, which name it, and how to copy it
+/// from the batch's snapshot into another.
+type Touched = ((usize, TypeId), Box<dyn Fn(&Style, &mut Style)>);
+
+/// Record that the batch on this thread writes the field `get` reads. Two getters at one
+/// address and of one type are one field (same code, same offset, same extent).
+fn touch<T: Clone + 'static>(get: fn(&Style) -> &T, get_mut: fn(&mut Style) -> &mut T) {
+    let key = (get as usize, TypeId::of::<T>());
+    TOUCHED.with(|t| {
+        let mut t = t.borrow_mut();
+        if !t.iter().any(|(k, _)| *k == key) {
+            t.push((key, Box::new(move |from, to| *get_mut(to) = get(from).clone())));
+        }
+    });
 }
 
 /// The current snapshot.
@@ -64,8 +88,21 @@ pub fn current() -> Arc<Style> {
     })
 }
 
-fn publish(style: Style) {
+/// Publish a batch's snapshot, `pending`, begun from `base`. When nothing was published since,
+/// that is `pending` itself; otherwise the fields the batch wrote are carried onto the newest
+/// snapshot, so another thread's publish meanwhile is kept, not reverted.
+fn publish_batch(pending: Style, base: &Arc<Style>, touched: &[Touched]) {
     let mut g = GLOBAL.write().unwrap_or_else(|e| e.into_inner());
+    let style = match g.as_ref() {
+        Some(newest) if !Arc::ptr_eq(newest, base) => {
+            let mut style = (**newest).clone();
+            for (_, copy) in touched {
+                copy(&pending, &mut style);
+            }
+            style
+        }
+        _ => pending,
+    };
     *g = Some(Arc::new(style));
     GENERATION.fetch_add(1, Ordering::AcqRel);
 }
@@ -94,21 +131,24 @@ pub fn batch<R>(f: impl FnOnce() -> R) -> R {
         DEPTH.with(|d| d.set(d.get() - 1));
         return r;
     }
-    let boxed = Box::into_raw(Box::new((*current()).clone()));
+    let base = current();
+    let boxed = Box::into_raw(Box::new((*base).clone()));
     PENDING.with(|p| p.set(boxed));
     DEPTH.with(|d| d.set(1));
     // Publish and clear even if `f` unwinds: a half-applied reload is still the newest.
-    struct End(*mut Style);
+    // `base` is held to the end, so no later snapshot can share its address.
+    struct End(*mut Style, Arc<Style>);
     impl Drop for End {
         fn drop(&mut self) {
             PENDING.with(|p| p.set(std::ptr::null_mut()));
             DEPTH.with(|d| d.set(0));
+            let touched = TOUCHED.with(|t| std::mem::take(&mut *t.borrow_mut()));
             // SAFETY: the box made above, released exactly once, here.
             let style = unsafe { Box::from_raw(self.0) };
-            publish(*style);
+            publish_batch(*style, &self.1, &touched);
         }
     }
-    let _end = End(boxed);
+    let _end = End(boxed, base);
     f()
 }
 
@@ -141,8 +181,11 @@ impl<T: Clone + 'static> StyleCell<T> {
     /// The field to change: published when the guard drops (in a batch, changed in place).
     pub fn write(&self) -> Result<StyleMut<T>, StyleError> {
         match pending() {
-            // SAFETY: as in `read`.
-            Some(p) => Ok(StyleMut::Pending((self.get_mut)(unsafe { &mut *p }) as *mut T)),
+            Some(p) => {
+                touch(self.get, self.get_mut);
+                // SAFETY: as in `read`.
+                Ok(StyleMut::Pending((self.get_mut)(unsafe { &mut *p }) as *mut T))
+            }
             None => Ok(StyleMut::Copy(Some((self.get)(&current()).clone()), self.get_mut)),
         }
     }
@@ -229,24 +272,50 @@ pub(crate) use style_slots;
 mod tests {
     use super::*;
 
+    // Handles on `Style::probe`, which nothing but these tests writes: what each test reads back
+    // is its own, whatever the tests running beside it publish.
+    static A: StyleCell<u32> = StyleCell::new(|s| &s.probe[0], |s| &mut s.probe[0]);
+    static B: StyleCell<u32> = StyleCell::new(|s| &s.probe[1], |s| &mut s.probe[1]);
+    static C: StyleCell<u32> = StyleCell::new(|s| &s.probe[2], |s| &mut s.probe[2]);
+    static X: StyleCell<u32> = StyleCell::new(|s| &s.probe[3], |s| &mut s.probe[3]);
+    static Y: StyleCell<u32> = StyleCell::new(|s| &s.probe[4], |s| &mut s.probe[4]);
+
     /// A write publishes; a batch publishes once, and its own reads see its writes before.
     #[test]
     fn writes_publish_and_a_batch_publishes_once() {
-        static PROBE: StyleCell<crate::layout::StyleRegistry> = StyleCell::new(|s| &s.registry, |s| &mut s.registry);
         let before = GENERATION.load(Ordering::Acquire);
-        PROBE.write().unwrap().load_float("style-test-a", 1.0);
-        assert_eq!(PROBE.read().unwrap().floats.get("style-test-a"), Some(&1.0));
+        *A.write().unwrap() = 1;
+        assert_eq!(A.get(), 1);
         assert!(GENERATION.load(Ordering::Acquire) > before);
 
         batch(|| {
-            PROBE.write().unwrap().load_float("style-test-b", 2.0);
-            PROBE.write().unwrap().load_float("style-test-c", 3.0);
-            assert_eq!(PROBE.read().unwrap().floats.get("style-test-b"), Some(&2.0), "a batch reads its own writes");
+            *B.write().unwrap() = 2;
+            *C.write().unwrap() = 3;
+            assert_eq!((B.get(), C.get()), (2, 3), "a batch reads its own writes");
             // Another thread still sees the snapshot from before the batch.
-            let seen = std::thread::spawn(|| PROBE.read().unwrap().floats.get("style-test-b").copied()).join().unwrap();
-            assert_eq!(seen, None, "nothing published yet");
+            let seen = std::thread::spawn(|| (B.get(), C.get())).join().unwrap();
+            assert_eq!(seen, (0, 0), "nothing published yet");
         });
-        let r = PROBE.read().unwrap();
-        assert_eq!((r.floats.get("style-test-b"), r.floats.get("style-test-c")), (Some(&2.0), Some(&3.0)));
+        assert_eq!((B.get(), C.get()), (2, 3));
+    }
+
+    /// A batch publishes the fields it wrote, not the whole snapshot it began from: a write
+    /// another thread published while it ran survives its end.
+    #[test]
+    fn a_batch_keeps_what_another_thread_published_meanwhile() {
+        let (began, wait_began) = std::sync::mpsc::channel();
+        let (published, wait_published) = std::sync::mpsc::channel::<()>();
+        let reload = std::thread::spawn(move || {
+            batch(|| {
+                *X.write().unwrap() = 1;
+                began.send(()).unwrap();
+                wait_published.recv().unwrap();
+            })
+        });
+        wait_began.recv().unwrap();
+        *Y.write().unwrap() = 7;
+        published.send(()).unwrap();
+        reload.join().unwrap();
+        assert_eq!((X.get(), Y.get()), (1, 7));
     }
 }
