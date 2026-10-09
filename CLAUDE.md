@@ -406,8 +406,8 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit/` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
-  concern (its `mod.rs` has the table). The largest files are now the 3D scene stage,
-  `src/vk/scene.rs` (largest file, ~1.4k lines), and the `DocEditor`.
+  concern (its `mod.rs` has the table). The largest files are now the `DocEditor`,
+  `src/widget/doc_editor/mod.rs` (largest file, ~1.3k lines), and the slider.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
@@ -419,7 +419,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   shells), `text_input.rs` (the per-frame field claim), `history.rs` (`History<T>`), `a11y.rs`,
   `l10n.rs`, `compute.rs` (what a compute job is, device-free).
 - `draw/` — renderer-free drawing (above); `draw::scene` and `draw::rt` for 3D and the tracer.
-- `vk/` — the Vulkan renderer (`renderer/` and `rt/`, each `mod.rs` with its table; `scene.rs`, `compute.rs`,
+- `vk/` — the Vulkan renderer (`renderer/`, `rt/` and `scene/`, each `mod.rs` with its table; `compute.rs`,
   `plate_probe.rs`); `web/` — wasm32 only: `WebRenderer`, the browser shell, its 3D, tracer and
   compute; `mac/` — macOS only: the AppKit shell.
 - `icon.rs` (XDG icon-theme lookup for names other apps ship — not `lib.rs`'s `upload_icon`, which

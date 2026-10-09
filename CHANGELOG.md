@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The Vulkan 3D scene stage is a directory module** (`vk/scene/`): `mod.rs` (the stage's
+  state, staging a frame, teardown), `pipelines` (`SceneStage::new` — render pass, layouts,
+  pipelines, per-frame buffers — and the descriptor write), `targets` (the backdrop and depth
+  images), `mesh` (`Mesh`, creating and replacing meshes, reclaiming spares) and `record` (a
+  frame's uniforms and the recorded pass). A pure move, checked line for line; the children
+  reach `renderer` and `image` as `crate::vk::…`. `new` is still one 575-line builder. Clippy,
+  the suite and `cargo check --workspace --exclude cce-fx` pass; not run on screen.
 - **`LineEdit` is a directory module** (`widget/line_edit/`): `mod.rs` (the model, its
   outcomes, char boundaries, construction, the display, selection helpers), `composition` (the
   input method's composition and the index maps across it and a mask), `pointer` (presses,
