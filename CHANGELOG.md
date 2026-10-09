@@ -10,6 +10,25 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The tessellator is a directory module, and `tessellate_display_list` is no longer one
+  1,134-line loop.** `backend/tessellate/` is `mod.rs` (the types, and the frame's `Tess`: each
+  item's prelude, a dispatch by prim family, and the batch tail), `flat`, `plates`, `carves`,
+  `droplet` (the prim families, each keeping its SDF arm and its banded arm side by side),
+  `shapes` and `bevel` (the vertex builders), and `debug` (`CCE_PLATE_DEBUG`, now a `PlateDbg`
+  struct, and the near-roll warning). The arm bodies moved verbatim, their identifiers rewritten
+  by script (skipping comments and string literals), with the four `continue`s that left the
+  item becoming `return false` and the banded groove's inner-loop `continue` kept. The function's
+  doc comment, which had drifted onto `prim_kind`, is back on it.
+  Removed as unreachable — no caller in the crate or any workspace app, nine of them only
+  re-exported from `engine`: `quad_vertices_clipped`, `rounded_rect_vertices`,
+  `push_rounded_rect_vertices`, `plate_bevel_vertices`, `circle_border_vertices`,
+  `arc_background_vertices`, `push_plate_solid_border_vertices_legacy`, and the extra-quad chain
+  left from the legacy tuple views (`extra_quad_vertices`, `extra_quad_vertices_clipped`,
+  `push_extra_quad_vertices`, `push_extra_quad_vertices_clipped`, `get_child_widget_for_quad`),
+  319 lines; with them the tessellator no longer imports the widget traits. Verified against
+  three baselines from the commit before: `tests/plate_golden.rs` (145k lines, both shading paths
+  at two scales), the renderer probe's scene tessellated and dumped (62k lines, likewise), and
+  the `CCE_PLATE_DEBUG` output of both — each byte-identical; `cargo check --workspace` builds.
 - **The params pane's `fields` is a loop over `row_field(i)`**, one `Option`-returning arm per
   row type (textpick, button, choice, spinbox, toggle/checkbox). A control's band — its rect
   below the label strip — and the wall depth carved into it (the roll width capped at a fifth of
