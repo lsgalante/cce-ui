@@ -9,259 +9,24 @@ impl Tess {
     /// (false); so does a degenerate groove or an empty union.
     pub(super) fn carves(&mut self, it: &mut Item) -> bool {
         match &it.item.prim {
-            Prim::Recess { rect, radii, depth, edges, .. }
-            | Prim::Boss { rect, radii, depth, edges, .. }
-            | Prim::Ridge { rect, radii, depth, edges }
-            | Prim::Trough { rect, radii, depth, edges, .. }
-                if self.shader_plates =>
-            {
-                let tint = match &it.item.prim {
-                    Prim::Recess { tint, .. } => *tint,
-                    Prim::Boss { tint, .. } => *tint,
-                    Prim::Trough { tint, .. } => *tint,
-                    _ => None,
-                };
-                // Recess carves down into the surface; Boss raises a plateau out
-                // of it (same machinery, depth sign flipped); Ridge is a raised
-                // rim straddling the boundary and Trough the sunken valley twin
-                // (their own overlay profiles — never grouped, the CSG features
-                // only model monotonic steps).
-                let mode = match &it.item.prim {
-                    Prim::Boss { .. } => 3.0f32,
-                    Prim::Ridge { .. } => 4.0,
-                    Prim::Trough { .. } => 9.0,
-                    _ => 2.0,
-                };
-                let raised = mode > 2.5;
-                // Grouped into the enclosing plate whenever one is live: the
-                // carve becomes a CSG feature of that plate's single draw —
-                // exact composite shading, real junctions at the plate's rolled
-                // perimeter — instead of a shading overlay (the fallback below).
-                //
-                // Edge-suppressed carves NEVER group: a suppressed wall's rect
-                // extends past the carve (below), relying on the overlay cover
-                // quad to keep that shading out of the drawn pixels — a clip
-                // the plate's whole-surface draw does not have, so grouped it
-                // smears the extended walls across the plate. Union pieces
-                // (section wells, a spinbox's field and button run) are
-                // exactly these.
-                // A tinted carve also never groups: a CSG feature is geometry only,
-                // so the tint could only land on the whole plate's specular.
-                let full_ring = *edges == (true, true, true, true);
-                let host_plate = if mode < 3.5 && full_ring && tint.is_none() && self.features.len() < crate::draw::MAX_PLATE_FEATURES {
-                    // The carve's shaded region, for the occlusion test below
-                    // (the overlay path's cover-quad inflation).
-                    let infl = *depth * 0.5 + 2.0;
-                    let (sx0, sy0) = (rect.x - infl, rect.y - infl);
-                    let (sx1, sy1) = (rect.x + rect.width + infl, rect.y + rect.height + infl);
-                    self.plate_stack
-                        .iter()
-                        .enumerate()
-                        .rev()
-                        .find(|(si, (bi, prect))| {
-                            let inside = rect.x >= prect.x - 0.5
-                                && rect.y >= prect.y - 0.5
-                                && rect.x + rect.width <= prect.x + prect.width + 0.5
-                                && rect.y + rect.height <= prect.y + prect.height + 0.5;
-                            if !inside {
-                                return false;
-                            }
-                            // Pixels drawn since this plate (a LATER plate in the
-                            // stack) must not overlap the carve — its shading would
-                            // land beneath them in this plate's earlier draw.
-                            if self.plate_stack[si + 1..].iter().any(|(_, orect)| {
-                                sx0 < orect.x + orect.width
-                                    && sx1 > orect.x
-                                    && sy0 < orect.y + orect.height
-                                    && sy1 > orect.y
-                            }) {
-                                return false;
-                            }
-                            // Contiguity: only the last feature-receiving plate (or
-                            // one with no features yet) may take another.
-                            self.batches[*bi].plate.as_ref().is_some_and(|p| p.host[1] == 0.0)
-                                || self.last_feature_plate == Some(*bi)
-                        })
-                        .map(|(_, &(bi, _))| bi)
-                } else {
-                    None
-                };
-                // Debug-build loudness for the silent grouped→overlay flip —
-                // see `near_roll_fallback_reason` on what qualifies and why
-                // this warns instead of panicking.
+            Prim::Recess { .. } | Prim::Boss { .. } | Prim::Ridge { .. } | Prim::Trough { .. } if self.shader_plates => {
+                // Grouped into the enclosing plate whenever one is live: the carve becomes a
+                // CSG feature of that plate's single draw — exact composite shading, real
+                // junctions at the plate's rolled perimeter — instead of a shading overlay.
+                let c = Carve::of(&it.item.prim);
+                let host = self.carve_host(&c);
                 #[cfg(debug_assertions)]
-                if host_plate.is_none() && mode < 3.5 && full_ring && tint.is_none() {
-                    let enclosing = self.plate_stack.iter().enumerate().rev().find(|(_, (_, p))| {
-                        rect.x >= p.x - 0.5
-                            && rect.y >= p.y - 0.5
-                            && rect.x + rect.width <= p.x + p.width + 0.5
-                            && rect.y + rect.height <= p.y + p.height + 0.5
-                    });
-                    if let Some((si, &(bi, prect))) = enclosing {
-                        // Host roll width rides the push's light.w (physical px).
-                        let roll = self.batches[bi].plate.as_ref().map_or(0.0, |p| p.light[3]) / self.scale;
-                        let later: Vec<crate::scene::layout::Rect> =
-                            self.plate_stack[si + 1..].iter().map(|&(_, r)| r).collect();
-                        let budget_full = self.features.len() >= crate::draw::MAX_PLATE_FEATURES;
-                        if let Some(why) =
-                            near_roll_fallback_reason(rect, *depth, &prect, roll, &later, budget_full)
-                        {
-                            let kind = if mode > 2.5 { "boss" } else { "recess" };
-                            plate_carve_warn_once(format!(
-                                "plate-carve: near-roll {kind} ({:.0},{:.0} {:.0}x{:.0}) lost grouping — {why}; \
-                                 its junction with the host plate's roll shades through the overlay fallback, \
-                                 visually different from grouped frames (CCE_PLATE_DEBUG=1 traces verdicts) \
-                                 [debug-build warning, printed once]",
-                                rect.x, rect.y, rect.width, rect.height
-                            ));
-                        }
-                    }
+                if host.is_none() && c.groupable() {
+                    self.warn_near_roll_fallback(&c);
                 }
                 if self.dbg.on {
-                    match host_plate {
-                        Some(_) => self.dbg.grouped += 1,
-                        None => {
-                            // Re-derive WHY, in the same order the guard tests
-                            // them. Debug-only: the hot path above is untouched.
-                            let kind = match &it.item.prim {
-                                Prim::Boss { .. } => "boss",
-                                Prim::Ridge { .. } => "ridge",
-                                Prim::Trough { .. } => "trough",
-                                _ => "recess",
-                            };
-                            let infl = *depth * 0.5 + 2.0;
-                            let (sx0, sy0) = (rect.x - infl, rect.y - infl);
-                            let (sx1, sy1) = (rect.x + rect.width + infl, rect.y + rect.height + infl);
-                            let enclosing: Vec<usize> = self.plate_stack
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, (_, p))| {
-                                    rect.x >= p.x - 0.5
-                                        && rect.y >= p.y - 0.5
-                                        && rect.x + rect.width <= p.x + p.width + 0.5
-                                        && rect.y + rect.height <= p.y + p.height + 0.5
-                                })
-                                .map(|(si, _)| si)
-                                .collect();
-                            let occluded = |si: usize| {
-                                self.plate_stack[si + 1..].iter().any(|(_, o)| {
-                                    sx0 < o.x + o.width && sx1 > o.x && sy0 < o.y + o.height && sy1 > o.y
-                                })
-                            };
-                            let why = if mode >= 3.5 {
-                                "ridge — never groups (its bump profile is not a monotonic step)".into()
-                            } else if !full_ring {
-                                format!("edge-suppressed {edges:?} — the extended wall would smear across the host")
-                            } else if tint.is_some() {
-                                "tinted — a CSG feature is geometry only, it carries no color".into()
-                            } else if self.features.len() >= crate::draw::MAX_PLATE_FEATURES {
-                                format!("feature budget full ({} used)", self.features.len())
-                            } else if enclosing.is_empty() {
-                                format!("no enclosing plate ({} open)", self.plate_stack.len())
-                            } else if enclosing.iter().all(|&si| occluded(si)) {
-                                "a later plate overlaps this carve's shaded region".into()
-                            } else {
-                                "host plate's feature run is closed (another carve appended since)".into()
-                            };
-                            self.dbg.fell_back.push(format!(
-                                "  overlay: {kind} ({:.0},{:.0} {:.0}x{:.0}) — {why}",
-                                rect.x, rect.y, rect.width, rect.height
-                            ));
-                        }
-                    }
+                    self.note_carve_verdict(&c, host);
                 }
-                if let Some(bi) = host_plate {
-                    {
-                        // A wall the carve shares with the plate's edge extends
-                        // past the plate, so the carve has no wall there.
-                        let ext = *depth + 4.0;
-                        let (mut x0, mut y0) = (rect.x, rect.y);
-                        let (mut x1, mut y1) = (rect.x + rect.width, rect.y + rect.height);
-                        if !edges.0 { y0 -= ext; }
-                        if !edges.1 { x1 += ext; }
-                        if !edges.2 { y1 += ext; }
-                        if !edges.3 { x0 -= ext; }
-                        let t_px = *depth * self.scale;
-                        // The carve's drop: the material's pinned height, else
-                        // the analytic ratio of the wall saturating at the DE's
-                        // roll width (`layout::carve_depth_px` states the rule
-                        // once for this path and the shader's free carves).
-                        let k_mag = crate::layout::carve_depth_px(*depth) * self.scale;
-                        // Negative depth = raised (Boss); the shader's summed
-                        // slope vectors and curvature sign follow it.
-                        let k_px = if raised { -k_mag } else { k_mag };
-                        if let Some(p) = self.batches[bi].plate.as_mut() {
-                            if p.host[1] == 0.0 {
-                                p.host[0] = self.features.len() as f32;
-                            }
-                            p.host[1] += 1.0;
-                        }
-                        self.last_feature_plate = Some(bi);
-                        self.features.push([
-                            (x0 + x1) * 0.5 * self.scale,
-                            (y0 + y1) * 0.5 * self.scale,
-                            (x1 - x0) * 0.5 * self.scale,
-                            (y1 - y0) * 0.5 * self.scale,
-                            radii.0 * self.scale,
-                            radii.1 * self.scale,
-                            radii.2 * self.scale,
-                            radii.3 * self.scale,
-                            t_px,
-                            k_px,
-                            0.0,
-                            0.0,
-                        ]);
-                        return false;
-                    }
+                if let Some(bi) = host {
+                    self.group_carve(bi, &c);
+                    return false;
                 }
-                // Overlay-only carve: the cover quad inflates by half the roll
-                // width (the step straddles the boundary) and carries no color —
-                // the shader emits translucent white/black over what's beneath.
-                let infl = *depth * 0.5 + 2.0;
-                self.verts.extend(quad_vertices(
-                    rect.x - infl, rect.y - infl,
-                    rect.width + 2.0 * infl, rect.height + 2.0 * infl,
-                    self.sw, self.sh, [0.0; 4],
-                ));
-                // A suppressed wall is pushed past the cover quad, so its
-                // shading falls outside the drawn pixels (see Prim::Recess on
-                // why a flush region is a step, not a trough).
-                let ext = *depth + 4.0;
-                let (mut x0, mut y0) = (rect.x, rect.y);
-                let (mut x1, mut y1) = (rect.x + rect.width, rect.y + rect.height);
-                if !edges.0 { y0 -= ext; }
-                if !edges.1 { x1 += ext; }
-                if !edges.2 { y1 += ext; }
-                if !edges.3 { x0 -= ext; }
-                let sdf_rect = crate::scene::layout::Rect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
-                let mut p = plate_push_raised(&sdf_rect, *radii, *depth, self.scale, self.light, self.finish, false, None);
-                p.mode = mode;
-                // w = 1.0 flags the free-carve shader path to composite its
-                // light in the tint and its shadow in a dark tint instead of
-                // white and black (plates leave w at 0.0).
-                if let Some(t) = tint {
-                    p.specular_tint = [t[0], t[1], t[2], 1.0];
-                }
-                // Host-plate box for the roll fade: a suppressed wall means the
-                // recess runs flush to the host's edge there, so that side of
-                // the box sits at the original rect edge; enabled walls face
-                // host interior, pushed to ±1e5 so no fade applies.
-                const FAR: f32 = 1e5;
-                let (hx0, hy0) = (
-                    if edges.3 { rect.x - FAR } else { rect.x },
-                    if edges.0 { rect.y - FAR } else { rect.y },
-                );
-                let (hx1, hy1) = (
-                    if edges.1 { rect.x + rect.width + FAR } else { rect.x + rect.width },
-                    if edges.2 { rect.y + rect.height + FAR } else { rect.y + rect.height },
-                );
-                p.host = [
-                    (hx0 + hx1) * 0.5 * self.scale,
-                    (hy0 + hy1) * 0.5 * self.scale,
-                    (hx1 - hx0) * 0.5 * self.scale,
-                    (hy1 - hy0) * 0.5 * self.scale,
-                ];
-                it.plate = Some(p);
+                it.plate = Some(self.overlay_carve(&c));
             }
             Prim::Recess { rect, radii, depth, edges, .. } => {
                 // Edges only — no fill: the shading is an overlay, so whatever is painted
@@ -554,5 +319,273 @@ impl Tess {
             _ => unreachable!("carves: not a carve prim"),
         }
         true
+    }
+
+    /// The open plate carve `c` groups into, if any: the innermost one that encloses it, that
+    /// no later plate's pixels overlap within the carve's shaded region (its shading would
+    /// land beneath them in this plate's earlier draw), and whose feature run is still open —
+    /// a plate's features are one contiguous run, so only the last plate to receive one (or a
+    /// plate with none yet) may take another. Only a carve that can group asks (see
+    /// [`Carve::groupable`]), and only while the frame's feature budget lasts.
+    fn carve_host(&self, c: &Carve) -> Option<usize> {
+        if !c.groupable() || self.features.len() >= crate::draw::MAX_PLATE_FEATURES {
+            return None;
+        }
+        let (sx0, sy0, sx1, sy1) = c.shaded();
+        self.plate_stack
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(si, (bi, prect))| {
+                if !c.within(prect) {
+                    return false;
+                }
+                if self.plate_stack[si + 1..].iter().any(|(_, orect)| {
+                    sx0 < orect.x + orect.width
+                        && sx1 > orect.x
+                        && sy0 < orect.y + orect.height
+                        && sy1 > orect.y
+                }) {
+                    return false;
+                }
+                self.batches[*bi].plate.as_ref().is_some_and(|p| p.host[1] == 0.0)
+                    || self.last_feature_plate == Some(*bi)
+            })
+            .map(|(_, &(bi, _))| bi)
+    }
+
+    /// Carve `c` as a CSG feature of plate batch `bi`, appended to that plate's feature run.
+    /// A wall the carve shares with the plate's edge extends past the plate, so the carve has
+    /// no wall there.
+    fn group_carve(&mut self, bi: usize, c: &Carve) {
+        let (x0, y0, x1, y1) = c.wall_box();
+        let t_px = c.depth * self.scale;
+        // The carve's drop: the material's pinned height, else the analytic ratio of the wall
+        // saturating at the DE's roll width (`layout::carve_depth_px` states the rule once for
+        // this path and the shader's free carves).
+        let k_mag = crate::layout::carve_depth_px(c.depth) * self.scale;
+        // Negative depth = raised (Boss); the shader's summed slope vectors and curvature sign
+        // follow it.
+        let k_px = if c.raised() { -k_mag } else { k_mag };
+        if let Some(p) = self.batches[bi].plate.as_mut() {
+            if p.host[1] == 0.0 {
+                p.host[0] = self.features.len() as f32;
+            }
+            p.host[1] += 1.0;
+        }
+        self.last_feature_plate = Some(bi);
+        self.features.push([
+            (x0 + x1) * 0.5 * self.scale,
+            (y0 + y1) * 0.5 * self.scale,
+            (x1 - x0) * 0.5 * self.scale,
+            (y1 - y0) * 0.5 * self.scale,
+            c.radii.0 * self.scale,
+            c.radii.1 * self.scale,
+            c.radii.2 * self.scale,
+            c.radii.3 * self.scale,
+            t_px,
+            k_px,
+            0.0,
+            0.0,
+        ]);
+    }
+
+    /// Carve `c` as an overlay: a cover quad inflated by half the roll width (the step
+    /// straddles the boundary) carrying no colour — the shader emits translucent white and
+    /// black over what is beneath — and its push block. A suppressed wall is pushed past the
+    /// cover quad, so its shading falls outside the drawn pixels (see `Prim::Recess` on why a
+    /// flush region is a step, not a trough).
+    fn overlay_carve(&mut self, c: &Carve) -> crate::draw::PlatePush {
+        let rect = &c.rect;
+        let infl = c.depth * 0.5 + 2.0;
+        self.verts.extend(quad_vertices(
+            rect.x - infl, rect.y - infl,
+            rect.width + 2.0 * infl, rect.height + 2.0 * infl,
+            self.sw, self.sh, [0.0; 4],
+        ));
+        let (x0, y0, x1, y1) = c.wall_box();
+        let sdf_rect = crate::scene::layout::Rect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+        let mut p = plate_push_raised(&sdf_rect, c.radii, c.depth, self.scale, self.light, self.finish, false, None);
+        p.mode = c.mode;
+        // w = 1.0 flags the free-carve shader path to composite its light in the tint and its
+        // shadow in a dark tint instead of white and black (plates leave w at 0.0).
+        if let Some(t) = c.tint {
+            p.specular_tint = [t[0], t[1], t[2], 1.0];
+        }
+        // Host-plate box for the roll fade: a suppressed wall means the recess runs flush to
+        // the host's edge there, so that side of the box sits at the original rect edge;
+        // enabled walls face host interior, pushed to ±1e5 so no fade applies.
+        const FAR: f32 = 1e5;
+        let edges = c.edges;
+        let (hx0, hy0) = (
+            if edges.3 { rect.x - FAR } else { rect.x },
+            if edges.0 { rect.y - FAR } else { rect.y },
+        );
+        let (hx1, hy1) = (
+            if edges.1 { rect.x + rect.width + FAR } else { rect.x + rect.width },
+            if edges.2 { rect.y + rect.height + FAR } else { rect.y + rect.height },
+        );
+        p.host = [
+            (hx0 + hx1) * 0.5 * self.scale,
+            (hy0 + hy1) * 0.5 * self.scale,
+            (hx1 - hx0) * 0.5 * self.scale,
+            (hy1 - hy0) * 0.5 * self.scale,
+        ];
+        p
+    }
+
+    /// Debug builds make one fallback loud without `CCE_PLATE_DEBUG`: a carve that could group
+    /// failing to while an open plate encloses it and its shaded region reaches that plate's
+    /// roll — see [`near_roll_fallback_reason`] on what qualifies and why this warns instead of
+    /// panicking.
+    #[cfg(debug_assertions)]
+    fn warn_near_roll_fallback(&self, c: &Carve) {
+        let enclosing = self.plate_stack.iter().enumerate().rev().find(|(_, (_, p))| c.within(p));
+        let Some((si, &(bi, prect))) = enclosing else { return };
+        // Host roll width rides the push's light.w (physical px).
+        let roll = self.batches[bi].plate.as_ref().map_or(0.0, |p| p.light[3]) / self.scale;
+        let later: Vec<crate::scene::layout::Rect> = self.plate_stack[si + 1..].iter().map(|&(_, r)| r).collect();
+        let budget_full = self.features.len() >= crate::draw::MAX_PLATE_FEATURES;
+        if let Some(why) = near_roll_fallback_reason(&c.rect, c.depth, &prect, roll, &later, budget_full) {
+            let kind = c.kind();
+            let rect = &c.rect;
+            plate_carve_warn_once(format!(
+                "plate-carve: near-roll {kind} ({:.0},{:.0} {:.0}x{:.0}) lost grouping — {why}; \
+                 its junction with the host plate's roll shades through the overlay fallback, \
+                 visually different from grouped frames (CCE_PLATE_DEBUG=1 traces verdicts) \
+                 [debug-build warning, printed once]",
+                rect.x, rect.y, rect.width, rect.height
+            ));
+        }
+    }
+
+    /// `CCE_PLATE_DEBUG`: count a grouped carve, or record why one fell back to an overlay —
+    /// re-derived in the order [`Tess::carve_host`] tests its guards, so keep the two in step.
+    fn note_carve_verdict(&mut self, c: &Carve, host: Option<usize>) {
+        if host.is_some() {
+            self.dbg.grouped += 1;
+            return;
+        }
+        let (sx0, sy0, sx1, sy1) = c.shaded();
+        let enclosing: Vec<usize> = self
+            .plate_stack
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, p))| c.within(p))
+            .map(|(si, _)| si)
+            .collect();
+        let occluded = |si: usize| {
+            self.plate_stack[si + 1..].iter().any(|(_, o)| {
+                sx0 < o.x + o.width && sx1 > o.x && sy0 < o.y + o.height && sy1 > o.y
+            })
+        };
+        let edges = c.edges;
+        let why = if c.mode >= 3.5 {
+            "ridge — never groups (its bump profile is not a monotonic step)".into()
+        } else if !c.full_ring() {
+            format!("edge-suppressed {edges:?} — the extended wall would smear across the host")
+        } else if c.tint.is_some() {
+            "tinted — a CSG feature is geometry only, it carries no color".into()
+        } else if self.features.len() >= crate::draw::MAX_PLATE_FEATURES {
+            format!("feature budget full ({} used)", self.features.len())
+        } else if enclosing.is_empty() {
+            format!("no enclosing plate ({} open)", self.plate_stack.len())
+        } else if enclosing.iter().all(|&si| occluded(si)) {
+            "a later plate overlaps this carve's shaded region".into()
+        } else {
+            "host plate's feature run is closed (another carve appended since)".into()
+        };
+        let kind = c.kind();
+        let rect = &c.rect;
+        self.dbg.fell_back.push(format!(
+            "  overlay: {kind} ({:.0},{:.0} {:.0}x{:.0}) — {why}",
+            rect.x, rect.y, rect.width, rect.height
+        ));
+    }
+}
+
+/// A recess, boss, ridge or trough on the SDF path: what the grouping decision and both ways of
+/// drawing it read. Recess carves down into the surface; Boss raises a plateau out of it (the
+/// same machinery, depth sign flipped); Ridge is a raised rim straddling the boundary and Trough
+/// the sunken valley twin (their own overlay profiles — never grouped, the CSG features only
+/// model monotonic steps).
+pub(super) struct Carve {
+    rect: crate::scene::layout::Rect,
+    radii: (f32, f32, f32, f32),
+    depth: f32,
+    edges: (bool, bool, bool, bool),
+    /// The shader mode: 2 recess, 3 boss, 4 ridge, 9 trough.
+    mode: f32,
+    tint: Option<[f32; 3]>,
+}
+
+impl Carve {
+    fn of(prim: &Prim) -> Carve {
+        let (rect, radii, depth, edges, mode, tint) = match prim {
+            Prim::Recess { rect, radii, depth, edges, tint } => (rect, radii, depth, edges, 2.0, *tint),
+            Prim::Boss { rect, radii, depth, edges, tint } => (rect, radii, depth, edges, 3.0, *tint),
+            Prim::Ridge { rect, radii, depth, edges } => (rect, radii, depth, edges, 4.0, None),
+            Prim::Trough { rect, radii, depth, edges, tint } => (rect, radii, depth, edges, 9.0, *tint),
+            _ => unreachable!("Carve::of: not a carve"),
+        };
+        Carve { rect: *rect, radii: *radii, depth: *depth, edges: *edges, mode, tint }
+    }
+
+    fn raised(&self) -> bool {
+        self.mode > 2.5
+    }
+
+    fn full_ring(&self) -> bool {
+        self.edges == (true, true, true, true)
+    }
+
+    /// Whether the carve can become a CSG feature at all. A ridge or trough cannot (not a
+    /// monotonic step). An edge-suppressed carve never groups: a suppressed wall's rect extends
+    /// past the carve, relying on the overlay cover quad to keep that shading out of the drawn
+    /// pixels — a clip the plate's whole-surface draw does not have, so grouped it smears the
+    /// extended walls across the plate (union pieces, such as section wells and a spinbox's
+    /// field and button run, are exactly these). A tinted carve never groups either: a CSG
+    /// feature is geometry only, so the tint could only land on the whole plate's specular.
+    fn groupable(&self) -> bool {
+        self.mode < 3.5 && self.full_ring() && self.tint.is_none()
+    }
+
+    /// The name `CCE_PLATE_DEBUG` and the near-roll warning give it.
+    fn kind(&self) -> &'static str {
+        if self.mode == 3.0 {
+            "boss"
+        } else if self.mode == 4.0 {
+            "ridge"
+        } else if self.mode == 9.0 {
+            "trough"
+        } else {
+            "recess"
+        }
+    }
+
+    /// Whether plate rect `p` encloses the carve (half a pixel's slack).
+    fn within(&self, p: &crate::scene::layout::Rect) -> bool {
+        let r = &self.rect;
+        r.x >= p.x - 0.5 && r.y >= p.y - 0.5 && r.x + r.width <= p.x + p.width + 0.5 && r.y + r.height <= p.y + p.height + 0.5
+    }
+
+    /// The carve's shaded region (the overlay's cover-quad inflation), as x0, y0, x1, y1.
+    fn shaded(&self) -> (f32, f32, f32, f32) {
+        let r = &self.rect;
+        let infl = self.depth * 0.5 + 2.0;
+        (r.x - infl, r.y - infl, r.x + r.width + infl, r.y + r.height + infl)
+    }
+
+    /// The box its walls are drawn on: the rect, with each suppressed side pushed out past it.
+    fn wall_box(&self) -> (f32, f32, f32, f32) {
+        let r = &self.rect;
+        let ext = self.depth + 4.0;
+        let (mut x0, mut y0) = (r.x, r.y);
+        let (mut x1, mut y1) = (r.x + r.width, r.y + r.height);
+        if !self.edges.0 { y0 -= ext; }
+        if !self.edges.1 { x1 += ext; }
+        if !self.edges.2 { y1 += ext; }
+        if !self.edges.3 { x0 -= ext; }
+        (x0, y0, x1, y1)
     }
 }

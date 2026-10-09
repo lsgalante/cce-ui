@@ -10,6 +10,18 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The tessellator's carve arm is a `Carve` and five methods.** The recess / boss / ridge /
+  trough SDF arm (about 250 lines) is now 18: `Carve::of` reads the prim; `carve_host` decides
+  grouping; `group_carve` appends the CSG feature; `overlay_carve` builds the overlay's cover
+  quad and push; `warn_near_roll_fallback` (debug builds) and `note_carve_verdict`
+  (`CCE_PLATE_DEBUG`, kept beside `carve_host` since it re-derives the same guards in order)
+  report. `Carve` holds what three copies each of the containment test and the shaded-region box,
+  two of the extended wall box and two of the kind name computed (`within`, `shaded`, `wall_box`,
+  `kind`, `groupable`). The overlay's cover quad keeps its own expression, since computing it
+  from the shaded box would round differently. Verified byte-identical against the golden, the
+  probe dump and the `CCE_PLATE_DEBUG` output, and the near-roll warning, fired headless from the
+  `trigger_near_roll_warning` example's scene, prints the same line before and after (that
+  example's doc named `backend/window_runner.rs`; it is `backend/tessellate/debug.rs`).
 - **The tessellator is a directory module, and `tessellate_display_list` is no longer one
   1,134-line loop.** `backend/tessellate/` is `mod.rs` (the types, and the frame's `Tess`: each
   item's prelude, a dispatch by prim family, and the batch tail), `flat`, `plates`, `carves`,

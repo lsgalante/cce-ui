@@ -1,5 +1,5 @@
 //! Deliberately fires the debug-build "near-roll carve lost grouping" warning
-//! (`near_roll_fallback_reason` in `backend/window_runner.rs`), so the loud
+//! (`near_roll_fallback_reason` in `backend/tessellate/debug.rs`), so the loud
 //! path can be seen working: a window plate opens the grouping window, a later
 //! Bevel plate overlaps where the carve will go, and a full-ring recess hugging
 //! the left roll is then rejected by the occlusion rule — groupable geometry,
