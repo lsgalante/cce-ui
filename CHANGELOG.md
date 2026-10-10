@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The Vulkan core is a directory module** (`vk/core/`): `mod.rs` (`VkCore`, its constructors,
+  the device setup in `new_inner` — one 295-line function, left whole — and `Drop`), `instance`
+  (the process-wide shared instance, its validation layer and debug callback), `surface`
+  (`SurfaceTarget`, `SurfaceLost`) and `device` (naming a device type, reporting an unmet
+  `CCE_VK_DEVICE` preference, with its test); `SurfaceTarget` and `SurfaceLost` re-exported. A
+  pure move, checked line for line. Clippy, the suite and `cargo check --workspace --exclude
+  cce-fx` pass.
 - **`ScrollBox` is a directory module** (`widget/container/scroll_box/`): `mod.rs` (the struct,
   its rect and bounds, the bar's geometry and raise state, the virtualization), `input`, `paint`
   (the relief scrollbar, re-exported for the text box, the pills, the flat quads) and `tests`. A

@@ -8,11 +8,27 @@
 //! builds the same core with no surface at all — for offscreen consumers
 //! (thumbnail rendering, previews, the future RT engine) that render into
 //! images instead of a swapchain.
+//!
+//! | module | holds |
+//! |---|---|
+//! | `mod.rs` | `VkCore`: its constructors (for a surface, or headless), the device setup, `Drop` |
+//! | `instance` | the one Vulkan instance a process shares, with its extensions and validation |
+//! | `surface` | `SurfaceTarget` (what a surface is made from) and `SurfaceLost` |
+//! | `device` | naming a device's type, and reporting a device preference that was not met |
+
+mod device;
+mod instance;
+mod surface;
+
+use device::*;
+use instance::*;
+pub use surface::*;
 
 use std::ffi::{c_void, CStr, CString};
 
 use ash::vk;
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
+
 
 /// Memory blocks start small and double as a client needs more, up to the
 /// allocator's old fixed sizes. Those defaults (a 256 MiB device block and a
@@ -27,34 +43,6 @@ fn allocation_sizes() -> gpu_allocator::AllocationSizes {
     gpu_allocator::AllocationSizes::new(8 * MIB, 4 * MIB)
         .with_max_device_memblock_size(256 * MIB)
         .with_max_host_memblock_size(64 * MIB)
-}
-
-const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
-
-unsafe extern "system" fn debug_callback(
-    severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    _types: vk::DebugUtilsMessageTypeFlagsEXT,
-    data: *const vk::DebugUtilsMessengerCallbackDataEXT<'_>,
-    _user_data: *mut c_void,
-) -> vk::Bool32 {
-    if data.is_null() {
-        return vk::FALSE;
-    }
-    let message = unsafe {
-        let p = (*data).p_message;
-        if p.is_null() {
-            return vk::FALSE;
-        }
-        CStr::from_ptr(p).to_string_lossy()
-    };
-    if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR) {
-        log::error!("[vulkan] {message}");
-    } else if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::WARNING) {
-        log::warn!("[vulkan] {message}");
-    } else {
-        log::debug!("[vulkan] {message}");
-    }
-    vk::FALSE
 }
 
 pub struct VkCore {
@@ -87,253 +75,6 @@ pub struct VkCore {
     /// rectangles that changed, which the Wayland WSI forwards as the
     /// surface's buffer damage in place of "everything".
     pub(crate) incremental_present: bool,
-}
-
-/// The process-wide Vulkan entry + instance every [`VkCore`] hangs off.
-///
-/// Instance creation is the expensive part of bringing up a renderer (ICD
-/// enumeration + driver init, ~70ms warm and much worse on a cold cache), and
-/// popup-style consumers (the cce-cloud daemon) create a renderer per window —
-/// so the instance is created once and intentionally lives for the process.
-struct SharedInstance {
-    entry: ash::Entry,
-    instance: ash::Instance,
-    // Held so the messenger stays alive; never destroyed.
-    _debug: Option<(ash::ext::debug_utils::Instance, vk::DebugUtilsMessengerEXT)>,
-    /// VK_KHR_surface + VK_KHR_wayland_surface were available and enabled.
-    has_wayland_surface: bool,
-    /// VK_KHR_surface + VK_EXT_metal_surface were (MoltenVK, on macOS).
-    has_metal_surface: bool,
-    api_version: u32,
-}
-
-static SHARED_INSTANCE: std::sync::OnceLock<SharedInstance> = std::sync::OnceLock::new();
-
-fn shared_instance() -> &'static SharedInstance {
-    SHARED_INSTANCE.get_or_init(|| unsafe {
-        let t = std::time::Instant::now();
-        let entry = ash::Entry::load().expect("Failed to load libvulkan");
-
-        // Validation when available (debug builds or CCE_VK_VALIDATION=1).
-        let want_validation =
-            cfg!(debug_assertions) || std::env::var_os("CCE_VK_VALIDATION").is_some();
-        let validation_available = want_validation
-            && entry
-                .enumerate_instance_layer_properties()
-                .map(|layers| {
-                    layers
-                        .iter()
-                        .any(|l| CStr::from_ptr(l.layer_name.as_ptr()) == VALIDATION_LAYER)
-                })
-                .unwrap_or(false);
-        if want_validation && !validation_available {
-            log::warn!(
-                "Vulkan validation requested but VK_LAYER_KHRONOS_validation is not installed"
-            );
-        }
-
-        let api_version = match entry.try_enumerate_instance_version().ok().flatten() {
-            Some(v) if v >= vk::API_VERSION_1_2 => vk::API_VERSION_1_2,
-            Some(v) => v,
-            None => vk::API_VERSION_1_0,
-        };
-        let app_name = c"cce-ui";
-        let app_info = vk::ApplicationInfo::default()
-            .application_name(app_name)
-            .engine_name(app_name)
-            .api_version(api_version);
-
-        // Surface extensions are enabled whenever the loader offers them, so
-        // the one shared instance serves both windowed and headless cores.
-        let ext_props = entry
-            .enumerate_instance_extension_properties(None)
-            .unwrap_or_default();
-        let has_inst_ext = |name: &CStr| {
-            ext_props
-                .iter()
-                .any(|e| CStr::from_ptr(e.extension_name.as_ptr()) == name)
-        };
-        let has_surface = has_inst_ext(ash::khr::surface::NAME);
-        let has_wayland_surface = has_surface && has_inst_ext(ash::khr::wayland_surface::NAME);
-        let has_metal_surface = has_surface && has_inst_ext(ash::ext::metal_surface::NAME);
-        // MoltenVK is a PORTABILITY driver: since loader 1.3.216 the loader
-        // lists one only to an instance that asks for portability
-        // enumeration, and a device of one must enable
-        // VK_KHR_portability_subset (below). macOS only, so the instance a
-        // Linux driver sees is the one it always saw.
-        let portability = cfg!(target_os = "macos") && has_inst_ext(ash::khr::portability_enumeration::NAME);
-
-        let mut extension_names: Vec<*const i8> = Vec::new();
-        if has_wayland_surface || has_metal_surface {
-            extension_names.push(ash::khr::surface::NAME.as_ptr());
-        }
-        if has_wayland_surface {
-            extension_names.push(ash::khr::wayland_surface::NAME.as_ptr());
-        }
-        if has_metal_surface {
-            extension_names.push(ash::ext::metal_surface::NAME.as_ptr());
-        }
-        if portability {
-            extension_names.push(ash::khr::portability_enumeration::NAME.as_ptr());
-        }
-        if validation_available {
-            extension_names.push(ash::ext::debug_utils::NAME.as_ptr());
-        }
-        let layer_names_owned: Vec<CString> = if validation_available {
-            vec![VALIDATION_LAYER.to_owned()]
-        } else {
-            Vec::new()
-        };
-        let layer_names: Vec<*const i8> = layer_names_owned.iter().map(|l| l.as_ptr()).collect();
-
-        let instance = entry
-            .create_instance(
-                &vk::InstanceCreateInfo::default()
-                    .flags(if portability {
-                        vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR
-                    } else {
-                        vk::InstanceCreateFlags::empty()
-                    })
-                    .application_info(&app_info)
-                    .enabled_extension_names(&extension_names)
-                    .enabled_layer_names(&layer_names),
-                None,
-            )
-            .expect("Failed to create Vulkan instance");
-
-        let debug = if validation_available {
-            let loader = ash::ext::debug_utils::Instance::new(&entry, &instance);
-            let messenger = loader
-                .create_debug_utils_messenger(
-                    &vk::DebugUtilsMessengerCreateInfoEXT::default()
-                        .message_severity(
-                            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                                | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
-                        )
-                        .message_type(
-                            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-                        )
-                        .pfn_user_callback(Some(debug_callback)),
-                    None,
-                )
-                .expect("Failed to create debug messenger");
-            log::info!("Vulkan validation layers enabled");
-            Some((loader, messenger))
-        } else {
-            None
-        };
-
-        log::debug!("[timing] shared Vulkan instance init: {:?}", t.elapsed());
-        SharedInstance {
-            entry,
-            instance,
-            _debug: debug,
-            has_wayland_surface,
-            has_metal_surface,
-            api_version,
-        }
-    })
-}
-
-/// What a window's `VkSurfaceKHR` is made from: the window system's own
-/// handles, as raw pointers.
-#[derive(Debug, Clone, Copy)]
-pub enum SurfaceTarget {
-    /// A `wl_display` and a `wl_surface` on it.
-    Wayland { display: *mut c_void, surface: *mut c_void },
-    /// A `CAMetalLayer` (macOS, through MoltenVK's VK_EXT_metal_surface).
-    Metal { layer: *const c_void },
-}
-
-impl SurfaceTarget {
-    /// Make the surface on `instance`, or fail as [`SurfaceLost`] (a dead
-    /// display connection). A loader with no extension for this kind of
-    /// window is a broken install, and panics naming it.
-    unsafe fn create(self, instance: &ash::Instance) -> Result<vk::SurfaceKHR, SurfaceLost> {
-        let shared = shared_instance();
-        match self {
-            SurfaceTarget::Wayland { display, surface } => {
-                if !shared.has_wayland_surface {
-                    panic!("Vulkan loader offers no VK_KHR_wayland_surface but a window was requested");
-                }
-                ash::khr::wayland_surface::Instance::new(&shared.entry, instance)
-                    .create_wayland_surface(
-                        &vk::WaylandSurfaceCreateInfoKHR::default().display(display).surface(surface),
-                        None,
-                    )
-                    .map_err(|result| SurfaceLost { call: "vkCreateWaylandSurfaceKHR", result })
-            }
-            SurfaceTarget::Metal { layer } => {
-                if !shared.has_metal_surface {
-                    panic!("Vulkan loader offers no VK_EXT_metal_surface (is MoltenVK installed?) but a window was requested");
-                }
-                ash::ext::metal_surface::Instance::new(&shared.entry, instance)
-                    .create_metal_surface(&vk::MetalSurfaceCreateInfoEXT::default().layer(layer.cast()), None)
-                    .map_err(|result| SurfaceLost { call: "vkCreateMetalSurfaceEXT", result })
-            }
-        }
-    }
-}
-
-/// A Vulkan call on a window surface failed — in practice
-/// `ERROR_SURFACE_LOST_KHR`: the display connection under the surface is dead,
-/// because the compositor exited (a logout) or the transport broke. Mesa's
-/// Wayland WSI answers the surface queries with a roundtrip, so they are the
-/// first thing to find out.
-///
-/// That is the client's SESSION ending, not a renderer bug, so the window
-/// constructors and the swapchain path report it instead of panicking, and the
-/// caller ends the session the way it would for any other lost connection.
-/// Until 2026-09-25 each of these calls `expect`ed, and a daemon asked for a
-/// window over a dead connection took the whole process down at logout
-/// (cce-cloud, `No surface formats: ERROR_SURFACE_LOST_KHR`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SurfaceLost {
-    /// The Vulkan entry point that failed.
-    pub call: &'static str,
-    pub result: vk::Result,
-}
-
-impl std::fmt::Display for SurfaceLost {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "window surface lost ({}: {})", self.call, self.result)
-    }
-}
-
-impl std::error::Error for SurfaceLost {}
-
-fn device_type_name(t: vk::PhysicalDeviceType) -> &'static str {
-    match t {
-        vk::PhysicalDeviceType::INTEGRATED_GPU => "integrated",
-        vk::PhysicalDeviceType::DISCRETE_GPU => "discrete",
-        vk::PhysicalDeviceType::VIRTUAL_GPU => "virtual",
-        vk::PhysicalDeviceType::CPU => "cpu",
-        _ => "other",
-    }
-}
-
-/// The warning for a `CCE_VK_DEVICE` preference the chosen device does not
-/// meet, or `None` when there was no explicit preference or it was met (a
-/// rank of 0 is a match, whatever the preference). `chosen` and `seen` are
-/// device descriptions, `seen` every one the loader offered.
-///
-/// A vendor whose driver failed to LOAD is in no list at all, which is the
-/// case worth naming: in a cce-shadow session the NVIDIA ICD will not load
-/// without an X display (`DISPLAY` and `XAUTHORITY`), and the loader says why
-/// only when asked (`VK_LOADER_DEBUG=error`).
-fn unmet_device_preference(pref: Option<&str>, chosen_rank: i32, chosen: &str, seen: &[String]) -> Option<String> {
-    let pref = pref?;
-    if chosen_rank == 0 {
-        return None;
-    }
-    Some(format!(
-        "cce-ui: CCE_VK_DEVICE={pref} is not met; using {chosen}. Devices the Vulkan loader offered: {}. \
-         A driver that failed to load is not among them (VK_LOADER_DEBUG=error says why; in a \
-         cce-shadow session the NVIDIA driver needs DISPLAY and XAUTHORITY).",
-        seen.join(", ")
-    ))
 }
 
 impl VkCore {
@@ -713,23 +454,5 @@ impl Drop for VkCore {
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_device(None);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// An explicit preference that was not met says so; one that was met, or
-    /// no preference at all, says nothing.
-    #[test]
-    fn an_unmet_device_preference_is_reported() {
-        let seen = vec!["Intel(R) Iris(R) Xe Graphics (integrated)".to_string()];
-        let msg = unmet_device_preference(Some("discrete"), 1, &seen[0], &seen).expect("unmet");
-        assert!(msg.contains("CCE_VK_DEVICE=discrete is not met"), "{msg}");
-        assert!(msg.contains("using Intel(R) Iris(R) Xe Graphics (integrated)"), "{msg}");
-        assert!(msg.contains("DISPLAY and XAUTHORITY"), "{msg}");
-        assert_eq!(unmet_device_preference(Some("discrete"), 0, &seen[0], &seen), None);
-        assert_eq!(unmet_device_preference(None, 1, &seen[0], &seen), None);
     }
 }
