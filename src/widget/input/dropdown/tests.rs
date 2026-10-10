@@ -259,7 +259,7 @@ fn a_marked_option_draws_its_glyph() {
         icons: Vec<(String, f32)>,
         texts: Vec<(String, f32)>,
     }
-    impl crate::layout::RenderTarget for Rec {
+    impl crate::scene::paint::RenderTarget for Rec {
         fn rect(&mut self, _: [f32; 4], _: f32, _: f32, _: f32, _: f32) {}
         fn text(&mut self, t: &str, x: f32, _: f32, _: f32, _: [f32; 4]) {
             self.texts.push((t.to_string(), x));

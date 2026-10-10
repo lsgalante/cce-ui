@@ -204,7 +204,7 @@ pub trait WidgetHost {
         full_name.split("::").last().unwrap_or("Widget")
     }
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> { None }
-    fn render_popover(&self, _pc: &mut dyn crate::layout::RenderTarget) {}
+    fn render_popover(&self, _pc: &mut dyn crate::scene::paint::RenderTarget) {}
 
     fn focus(&mut self) {
         self.base_mut().focused = true;

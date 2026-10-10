@@ -12,8 +12,9 @@
 //! which the section lays out across its content box with `scene::layout` and paints
 //! ([`SectionContext::form`], [`SectionContext::place`]).
 
-use super::*;
 use crate::context::UiContext;
+use crate::layout::*;
+use crate::scene::paint::{RenderTarget, SectionFrame};
 
 fn estimate_label_width_helper(label: &str, font_size: f32, font_fam: &str) -> f32 {
     let fam_lower = font_fam.to_lowercase();
@@ -519,6 +520,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::paint::PopoverCollector;
 
     /// Where a section goes depends on the sections before it and never on its own height:
     /// one column wide it takes the shortest column, as wide as the page it goes below

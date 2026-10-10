@@ -359,7 +359,7 @@ impl Paint for ParametersBg {
     }
 
     /// The dropdown rows' popovers; the raw children's are the adapter's recursion.
-    fn draw_popover(&self, _rect: Rect, pc: &mut dyn crate::layout::RenderTarget) {
+    fn draw_popover(&self, _rect: Rect, pc: &mut dyn crate::scene::paint::RenderTarget) {
         for d in self.choices.iter().flatten() {
             d.render_popover(pc);
         }

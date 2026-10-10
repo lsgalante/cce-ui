@@ -333,7 +333,7 @@ any off-standard row), and `src/main.rs` is the reference.
   (`layout::control_corner_radius`, default 8). A new control-scale radius getter falls back to
   the control rung, never to a literal.
 - **New layout is `scene::layout`** (measure → arrange; hand-rolled, not taffy). A settings page
-  section's contents are a `Form` (`layout/form.rs`): declare widgets, text, rows, rules and
+  section's contents are a `Form` (`compose/form.rs`): declare widgets, text, rows, rules and
   fills; `SectionContext::place` solves and paints. One list row's cells are `lay_row`.
 - Migrating an app onto the standard is pixel-neutral for the plate (`tests/plate_golden.rs`)
   and a measured change for spacing (screenshot, count the columns of flat face).
@@ -422,8 +422,11 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `src/a11y.rs` (largest file, ~940 lines); everything else is under 800.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
-  registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
-  (settings-page sections: `PageFlow`, `SectionContext`), `form.rs` (`Form`, `lay_row`).
+  registry).
+- `compose/` — pages composed from widgets on a flat host: `render.rs` (`render_widget_h`,
+  `render_popovers`, the walk onto a `scene::paint::RenderTarget`), `section.rs` (settings-page
+  sections: `PageFlow`, `SectionContext`), `form.rs` (`Form`, `lay_row`). The target itself,
+  `RenderTarget`, and the carve types it takes are `scene::paint`'s (`target.rs`).
 - `color/` — the palette constants and the style slots (`mod.rs`, with the table), the getters
   and setters by topic (`surfaces.rs`, `controls.rs`, `lists.rs`, `graph.rs`), `load.rs` (config →
   colours, `retired_surface_keys`), `math.rs` (sRGB/linear, OKLab), `materials.rs`, `chords.rs`.

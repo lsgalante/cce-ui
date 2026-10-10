@@ -154,7 +154,7 @@ impl TextBox {
     ///
     /// The SINGLE source for that geometry: `paint` carves it here, and the
     /// flat-host bridge (`layout::render_widget`) relays that carve to a flat
-    /// host as a [`relief_carve`](crate::layout::RenderTarget::relief_carve).
+    /// host as a [`relief_carve`](crate::scene::paint::RenderTarget::relief_carve).
     /// A second copy of this math in the bridge is exactly how the two would
     /// drift apart.
     pub fn well(&self) -> Option<crate::scene::paint::Field> {

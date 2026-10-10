@@ -17,7 +17,8 @@ use crate::scene::arena::{Arena, NodeId};
 use crate::scene::layout::{arrange, measure, CrossAlign, LayoutBox, Length, Rect, Size, Style};
 use crate::widget::{UiContext, WidgetHost, WidgetHostExt};
 
-use super::{render_widget, RenderTarget};
+use super::render_widget;
+use crate::scene::paint::RenderTarget;
 
 /// What a piece paints once it is placed: the target, its rect, the widget context.
 pub type Draw<'w, P> = Box<dyn FnOnce(&mut P, Rect, &mut UiContext) + 'w>;

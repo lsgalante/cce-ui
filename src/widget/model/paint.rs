@@ -54,7 +54,7 @@ pub trait Paint {
     }
 
     /// Draw this widget's own popover (legacy `WidgetHost::render_popover`).
-    fn draw_popover(&self, _rect: Rect, _pc: &mut dyn crate::layout::RenderTarget) {}
+    fn draw_popover(&self, _rect: Rect, _pc: &mut dyn crate::scene::paint::RenderTarget) {}
 
     /// Solid border `(color, thickness)` of the widget's background quad. **Transitional**, like
     /// [`corner_style`](Paint::corner_style): `render_widget` gives a widget's background quad a

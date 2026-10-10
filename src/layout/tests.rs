@@ -25,6 +25,8 @@ fn unit_slots_resolve_through_the_metric_at_read_time() {
     assert_eq!(reg.get_len("probe_width"), Some(Len::px(7.0)));
 }
 
+use crate::compose::{render_widget, Grid};
+use crate::scene::paint::RenderTarget;
 use super::*;
 
 /// A graph's wires and ports reach a flat host: `render_widget` hands

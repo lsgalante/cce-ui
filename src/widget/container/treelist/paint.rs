@@ -338,7 +338,7 @@ impl Paint for TreeList {
     
     }
 
-    fn draw_popover(&self, _rect: Rect, pc: &mut dyn crate::layout::RenderTarget) {
+    fn draw_popover(&self, _rect: Rect, pc: &mut dyn crate::scene::paint::RenderTarget) {
         if !self.add_key_popover_open { return; }
         
         let (rx, ry, rw, rh) = self.popover_rect_geom();

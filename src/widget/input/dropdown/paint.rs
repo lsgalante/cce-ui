@@ -53,7 +53,7 @@ impl Paint for Dropdown {
         }
     }
 
-    fn draw_popover(&self, rect: Rect, pc: &mut dyn crate::layout::RenderTarget) {
+    fn draw_popover(&self, rect: Rect, pc: &mut dyn crate::scene::paint::RenderTarget) {
         if !self.open {
             return;
         }
@@ -326,12 +326,12 @@ impl Dropdown {
         }
 
         if adjusted {
-            for (qx, qy, qw, qh, qr, qc, corners) in crate::layout::partition_concentric_corners(
+            for (qx, qy, qw, qh, qr, qc, corners) in crate::scene::paint::partition_concentric_corners(
                 x, y, w, visual_h, radius, outer_radii, border_color,
             ) {
                 ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
             }
-            for (qx, qy, qw, qh, qr, qc, corners) in crate::layout::partition_concentric_corners(
+            for (qx, qy, qw, qh, qr, qc, corners) in crate::scene::paint::partition_concentric_corners(
                 x + 1.0, y + 1.0, w - 2.0, visual_h - 2.0, inner_radius, inner_radii, bg_color,
             ) {
                 ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);

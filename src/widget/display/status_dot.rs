@@ -94,7 +94,7 @@ mod tests {
         struct Probe {
             rects: Vec<(f32, f32, f32, f32, [f32; 4])>,
         }
-        impl crate::layout::RenderTarget for Probe {
+        impl crate::scene::paint::RenderTarget for Probe {
             fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
                 self.rects.push((x, y, w, h, color));
             }
@@ -104,7 +104,7 @@ mod tests {
         let mut ctx = UiContext::new();
         let mut probe = Probe { rects: Vec::new() };
         let mut dot = StatusDot::new(DotStatus::Active);
-        crate::layout::render_widget(&mut probe, &mut dot, 10.0, 10.0, 10.0, 10.0, &mut ctx);
+        crate::compose::render_widget(&mut probe, &mut dot, 10.0, 10.0, 10.0, 10.0, &mut ctx);
         assert_eq!(probe.rects.len(), 1, "the dot is visible now (legacy emitted 0 here)");
         assert_eq!(probe.rects[0].4, [0.20, 0.70, 0.35, 1.0], "active-status green");
     }

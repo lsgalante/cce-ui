@@ -267,7 +267,7 @@ the host implements it. `a_widget_glyph_reaches_a_flat_host` and
   (`docs/platforms.md`).
 - **Vertical text** (`text::set_vertical_text(Some(bar_thickness))`): the status bar's
   mode on a screen edge — labels stack their characters at 1.05 line height. Process-wide.
-- **Settings-page sections** (`layout/section.rs`, `layout/form.rs`): `PageFlow` places sections
+- **Settings-page sections** (`compose/section.rs`, `compose/form.rs`): `PageFlow` places sections
   in a masonry of columns at least `grid_min_col_width` wide; `PageLayoutBuilder` draws each once;
   a section's contents are a `Form` on `scene::layout` (widgets, text, rows, `block`s, `rule`s,
   `space`, `draw`, `fill`), placed by `SectionContext::place` in declaration order with the

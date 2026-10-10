@@ -10,7 +10,18 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
-- **Five more upward edges gone; `layering.rs` allows 7.** The paint walk (`painter`) and
+- **`layout` is the style getters again; `compose` and `scene::paint::target` take the rest.**
+  `layout/bridge.rs` mixed the flat-host target with the walk that replays widgets onto it,
+  and `layout/section.rs` / `form.rs` placed widgets: all four upward edges out of `layout`
+  came from them. The target (`RenderTarget`, `ReliefCarve`, `CarveKind`, `SectionFrame`,
+  `PopoverCollector`, `partition_concentric_corners`) is paint vocabulary `PaintCtx` already
+  implements, so it is `scene::paint`'s (`target.rs`); the widget walk (`render_widget[_h]`,
+  `render_popovers`), `PageFlow`/`SectionContext` and `Form`/`lay_row` are the new top-level
+  `compose` module, beside `widget`. `relief.rs` parses ramp specs through cce-core instead of
+  `widget`'s re-export. `layering.rs` allows 5. Paths moved, nothing else: six apps'
+  imports rewritten (`cce_ui::compose::…`, `cce_ui::scene::paint::RenderTarget`), the suite
+  and a whole-workspace build pass.
+- **Five more upward edges gone; `layering.rs` allows 8.** The paint walk (`painter`) and
   `WidgetTree` (`tree`) walk and own widgets, so they moved from `scene` to `widget`; `scene`
   keeps the generic `Arena` and names no widget type. `Vertex`, what the 2D shaders take, is
   `draw`'s (`backend::tessellate` re-exports it), so `draw` no longer reaches into `backend` and

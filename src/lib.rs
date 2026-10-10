@@ -48,6 +48,8 @@ pub use cce_core::locale;
 pub mod l10n;
 pub mod window_state;
 pub mod style;
+/// Pages composed from widgets on a flat host: the widget walk, `PageFlow` sections, `Form`.
+pub mod compose;
 /// Text shaping, the shaped-buffer cache and the font set (was `backend::text`).
 pub mod text;
 pub mod text_input;

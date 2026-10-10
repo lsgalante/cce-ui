@@ -7,7 +7,7 @@ use super::*;
 /// ctx straight into `render_popover`, so popovers draw REAL prims — relief
 /// plates, rounded rects, bounded text — instead of the flattened
 /// `PopoverCollector` view (which stays for legacy tuple hosts).
-impl crate::layout::RenderTarget for PaintCtx {
+impl crate::scene::paint::RenderTarget for PaintCtx {
     fn icon(&mut self, name: &str, rect: Rect, color: [f32; 4]) {
         PaintCtx::icon(self, name, rect, color);
     }
@@ -39,7 +39,7 @@ impl crate::layout::RenderTarget for PaintCtx {
         PaintCtx::text(self, content, x, y, size, c);
     }
     fn text_with_font(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], font: &str) {
-        crate::layout::RenderTarget::text_with_font_and_bounds(self, content, x, y, size, color, font, None);
+        crate::scene::paint::RenderTarget::text_with_font_and_bounds(self, content, x, y, size, color, font, None);
     }
     fn text_with_bounds(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], bounds: Option<[f32; 4]>) {
         let c = [
@@ -69,7 +69,7 @@ impl crate::layout::RenderTarget for PaintCtx {
     fn inset_plate_tinted(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, tint: [f32; 3]) {
         PaintCtx::inset_plate_tinted(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), Material::face(color).as_ref(), depth, tint);
     }
-    fn relief_carve(&mut self, carve: &crate::layout::ReliefCarve) {
+    fn relief_carve(&mut self, carve: &crate::scene::paint::ReliefCarve) {
         PaintCtx::carve(self, carve);
     }
 }

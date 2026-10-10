@@ -280,7 +280,7 @@ impl Paint for MenuBar {
         self.context_popover_rect(rect).or_else(|| self.menu_dropdown_rect())
     }
 
-    fn draw_popover(&self, rect: Rect, pc: &mut dyn crate::layout::RenderTarget) {
+    fn draw_popover(&self, rect: Rect, pc: &mut dyn crate::scene::paint::RenderTarget) {
         let label_color = self.text_color();
         let srgb = crate::colors::to_srgb(label_color);
         let color_f32 = [srgb[0], srgb[1], srgb[2], 1.0];
@@ -289,7 +289,7 @@ impl Paint for MenuBar {
         // Both dropdown flavors paint in the Dropdown widget's popover idiom
         // (layered soft shadows, surface border/bg, accent hover, blue
         // selected) so menubar menus read as the DE's normal dropdowns.
-        let draw_panel = |pc: &mut dyn crate::layout::RenderTarget, dx: f32, dy: f32, dw: f32, dh: f32, hovered: Option<usize>| {
+        let draw_panel = |pc: &mut dyn crate::scene::paint::RenderTarget, dx: f32, dy: f32, dw: f32, dh: f32, hovered: Option<usize>| {
             let theme = colors::active_theme();
             pc.rect([0.02, 0.02, 0.05, 0.15], dx + 1.0, dy + 1.0, dw, dh);
             pc.rect([0.02, 0.02, 0.05, 0.08], dx + 3.0, dy + 3.0, dw, dh);

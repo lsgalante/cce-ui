@@ -293,7 +293,7 @@ fn sink_behind_bars_cross_at_the_centre() {
 /// Records the alpha of every rect a paint emits.
 #[derive(Default)]
 struct Alphas(Vec<f32>);
-impl crate::layout::RenderTarget for Alphas {
+impl crate::scene::paint::RenderTarget for Alphas {
     fn rect(&mut self, color: [f32; 4], _x: f32, _y: f32, _w: f32, _h: f32) {
         self.0.push(color[3]);
     }

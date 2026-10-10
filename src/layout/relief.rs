@@ -32,7 +32,7 @@ pub(super) fn apply_relief_profile_config() {
 /// A config'd profile spec → installable keys. `None` (falling back to the
 /// analytic profile) for absent, identity-sentinel, or unparseable specs.
 pub(super) fn parse_relief_profile_spec(spec: Option<&str>) -> Option<(Vec<(f32, f32)>, bool)> {
-    spec.filter(|s| *s != RELIEF_PROFILE_IDENTITY_SPEC).and_then(crate::widget::parse_ramp_spec)
+    spec.filter(|s| *s != RELIEF_PROFILE_IDENTITY_SPEC).and_then(cce_core::ramp::parse_ramp_spec)
 }
 
 /// Install (or clear back to analytic) the WALL profile from a ramp spec —

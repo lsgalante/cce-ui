@@ -34,12 +34,6 @@ crate::style::style_slots! {
 
 mod registry;
 pub use registry::*;
-mod bridge;
-pub use bridge::*;
-mod section;
-pub use section::*;
-mod form;
-pub use form::{lay_row, line_height as form_line_height, text_width as form_text_width, Cell, Form, Group as FormGroup};
 mod controls;
 pub use controls::*;
 mod fonts;

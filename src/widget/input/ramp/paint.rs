@@ -14,7 +14,7 @@ impl Paint for Ramp {
     
     }
 
-    fn draw_popover(&self, _rect: Rect, pc: &mut dyn crate::layout::RenderTarget) {
+    fn draw_popover(&self, _rect: Rect, pc: &mut dyn crate::scene::paint::RenderTarget) {
         self.preset_dropdown.render_popover(pc);
         self.line_type_dropdown.render_popover(pc);
     

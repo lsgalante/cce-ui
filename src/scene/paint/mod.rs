@@ -23,6 +23,8 @@ mod flat;
 mod prim;
 mod relief;
 mod render_target;
+mod target;
+pub use target::*;
 mod surfaces;
 mod text;
 #[cfg(test)]

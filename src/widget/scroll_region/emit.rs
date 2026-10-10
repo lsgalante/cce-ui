@@ -12,7 +12,7 @@ impl ScrollRegion {
     /// under them. Call [`Self::push_scrollbar_fore`] once the rows are down.
     /// A framed sink region draws its behind copy here, under the bg fill; a
     /// frameless one leaves it to the host, under the host's plate.
-    pub fn push_prims(&self, pc: &mut dyn crate::layout::RenderTarget) {
+    pub fn push_prims(&self, pc: &mut dyn crate::scene::paint::RenderTarget) {
         if self.draw_frame {
             let radius = crate::layout::list_corner_radius();
             let border_color = if self.focused {
@@ -57,7 +57,7 @@ impl ScrollRegion {
     /// after the rows. It fades rather than flips and keeps drawing all the
     /// way out — gating it on `scrollbar_raised` would cut the fade off at
     /// the latch. Nothing for a plain region, whose bar `push_prims` drew.
-    pub fn push_scrollbar_fore(&self, pc: &mut dyn crate::layout::RenderTarget) {
+    pub fn push_scrollbar_fore(&self, pc: &mut dyn crate::scene::paint::RenderTarget) {
         if self.sink_behind {
             self.push_scrollbar_prims_alpha(pc, self.activity.fade());
         }
@@ -66,7 +66,7 @@ impl ScrollRegion {
     /// The pill scrollbars alone (track + thumb, both axes), drawn wherever the
     /// host calls it — a frameless sink-behind host draws its idle copy with
     /// this, every frame, BEFORE its plate.
-    pub fn push_scrollbar_prims(&self, pc: &mut dyn crate::layout::RenderTarget) {
+    pub fn push_scrollbar_prims(&self, pc: &mut dyn crate::scene::paint::RenderTarget) {
         self.push_scrollbar_prims_alpha(pc, 1.0);
     }
 
@@ -74,7 +74,7 @@ impl ScrollRegion {
     /// `alpha` — what a host draws the FORE copy with while it fades in and
     /// out. The copy that idles behind the plate is drawn at full alpha; the
     /// plate over it is what dims and frosts it.
-    pub fn push_scrollbar_prims_alpha(&self, pc: &mut dyn crate::layout::RenderTarget, alpha: f32) {
+    pub fn push_scrollbar_prims_alpha(&self, pc: &mut dyn crate::scene::paint::RenderTarget, alpha: f32) {
         let a = alpha.clamp(0.0, 1.0);
         if a <= 0.001 {
             return;

@@ -10,7 +10,7 @@
 //! 1. `style`, `color`, `scale`
 //! 2. `draw`, `layout`, `icon`
 //! 3. `scene`
-//! 4. `context`, `widget`, `text`, `ime`, `text_input`, `window_state`, `a11y`
+//! 4. `context`, `widget`, `text`, `compose`, `ime`, `text_input`, `window_state`, `a11y`
 //! 5. the shells and the renderer: `backend`, `vk`, `wayland`, `web`, `mac`,
 //!    `protocol`, `file_dialog`, `mcp`
 //! 6. `engine`, the facade apps import
@@ -20,6 +20,9 @@
 //! unless it is in [`ALLOWED_UPWARD`], the edges that existed when the test
 //! was written. That list only shrinks: an allowance whose edge is gone
 //! fails too, so the fix that removes an edge also deletes its line.
+//!
+//! Test code is not scanned: a trailing `#[cfg(test)] mod tests`, and test
+//! modules in their own files (`tests.rs`, `*_tests.rs`, `tests/`).
 //!
 //! An integration test, like `doc_claims.rs`, so its own scanning is not part
 //! of what it scans. Needs nothing but std.
@@ -42,7 +45,7 @@ fn layer(name: &str) -> Option<u8> {
         "draw" | "layout" | "icon" => 2,
         "scene" => 3,
         // `text` shapes with `scene::paint` and widget types: it sits with them.
-        "context" | "ime" | "text_input" | "window_state" | "a11y" | "widget" | "text" => 4,
+        "context" | "ime" | "text_input" | "window_state" | "a11y" | "widget" | "text" | "compose" => 4,
         "backend" | "vk" | "wayland" | "web" | "mac" | "protocol" | "file_dialog" | "mcp" => 5,
         "engine" => 6,
         _ => return None,
@@ -54,12 +57,7 @@ fn layer(name: &str) -> Option<u8> {
 const ALLOWED_UPWARD: &[(&str, &str)] = &[
     ("color", "layout"),
     ("color", "scene"),
-    ("layout", "context"),
     ("layout", "scene"),
-    // Was layout -> backend: the same use of text shaping, renamed when
-    // backend::text became the top-level text module.
-    ("layout", "text"),
-    ("layout", "widget"),
     ("scale", "window_state"),
     ("style", "layout"),
 ];
@@ -97,6 +95,13 @@ fn edges() -> BTreeMap<(String, String), String> {
         let first = rel.components().next().unwrap().as_os_str().to_string_lossy().into_owned();
         let from = first.trim_end_matches(".rs").to_string();
         if matches!(from.as_str(), "lib" | "main" | "config_style_tests") {
+            continue;
+        }
+        // A test module in its own file (`tests.rs`, `*_tests.rs`, a `tests/`
+        // directory) is not shipped code, whatever it names.
+        let is_test_file = rel.components().any(|c| c.as_os_str() == "tests")
+            || rel.file_stem().is_some_and(|s| s == "tests" || s.to_string_lossy().ends_with("_tests"));
+        if is_test_file {
             continue;
         }
         let code = shipped(&std::fs::read_to_string(&path).unwrap());
