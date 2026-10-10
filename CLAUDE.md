@@ -182,7 +182,7 @@ Rules of the contract:
 
 ## The widget model
 
-**Traits.** `WidgetHost` (`src/widget/mod.rs`, 31 methods) is what the machinery — routing, paint
+**Traits.** `WidgetHost` (`src/widget/host.rs`, 31 methods) is what the machinery — routing, paint
 walk, render loop — sees. Its one production implementor is `Adapted<W>`. A widget's behaviour
 lives on the narrow traits in `src/widget/model/`: `Layout`, `Paint`, `Input`. The host hands
 those out (`layout_model()`, `paint_model()`, `input_model[_mut]()`), and `WidgetHostExt`
@@ -400,7 +400,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   (the box model), `paint/` (`DisplayList`, `Prim`, `PaintCtx`, `Field`, `ControlPlate`,
   `PlateSpec`), `painter.rs` (the paint walk), `anim.rs` (`Animated<T>`), `material.rs`,
   `heightfield.rs`.
-- `widget/` — `mod.rs` (`WidgetHost`), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
+- `widget/` — `host.rs` (`WidgetHost`), `events.rs` (the input vocabulary), `controllers.rs` (the host controller traits), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
   `embedded.rs`, `container/` (params pane, tree list, spreadsheet, menus, scroll boxes…),
   `input/` (button, slider, text box, dropdown, ramp…), `display/` (label, graph, svg…),
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit/` (`LineEdit`, a field an app

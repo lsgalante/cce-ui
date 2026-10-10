@@ -10,6 +10,14 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The widget module root is split** (`widget/`): `mod.rs` keeps widget ids, the layout value
+  types, `ContextAction`, `EmbedImage`, `CornerRadii` and the module tree with its re-exports;
+  the input vocabulary moves to `events` (with `match_key_shortcut` and its tests),
+  `WidgetHost` / `WidgetHostExt` / `NoModel` to `host`, the controller traits to
+  `controllers`. All re-exported, so `widget::…` paths are unchanged. A pure move, checked line
+  for line, except a tombstone comment about the deleted `Control` subtrait, dropped; the module
+  gained the doc it lacked. Clippy, the suite and `cargo check --workspace --exclude cce-fx`
+  pass.
 - **The `DocEditor`'s live preview is a directory module** (`widget/doc_editor/preview/`):
   `mod.rs` (what a line is, the styled `Line`, block contexts, `style_line`), `embeds`,
   `properties` (the frontmatter as a Properties table), `inline` (the inline-markup scanner) and
