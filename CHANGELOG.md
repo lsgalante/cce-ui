@@ -10,6 +10,29 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The material setters change their cells under one guard, merged by name and by rung.**
+  `color::set_named_material` and `set_material_binding` read the whole cell (`style_read`),
+  changed one entry and wrote the whole cell back (`style_write`): two guards, so a material
+  another thread defined, or a rung it bound, between the read and the write was put back
+  out. (Under the per-slot `RwLock`s it was the same race; the 2026-10-09 guard fix could not
+  reach it, since each guard was right on its own.) They now go through `style_update`, which
+  runs the change under ONE write guard — and, under `cfg(test)`, on the thread's overlay as
+  `style_write` does — and the two cells are `StyleCell::merging`: `NAMED_MATERIALS` merges
+  by name (`merge_materials`: a name the write added, redefined or dropped is applied to the
+  newest list; every other is left as it is), `MATERIAL_BINDINGS` by rung. One guard alone
+  would not do: a guard whose field another write changed meanwhile otherwise lands as a
+  store. A config load still replaces both cells whole, inside its batch. Tests:
+  `color::materials::tests::concurrent_material_writes_keep_each_others_change` (sequenced
+  with channels on the real cells, under `test_color_state_lock`; fails every run with the
+  cells unmerged), `the_material_merges_land_only_what_the_write_changed`, and
+  `tests/material_setters_race.rs`, an integration test (cce-ui without `cfg(test)`, so the
+  shipped setters run, not the overlay) racing two threads of 500 definitions and bindings
+  each: the old setters failed it 20 of 20 runs (the last lost 470 of 1000 materials), the
+  new ones pass 20 of 20. Verified on the rebased tree: 10 of 10 full
+  `cargo test --all-features` runs and 50 of 50 `--lib` runs; clippy clean. (Earlier loops on
+  the pre-rebase tree also had every style and material test passing; the runs that failed
+  there failed only in five tests that write temp files, when the shared `/tmp` quota ran out.)
+
 - **Tests no longer share the process-wide scale** (`scale.rs`): under `cfg(test)` the value a
   thread on no window reads, and `set_scale_factor` writes besides the window's, is per thread.
   `offsets_count_chars_and_reshape_on_change` failed once on CI's macos job (run 38064718562,

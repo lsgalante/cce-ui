@@ -236,6 +236,24 @@ fn style_write<T: Clone + PartialEq + 'static>(cell: &'static crate::style::Styl
     }
 }
 
+/// Change a style static in place, under ONE write guard, so a change another thread
+/// publishes meanwhile is merged with this one rather than overwritten (a `style_read` then a
+/// `style_write` is two guards, and the write puts back what the read saw). Per-thread under
+/// `cfg(test)`, as [`style_write`].
+#[inline]
+fn style_update<T: Clone + PartialEq + 'static>(cell: &'static crate::style::StyleCell<T>, f: impl FnOnce(&mut T)) {
+    #[cfg(test)]
+    {
+        let mut val = style_read(cell);
+        f(&mut val);
+        test_overlay::set(cell as *const _ as usize, val);
+    }
+    #[cfg(not(test))]
+    if let Ok(mut lock) = cell.write() {
+        f(&mut lock);
+    }
+}
+
 static SIDEBAR_BG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.SIDEBAR_BG_COLOR, |s| &mut s.color.SIDEBAR_BG_COLOR);
 
 static HIGHLIGHT_PRIMARY_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.HIGHLIGHT_PRIMARY_COLOR, |s| &mut s.color.HIGHLIGHT_PRIMARY_COLOR);
