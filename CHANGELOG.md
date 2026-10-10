@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The Markdown reading view is a directory module** (`widget/markdown/`): `mod.rs` (the theme
+  and colours, `Draw` / `Hit` / `Layout` and painting it, the `layout` entry points, the
+  layouter's state), `blocks` (each block kind's layout) and `inline` (spans laid out word by
+  word, with their tokens), and `tests`. A pure move, checked line for line; the doc's
+  "moved here from cce-notes" note is dropped. Clippy, the suite and `cargo check --workspace
+  --exclude cce-fx` pass.
 - **The macOS shell is split** (`mac/`): `mod.rs` keeps `run`, the `Ev`s the AppKit side hands
   the shell (`send`, the sink) and the menu; `MacShell` moves to `shell`, `CceView` (with its
   input-method state) to `view`, the application and window delegate to `delegate`. What
