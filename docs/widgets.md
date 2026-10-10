@@ -61,6 +61,23 @@ window coordinates. On a toplevel the runner hosts it in an `xdg_popup` (`docs/r
   keeps, and the closed trigger shows its value without the mark.
   `a_marked_option_draws_its_glyph` is the test.
 
+## Date picker (`DatePicker`)
+
+- An immediate-mode helper, not a `WidgetHost` widget: the host opens it (`DatePicker::open`,
+  below what is being dated and right-aligned to it, flipped above when there is no room, kept
+  in the window), routes the pointer (`hit`, `press`), keys (`key`) and the wheel
+  (`shift_month`) to it while it is open, and acts on the `Outcome` each answers — `Set(day)`,
+  `Clear`, `Close`, `Redraw`, `Ignored`. A press outside is the host's to turn into `Close`.
+- The surface is the dropdown's: `Material::popover` on a carved plate. Day cells are
+  `dropdown_height()` square; the content stands `bevel_width()` plus half the text inset in.
+  Month and weekday names and the footer go through `l10n` (`date-picker-*`).
+- Options: `with_title` names the item on the first line (it may cover its own row),
+  `with_week_start` sets the first column, `without_clear` keeps a date that must stay (Clear
+  draws faint and does nothing).
+- Display-list text draws above all geometry, and only a registered widget's popover gets the
+  engine's text clamp, so the host leaves its own text out from under `rect` while it is open.
+  cce-list (list items, vault tasks) and cce-calendar (day-pane rows) are the hosts.
+
 ## Parameter pane (`ParametersBg`)
 
 The designer's and cce-files' row-based parameter editor. Row types are strings

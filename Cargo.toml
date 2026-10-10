@@ -42,6 +42,9 @@ cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "ea9d65d5e
 # The accessibility tree's schema (rfc-accessibility-locale § 5): pure data, built for
 # every target; `crate::a11y` produces its TreeUpdate. The platform adapters are separate.
 accesskit = "0.25"
+# Calendar dates for `DatePicker`: `NaiveDate` arithmetic only. No default features, so no
+# clock and nothing platform-bound — the picker is handed "today" by its host.
+chrono = { version = "0.4", default-features = false }
 cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "acf0e24b015812bd9a83022085cc78cfa9acd766", optional = true }
 glam = "0.29"
 bytemuck = { version = "1", features = ["derive"] }

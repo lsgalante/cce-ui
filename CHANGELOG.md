@@ -22,6 +22,15 @@ today's date — what changed, why, and how it was checked.
   `RenderTarget`). One broken intra-doc link fixed on the way (`clips_children` lives on
   `WidgetHostExt`). Also deleted `probe_slider_bridge`, a test that only printed. Clippy and
   the suite pass.
+- **`DatePicker`, a month grid for choosing a day** (`widget/input/date_picker.rs`): an
+  immediate-mode helper a host opens over its content and routes input to, built first inside
+  cce-list for its items' due dates and moved here when cce-calendar wanted the same one.
+  Popover surface, cce-icons chevrons, names through `l10n` (`date-picker-*`), sizes from the
+  getters; `with_title` / `with_week_start` / `without_clear`. Adds `chrono` without default
+  features (date arithmetic only; the host passes today). Four unit tests (grid start for both
+  week starts, hit mapping, the footer and Clear, placement flipping in a small window, keys
+  across a month boundary); clippy and the suite pass; checked on screen in both apps in a
+  shadow session. `scripts/check-wasm` not run (no wasm32 target on this machine).
 - **The Vulkan renderer's backdrop pass has a file of its own** (`vk/renderer/backdrop.rs`):
   `record_backdrop` — the 3D scene and the tracer into the backdrop, and its copy into the
   swapchain image — moves out of `record.rs`, which keeps the UI pass. A pure move, checked line

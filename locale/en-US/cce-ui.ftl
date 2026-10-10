@@ -38,6 +38,34 @@ ramp-delete-key = Delete
 keybind-recording = [ Press Keys... ]
 keybind-none = None
 
+## The date picker (`DatePicker`)
+# Its header: the month's name and the year, as a calendar heads a month.
+date-picker-month = { $month } { $year }
+date-picker-january = January
+date-picker-february = February
+date-picker-march = March
+date-picker-april = April
+date-picker-may = May
+date-picker-june = June
+date-picker-july = July
+date-picker-august = August
+date-picker-september = September
+date-picker-october = October
+date-picker-november = November
+date-picker-december = December
+# The weekday row: two letters each, over a column a day cell wide.
+date-picker-mon = Mo
+date-picker-tue = Tu
+date-picker-wed = We
+date-picker-thu = Th
+date-picker-fri = Fr
+date-picker-sat = Sa
+date-picker-sun = Su
+# The footer's buttons.
+date-picker-today = Today
+date-picker-tomorrow = Tomorrow
+date-picker-clear = Clear
+
 ## The document editor's Properties table
 doc-properties = Properties
 doc-empty = Empty
