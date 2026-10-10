@@ -21,8 +21,8 @@ pub fn shaped_cluster_offsets(
     size: f32,
     font: Option<&str>,
 ) -> Vec<(usize, f32)> {
-    let scale = crate::scale::scale_factor().max(1.0);
-    let buffer = shared_text_buffer(fs, text, size, font, crate::scene::paint::TextAttrs::default());
+    let scale = crate::scale::scale_factor();
+    let buffer = shared_text_buffer_at(fs, text, size, font, crate::scene::paint::TextAttrs::default(), scale);
     let run = shaped_run(&buffer, text, scale);
     let mut out: Vec<(usize, f32)> = run.clusters.iter().map(|c| (c.start, c.leading())).collect();
     out.push((text.len(), run.width));

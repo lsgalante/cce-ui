@@ -44,7 +44,9 @@ pub fn get_text_buffer_attrs(
 /// [`get_text_buffer_attrs`] without the copy: the cached buffer itself,
 /// shared. What the frame and the toolkit's own measuring use — a `Buffer`
 /// owns every shaped line and glyph, so the clone the public functions hand
-/// out costs as much as the text is long.
+/// out costs as much as the text is long. Shaped at the current window's
+/// scale; a measurement that divides by a scale it read itself uses
+/// [`shared_text_buffer_at`] instead.
 pub(crate) fn shared_text_buffer(
     fs: &mut FontSystem,
     text: &str,
@@ -52,7 +54,23 @@ pub(crate) fn shared_text_buffer(
     font: Option<&str>,
     text_attrs: crate::scene::paint::TextAttrs,
 ) -> Rc<Buffer> {
-    let scale = crate::scale::scale_factor();
+    shared_text_buffer_at(fs, text, size, font, text_attrs, crate::scale::scale_factor())
+}
+
+/// [`shared_text_buffer`] shaped at `scale` (physical px per logical px) rather than at a
+/// scale read here. A measurement turns the buffer's physical positions into logical ones by
+/// dividing by a scale; it reads that scale ONCE and passes it here, so the buffer and the
+/// division agree. Two reads disagree whenever the scale changes between them (a worker
+/// thread, on no window, reads the process-wide value, which any window may set), and the
+/// offsets come out multiplied by their ratio.
+pub(crate) fn shared_text_buffer_at(
+    fs: &mut FontSystem,
+    text: &str,
+    size: f32,
+    font: Option<&str>,
+    text_attrs: crate::scene::paint::TextAttrs,
+    scale: f32,
+) -> Rc<Buffer> {
     let (family_name, font_size) = match font {
         Some(font_str) => {
             let (family, parsed_size) = crate::layout::split_font_string(font_str);
@@ -222,7 +240,7 @@ pub(crate) fn shared_laid_out_buffer(
     }
 
     // Resolved family + attrs come from the single run; this copy is ours to re-lay-out.
-    let mut buf = Buffer::clone(&shared_text_buffer(fs, text, size, font, text_attrs));
+    let mut buf = Buffer::clone(&shared_text_buffer_at(fs, text, size, font, text_attrs, scale));
     let line_height = physical_size * 1.4;
     buf.set_metrics(fs, Metrics::new(physical_size, line_height));
     buf.set_size(fs, layout.wrap_width.map(|w| w * scale), Some(layout.box_height * scale));
