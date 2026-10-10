@@ -10,6 +10,10 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The params pane's tests are split by topic** (`widget/container/parameters_bg/tests/`):
+  `mod.rs` (the imports and `panel_with`), `rows`, `code` (with the key and dispatch helpers
+  only it uses), `sections` (with the outline-end helpers) and `pointer`. A pure move, checked
+  line for line; the suite still runs 657 tests.
 - **The widget module root is split** (`widget/`): `mod.rs` keeps widget ids, the layout value
   types, `ContextAction`, `EmbedImage`, `CornerRadii` and the module tree with its re-exports;
   the input vocabulary moves to `events` (with `match_key_shortcut` and its tests),
