@@ -74,7 +74,10 @@ The `Makefile` wraps `cargo build --release` and `ccebuild install --no-build cc
 - **Pin what a result depends on, per thread.** `motion::force_for_test`,
   `input::force_natural_scroll`, `scroll_motion::force_scroll_settings` pin the animations
   switch, natural scrolling and kinetic settings for the calling thread. Never set a
-  process-wide env var in a test (the suite is parallel). A dependent crate's test binary links
+  process-wide env var in a test (the suite is parallel). The window properties' process-wide
+  fallback (`scale::set_scale_factor` off a window) is per thread under `cfg(test)`: no test
+  but `window_state`'s enters a window, so every shaping test reads it, and one test's write
+  once rescaled another's text mid-shape. A dependent crate's test binary links
   cce-ui WITHOUT `cfg(test)`, so it reads the machine unless it pins.
 - **A colour test that reloads a knob reloads its default back.** `reload_colors` writes
   process-wide globals and an absent frost knob keeps its last value; `reload_colors("")` does

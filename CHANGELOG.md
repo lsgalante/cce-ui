@@ -10,6 +10,21 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **Tests no longer share the process-wide scale** (`scale.rs`): under `cfg(test)` the value a
+  thread on no window reads, and `set_scale_factor` writes besides the window's, is per thread.
+  `offsets_count_chars_and_reshape_on_change` failed once on CI's macos job (run 38064718562,
+  commit 8007f9e) with the first `prepare_text`'s offsets exactly 1.5× the second's: no test
+  enters a window but `window_state`'s, which sets the process scale to 2.0 then leaves it at
+  1.5, and it did so while the text box's first shape was under way — `prepare_text` had read
+  1.0 for its key and its division, `shared_text_buffer` read 1.5 for the buffer, so the offsets
+  came out in physical px; the second call saw a new key, reshaped consistently, and differed.
+  (The slow first shape over macOS's system fonts is what made the window wide.) Every shaping
+  test read that one value, so the fix is at the writer, not a pin in one test.
+  `each_window_has_its_own_scale_and_a_worker_reads_the_last` now checks the fallback on its own
+  thread and that another thread keeps 1.0; its old worker check compared two reads made in the
+  worker, which held whatever the value. Checked by setting the scale from another thread
+  between the two calls: the tree before fails with the CI failure's shape, the tree after
+  passes; the suite ran clean several times.
 - **The context menu's API and marks have files of their own** (`widget/core/context_menu/`):
   `api.rs` (the free-function API apps and the runner call, each acting on the current window's
   menu) and `marks.rs` (the row marks and chevrons, `split_mark`, the label-to-action

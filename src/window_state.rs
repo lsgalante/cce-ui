@@ -24,6 +24,8 @@
 //! process-wide value, which every window's setter also writes — the last one set. So a
 //! process with one window reads exactly what it did when these were only process-wide,
 //! and two windows on one thread each read their own (`docs/rfc-global-state.md`, phase 4).
+//! Under `cfg(test)` the process-wide scale is per thread, so a test's write reaches no other
+//! test (`scale.rs`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -144,8 +146,9 @@ pub fn enter(state: &Rc<WindowState>) -> Entered {
 mod tests {
     use super::*;
 
-    /// Two windows draw at their own scales; a worker thread, on no window, reads the last
-    /// one set; and the scroll phase is the window's.
+    /// Two windows draw at their own scales; off a window, the thread reads the last one
+    /// set — and, the process-wide scale being per thread in tests, no other test's thread
+    /// sees it; and the scroll phase is the window's.
     #[test]
     fn each_window_has_its_own_scale_and_a_worker_reads_the_last() {
         let (a, b) = (WindowState::new(), WindowState::new());
@@ -159,9 +162,10 @@ mod tests {
             crate::scale::set_scale_factor(1.5);
             assert_eq!(crate::scale::scale_factor(), 1.5);
             assert_eq!(crate::widget::scroll_motion::current_scroll_phase(), crate::widget::ScrollPhase::Wheel, "b's own phase");
-            let (seen, process) = std::thread::spawn(|| (crate::scale::scale_factor(), crate::scale::process_scale_factor())).join().unwrap();
-            assert_eq!(seen, process, "a worker, on no window, reads the process-wide scale");
         }
+        assert_eq!(crate::scale::scale_factor(), 1.5, "on no window, the last scale any window set");
+        let other = std::thread::spawn(crate::scale::scale_factor).join().unwrap();
+        assert_eq!(other, 1.0, "another test's thread keeps the default scale");
         let _in_a = enter(&a);
         assert_eq!(crate::scale::scale_factor(), 2.0, "a keeps its own");
         assert_eq!(crate::widget::scroll_motion::current_scroll_phase(), crate::widget::ScrollPhase::Finger);

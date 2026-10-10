@@ -1,6 +1,16 @@
 use std::sync::{OnceLock, RwLock};
 
+#[cfg(not(test))]
 static SCALE_FACTOR: RwLock<f32> = RwLock::new(1.0);
+
+// Under `cfg(test)` the process-wide scale is per thread: no test enters a window but
+// `window_state`'s, so every shaping test reads this value, and one test setting it would
+// rescale another's text mid-shape (`prepare_text` once read 1.0 for its key and 1.5 for
+// its buffer, and kept offsets in physical px).
+#[cfg(test)]
+thread_local! {
+    static SCALE_FACTOR: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
 static FORCED_SCALE: OnceLock<Option<f32>> = OnceLock::new();
 
 /// `CCE_FORCE_SCALE`: HiDPI override for foreign compositors that report a
@@ -32,15 +42,24 @@ pub fn scale_factor() -> f32 {
     crate::window_state::entered(|w| w.props.borrow().scale).unwrap_or_else(process_scale_factor)
 }
 
+#[cfg(not(test))]
 pub(crate) fn process_scale_factor() -> f32 {
     *SCALE_FACTOR.read().unwrap()
 }
 
+#[cfg(test)]
+pub(crate) fn process_scale_factor() -> f32 {
+    SCALE_FACTOR.with(|s| s.get())
+}
+
 pub fn set_scale_factor(scale: f32) {
     crate::window_state::entered(|w| w.props.borrow_mut().scale = scale);
+    #[cfg(not(test))]
     if let Ok(mut lock) = SCALE_FACTOR.write() {
         *lock = scale;
     }
+    #[cfg(test)]
+    SCALE_FACTOR.with(|s| s.set(scale));
 }
 
 pub fn app_id() -> String {
