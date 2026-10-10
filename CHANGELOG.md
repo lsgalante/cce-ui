@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The WebGPU renderer is a directory module** (`web/renderer/`): `mod.rs` (its state, images,
+  captures, `new`, resizing, text, `impl Stage3D`), `gpu` (the WebGPU helpers; the four the 3D
+  and tracer passes import are `pub(in crate::web)` and re-exported from `renderer`, so
+  `super::renderer::…` still resolves for them) and `frame` (draining images, the blur
+  snapshot, the passes, `draw_frame_2d`). A pure move, checked line for line. Browser-only
+  code this machine cannot compile: committed on a branch and built by CI's `wasm` job first.
 - **The Markdown reading view is a directory module** (`widget/markdown/`): `mod.rs` (the theme
   and colours, `Draw` / `Hit` / `Layout` and painting it, the `layout` entry points, the
   layouter's state), `blocks` (each block kind's layout) and `inline` (spans laid out word by
