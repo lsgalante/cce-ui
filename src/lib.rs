@@ -40,6 +40,9 @@ pub use cce_core::plan;
 pub use cce_core::process;
 /// Byte-safe `percent_decode`.
 pub use cce_core::fmt;
+/// `.desktop` files: the XDG applications dirs and the `[Desktop Entry]` group.
+#[cfg(not(target_arch = "wasm32"))]
+pub use cce_core::desktop_entry;
 /// The user's locale (`locale::locale()`), what every font system is built with.
 pub use cce_core::locale;
 pub mod l10n;
