@@ -406,8 +406,8 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit/` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
-  concern (its `mod.rs` has the table). The largest files are now the macOS shell,
-  `src/mac/mod.rs` (largest file, ~1.1k lines), and the Markdown reading view.
+  concern (its `mod.rs` has the table). The largest files are now the Markdown reading view,
+  `src/widget/markdown.rs` (largest file, ~1.0k lines), and the WebGPU renderer.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
@@ -421,7 +421,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
 - `draw/` — renderer-free drawing (above); `draw::scene` and `draw::rt` for 3D and the tracer.
 - `vk/` — the Vulkan renderer (`renderer/`, `rt/`, `scene/` and `image/`, each `mod.rs` with its table; `compute.rs`,
   `plate_probe.rs`); `web/` — wasm32 only: `WebRenderer`, the browser shell, its 3D, tracer and
-  compute; `mac/` — macOS only: the AppKit shell.
+  compute; `mac/` — macOS only: the AppKit shell (its `mod.rs` has the table).
 - `icon.rs` (XDG icon-theme lookup for names other apps ship — not `lib.rs`'s `upload_icon`, which
   loads a bundled cce-icons glyph), `file_dialog.rs`, `scale.rs`, `wayland.rs` (scale and
   metric detection), `protocol.rs`, `mcp.rs`, `engine.rs` (the client-facing re-export surface).

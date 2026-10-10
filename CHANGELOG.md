@@ -10,6 +10,14 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The macOS shell is split** (`mac/`): `mod.rs` keeps `run`, the `Ev`s the AppKit side hands
+  the shell (`send`, the sink) and the menu; `MacShell` moves to `shell`, `CceView` (with its
+  input-method state) to `view`, the application and window delegate to `delegate`. What
+  crosses between them is `pub(super)`: `MacShell`'s fields and methods (`run` builds and drives
+  it), `ViewIme`'s fields (the shell reads the marked text), the two classes
+  (`define_class!` takes a visibility) and their constructors. A pure move, checked line for
+  line. Nothing here compiles `src/mac` (no `aarch64-apple-darwin` target on this machine), so
+  CI's `macos` job is the first build of it.
 - **The params pane's tests are split by topic** (`widget/container/parameters_bg/tests/`):
   `mod.rs` (the imports and `panel_with`), `rows`, `code` (with the key and dispatch helpers
   only it uses), `sections` (with the outline-end helpers) and `pointer`. A pure move, checked
