@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **`MenuBar` is a directory module** (`widget/container/menu/`): `mod.rs` (the struct, its
+  geometry, construction and builders, `impl Layout`, its `Send` / `Sync`), `paint`, `input`,
+  `controller` (`MenuController` and `PageSelector`) and `tests`. A pure move, checked line for
+  line. The module doc was a migration log (the standalone `Menu` deleted, the text caches and
+  vertical-mode height dropped — recorded in `git log`) and said `arrange_children` parented
+  the strip back to the adapter, which it no longer does; it now describes the bar as it is.
+  Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The sliders are a directory module** (`widget/input/slider/`): `mod.rs` (`Slider`: its
   geometry, construction and setters, value stepping, the readout's commit, `impl Layout`, the
   label strip), `band` (the band's profile and shape, public for app-owned scrubbers), `paint`,
