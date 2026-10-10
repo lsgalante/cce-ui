@@ -10,6 +10,11 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **`ColorSelector` is a directory module** (`widget/input/color_selector/`): `mod.rs` (the
+  struct, construction and builders, the field's relief, the hex value, `impl Layout`, placing
+  the picker), `paint`, `input` (editing the hex, launching the picker and reading its stream)
+  and `tests`. A pure move, checked line for line; the module gained the doc it lacked. Clippy,
+  the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The Vulkan image stage is a directory module** (`vk/image/`): `mod.rs` (the GPU image, the
   stage and its limits, the descriptor bindings, `new` and `destroy`), `pending` (draining the
   upload queue, freeing images), `upload` (the shared staging buffer, one-shot and batched
