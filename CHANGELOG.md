@@ -10,6 +10,11 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **`Spinbox` is a directory module** (`widget/input/spinbox/`): `mod.rs` (the struct, its
+  relief and geometry, construction, the caret, the value's text, parsing and stepping, the
+  builders, `impl Layout`), `paint`, `input` and `tests`. A pure move, checked line for line;
+  the module doc ("Phase 5i") describes the spinbox as it is. Clippy, the suite and `cargo check
+  --workspace --exclude cce-fx` pass.
 - **`Button` is a directory module** (`widget/input/button/`): `mod.rs` (the kinds, the struct,
   construction, icons, the label's font and width, the plate, the builders, `impl Layout`,
   `PageButton`), `paint`, `input`, and the two test modules as files. A pure move, checked line
