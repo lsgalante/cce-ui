@@ -276,7 +276,11 @@ pub const PROGRESS_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
 
 pub const PROGRESS_FILL: [f32; 4] = [0.20, 0.50, 0.75, 1.0];
 
-pub const HIGHLIGHT_PRIMARY: [f32; 4] = [1.0, 1.0, 1.0, 0.12];
+/// `#7dffff` in config, the DE's accent. Not white: a highlight is also a
+/// specular tint (a selected graph node's bevel), and white is the tint a
+/// plain bevel already wears, so a white default made selection invisible
+/// on a machine with no config (until 2026-10-10).
+pub const HIGHLIGHT_PRIMARY: [f32; 4] = [0.205, 1.0, 1.0, 0.12];
 
 pub const HIGHLIGHT_SECONDARY: [f32; 4] = [1.0, 1.0, 1.0, 0.06];
 

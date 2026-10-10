@@ -33,6 +33,18 @@ fn the_hex_that_pins_a_default_round_trips_through_the_gamma_decode() {
     assert_eq!(parse_hex_rgba_linear("#050508").unwrap()[3], 1.0);
 }
 
+/// The default highlight is seen as a TINT, not only as a wash: it must
+/// differ from the white a plain bevel wears, or a selected node looks
+/// like every other one when no config sets `highlight primary`.
+#[test]
+fn the_default_highlight_is_not_a_plain_bevel_tint() {
+    assert_ne!(HIGHLIGHT_PRIMARY[..3], [1.0, 1.0, 1.0]);
+    let decoded = parse_hex_rgba_linear("#7dffff").expect("valid hex");
+    for (got, want) in decoded.iter().take(3).zip(HIGHLIGHT_PRIMARY.iter().take(3)) {
+        assert!((got - want).abs() < 0.005, "#7dffff decodes to {decoded:?}, HIGHLIGHT_PRIMARY is {HIGHLIGHT_PRIMARY:?}");
+    }
+}
+
 /// Rim refraction defaults OFF and clamps, like its neighbour.
 /// The pane plates roll over the relief width — the one roll width —
 /// and nothing, a loaded `plate.bevel_width` included, moves them off it.
