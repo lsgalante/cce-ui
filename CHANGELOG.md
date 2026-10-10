@@ -10,6 +10,14 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **`Breadcrumb` is a directory module** (`widget/container/breadcrumb/`): `mod.rs` (the
+  struct, its constants and associated constants, construction and setters, the path,
+  `impl Layout`, `PathController`), `geometry` (the visible segments and their elision, hit
+  zones, the plate band, the run box and seams), `paint`, `input`, and the two test modules as
+  files. A pure move, checked line for line. The module doc, which called it "the first
+  controller widget across" and described the designer downcasting a roster entry to reach it
+  (it takes a `&mut dyn PathController` through the context now), describes the breadcrumb as
+  it is. Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The WebGPU renderer is a directory module** (`web/renderer/`): `mod.rs` (its state, images,
   captures, `new`, resizing, text, `impl Stage3D`), `gpu` (the WebGPU helpers; the four the 3D
   and tracer passes import are `pub(in crate::web)` and re-exported from `renderer`, so
