@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The `DocEditor`'s live preview is a directory module** (`widget/doc_editor/preview/`):
+  `mod.rs` (what a line is, the styled `Line`, block contexts, `style_line`), `embeds`,
+  `properties` (the frontmatter as a Properties table), `inline` (the inline-markup scanner) and
+  `tests`; everything public re-exported, so `doc_editor::preview::…` paths are unchanged. A
+  pure move, checked line for line. Clippy, the suite and `cargo check --workspace --exclude
+  cce-fx` pass.
 - **The params pane's paint is split** (`widget/container/parameters_bg/`): `paint.rs` keeps row
   floors, section outlines and arcs, the scrollbar, the ramps and trackballs a host paints
   through the scene path, and `impl Paint`; the labels and glyphs move to `text` (with
