@@ -1,16 +1,14 @@
 //! The compute-job API: upload buffers, dispatch a WGSL kernel, read back.
 //!
-//! The renderer already had everything a compute job needs — naga compiles
-//! WGSL to SPIR-V at runtime, the path tracer builds compute pipelines over
-//! storage buffers, and `RtOffscreen` runs a headless device with no window
-//! — but all of it was internal to the RT pass and read back only an image.
-//! This module is that machinery with a general face: a [`ComputeDevice`]
+//! It is the renderer's own machinery — naga compiling WGSL to SPIR-V at
+//! run time, compute pipelines over storage buffers, a headless device with
+//! no window (as `RtOffscreen` runs) — with a general face: a [`ComputeDevice`]
 //! owns a headless [`VkCore`], and [`ComputeDevice::run`] takes a
 //! [`Kernel`] and a list of [`Binding`]s, uploads them, dispatches, waits,
 //! and copies every read-write binding back into the caller's slice.
 //!
-//! Designed for cce-designer's Phase 7 step 4 (see its `shapeshifter.md`):
-//! the per-point solver operators — relax, diffuse, collide — written once
+//! Built for cce-designer's solver (its `shapeshifter.md`):
+//! the per-point operators — relax, diffuse, collide — written once
 //! in WGSL over the columnar attribute arrays a `Detail` already keeps, with
 //! the CPU evaluator as the reference each is held to. The shape of the API
 //! follows from that use: the caller has arrays in memory and wants them

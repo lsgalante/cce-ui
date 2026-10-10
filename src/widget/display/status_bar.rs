@@ -1,11 +1,8 @@
-//! Narrow-trait `StatusBar` (Phase 5t) — a one-line text bar whose theming is parent-coupled
-//! exactly like MenuBar's: when its tracked parent is a root plate container it pulls the root plate
-//! statusbar color/text-color/blur and derives its rounded corners from where it sits against
-//! the parent's edges ([`Paint::corner_style`] + the corners walk). Two text paths: the
-//! [`Paint::paint`] prim (carrying the configured statusbar font — the legacy default-font
-//! behavior on this path dropped the family and rendered sans), and pre-shaped cosmic-text
-//! buffers through [`Paint::text_items`] (new with this migration) for manual hosts —
-//! cce-status-interface calls `prepare_text` then `get_text_items` into its own paint.
+//! `StatusBar` — a one-line text bar along a window's edge. Under `control_relief` it is a band
+//! recessed into the plate, its wall along the top; flat, a quad in its own colour
+//! (`set_bg_color`, else `colors::STATUS_BG`). Its corners are square. The text is a
+//! [`Paint::paint`] prim in the configured statusbar font, and `prepare_text` keeps a shaped
+//! buffer of it that `set_text` drops.
 
 use crate::colors;
 use crate::scene::layout::Rect;
@@ -139,10 +136,7 @@ impl Paint for StatusBar {
         }
     }
 
-    /// Background exactly on the legacy split: a plain quad when cornerless (the legacy
-    /// `extra_quads` body), a rounded rect against the parent's corners otherwise (the legacy
-    /// default `all_rounded_quads` path) — plus the text label (the legacy `text_labels`
-    /// body; deliberately no `widget_font`, see module docs).
+    /// The band (recessed under relief, a plain quad otherwise), then the text label.
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         if self.recessed() {
             // The recess shading is a light/shadow overlay — whatever the plate painted

@@ -1,4 +1,4 @@
-//! Narrow-trait `Graph` (Phase 5m) — the node-network editor: a pannable/zoomable grid of
+//! `Graph` — the node-network editor: a pannable/zoomable grid of
 //! draggable nodes with geometry toggles, input/output ports, wire routing, and interactive
 //! connection dragging. [`GraphController`] rides the `Input` capability hooks.
 //!

@@ -1,12 +1,6 @@
-//! Generational node arena — the ownership spine of the rebuilt cce-ui core.
+//! Generational node arena — the ownership spine of the cce-ui core (`docs/rfc-core-rebuild.md`).
 //!
-//! This is Phase 1 of the core rebuild (see `docs/rfc-core-rebuild.md`). It replaces the old
-//! model where the widget tree was smeared across three parallel stores kept in sync by hand
-//! (`root plate container.children: Vec<*mut dyn WidgetHost>`, `UiContext.layout_tree`, and
-//! `UiContext.widget_registry`) and traversed through raw `*mut dyn WidgetHost` pointers that
-//! `Drop` did not fully clear.
-//!
-//! Here there is exactly **one** store. Every node lives in the [`Arena`], addressed by a
+//! There is exactly **one** store. Every node lives in the [`Arena`], addressed by a
 //! [`NodeId`] that carries a generation. When a node is removed its slot's generation is bumped,
 //! so any [`NodeId`] still pointing at the old occupant reads back as [`None`] instead of
 //! dereferencing freed memory. Use-after-free becomes a missed lookup, not undefined behavior —
@@ -17,9 +11,8 @@
 //! stored as `Vec<NodeId>` (indices, not pointers), so traversal never aliases a `&mut`, which
 //! keeps the whole thing safe and borrow-checker-friendly without `unsafe`.
 //!
-//! [`Node<T>`] is generic over its payload for now. In later phases the payload grows into the
-//! rich per-node record from the RFC (widget + style + computed layout + animation + dirty
-//! flags); nothing about the identity/ownership model below changes when it does.
+//! [`Node<T>`] is generic over its payload: the widget tree (`scene::tree`) and the box model
+//! (`scene::layout`) each keep their own records in it.
 
 use std::num::NonZeroU32;
 

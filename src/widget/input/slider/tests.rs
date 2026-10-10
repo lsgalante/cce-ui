@@ -66,18 +66,6 @@ fn rangeslider_overlap_and_constraint() {
     rs.drag_end();
 }
 
-#[test]
-fn probe_slider_bridge() {
-
-
-let mut sl = Slider::new().with_label("Slider");
-WidgetHost::set_rect(&mut sl, 20.0, 220.0, 200.0, 40.0);
-eprintln!("rect         = {:?}", WidgetHost::rect(&sl));
-eprintln!("quads        = {:?}", crate::widget::shown_quads(&sl));
-eprintln!("rounded      = {:?}", crate::widget::shown_rounded_quads(&sl));
-eprintln!("labels       = {:?}", sl.own_text_labels().iter().map(|l| l.text.clone()).collect::<Vec<_>>());
-}
-
 /// Slider press-on-track begins a drag through the routed path; wheel adjusts the value
 /// with the scroll-gesture gating intact.
 #[test]

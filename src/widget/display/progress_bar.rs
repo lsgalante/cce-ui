@@ -1,7 +1,7 @@
-//! The first widget migrated off `WidgetHost` onto the narrow traits (Phase 5c). `ProgressBar`
-//! implements only [`Layout`] + [`Paint`] + [`Input`]; [`ProgressBar::new`] returns it already
-//! wrapped in [`Adapted`], so construction sites (`Box::new(ProgressBar::new(0.65))`, optionally
-//! `.with_label(..)`) are unchanged by the migration.
+//! `ProgressBar` — a fill across a track, recessed into the plate under relief (the slider's
+//! well composition) and a flat rounded track otherwise. It implements [`Layout`] + [`Paint`] +
+//! [`Input`]; [`ProgressBar::new`] returns it already wrapped in [`Adapted`], ready to insert
+//! (optionally `.with_label(..)`).
 
 use crate::colors;
 use crate::scene::layout::{Rect, Size};

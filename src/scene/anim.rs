@@ -1,15 +1,11 @@
-//! Animation primitive — Phase 4 of the core rebuild.
-//!
-//! The legacy toolkit has almost no animation: a single hand-rolled `hover_animation` helper (with
-//! a dead duplicate), and everything else is an instant boolean flip (`hovered`, `pressed`,
-//! `network_opacity` as a static multiplier). This module provides the missing spine — a small
-//! [`Animated<T>`] value that eases or springs toward a target over time — so hover/press/opacity
-//! and transitions become interpolated instead of instantaneous.
+//! The animation primitive: [`Animated<T>`], a value that eases or springs toward a target over
+//! time, so a hover, a press, an opacity or a transition is interpolated rather than flipped.
 //!
 //! It is pure time-based math over an [`Animatable`] value, fully unit-testable without a clock,
-//! GPU, or event loop: drive it with [`Animated::tick`] and read [`Animated::value`]. Wiring it
-//! into widgets and having the frame loop keep ticking while anything is live is the (runtime-gated)
-//! follow-up; the loop already returns "still animating" from `tick`, which this feeds.
+//! GPU, or event loop: drive it with [`Animated::tick`] and read [`Animated::value`]. No widget
+//! in the toolkit holds one yet (hover runs through `widget::hover_animation`); one that does
+//! reports "still animating" from its `tick` while it moves, which keeps the frame loop's
+//! cadence up.
 
 /// A value that can be interpolated and integrated for animation (scalars, colors, points).
 pub trait Animatable: Copy {

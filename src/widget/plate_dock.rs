@@ -1,5 +1,5 @@
-//! The plate-corner dock affordance (RFC Phase 7c), generalized from
-//! cce-designer's plate corner: a small circular control on a pane plate's
+//! The plate-corner dock affordance, generalized from cce-designer's plate
+//! corner: a small circular control on a pane plate's
 //! top-right that opens a menu (Collapse/Expand, Detach/Reattach, plus
 //! host-specific rows), collapses the plate to a title stub, and arms
 //! click-vs-drag for dock repositioning.

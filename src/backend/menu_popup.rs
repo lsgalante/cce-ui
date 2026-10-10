@@ -9,31 +9,27 @@
 //! output: it flips the menu to open upward, slides it in from an edge, or
 //! cuts it short, in which case the rows scroll.
 //!
-//! Two rules make this safe, and they are the two things the previous popup
-//! path (deleted in July 2026 as Phase 6x) got wrong:
+//! Two rules make this safe:
 //!
 //! - **The compositor's placement is written back into the menu.** The popup
 //!   lands where the configure says, not where the menu asked, and
 //!   `context_menu::place` moves the menu's rect there. The rect every app
-//!   hit-tests against is therefore the rect on screen — the anchor-mismatch
-//!   bugs the old path had (a menu drawn in one place and clicked in another)
-//!   cannot happen.
+//!   hit-tests against is therefore the rect on screen: a menu is never drawn
+//!   in one place and clicked in another.
 //! - **The popup takes its own input, translated into window coordinates.**
-//!   The old popup had an empty input region and let clicks fall through to
-//!   the window beneath, which only works where there IS window beneath. A
-//!   pointer event on the popup is offset by the popup's position and handed
-//!   to the app as if it had landed on the window, so apps need no change:
-//!   their menu dispatch already works in window coordinates, which may now
-//!   lie outside the window.
+//!   An empty input region, letting clicks fall through to the window beneath,
+//!   would only work where there IS window beneath. A pointer event on the
+//!   popup is offset by the popup's position and handed to the app as if it
+//!   had landed on the window, so apps need no change: their menu dispatch
+//!   works in window coordinates, which may lie outside the window.
 //!
 //! While the popup is up the menu is `hosted`, which turns the apps' own
 //! in-window paint calls into no-ops. The popup has no keyboard grab: the
 //! keyboard stays with the window, whose Escape and press-outside handling
 //! close the menu as before.
 //!
-//! **A page turn is a new popup at the old one's corner** (2026-10-02,
-//! where until then a row's submenu was a second popup, the CHILD of this
-//! one, flying out beside it). `context_menu::show_page` puts the page's
+//! **A page turn is the same popup at the old plate's corner.**
+//! `context_menu::show_page` puts the page's
 //! top-left where the menu's was and marks the menu `turned`; its generation
 //! moves, and the popup that is up is REPOSITIONED (`xdg_popup.reposition`)
 //! to the page's size, anchored at that corner, rather than replaced: a new

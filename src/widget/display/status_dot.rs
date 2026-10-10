@@ -1,11 +1,6 @@
-//! Narrow-trait status dot (Phase 5c leaf sweep).
-//!
-//! **Deliberate behavior fix:** the legacy `WidgetHost` impl only set `color()` and never emitted
-//! geometry on any render path (`all_quads` and `all_rounded_quads` were both empty for it, and
-//! `render_widget` never reads `color()` directly), so the dot was **invisible** — a probe test
-//! against the legacy widget confirmed zero rects emitted through `render_widget`. The narrow
-//! [`Paint`] default emits the color quad, so the dot now actually shows. The probe test at the
-//! bottom documents the fix.
+//! `StatusDot` — an indicator: a disc in its status colour, the largest circle the rect holds.
+//! It stays a shape, not a glyph (an indicator, not a symbol). The tests below hold that it
+//! draws its disc, through a flat host's `render_widget` too.
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;

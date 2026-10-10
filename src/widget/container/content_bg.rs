@@ -1,8 +1,8 @@
-//! Narrow-trait `ContentBg` (Phase 5n) — a standalone gradient-grid page background. Despite
+//! `ContentBg` — a standalone gradient-grid page background. Despite
 //! the name it owns no children; its GraphController impl is a stub except the grid-geometry
 //! setters (hosts configure the grid through the controller interface). Never hittable; the
 //! background color itself is drawn by hosts reading `color()` (the geometry here is only the
-//! cell/gap gradient grid, exactly the legacy `extra_quads`).
+//! cell/gap gradient grid).
 
 use crate::colors;
 use crate::scene::layout::Rect;

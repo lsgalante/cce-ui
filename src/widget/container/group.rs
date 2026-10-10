@@ -23,7 +23,7 @@
 //! (`style.container.section.{depth,font,padding}`) apply.
 //!
 //! The group is never hittable and draws only through `paint_ui` (it needs
-//! the context to find its members), so hosts on the legacy quad bridges see
+//! the context to find its members), so a flat host (`layout::bridge`) sees
 //! it only through the prim replay — which carries every prim it emits
 //! (recesses, fillets, vectors, text). `CCE_GROUP_DEBUG=1` prints each
 //! paint's hull, plate and frame.

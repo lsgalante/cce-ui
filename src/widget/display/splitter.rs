@@ -1,4 +1,4 @@
-//! Narrow-trait pane splitter (Phase 5i leaf sweep). A self-moving widget: dragging repositions
+//! `Splitter` — a pane splitter, and a self-moving widget: dragging repositions
 //! the splitter itself via [`Input::drag_reposition`] (the adapter applies the new origin to the
 //! base rect). Hover/drag drive the color, tracked from the forwarded events.
 

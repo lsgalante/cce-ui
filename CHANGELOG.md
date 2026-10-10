@@ -10,6 +10,18 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **Module docs describe the present** (24 files): the module docs that narrated the core
+  rebuild ("Phase 5c leaf sweep", "until 2026-10-08", "the legacy `extra_quads`") now say what
+  the module is. Several were wrong, not just dated: `scene/mod.rs` said nothing in it was wired
+  into the render path; `scene/painter.rs` called routing the backend through the walk a
+  follow-up; `StatusBar`'s described theming coupled to a "root plate container" and a
+  `text_items` path, both gone; `UsageBar`'s and `StatusDot`'s named the removed
+  `all_rounded_quads`; the reference app's said there is no popup surface (the context menu has
+  one); `scene/anim.rs` now says no widget holds an `Animated` yet. "Legacy" stays where it names
+  a path that exists (the banded edge shading, the colour-file key fallback, the flat-host
+  `RenderTarget`). One broken intra-doc link fixed on the way (`clips_children` lives on
+  `WidgetHostExt`). Also deleted `probe_slider_bridge`, a test that only printed. Clippy and
+  the suite pass.
 - **The Vulkan renderer's backdrop pass has a file of its own** (`vk/renderer/backdrop.rs`):
   `record_backdrop` — the 3D scene and the tracer into the backdrop, and its copy into the
   swapchain image — moves out of `record.rs`, which keeps the UI pass. A pure move, checked line

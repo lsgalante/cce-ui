@@ -6,14 +6,11 @@
 //! shortest column. A section is drawn ONCE, in place: where it goes depends only on the
 //! sections before it, never on its own height, so [`PageLayoutBuilder`] asks the flow for
 //! the slot, lets the section draw its content there, and hands the height it came to back
-//! to the flow. Until 2026-10-08 every section was drawn twice — once into a throwaway
-//! target to measure it, then for real — through the legacy `LayoutStrategy`, whose
-//! `allocate` took the height first; the flow's choices are the same, so the pages are too.
+//! to the flow.
 //!
 //! What goes inside a section is a [`Form`](super::Form): a box-model tree the page declares,
 //! which the section lays out across its content box with `scene::layout` and paints
-//! ([`SectionContext::form`], [`SectionContext::place`]). Until 2026-10-08 it was a cursor
-//! down the content box with a one- or two-column grid, and every page added its own insets.
+//! ([`SectionContext::form`], [`SectionContext::place`]).
 
 use super::*;
 use crate::context::UiContext;

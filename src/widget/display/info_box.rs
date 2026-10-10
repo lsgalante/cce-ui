@@ -1,4 +1,5 @@
-//! Narrow-trait info box (Phase 5i leaf sweep). Pure display: themed card + border + title/lines.
+//! `InfoBox` — pure display: a card with a title and lines of text. Under relief the card is a
+//! raised pane plate (the DE plate fill under a rolled edge); flat, a themed card with a border.
 
 use crate::colors;
 use crate::scene::layout::Rect;

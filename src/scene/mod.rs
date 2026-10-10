@@ -1,9 +1,8 @@
-//! The rebuilt cce-ui core spine (see `docs/rfc-core-rebuild.md`).
-//!
-//! This module is being grown additively alongside the existing widget system; nothing here is
-//! wired into the live render path yet. Phase 1 lands the ownership foundation — a generational
-//! node [`Arena`]. Later phases add the layout pass, the paint/display-list, and animation on
-//! top of the same node identity.
+//! The cce-ui core (`docs/rfc-core-rebuild.md`): the generational node [`Arena`] and the widget
+//! tree on it (`tree`), the box model (`layout`), the paint vocabulary and display list (`paint`)
+//! with the walk that fills it (`painter`), animation (`anim`), materials, the relief's shading
+//! (`relief_shade`) and the relief as a height field (`heightfield`). Every frame is built
+//! through it.
 
 pub mod anim;
 pub mod arena;

@@ -1,7 +1,5 @@
-//! Narrow-trait separator line (Phase 5c leaf sweep). The legacy struct carried its own public
-//! x/y/w/h fields instead of a `Widget` base; the rect now lives on the [`Adapted`] base, so
-//! callers position it via `set_rect`/`rect` (cce-status-interface's rotation loop was updated
-//! accordingly).
+//! `Separator` — a rule between runs of content. Its rect lives on the [`Adapted`] base, so a
+//! host positions it with `set_rect` / `rect`.
 //!
 //! **Relief.** Under `control_relief` the rule is a groove carved into the plate it sits
 //! on — the seam vocabulary (`CLAUDE.md`): the rect is the groove's floor, the walls

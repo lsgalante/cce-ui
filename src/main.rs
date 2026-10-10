@@ -1,7 +1,7 @@
-//! The reference `Application` (Phase 6ad) — a small widget gallery on the target
-//! architecture, end to end. This is the file to copy when starting a new `cce-*` client.
+//! The reference `Application` — a small widget gallery on the toolkit's architecture, end to
+//! end. This is the file to copy when starting a new `cce-*` client.
 //!
-//! The shape every migrated app shares:
+//! The shape every app shares:
 //!
 //! 1. **One paint path.** The whole frame — geometry AND text — is built in
 //!    [`Application::display_list`] as prims on a [`PaintCtx`], with
@@ -22,9 +22,10 @@
 //! 5. **The context owns the widgets.** The app holds a [`Handle`] to each (all [`Adapted`])
 //!    and reaches it through the context — `ui[h]`, `ui.get_mut(h)`, `ui.lend_h(h, ..)` when the
 //!    widget and the context are both needed — so the compiler keeps the app's access and the
-//!    context's own from overlapping (`docs/rfc-owning-registry.md`). The window plate is prims,
-//!    not a root plate container; popovers draw INTO the frame (there is no popup surface); app
-//!    state — not any widget tree — is the source of truth.
+//!    context's own from overlapping (`docs/rfc-owning-registry.md`). The window plate is prims;
+//!    a widget's popover (a dropdown's list) draws INTO the frame, while the context menu has a
+//!    popup surface of its own on a toplevel; app state — not any widget tree — is the source of
+//!    truth.
 
 use cce_ui::context::UiContext;
 use cce_ui::engine::{Application, AppSender, LogicalPosition, LogicalSize, WindowSettings};

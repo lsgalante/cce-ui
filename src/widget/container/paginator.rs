@@ -1,8 +1,6 @@
-//! Narrow-trait `Paginator` (Phase 5r; pages folded away in Phase 6au) — a vertical sidebar tab
-//! strip. The tabs live in an EMBEDDED [`ButtonStrip`] owned by value; every app manages its own
-//! page content keyed on `selected_page()`, so the former `Vec<Page>` stack (empty `Page`
-//! containers toggled visible/hidden) is gone — its only observable output, the page-area
-//! background quad, is painted directly here.
+//! `Paginator` — a vertical sidebar tab strip. The tabs live in an EMBEDDED [`ButtonStrip`] owned
+//! by value; the paginator holds no pages — every app manages its own page content keyed on
+//! `selected_page()` — and paints the page area's background quad itself.
 //!
 //! The strip is an [`Embedded`] child: held by value until the paginator is inserted, the
 //! context's after that ([`Layout::register_embedded_children`] attaches it and links it

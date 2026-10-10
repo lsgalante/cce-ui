@@ -1,16 +1,14 @@
-//! The paint walk — Phase 3 of the core rebuild.
+//! The paint walk.
 //!
 //! One traversal of the widget tree that emits every widget's own primitives into a single
-//! [`DisplayList`], in draw order, through a [`PaintCtx`]. Recursion and clipping live *here*
-//! (not smeared across each container's `all_*` methods): a widget contributes its own geometry
-//! via [`WidgetHost::paint_self`], then the walk descends into its children — pushing the widget's
-//! rect as a clip first when [`WidgetHost::clips_children`] is set, so the clip stack composes
-//! automatically instead of every container re-deriving intersections by hand.
+//! [`DisplayList`], in draw order, through a [`PaintCtx`]. Recursion and clipping live *here*,
+//! not in each container: a widget contributes its own geometry via [`WidgetHost::paint_self`],
+//! then the walk descends into its children — pushing the widget's rect as a clip first when
+//! [`clips_children`](crate::widget::WidgetHostExt::clips_children) is set, so the clip stack
+//! composes without any container re-deriving intersections by hand.
 //!
-//! This replaces, once wired into the backend, the three uncoordinated render paths (top-level
-//! `view*`, recursive `all_rounded_quads`, immediate-mode `render_widget`). This module is the
-//! walk itself, unit-tested here; routing the backend's `render()` through its `DisplayList`
-//! (with GPU `set_scissor_rect` per clip) is the runtime-gated follow-up.
+//! It is the one paint path: a frame's widgets reach the `DisplayList` the backend tessellates
+//! (`backend::frame::build_frame`) through this walk, its clips becoming the batches' scissors.
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::{DisplayList, PaintCtx, Prim};

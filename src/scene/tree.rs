@@ -2,9 +2,7 @@
 //! their parent/child links, in one generational [`Arena`] keyed through a
 //! `WidgetId → NodeId` index, so the context's `WidgetId`-based API (`link_ids`,
 //! `clear_hierarchy`, …) and the apps' handles name nodes by id. Links are **symmetric** by
-//! construction: `set_parent` / `unlink` update both ends. (The two `HashMap`s it replaced —
-//! an id → pointer registry and a parents/children pair kept in step by hand — were sometimes
-//! left asymmetric; `docs/rfc-core-rebuild.md` Phase 1b.)
+//! construction: `set_parent` / `unlink` update both ends.
 //!
 //! ## The tree owns its widgets
 //!
@@ -13,9 +11,7 @@
 //! pointer to the language, and every reborrow through it would invalidate the references the
 //! context hands out). Every access — the app's through a handle, the context's dispatch —
 //! derives from that root, and a widget out on loan (`UiContext::lend`) resolves to nothing,
-//! so no two `&mut`s to one widget ever coexist. Until 2026-10-08 the tree held raw pointers
-//! to widgets the APP owned, each watched by a liveness token; that path is gone
-//! (`docs/rfc-owning-registry.md`, phase 5).
+//! so no two `&mut`s to one widget ever coexist (`docs/rfc-owning-registry.md`).
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::ptr::NonNull;

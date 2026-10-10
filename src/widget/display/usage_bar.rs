@@ -1,6 +1,5 @@
-//! Narrow-trait usage bar (Phase 5c leaf sweep). The narrow [`Paint::paint`] emits a rounded
-//! track and fill (the ProgressBar's composition, in both styles), which reach legacy render
-//! loops through the adapter's `all_rounded_quads` reverse bridge.
+//! `UsageBar` — a fill across a track, the [`ProgressBar`](super::ProgressBar)'s composition in
+//! both styles: recessed into the plate under relief, a flat rounded track and fill otherwise.
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;

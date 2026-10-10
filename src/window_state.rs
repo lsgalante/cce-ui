@@ -10,20 +10,19 @@
 //!   its app id, whether it is fullscreen or maximized, and vertical text (`scale`,
 //!   `units`, `backend::text`).
 //!
-//! Each lived in a thread-local of its own until 2026-10-08, so every window on a thread
-//! shared one menu, one highlight and one composition. Now a window OWNS a
-//! [`WindowState`], and its shell makes it the current one ([`enter`]) for as long as it
+//! A window OWNS a [`WindowState`], and its shell makes it the current one ([`enter`]) for
+//! as long as it
 //! runs that window's code; the modules' free functions — `context_menu::show`,
 //! `hover_animation::tick`, `ime::caret`, … — act on the current one, so the many apps
-//! and widgets that call them (an app need not have a `UiContext` to show a menu) are
-//! unchanged. With none entered — a test, a tool that draws no window — each thread has a
-//! default one, which is what the thread-locals were.
+//! and widgets that call them (an app need not have a `UiContext` to show a menu) need not
+//! know which window they serve. With none entered — a test, a tool that draws no window —
+//! each thread has a default one.
 //!
 //! **The window's properties read differently off a window.** A worker thread asking for the
 //! scale (a page rasterized at it, a tile decoded for it) has no window entered; it reads the
 //! process-wide value, which every window's setter also writes — the last one set. So a
-//! process with one window reads exactly what it did when these were only process-wide,
-//! and two windows on one thread each read their own (`docs/rfc-global-state.md`, phase 4).
+//! process with one window reads the same value on and off it, and two windows on one
+//! thread each read their own (`docs/rfc-global-state.md`, phase 4).
 //! Under `cfg(test)` the process-wide scale is per thread, so a test's write reaches no other
 //! test (`scale.rs`).
 

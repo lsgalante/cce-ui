@@ -1,5 +1,5 @@
-//! `TextItem` (retained cosmic-text buffer holder, unchanged) and the narrow-trait
-//! `InteractiveListItem` (Phase 5j): Button-style press/release with themed
+//! `TextItem` (a retained cosmic-text buffer holder) and `InteractiveListItem`: Button-style
+//! press/release with themed
 //! selected/hover/press overlays and title/subtitle text.
 
 use crate::colors;
