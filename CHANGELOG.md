@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The Vulkan renderer's frame is split** (`vk/renderer/`): `frame.rs` keeps `draw_frame_2d`
+  (the order of its phases), the immediate uploads, text and the frame's upload; recording the
+  backdrop, the UI pass, the display list, images and the overlay moves to `record` (with
+  `clip_to`), acquiring, the damage and partial region, submitting, image ages and presenting
+  to `present`. A pure move, checked line for line; the methods called across the files are
+  `pub(super)`. Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass; not run
+  on screen.
 - **`Checkbox` and `Toggle` are split** (`widget/input/checkbox/`): `mod.rs` (the box both share,
   `paint_box`, which the radio group also draws with, the value parser, `Checkbox` whole),
   `toggle` (`Toggle` whole, re-exported) and `tests`. A pure move, checked line for line; two of

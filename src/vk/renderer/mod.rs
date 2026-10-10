@@ -12,7 +12,9 @@
 //! | `mod.rs` | [`VkRenderer`] and its per-frame `Frame`, the push-constant and window-info sizes, `Drop` |
 //! | `init` | `try_new` / `try_new_for`: instance, device, queues, pipelines, the stages |
 //! | `surface` | the swapchain and its surface: create, recreate, detach and attach, resize, surface loss, the window-info block |
-//! | `frame` | a frame: `draw_frame_2d` (the UI pass, the blur snapshots, the image and text passes, damage), uploads, text |
+//! | `frame` | a frame: `draw_frame_2d` (the order of its phases), immediate uploads, text, the frame's upload |
+//! | `record` | recording a frame: the backdrop, the UI pass, the display list's batches and snapshots, images, the overlay |
+//! | `present` | acquire, the frame's damage and partial region, submit, image ages, present |
 //! | `snapshot` | the blur-behind snapshot of the frame so far and its mip chain; the backdrop and snapshot targets |
 //! | `stage3d` | meshes, lit meshes and the path tracer's scene, and the `Stage3D` / `LitStage3D` impls |
 //! | `pipeline` | `create_ui_pipeline`, the one 2D pipeline (shared with `vk::plate_probe`) |
@@ -27,6 +29,8 @@ mod frame;
 mod images;
 mod init;
 mod pipeline;
+mod present;
+mod record;
 mod shaders;
 mod snapshot;
 mod stage3d;
