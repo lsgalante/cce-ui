@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **`ScrollBox` is a directory module** (`widget/container/scroll_box/`): `mod.rs` (the struct,
+  its rect and bounds, the bar's geometry and raise state, the virtualization), `input`, `paint`
+  (the relief scrollbar, re-exported for the text box, the pills, the flat quads) and `tests`. A
+  pure move, checked line for line. The module doc, an account of its Phase 6av demotion from
+  `WidgetHost` naming a consumer that no longer exists, now says what it is and who embeds it.
+  Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The text box's tests are split by topic** (`widget/input/text_box/tests/`): `shaping` (glyph
   offsets, right-to-left text, wrapping), `pointer` (focus, clicks, drags, selection, the
   context menu), `editing` (composition, undo runs, the clipboard and passwords, the search
