@@ -8,7 +8,8 @@
 //! | `pointer` | pointer input and the pinch gesture, mapped into the driver |
 //! | `keyboard` | keyboard input through xkb, and the text input (`text-input-v3`) |
 //! | `protocols` | the cce inspector and window-management protocols |
-//! | `session` | `run`: sessions, reconnects, and waiting out a compositor restart |
+//! | `session` | `run` and `run_session`: one session per connection around the same app |
+//! | `reconnect` | what follows a session's end: reconnecting with backoff, exiting, or waiting out a compositor restart |
 
 mod handlers;
 mod keyboard;
@@ -16,9 +17,11 @@ mod layer;
 mod pointer;
 mod present;
 mod protocols;
+mod reconnect;
 mod session;
 
 pub use session::run;
+use reconnect::*;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     data_device_manager::DataDeviceManagerState,

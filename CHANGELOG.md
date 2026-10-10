@@ -10,6 +10,11 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The Wayland runner's reconnect policy is its own file** (`backend/window_runner/reconnect.rs`):
+  `SessionEnd`, `AfterSession`, the compositor-socket wait, the backoff constants and
+  `after_session`, with the `reconnect_tests` that test them; `session.rs` keeps
+  `raise_fd_limit`, `run` and `run_session` (one 350-line function, left whole). A pure move,
+  checked line for line. Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The path tracer's CPU half is a directory module** (`draw/rt/`): `mod.rs` (the scene schema),
   `bvh` (the binned-SAH build), `pack` (the GPU layouts, constants, packing, `PreparedRtScene`,
   the parameter blocks) and `tests`; re-exported, so `draw::rt::…` paths are unchanged. A pure
