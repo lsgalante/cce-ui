@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The path tracer's CPU half is a directory module** (`draw/rt/`): `mod.rs` (the scene schema),
+  `bvh` (the binned-SAH build), `pack` (the GPU layouts, constants, packing, `PreparedRtScene`,
+  the parameter blocks) and `tests`; re-exported, so `draw::rt::…` paths are unchanged. A pure
+  move, checked line for line; three section banners are dropped, one of which named a shader
+  (`rt.wgsl`) that no longer exists. Clippy, the suite, the tracer's GPU tests
+  (`CCE_VK_RT=compute`, `--ignored`) and `cargo check --workspace --exclude cce-fx` pass.
 - **The Vulkan renderer's frame is split** (`vk/renderer/`): `frame.rs` keeps `draw_frame_2d`
   (the order of its phases), the immediate uploads, text and the frame's upload; recording the
   backdrop, the UI pass, the display list, images and the overlay moves to `record` (with
