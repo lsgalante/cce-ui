@@ -447,7 +447,9 @@ fn fit(text: &str, w: f32, size: f32, font: &str, m: &mut ShapingMeasure) -> Str
 fn color_for(look: &Look, th: &EditorTheme) -> [f32; 4] {
     if look.marker || look.comment || look.dim {
         th.dim
-    } else if look.link || look.tag {
+    } else if look.tag {
+        th.tag
+    } else if look.link {
         th.link
     } else {
         th.fg

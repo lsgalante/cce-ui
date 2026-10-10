@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The tag colour is a theme key, `style.text.tag`** (`color/text.rs`): the reading view's
+  `#tag` text and wash, and `DocEditor`'s, read `colors::text_tag_color` /
+  `text_tag_background_color`. The wash is derived (the tag colour at 0.15 of its alpha, what
+  it was), not a second key. The default is the link's violet, as before; the editor drew tags
+  in `link` and now has a `tag` field on `EditorTheme`, so a theme can part the two. The quote
+  bar and highlight are still hard-coded. Clippy, the suite and `cargo doc` pass
+  (`the_tag_key_sets_the_tag_and_its_wash`).
 - **The link colour is a theme key, `style.text.link`** (`color/text.rs`): the markdown
   reading view and `DocEditor`'s `EditorTheme::new` read `colors::text_link_color` instead of
   hard-coding Obsidian's violet, so a theme recolours links in cce-notes and cce-grid's cards.

@@ -1,10 +1,16 @@
-//! Text colours outside a control: the link colour (`style.text.link`) and the unresolved link,
-//! which is derived from it rather than set.
+//! Text colours outside a control: the link colour (`style.text.link`) and the tag colour
+//! (`style.text.tag`). The unresolved link and the tag's wash are derived from them, not set.
 
 use super::*;
 
 /// The built-in link colour, as a theme states it (sRGB): a violet on the dark pages.
 pub(super) const DEFAULT_LINK_SRGB: [f32; 4] = [0.66, 0.55, 0.98, 1.0];
+
+/// The built-in tag colour (sRGB): the link's violet, set apart so a theme can part them.
+pub(super) const DEFAULT_TAG_SRGB: [f32; 4] = [0.66, 0.55, 0.98, 1.0];
+
+/// The opacity of the wash behind a tag, as a share of the tag colour's own.
+const TAG_WASH_ALPHA: f32 = 0.15;
 
 /// How an unresolved link differs from a link, in OKLab: this much of the lightness and this
 /// much of the chroma, the hue kept. With the default link it lands within 1/255 of
@@ -13,6 +19,8 @@ const UNRESOLVED_LIGHTNESS: f32 = 0.82;
 const UNRESOLVED_CHROMA: f32 = 0.64;
 
 pub(super) static TEXT_LINK_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXT_LINK_COLOR, |s| &mut s.color.TEXT_LINK_COLOR);
+
+pub(super) static TEXT_TAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXT_TAG_COLOR, |s| &mut s.color.TEXT_TAG_COLOR);
 
 /// The colour of a link in text (linear): a URL, a note link that resolves, the link glyph.
 pub fn text_link_color() -> [f32; 4] {
@@ -27,6 +35,22 @@ pub fn set_text_link_color(c: [f32; 4]) {
 /// a theme that sets `style.text.link` moves both.
 pub fn text_link_unresolved_color() -> [f32; 4] {
     unresolved_from(text_link_color())
+}
+
+/// The colour of a `#tag`'s text (linear).
+pub fn text_tag_color() -> [f32; 4] {
+    style_read(&TEXT_TAG_COLOR)
+}
+
+pub fn set_text_tag_color(c: [f32; 4]) {
+    style_write(&TEXT_TAG_COLOR, c);
+}
+
+/// The wash behind a `#tag` (linear): the tag colour, faint, so a theme that sets
+/// `style.text.tag` moves both.
+pub fn text_tag_background_color() -> [f32; 4] {
+    let t = text_tag_color();
+    [t[0], t[1], t[2], t[3] * TAG_WASH_ALPHA]
 }
 
 fn unresolved_from(link: [f32; 4]) -> [f32; 4] {
@@ -62,5 +86,23 @@ mod tests {
         assert_eq!(link, [1.0, 0.0, 0.0, 1.0]);
         assert_ne!(unresolved, before);
         assert!(unresolved[0] < link[0] && unresolved[0] > unresolved[2], "{unresolved:?}");
+    }
+
+    /// `style.text.tag` sets the tag and its wash, and leaves the link alone; the default wash
+    /// is the one the reading view drew before the key existed.
+    #[test]
+    fn the_tag_key_sets_the_tag_and_its_wash() {
+        let _lock = test_color_state_lock();
+        assert_eq!(text_tag_background_color(), to_linear([0.66, 0.55, 0.98, 0.15]));
+        let link = text_link_color();
+        reload_colors("style {\n text {\n tag \"#00ff00\"\n }\n}\n");
+        let (tag, wash, after) = (text_tag_color(), text_tag_background_color(), text_link_color());
+        if let Ok(mut lock) = TEXT_TAG_COLOR.write() {
+            *lock = to_linear(DEFAULT_TAG_SRGB);
+        }
+        reload_colors("");
+        assert_eq!(tag, [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(wash, [0.0, 1.0, 0.0, TAG_WASH_ALPHA]);
+        assert_eq!(after, link);
     }
 }

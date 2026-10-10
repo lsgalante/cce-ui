@@ -14,6 +14,8 @@ pub struct EditorTheme {
     pub link: [f32; 4],
     /// A note link with no target (the host says which, at paint).
     pub link_unresolved: [f32; 4],
+    /// A `#tag`'s text.
+    pub tag: [f32; 4],
     pub code_bg: [f32; 4],
     pub highlight_bg: [f32; 4],
     pub tag_bg: [f32; 4],
@@ -26,8 +28,8 @@ pub struct EditorTheme {
 }
 
 impl EditorTheme {
-    /// Obsidian-ish dark defaults at `size`, in the DE's sans and mono; the link colours are the
-    /// theme's (`style.text.link`), read once here.
+    /// Obsidian-ish dark defaults at `size`, in the DE's sans and mono; the link and tag
+    /// colours are the theme's (`style.text.link`, `style.text.tag`), read once here.
     pub fn new(size: f32) -> EditorTheme {
         let lin = crate::colors::to_linear;
         EditorTheme {
@@ -41,7 +43,8 @@ impl EditorTheme {
             link_unresolved: crate::colors::text_link_unresolved_color(),
             code_bg: [1.0, 1.0, 1.0, 0.06],
             highlight_bg: lin([1.0, 0.82, 0.0, 0.40]),
-            tag_bg: lin([0.66, 0.55, 0.98, 0.15]),
+            tag: crate::colors::text_tag_color(),
+            tag_bg: crate::colors::text_tag_background_color(),
             pill_bg: [1.0, 1.0, 1.0, 0.09],
             accent: lin([0.66, 0.55, 0.98, 1.0]),
             rule: [1.0, 1.0, 1.0, 0.14],

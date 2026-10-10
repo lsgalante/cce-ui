@@ -149,7 +149,7 @@ impl<'a> Layouter<'a> {
         let code = s.code || s.math;
         let size = if code { (base.size * 0.92).round() } else { base.size };
         let color = match &span.link {
-            Some(SpanLink::Tag(_)) => lin(TAG),
+            Some(SpanLink::Tag(_)) => crate::colors::text_tag_color(),
             Some(l @ (SpanLink::Note { .. } | SpanLink::Embed { .. })) => {
                 if (self.resolved)(l) {
                     crate::colors::text_link_color()
@@ -170,7 +170,7 @@ impl<'a> Layouter<'a> {
             } else if s.highlight {
                 Some(lin(HIGHLIGHT_BG))
             } else if matches!(span.link, Some(SpanLink::Tag(_))) {
-                Some(lin(TAG_BG))
+                Some(crate::colors::text_tag_background_color())
             } else {
                 None
             },

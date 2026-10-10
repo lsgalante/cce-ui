@@ -48,19 +48,15 @@ impl Theme {
     }
 }
 
-// Colours. Links read the theme (`style.text.link`, through
-// `colors::text_link_color` / `text_link_unresolved_color`). TODO(style): the
-// toolkit has no tag, quote or highlight colour yet; these follow Obsidian's
-// dark theme until it does. FG, DIM and the white washes are already linear;
+// Colours. Links and tags read the theme (`style.text.link` / `style.text.tag`,
+// through `colors::text_link_color` and its kin). TODO(style): the toolkit has
+// no quote or highlight colour yet; these follow Obsidian's dark theme until it
+// does. FG, DIM and the white washes are already linear;
 // the rest are written in sRGB (as a theme states them) and go through `lin`
 // where they are used.
 const FG: [f32; 4] = crate::colors::TEXT_FG;
 
 const DIM: [f32; 4] = crate::colors::TEXT_DIM;
-
-const TAG: [f32; 4] = [0.66, 0.55, 0.98, 1.0];
-
-const TAG_BG: [f32; 4] = [0.66, 0.55, 0.98, 0.15];
 
 const CODE_BG: [f32; 4] = [1.0, 1.0, 1.0, 0.06];
 
