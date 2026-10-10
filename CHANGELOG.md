@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **`Button` is a directory module** (`widget/input/button/`): `mod.rs` (the kinds, the struct,
+  construction, icons, the label's font and width, the plate, the builders, `impl Layout`,
+  `PageButton`), `paint`, `input`, and the two test modules as files. A pure move, checked line
+  for line. The module doc ("Phase 5f", parity with the legacy `mouse_input`, a colour matrix
+  that "becomes `Animated<f32>` lerping in RFC §3.6") describes the button as it is. Clippy,
+  the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The box model is a directory module** (`scene/layout/`): `mod.rs` (`Size`, `Rect`, `Edges`,
   `fit_rect`), `style` (axes, modes, lengths, alignment, `Style` and its presets, `LayoutBox`),
   `solve` (`compute_layout`, `measure`, `arrange` and their per-mode halves) and `tests`; all
