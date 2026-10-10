@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The Vulkan tracer's construction and tests have files of their own** (`vk/rt/`): `init.rs`
+  (`RtStage::new`, one 250-line function — the tier's pipelines, descriptor layouts and sets,
+  the frames in flight) and `tests.rs` (the GPU tests); `mod.rs` keeps the tier, `RtStage`'s
+  state, staging and teardown. A pure move, checked line for line. Clippy, the suite, the
+  tracer's GPU tests (`CCE_VK_RT=compute`, `--ignored`) and `cargo check --workspace --exclude
+  cce-fx` pass.
 - **A text measurement reads the scale once** (`backend/text/shape.rs`, the text box's
   `prepare_text` and shaping, `shaped_cluster_offsets`, `ShapingMeasure`): the new
   `shared_text_buffer_at` shapes at a scale the caller passes, and every path that divides a
