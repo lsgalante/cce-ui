@@ -45,7 +45,7 @@ accesskit = "0.25"
 # Calendar dates for `DatePicker`: `NaiveDate` arithmetic only. No default features, so no
 # clock and nothing platform-bound — the picker is handed "today" by its host.
 chrono = { version = "0.4", default-features = false }
-cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "acf0e24b015812bd9a83022085cc78cfa9acd766", optional = true }
+cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "672948dcacca3b4f17bc74c0a81dc741c4bac9a7", optional = true }
 glam = "0.29"
 bytemuck = { version = "1", features = ["derive"] }
 # WGSL parsing and validation everywhere — a compute kernel is checked, and

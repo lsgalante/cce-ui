@@ -463,6 +463,7 @@ dependencies = [
  "calloop-wayland-source",
  "cce-core",
  "cce-vault",
+ "chrono",
  "cosmic-text",
  "cursor-icon",
  "dispatch2",
@@ -499,7 +500,7 @@ dependencies = [
 [[package]]
 name = "cce-vault"
 version = "0.1.0"
-source = "git+https://github.com/lsgalante/cce-vault.git?rev=acf0e24b015812bd9a83022085cc78cfa9acd766#acf0e24b015812bd9a83022085cc78cfa9acd766"
+source = "git+https://github.com/lsgalante/cce-vault.git?rev=672948dcacca3b4f17bc74c0a81dc741c4bac9a7#672948dcacca3b4f17bc74c0a81dc741c4bac9a7"
 dependencies = [
  "chrono",
  "indexmap",
