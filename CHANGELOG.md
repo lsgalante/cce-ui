@@ -10,6 +10,11 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The params pane's input is split by event** (`widget/container/parameters_bg/`): `input.rs`
+  keeps hover, the row being typed into, committing a row, the pointer moving and `impl Input`;
+  presses move to `press` (with `hold_focus` and `fill_from_pick`), keys to `keys`, the wheel to
+  `wheel`. A pure move, checked line for line. Clippy, the suite and `cargo check --workspace
+  --exclude cce-fx` pass.
 - **`Float3` is a directory module** (`widget/display/float3/`): `mod.rs` (the struct,
   construction, components and values, the rows' layout, `impl Layout` and `impl Paint`), `ball`
   (the trackball: the camera view, rolling, rings, its paint, drag and scroll), `input` (the

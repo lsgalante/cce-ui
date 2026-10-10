@@ -29,6 +29,9 @@
 //! | `geometry` | label layout, row heights, sections, control rects, the scrollbar |
 //! | `paint` | the views the pane draws, and `impl Paint` |
 //! | `input` | hover, typing, committing a row, and `impl Input` |
+//! | `press` | presses: the scrollbar, section titles, open popovers, row controls, focus |
+//! | `keys` | keys to the focused row |
+//! | `wheel` | which control a wheel gesture belongs to, and scrolling |
 //! | `code` | the inline code editor |
 //! | `controller` | `impl ParamController`: the host's reads and writes |
 
@@ -36,13 +39,17 @@ mod code;
 mod controller;
 mod geometry;
 mod input;
+mod keys;
 mod paint;
+mod press;
 mod rows;
+mod wheel;
 #[cfg(test)]
 mod tests;
 
 pub use rows::SEPARATOR;
 use rows::*;
+use press::fill_from_pick;
 
 use crate::colors;
 use crate::scene::layout::Rect;
