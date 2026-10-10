@@ -10,6 +10,11 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The Vulkan renderer's backdrop pass has a file of its own** (`vk/renderer/backdrop.rs`):
+  `record_backdrop` — the 3D scene and the tracer into the backdrop, and its copy into the
+  swapchain image — moves out of `record.rs`, which keeps the UI pass. A pure move, checked line
+  for line. Clippy, the suite and `cargo check --workspace --exclude cce-fx` pass (also
+  excluding cce-data-editor, mid-edit in another session); not run on screen.
 - **The height field is a directory module** (`scene/heightfield/`): `mod.rs` (`HeightField`,
   with `from_frame` — one 200-line function, left whole — and its readers), `profiles` (the
   wall and roll height curves, the rounded-rect SDF), `export` (`request`, the `CCE_HEIGHTMAP`

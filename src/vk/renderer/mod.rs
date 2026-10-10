@@ -13,7 +13,8 @@
 //! | `init` | `try_new` / `try_new_for`: instance, device, queues, pipelines, the stages |
 //! | `surface` | the swapchain and its surface: create, recreate, detach and attach, resize, surface loss, the window-info block |
 //! | `frame` | a frame: `draw_frame_2d` (the order of its phases), immediate uploads, text, the frame's upload |
-//! | `record` | recording a frame: the backdrop, the UI pass, the display list's batches and snapshots, images, the overlay |
+//! | `backdrop` | the passes beneath the UI: the 3D scene and the tracer into the backdrop, and its copy |
+//! | `record` | recording the UI pass: the display list's batches and snapshots, images, the overlay |
 //! | `present` | acquire, the frame's damage and partial region, submit, image ages, present |
 //! | `snapshot` | the blur-behind snapshot of the frame so far and its mip chain; the backdrop and snapshot targets |
 //! | `stage3d` | meshes, lit meshes and the path tracer's scene, and the `Stage3D` / `LitStage3D` impls |
@@ -23,6 +24,7 @@
 //! | `images` | image subresource ranges, the snapshot's mip levels, image clears, the flipped viewport |
 //! | `buffers` | host-visible buffers |
 
+mod backdrop;
 mod buffers;
 mod damage;
 mod frame;
