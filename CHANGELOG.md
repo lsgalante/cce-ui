@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **Materials are a directory module** (`scene/material/`): `mod.rs` (`Material`, `PlateRole`),
+  `finish`, `frost`, `def` (`MaterialDef`, `FrostDef`, `PlateRung`) and `tests`; all
+  re-exported, so `scene::material::…` paths are unchanged. A pure move, checked line for line;
+  the tests' `include_str!` of `shader2d.wgsl` gains a `../` for the deeper file. The module doc
+  narrated RFC steps 1 and 2 as in progress; it now describes the finished design. Clippy, the
+  suite and `cargo check --workspace --exclude cce-fx` pass.
 - **`Spinbox` is a directory module** (`widget/input/spinbox/`): `mod.rs` (the struct, its
   relief and geometry, construction, the caret, the value's text, parsing and stepping, the
   builders, `impl Layout`), `paint`, `input` and `tests`. A pure move, checked line for line;
