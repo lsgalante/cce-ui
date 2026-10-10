@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The `DocEditor`'s line layout is a directory module** (`widget/doc_editor/layout/`): `mod.rs`
+  (`Run`, `Deco`, `LineLayout` and `layout_line`, one 320-line function left whole), `theme` (the
+  `EditorTheme`, indents, the pill metrics), `geometry` (image layouts, the caret's x, selection
+  rects, the column at an x, the link at a point) and `tests`; re-exported, so paths are
+  unchanged. A pure move, checked line for line. Clippy, the suite and `cargo check --workspace
+  --exclude cce-fx` pass.
 - **The browser shell is a directory module** (`web/shell/`): `mod.rs` (`Sizing`, `Fonts`, `run`,
   `capture`, the small DOM helpers), `canvas` (`WebShell` and its `Shell` impl) and `events` (the
   page's event loop: `Loop`, its scheduling, the events installed on the canvas and the keyboard
