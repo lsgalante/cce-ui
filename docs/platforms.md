@@ -24,7 +24,7 @@ frame drawn whole; the backdrop sampled with `textureSampleLevel(…, 0.0)` (no 
 non-uniform branch). `request_device` asks for the adapter's own limits where a caller needs more
 than the spec defaults.
 
-**The browser shell** (`web::run::<App>(canvas, fonts, sizing).await`, `src/web/shell.rs`) runs an
+**The browser shell** (`web::run::<App>(canvas, fonts, sizing).await`, `src/web/shell/`) runs an
 `Application` over a `<canvas>` on the same `Driver` and `Pacer`:
 
 - **Events** on the canvas, mapped by `backend::dom` (portable, tested natively): pointer

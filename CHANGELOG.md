@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The browser shell is a directory module** (`web/shell/`): `mod.rs` (`Sizing`, `Fonts`, `run`,
+  `capture`, the small DOM helpers), `canvas` (`WebShell` and its `Shell` impl) and `events` (the
+  page's event loop: `Loop`, its scheduling, the events installed on the canvas and the keyboard
+  sink). `run` builds `WebShell` and `Loop`, so their fields and methods are `pub(super)`. A pure
+  move, checked line for line. Browser-only code this machine cannot compile: committed on a
+  branch and built by CI's `wasm` job first.
 - **The Wayland runner's reconnect policy is its own file** (`backend/window_runner/reconnect.rs`):
   `SessionEnd`, `AfterSession`, the compositor-socket wait, the backoff constants and
   `after_session`, with the `reconnect_tests` that test them; `session.rs` keeps
