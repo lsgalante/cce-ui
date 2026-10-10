@@ -59,13 +59,8 @@ pub(crate) fn dl_batches_2d(dl_batches: &[DlBatch], scale_f32: f32) -> Vec<Batch
         .collect()
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Vertex {
-    pub position: [f32; 2],
-    pub color: [f32; 4],
-    pub clip_circle: [f32; 3], // [cx, cy, r]
-}
+/// What a renderer draws, so `draw` owns it; re-exported here at its old path.
+pub use crate::draw::Vertex;
 
 /// A contiguous run of vertices sharing one scissor rect (Phase 3 single paint path) and one
 /// rounded-rect clip. `scissor` is a logical-pixel clip (`None` = unclipped); `clip_rrect` is

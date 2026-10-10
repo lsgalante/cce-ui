@@ -513,7 +513,7 @@ impl Application for DemoApp {
         ];
         for id in roots {
             if let Some(w) = ui.get_widget(id) {
-                cce_ui::scene::painter::paint_root_into(ui, w, &mut pc);
+                cce_ui::widget::painter::paint_root_into(ui, w, &mut pc);
             }
         }
 
@@ -529,7 +529,7 @@ impl Application for DemoApp {
 
         // The dialog over everything: its backdrop, its plate, and its members on the plate
         // (it paints them; they are never painted on their own).
-        cce_ui::scene::painter::paint_root_into(ui, &ui[self.dialog], &mut pc);
+        cce_ui::widget::painter::paint_root_into(ui, &ui[self.dialog], &mut pc);
 
         Some(pc.finish())
     }

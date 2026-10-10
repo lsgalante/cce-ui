@@ -216,7 +216,7 @@ mod imp {
         pub fn publish<A: Application>(&mut self, app: &mut A, scale: f64) {
             self.adapter.update_if_active(|| {
                 let t0 = web_time::Instant::now();
-                let tree = crate::a11y::app_tree(app, scale);
+                let tree = crate::backend::app::accessibility_tree(app, scale);
                 if super::debug() {
                     eprintln!("[a11y] publish: {} nodes, focus {:?}, built in {:?}", tree.nodes.len(), tree.focus, t0.elapsed());
                 }

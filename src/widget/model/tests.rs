@@ -30,7 +30,7 @@ use super::*;
 use crate::widget::PathController;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::Prim;
-use crate::scene::painter::paint_tree;
+use crate::widget::painter::paint_tree;
 use crate::widget::UiContext;
 
 /// A leaf that only knows the two narrow concerns — no `WidgetHost` in sight: it reports an

@@ -70,7 +70,7 @@ pub(super) fn rect_overlaps(a: vk::Rect2D, b: vk::Rect2D) -> bool {
 }
 
 /// The physical-px box a run of vertices covers (positions are NDC, y up).
-pub(crate) fn verts_bounds(verts: &[crate::engine::Vertex], extent: vk::Extent2D) -> Option<vk::Rect2D> {
+pub(crate) fn verts_bounds(verts: &[crate::draw::Vertex], extent: vk::Extent2D) -> Option<vk::Rect2D> {
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for v in verts {
         let px = (v.position[0] + 1.0) * 0.5 * extent.width as f32;

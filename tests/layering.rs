@@ -8,7 +8,7 @@
 //!
 //! 0. the base: crate-root helpers and the re-exported cce-core modules
 //! 1. `style`, `color`, `scale`
-//! 2. `draw`, `layout`
+//! 2. `draw`, `layout`, `icon`
 //! 3. `scene`
 //! 4. `context`, `widget`, `text`, `ime`, `text_input`, `window_state`, `a11y`
 //! 5. the shells and the renderer: `backend`, `vk`, `wayland`, `web`, `mac`,
@@ -33,12 +33,13 @@ fn layer(name: &str) -> Option<u8> {
         // Crate-root helpers and macros (lib.rs), and cce-core's modules
         // re-exported at their old paths.
         "config" | "input" | "motion" | "units" | "ipc" | "locale" | "plan" | "process" | "fmt"
-        | "desktop_entry" | "relief_spec" | "l10n" | "history" | "icon" | "compute"
+        | "desktop_entry" | "relief_spec" | "l10n" | "history" | "compute"
         | "create_font_system" | "create_font_system_with_system_fonts" | "geometry_font_system"
         | "icon_pixels" | "icon_source" | "icon_tint" | "icons_dir" | "rasterize_svg" | "upload_icon"
         | "upload_icon_tinted" | "page_fonts" | "scroll_debug" | "impl_widget_base" => 0,
         "style" | "color" | "colors" | "scale" => 1,
-        "draw" | "layout" => 2,
+        // `icon` uploads what it resolves, through `draw`.
+        "draw" | "layout" | "icon" => 2,
         "scene" => 3,
         // `text` shapes with `scene::paint` and widget types: it sits with them.
         "context" | "ime" | "text_input" | "window_state" | "a11y" | "widget" | "text" => 4,
@@ -51,11 +52,8 @@ fn layer(name: &str) -> Option<u8> {
 /// Upward edges that existed on 2026-10-10, `from -> to`. Delete a line
 /// when its edge is gone (the test says which); never add one.
 const ALLOWED_UPWARD: &[(&str, &str)] = &[
-    ("a11y", "backend"),
     ("color", "layout"),
     ("color", "scene"),
-    ("draw", "backend"),
-    ("icon", "draw"),
     ("layout", "context"),
     ("layout", "scene"),
     // Was layout -> backend: the same use of text shaping, renamed when
@@ -63,9 +61,7 @@ const ALLOWED_UPWARD: &[(&str, &str)] = &[
     ("layout", "text"),
     ("layout", "widget"),
     ("scale", "window_state"),
-    ("scene", "widget"),
     ("style", "layout"),
-    ("vk", "engine"),
 ];
 
 /// The code a module ships: everything before a trailing `#[cfg(test)] mod

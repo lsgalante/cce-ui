@@ -12,6 +12,11 @@
 mod controllers;
 mod events;
 mod host;
+/// The paint walk: a widget tree into a `DisplayList` through `PaintCtx`.
+pub mod painter;
+/// `WidgetTree`: the widget forest on `scene::Arena` (parents, children, ownership).
+pub mod tree;
+pub use tree::WidgetTree;
 
 pub use controllers::*;
 pub use events::*;

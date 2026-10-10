@@ -9,7 +9,16 @@
 //! Vulkan one on Linux, a WebGPU one in the browser — so they live here, and
 //! `vk` re-exports every one at its old path.
 
-use crate::backend::tessellate::Vertex;
+/// One 2D vertex of a tessellated frame: what the 2D shaders take. Defined
+/// here, with the rest of what a renderer draws; `backend::tessellate` makes
+/// it and re-exports it at its old path.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Vertex {
+    pub position: [f32; 2],
+    pub color: [f32; 4],
+    pub clip_circle: [f32; 3], // [cx, cy, r]
+}
 use cosmic_text::Buffer as TextBuffer;
 
 pub mod glyphs;

@@ -54,7 +54,7 @@ use gpu_allocator::vulkan::{
 };
 use gpu_allocator::MemoryLocation;
 
-use crate::engine::Vertex;
+use crate::draw::Vertex;
 
 use super::core::SurfaceLost;
 use super::image::ImageStage;

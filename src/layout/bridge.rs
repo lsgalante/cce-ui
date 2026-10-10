@@ -244,7 +244,7 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     // no flat-surface counterpart and are skipped, as they always were.
     let solid_border = w.solid_border();
     let mut text_scratch = crate::scene::paint::PaintCtx::new();
-    crate::scene::painter::paint_root_into(&*ctx, &*w, &mut text_scratch);
+    crate::widget::painter::paint_root_into(&*ctx, &*w, &mut text_scratch);
 
     // A zero-stroke Border waiting for its Trough: (rect, radii, fill).
     let mut pending_face: Option<(crate::scene::layout::Rect, crate::scene::paint::Radii, [f32; 4])> = None;

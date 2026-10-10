@@ -13,7 +13,7 @@ pub trait Paint {
 
     /// Emit this node's OWN primitives (non-recursive) into `ctx`, given its final `rect`. The
     /// default paints a plain background from [`color`](Paint::color) — the common leaf case.
-    /// Recursion into children and clipping are the paint walk's job ([`crate::scene::painter`]),
+    /// Recursion into children and clipping are the paint walk's job ([`crate::widget::painter`]),
     /// not this method's.
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let color = self.color();

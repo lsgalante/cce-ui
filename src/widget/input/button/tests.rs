@@ -80,7 +80,7 @@ fn intrinsic_size_holds_the_label_as_the_walk_draws_it() {
     let size = ctx[b].intrinsic_size().unwrap();
     WidgetHost::set_rect(&mut ctx[b], 10.0, 20.0, size.width, size.height);
 
-    let list = crate::scene::painter::paint_tree(&ctx, &ctx[b]);
+    let list = crate::widget::painter::paint_tree(&ctx, &ctx[b]);
     let text = list
         .items
         .iter()

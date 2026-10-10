@@ -94,7 +94,7 @@ is gone, never add one).
 **CI** (`.github/workflows/ci.yml`, every push; warnings are errors):
 `test` (Ubuntu 24.04 with lavapipe so GPU tests run — the job fails if any printed a skip note —
 and `fonts-liberation` as `CCE_FONTS_DIR`), `clippy`, `miri` (`widget::handle`,
-`widget::embedded`, `scene::tree` under Stacked and Tree Borrows), `wasm` (`scripts/check-wasm`),
+`widget::embedded`, `widget::tree` under Stacked and Tree Borrows), `wasm` (`scripts/check-wasm`),
 `macos` (builds and links every target on a macOS runner, runs the tests). To match `test`
 locally: `apt install libwayland-dev libxkbcommon-dev mesa-vulkan-drivers fonts-liberation`, then
 `CCE_FONTS_DIR=/usr/share/fonts/truetype/liberation RUSTFLAGS="-D warnings" cargo test --all-features`.
@@ -200,7 +200,7 @@ the model cannot (visibility gating, the content rect, child recursion, registry
 route through `handle_event`; apps drain widget state through `Adapted<W>`'s inherent methods
 (`take_click`, `take_change`, …).
 
-**The registry owns its widgets** (`UiContext`, `src/context/`; tree in `scene::tree`):
+**The registry owns its widgets** (`UiContext`, `src/context/`; tree in `widget::tree`):
 
 - `ctx.insert(w)` moves a widget in and returns `Handle<W>` (`Copy`, typed). Reach it through the
   context: `ctx[h]`, `ctx.get(h)` / `get_mut(h)`, or `ctx.lend_h(h, |w, ctx| ..)` when you need
@@ -222,7 +222,7 @@ route through `handle_event`; apps drain widget state through `Adapted<W>`'s inh
 - A widget used only as a paint STAMP stays a bare `Adapted` and is never inserted.
 - Drive focus through the context (`focus_id` / `unfocus_id`), never `w.focus()` directly, so
   the window's focus record follows.
-- `widget::handle`, `widget::embedded` and `scene::tree` hold the tests; CI runs them under Miri.
+- `widget::handle`, `widget::embedded` and `widget::tree` hold the tests; CI runs them under Miri.
 
 **A new widget declares what it is**: its `Input::focus_role` — `Plate` (you press it: Enter /
 Space act), `Well` (you type or adjust in it), or `None` — and a label that names it to a person.
@@ -245,7 +245,7 @@ code that matches displayed text.
 ## Rendering
 
 - **One paint path.** `backend::frame::build_frame` builds the frame from the app's
-  `DisplayList` (via `PaintCtx`: clip/transform stack, the paint walk in `scene/painter.rs`;
+  `DisplayList` (via `PaintCtx`: clip/transform stack, the paint walk in `widget/painter.rs`;
   each widget emits its own prims, the walk owns recursion and clipping), tessellates it
   (`backend/tessellate/`), and the shell presents it. `None` from `display_list` is an empty
   frame. `build_frame` has no window system in it and is tested with no GPU.
@@ -408,11 +408,11 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   content change in `frame.rs`, a pacing change in `shell.rs` — never in the Wayland code.
 - `context/` — `UiContext`: the widget registry, routing, hit-testing, focus, modals, popovers,
   the context menu (its `mod.rs` has the table).
-- `scene/` — the core: `arena.rs` (generational forest), `tree.rs` (`WidgetTree`), `layout/`
+- `scene/` — the core: `arena.rs` (generational forest), `layout/`
   (the box model), `paint/` (`DisplayList`, `Prim`, `PaintCtx`, `Field`, `ControlPlate`,
-  `PlateSpec`), `painter.rs` (the paint walk), `anim.rs` (`Animated<T>`), `material/`,
+  `PlateSpec`), `anim.rs` (`Animated<T>`), `material/`,
   `heightfield/`.
-- `widget/` — `host.rs` (`WidgetHost`), `events.rs` (the input vocabulary), `controllers.rs` (the host controller traits), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
+- `widget/` — `host.rs` (`WidgetHost`), `tree.rs` (`WidgetTree`, on `scene::Arena`), `painter.rs` (the paint walk over widgets), `events.rs` (the input vocabulary), `controllers.rs` (the host controller traits), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
   `embedded.rs`, `container/` (params pane, tree list, spreadsheet, menus, scroll boxes…),
   `input/` (button, slider, text box, dropdown, ramp…), `display/` (label, graph, svg…),
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit/` (`LineEdit`, a field an app

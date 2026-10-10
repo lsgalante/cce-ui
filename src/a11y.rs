@@ -27,7 +27,7 @@
 //!
 //! An app that draws without a [`UiContext`] (the status bar, the terminal, the map…) says
 //! what it shows through [`Application::accessibility`](crate::backend::app::Application::accessibility),
-//! pushing AccessKit nodes into [`AppNodes`]; [`app_tree`] puts both halves and the menu
+//! pushing AccessKit nodes into [`AppNodes`]; `engine::accessibility_tree` puts both halves and the menu
 //! under one window.
 //!
 //! Every call answers the whole tree. AccessKit's adapters compare it with the last one and
@@ -432,16 +432,6 @@ fn truth(value: &str) -> Option<bool> {
 /// at HiDPI `scale` (see the module docs).
 pub fn tree_update(ctx: &UiContext, title: &str, scale: f64) -> TreeUpdate {
     window_tree(Some(ctx), AppNodes::default(), title, scale)
-}
-
-/// An app's whole tree: its [`UiContext`]'s widgets if it has one, the nodes its
-/// [`Application::accessibility`](crate::backend::app::Application::accessibility) declares,
-/// and an open context menu, under a window named by its settings' title.
-pub fn app_tree<A: crate::backend::app::Application>(app: &mut A, scale: f64) -> TreeUpdate {
-    let mut own = AppNodes::default();
-    app.accessibility(&mut own);
-    let title = app.settings().title;
-    window_tree(app.ui_context(), own, &title, scale)
 }
 
 /// The tree of `ctx`'s widgets (if any) and `app`'s own nodes under one window. Focus, most

@@ -242,7 +242,7 @@ mod tests {
         WidgetHost::set_rect(&mut bar, 0.0, 570.0, 800.0, 30.0);
 
         let mut pc = PaintCtx::new();
-        crate::scene::painter::paint_root_into(&ui, &bar, &mut pc);
+        crate::widget::painter::paint_root_into(&ui, &bar, &mut pc);
         let fonts: Vec<_> = pc
             .finish()
             .items

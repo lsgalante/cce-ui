@@ -110,7 +110,7 @@ mod tests {
 
     fn image_prims(view: &Adapted<ImageView>, ctx: &UiContext) -> Vec<(u32, Rect, f32)> {
         let mut pc = PaintCtx::new();
-        crate::scene::painter::paint_root_into(ctx, view, &mut pc);
+        crate::widget::painter::paint_root_into(ctx, view, &mut pc);
         pc.finish()
             .items
             .into_iter()

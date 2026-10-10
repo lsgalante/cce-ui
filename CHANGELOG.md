@@ -10,6 +10,16 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **Five more upward edges gone; `layering.rs` allows 7.** The paint walk (`painter`) and
+  `WidgetTree` (`tree`) walk and own widgets, so they moved from `scene` to `widget`; `scene`
+  keeps the generic `Arena` and names no widget type. `Vertex`, what the 2D shaders take, is
+  `draw`'s (`backend::tessellate` re-exports it), so `draw` no longer reaches into `backend` and
+  `vk` no longer reaches into `engine`. `a11y::app_tree`, generic over `Application`, is now
+  `engine::accessibility_tree` beside the trait, so `a11y` takes only parts. `icon` sits with
+  `draw`, which it uploads through. App paths moved with them: `cce_ui::widget::painter`,
+  `cce_ui::widget::WidgetTree` (20 apps rewritten), and cce-data-editor's test calls
+  `engine::accessibility_tree`. The suite (624), the CI Miri filter (`widget::tree`) and a
+  whole-workspace build pass.
 - **Text shaping is the top-level `text` module** (was `backend/text/`): shaping, the
   shaped-buffer cache, the font set and bidi. Widgets, `layout` and `window_state` need it and
   it is not part of a shell, so `widget -> backend` and `window_state -> backend` are gone

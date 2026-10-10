@@ -206,7 +206,7 @@ fn the_row_chrome_is_the_panes_and_the_plate_the_hosts() {
     );
     // Per-label hatch: the walk's text prims carry the widget font and viewport bounds.
     let mut scratch = crate::scene::paint::PaintCtx::new();
-    crate::scene::painter::append_widget_text(&ctx, &p, &mut scratch);
+    crate::widget::painter::append_widget_text(&ctx, &p, &mut scratch);
     let labels: Vec<_> = scratch
         .finish()
         .items

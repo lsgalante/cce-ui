@@ -11,7 +11,7 @@
 //! stored as `Vec<NodeId>` (indices, not pointers), so traversal never aliases a `&mut`, which
 //! keeps the whole thing safe and borrow-checker-friendly without `unsafe`.
 //!
-//! [`Node<T>`] is generic over its payload: the widget tree (`scene::tree`) and the box model
+//! [`Node<T>`] is generic over its payload: the widget tree (`widget::tree`) and the box model
 //! (`scene::layout`) each keep their own records in it.
 
 use std::num::NonZeroU32;

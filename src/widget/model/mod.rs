@@ -2,7 +2,7 @@
 //!
 //! A widget's behaviour is three independent traits, one per concern: [`Layout`] (its size, its
 //! label's place, its children's arrangement, the children it embeds), [`Paint`] (what it draws
-//! given its laid-out rect, read by the paint walk in [`crate::scene::painter`]) and [`Input`]
+//! given its laid-out rect, read by the paint walk in [`crate::widget::painter`]) and [`Input`]
 //! (its hit, events, focus role, values and drags). [`Adapted<W>`] wraps a widget that implements
 //! all three and is the one production implementor of [`WidgetHost`], the surface the machinery
 //! sees: it carries the [`Widget`] base (rect, id, label, dirty) and the visibility flag, and

@@ -214,7 +214,7 @@ impl Paint for Dialog {
         }
         for &id in &self.members {
             if let Some(w) = ui.get_widget(id) {
-                crate::scene::painter::paint_root_into(ui, w, ctx);
+                crate::widget::painter::paint_root_into(ui, w, ctx);
             }
         }
     }
@@ -284,12 +284,12 @@ mod tests {
         let ok = ctx.insert(Button::new(120.0, 160.0, 80.0, 24.0).with_label("OK"));
         let dialog = ctx.insert(Dialog::new().with_label("Rename"));
         let mut pc = PaintCtx::new();
-        crate::scene::painter::paint_root_into(&ctx, &ctx[dialog], &mut pc);
+        crate::widget::painter::paint_root_into(&ctx, &ctx[dialog], &mut pc);
         assert!(pc.finish().items.is_empty(), "closed, it paints nothing");
 
         ctx.lend_h(dialog, |d, ctx| d.open(ctx, vec![ok.id()]));
         let mut pc = PaintCtx::new();
-        crate::scene::painter::paint_root_into(&ctx, &ctx[dialog], &mut pc);
+        crate::widget::painter::paint_root_into(&ctx, &ctx[dialog], &mut pc);
         let prims: Vec<Prim> = pc.finish().items.into_iter().map(|i| i.prim).collect();
         let texts: Vec<&str> = prims
             .iter()

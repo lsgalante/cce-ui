@@ -337,7 +337,7 @@ pub trait Application: Sized + 'static {
     /// an accessibility tree, for an app that draws without widgets (a status bar module, a
     /// terminal, a map) or draws parts of its window itself. Pushed as AccessKit nodes into
     /// `nodes` (`crate::a11y::AppNodes`); the widgets and an open context menu are added
-    /// around them (`crate::a11y::app_tree`). Default: nothing.
+    /// around them (`accessibility_tree`). Default: nothing.
     fn accessibility(&mut self, nodes: &mut crate::a11y::AppNodes) {
         let _ = nodes;
     }
@@ -494,7 +494,7 @@ pub trait Application: Sized + 'static {
     /// and [`custom_vertices`](Application::custom_vertices) still go through their own paths;
     /// text renders from the list when [`display_list_text`](Application::display_list_text)
     /// opts in. Receives the frame's logical size and HiDPI scale. Typically implemented as
-    /// `Some(cce_ui::scene::painter::paint_tree(&self.ui_context, &self.root))`.
+    /// `Some(cce_ui::widget::painter::paint_tree(&self.ui_context, &self.root))`.
     fn display_list(&mut self, _size: LogicalSize, _scale: f64) -> Option<crate::scene::paint::DisplayList> {
         None
     }
@@ -662,4 +662,15 @@ mod app_sender_tests {
         // And the escape hatch for a client still holding calloop's type.
         let _raw: calloop::channel::Sender<u32> = sender.into();
     }
+}
+
+/// An app's whole accessibility tree: its [`UiContext`](crate::context::UiContext)'s widgets
+/// if it has one, the nodes its [`Application::accessibility`] declares, and an open context
+/// menu, under a window named by its settings' title. Here rather than in `a11y`, which sits
+/// below the app contract and takes its parts (`a11y::window_tree`).
+pub fn accessibility_tree<A: Application>(app: &mut A, scale: f64) -> accesskit::TreeUpdate {
+    let mut own = crate::a11y::AppNodes::default();
+    app.accessibility(&mut own);
+    let title = app.settings().title;
+    crate::a11y::window_tree(app.ui_context(), own, &title, scale)
 }

@@ -38,7 +38,7 @@ pub struct UiContext {
     /// The widget tree + registry, consolidated into one generational store (Phase 1b of the
     /// core rebuild). Replaces the former `layout_tree` + `widget_registry` maps; see
     /// `scene/tree.rs`.
-    pub tree: crate::scene::WidgetTree,
+    pub tree: crate::widget::WidgetTree,
     /// The focused widget's id (Phase 6bc: stored ids, not pointers — a stale id resolves to
     /// `None` through the generational tree instead of dereferencing freed memory).
     pub focused_widget: Option<WidgetId>,
@@ -85,7 +85,7 @@ pub struct UiContext {
 impl UiContext {
     pub fn new() -> Self {
         Self {
-            tree: crate::scene::WidgetTree::new(),
+            tree: crate::widget::WidgetTree::new(),
             focused_widget: None,
             active_popovers: Vec::new(),
             modals: Vec::new(),
