@@ -281,7 +281,7 @@ untouched slider verbatim, a moved one converted through the same metric that se
   is 1.67 mm.
 - **Why logical px inside**: UI sizes are perceptual and angular; a hit target should not become
   8 mm on a projector. Documents and fabrication live in real units and convert at view time.
-- **The height field** (`scene/heightfield.rs`): integrates the slopes the shader lights back into
+- **The height field** (`scene/heightfield/`): integrates the slopes the shader lights back into
   heights, samples a frame's plates per physical px (plates stack, carves etch), and writes a
   16-bit PNG with a JSON sidecar (pitch and range in mm via the metric, datum, metric source).
   `CCE_HEIGHTMAP=<file>` in any client, or `heightfield::request`. On an assumed metric the

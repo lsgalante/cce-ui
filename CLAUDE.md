@@ -405,7 +405,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
 - `scene/` — the core: `arena.rs` (generational forest), `tree.rs` (`WidgetTree`), `layout/`
   (the box model), `paint/` (`DisplayList`, `Prim`, `PaintCtx`, `Field`, `ControlPlate`,
   `PlateSpec`), `painter.rs` (the paint walk), `anim.rs` (`Animated<T>`), `material/`,
-  `heightfield.rs`.
+  `heightfield/`.
 - `widget/` — `host.rs` (`WidgetHost`), `events.rs` (the input vocabulary), `controllers.rs` (the host controller traits), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
   `embedded.rs`, `container/` (params pane, tree list, spreadsheet, menus, scroll boxes…),
   `input/` (button, slider, text box, dropdown, ramp…), `display/` (label, graph, svg…),

@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The height field is a directory module** (`scene/heightfield/`): `mod.rs` (`HeightField`,
+  with `from_frame` — one 200-line function, left whole — and its readers), `profiles` (the
+  wall and roll height curves, the rounded-rect SDF), `export` (`request`, the `CCE_HEIGHTMAP`
+  request, `export_png`) and `tests`; re-exported, so `scene::heightfield::…` paths are
+  unchanged. A pure move, checked line for line. Clippy, the suite and `cargo check --workspace
+  --exclude cce-fx` pass.
 - **The Vulkan tracer's construction and tests have files of their own** (`vk/rt/`): `init.rs`
   (`RtStage::new`, one 250-line function — the tier's pipelines, descriptor layouts and sets,
   the frames in flight) and `tests.rs` (the GPU tests); `mod.rs` keeps the tier, `RtStage`'s
