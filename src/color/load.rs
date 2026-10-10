@@ -371,6 +371,9 @@ fn parse_and_set_colors_in_batch(content: &str) {
     if let Some(c) = get_color("/style/data/tree/leaf_text_selected_color") {
         if let Ok(mut lock) = TREE_LEAF_TEXT_SELECTED_COLOR.write() { *lock = c; }
     }
+    if let Some(c) = get_color("/style/text/link") {
+        if let Ok(mut lock) = TEXT_LINK_COLOR.write() { *lock = c; }
+    }
     if let Some(c) = get_color("/style/data/tree/type_text_color") {
         if let Ok(mut lock) = TREE_TYPE_TEXT_COLOR.write() { *lock = c; }
     }

@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The link colour is a theme key, `style.text.link`** (`color/text.rs`): the markdown
+  reading view and `DocEditor`'s `EditorTheme::new` read `colors::text_link_color` instead of
+  hard-coding Obsidian's violet, so a theme recolours links in cce-notes and cce-grid's cards.
+  The unresolved-link colour is derived, not a second key: the link in OKLab at 0.82 of the
+  lightness and 0.64 of the chroma, the hue kept, so a theme that sets the link moves both. The
+  ratios were fitted to the two hand-picked colours; the derived default is within 1/255 of the
+  old one (`the_default_unresolved_link_is_the_old_one`). The reading view's link glyph now
+  matches the link text: it was handed the sRGB constant as if it were linear and drew lighter.
+  Tag, quote and highlight colours are still hard-coded. Clippy, the suite and `cargo doc` pass.
 - **The doc links resolve** (27 files): `cargo doc -p cce-ui --all-features` reported 41 warnings
   and reports none. Sixteen links named items that had moved or been renamed — the `a11y_*`
   reads on `WidgetHostExt`, `Application::create`, `IDLE_DISPATCH`, `build_frame`,

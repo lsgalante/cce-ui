@@ -13,6 +13,7 @@
 //! | `controls` | buttons, text boxes, dropdowns, sliders, spinboxes, progress bars, control labels, the ramp |
 //! | `lists` | lists, breadcrumbs, the tree list, scrollbars |
 //! | `graph` | the node graph: nodes, wires, connectors, its grid |
+//! | `text` | text colours outside a control: the link colour and the unresolved link derived from it |
 //! | `load` | reading the config into the slots, retired surface keys, reloads |
 //! | `math` | sRGB / linear, OKLab, the perceptual fade |
 //! | `materials` | named materials and the rung bindings |
@@ -33,6 +34,8 @@ mod graph;
 pub use graph::*;
 mod lists;
 pub use lists::*;
+mod text;
+pub use text::*;
 mod surfaces;
 pub use surfaces::*;
 
@@ -161,6 +164,7 @@ crate::style::style_slots! {
     TREE_TYPE_TEXT_COLOR: [f32; 4] = [0.78, 0.47, 0.87, 1.0];
     TREE_VALUE_TEXT_COLOR: [f32; 4] = [0.51, 0.51, 0.54, 1.0];
     TREE_SEPARATOR_COLOR: [f32; 4] = [0.15, 0.15, 0.19, 1.0];
+    TEXT_LINK_COLOR: [f32; 4] = to_linear(text::DEFAULT_LINK_SRGB);
     SCROLLBAR_TRACK_COLOR: [f32; 4] = [0.15, 0.15, 0.20, 0.3];
     SCROLLBAR_THUMB_COLOR: [f32; 4] = [0.60, 0.60, 0.65, 0.4];
     GRAPH_GRID_COLOR: [f32; 3] = [0.07, 0.07, 0.09];

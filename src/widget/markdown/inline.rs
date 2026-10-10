@@ -152,12 +152,12 @@ impl<'a> Layouter<'a> {
             Some(SpanLink::Tag(_)) => lin(TAG),
             Some(l @ (SpanLink::Note { .. } | SpanLink::Embed { .. })) => {
                 if (self.resolved)(l) {
-                    lin(LINK)
+                    crate::colors::text_link_color()
                 } else {
-                    lin(LINK_UNRESOLVED)
+                    crate::colors::text_link_unresolved_color()
                 }
             }
-            Some(SpanLink::Url(_)) => lin(LINK),
+            Some(SpanLink::Url(_)) => crate::colors::text_link_color(),
             None => base.color.unwrap_or(FG),
         };
         Look {

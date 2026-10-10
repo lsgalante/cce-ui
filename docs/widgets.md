@@ -213,6 +213,10 @@ Opt-in features for the note clients.
 - **`markdown`** — `widget::markdown`, the reading view: cce-vault's blocks laid out at a width
   into draw items and click targets (`layout`, `Layout::paint` / `paint_scaled`). cce-notes'
   reading mode and cce-grid's note cards.
+- **Links take the theme's colour**, `style.text.link` (`colors::text_link_color`), in both
+  views; a link with no target is that colour darker and greyer
+  (`colors::text_link_unresolved_color`, derived in OKLab, no key of its own). `EditorTheme::new`
+  reads them once, so an editor built before a reload keeps the old colours.
 - **`doc_editor`** — `widget::doc_editor::DocEditor`, the editor with live preview: markup is
   hidden except on the caret's lines (the selection's, or the whole fenced block the caret is in),
   where it shows dimmed; `preview = false` is source mode.

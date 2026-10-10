@@ -26,7 +26,8 @@ pub struct EditorTheme {
 }
 
 impl EditorTheme {
-    /// Obsidian-ish dark defaults at `size`, in the DE's sans and mono.
+    /// Obsidian-ish dark defaults at `size`, in the DE's sans and mono; the link colours are the
+    /// theme's (`style.text.link`), read once here.
     pub fn new(size: f32) -> EditorTheme {
         let lin = crate::colors::to_linear;
         EditorTheme {
@@ -36,8 +37,8 @@ impl EditorTheme {
             spacing: 1.55,
             fg: crate::colors::TEXT_FG,
             dim: crate::colors::TEXT_DIM,
-            link: lin([0.66, 0.55, 0.98, 1.0]),
-            link_unresolved: lin([0.50, 0.44, 0.70, 1.0]),
+            link: crate::colors::text_link_color(),
+            link_unresolved: crate::colors::text_link_unresolved_color(),
             code_bg: [1.0, 1.0, 1.0, 0.06],
             highlight_bg: lin([1.0, 0.82, 0.0, 0.40]),
             tag_bg: lin([0.66, 0.55, 0.98, 0.15]),

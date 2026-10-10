@@ -62,7 +62,7 @@ impl<'a> Layouter<'a> {
                 self.out.draws.push(Draw::Icon {
                     name: "link",
                     rect: Rect { x, y: y + 0.5 * (size * 1.3 - side), width: side, height: side },
-                    color: LINK,
+                    color: crate::colors::text_link_color(),
                 });
                 let span = Span {
                     text: shown,
