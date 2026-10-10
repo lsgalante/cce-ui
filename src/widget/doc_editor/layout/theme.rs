@@ -21,15 +21,16 @@ pub struct EditorTheme {
     pub tag_bg: [f32; 4],
     /// A list property's item.
     pub pill_bg: [f32; 4],
-    pub accent: [f32; 4],
+    /// The bar down a block quote's side.
+    pub quote_bar: [f32; 4],
     pub rule: [f32; 4],
     pub caret: [f32; 4],
     pub selection: [f32; 4],
 }
 
 impl EditorTheme {
-    /// Obsidian-ish dark defaults at `size`, in the DE's sans and mono; the link and tag
-    /// colours are the theme's (`style.text.link`, `style.text.tag`), read once here.
+    /// Obsidian-ish dark defaults at `size`, in the DE's sans and mono; the link, tag and
+    /// quote bar colours are the theme's (`style.text.*`), read once here.
     pub fn new(size: f32) -> EditorTheme {
         let lin = crate::colors::to_linear;
         EditorTheme {
@@ -46,7 +47,7 @@ impl EditorTheme {
             tag: crate::colors::text_tag_color(),
             tag_bg: crate::colors::text_tag_background_color(),
             pill_bg: [1.0, 1.0, 1.0, 0.09],
-            accent: lin([0.66, 0.55, 0.98, 1.0]),
+            quote_bar: crate::colors::text_quote_bar_color(),
             rule: [1.0, 1.0, 1.0, 0.14],
             caret: lin([0.85, 0.85, 0.92, 1.0]),
             selection: lin([0.40, 0.45, 0.75, 0.45]),

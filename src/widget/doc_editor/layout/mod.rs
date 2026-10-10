@@ -418,7 +418,7 @@ pub fn layout_line(text: &str, line: &preview::Line, active: bool, width: f32, t
     match &line.kind {
         Kind::Quote(d) => {
             for k in 0..*d {
-                decos.push(Deco::Quad(Rect { x: k as f32 * QUOTE_STEP + 2.0, y: 0.0, width: 3.0, height }, th.accent));
+                decos.push(Deco::Quad(Rect { x: k as f32 * QUOTE_STEP + 2.0, y: 0.0, width: 3.0, height }, th.quote_bar));
             }
         }
         Kind::Rule if !active => decos.push(Deco::Quad(Rect { x: 0.0, y: (height / 2.0).round(), width, height: 1.0 }, th.rule)),

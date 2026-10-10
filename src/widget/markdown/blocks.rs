@@ -199,7 +199,7 @@ impl<'a> Layouter<'a> {
             None => {
                 self.out.draws.insert(
                     start,
-                    Draw::Quad { rect: Rect { x, y, width: 2.0, height: end - y }, color: lin(QUOTE_BAR) },
+                    Draw::Quad { rect: Rect { x, y, width: 2.0, height: end - y }, color: crate::colors::text_quote_bar_color() },
                 );
             }
         }

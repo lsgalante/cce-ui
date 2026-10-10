@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The quote bar is a theme key, `style.text.quote_bar`** (`color/text.rs`): the reading
+  view's block-quote and callout bar, and `DocEditor`'s, read `colors::text_quote_bar_color`.
+  The default is the link's violet, as before. `EditorTheme::accent`, whose only use was the
+  quote bar, is renamed `quote_bar`; cce-notes, the one client that builds a theme, calls
+  `EditorTheme::new` and does not name the field. The highlight wash is the last hard-coded
+  colour in the two views. Clippy, the suite and `cargo doc` pass; cce-notes and cce-grid
+  check (`the_quote_bar_key_sets_the_quote_bar`).
 - **The tag colour is a theme key, `style.text.tag`** (`color/text.rs`): the reading view's
   `#tag` text and wash, and `DocEditor`'s, read `colors::text_tag_color` /
   `text_tag_background_color`. The wash is derived (the tag colour at 0.15 of its alpha, what

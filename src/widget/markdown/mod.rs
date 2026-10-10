@@ -48,12 +48,12 @@ impl Theme {
     }
 }
 
-// Colours. Links and tags read the theme (`style.text.link` / `style.text.tag`,
-// through `colors::text_link_color` and its kin). TODO(style): the toolkit has
-// no quote or highlight colour yet; these follow Obsidian's dark theme until it
-// does. FG, DIM and the white washes are already linear;
-// the rest are written in sRGB (as a theme states them) and go through `lin`
-// where they are used.
+// Colours. Links, tags and the quote bar read the theme (`style.text.link`,
+// `.tag`, `.quote_bar`, through `colors::text_link_color` and its kin).
+// TODO(style): the toolkit has no highlight colour yet; it follows Obsidian's
+// dark theme until it does. FG, DIM and the white washes are already linear;
+// HIGHLIGHT_BG is written in sRGB (as a theme states it) and goes through `lin`
+// where it is used.
 const FG: [f32; 4] = crate::colors::TEXT_FG;
 
 const DIM: [f32; 4] = crate::colors::TEXT_DIM;
@@ -64,7 +64,6 @@ const HIGHLIGHT_BG: [f32; 4] = [1.0, 0.82, 0.0, 0.40];
 
 const RULE: [f32; 4] = [1.0, 1.0, 1.0, 0.12];
 
-const QUOTE_BAR: [f32; 4] = [0.66, 0.55, 0.98, 1.0];
 
 /// What an inline image's link text is swapped for while a paragraph is
 /// tokenized: one non-space char, so the image is one word.
