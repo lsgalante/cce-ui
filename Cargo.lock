@@ -113,7 +113,7 @@ dependencies = [
  "url",
  "wayland-backend",
  "wayland-client",
- "wayland-protocols 0.32.13",
+ "wayland-protocols",
  "zbus",
 ]
 
@@ -439,7 +439,7 @@ dependencies = [
 [[package]]
 name = "cce-core"
 version = "0.1.0"
-source = "git+https://github.com/lsgalante/cce-core.git?rev=ea9d65d5e0ea4ec3849b65b7394817637d1d9f05#ea9d65d5e0ea4ec3849b65b7394817637d1d9f05"
+source = "git+https://github.com/lsgalante/cce-core.git?rev=27a2567b217312898a5de44ce430533d9870b4e4#27a2567b217312898a5de44ce430533d9870b4e4"
 dependencies = [
  "fluent-bundle",
  "kdl",
@@ -490,7 +490,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wayland-backend",
  "wayland-client",
- "wayland-protocols 0.31.2",
+ "wayland-protocols",
  "wayland-scanner",
  "web-sys",
  "web-time",
@@ -2154,7 +2154,7 @@ dependencies = [
  "wayland-client",
  "wayland-csd-frame",
  "wayland-cursor",
- "wayland-protocols 0.32.13",
+ "wayland-protocols",
  "wayland-protocols-wlr",
  "wayland-scanner",
  "xkbcommon",
@@ -2772,18 +2772,6 @@ dependencies = [
 
 [[package]]
 name = "wayland-protocols"
-version = "0.31.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f81f365b8b4a97f422ac0e8737c438024b5951734506b0e1d775c73030561f4"
-dependencies = [
- "bitflags 2.13.1",
- "wayland-backend",
- "wayland-client",
- "wayland-scanner",
-]
-
-[[package]]
-name = "wayland-protocols"
 version = "0.32.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23d0c813de3daa2ed6520af85a3bd49b0e722a3078506899aa9686fea58dc4b6"
@@ -2803,7 +2791,7 @@ dependencies = [
  "bitflags 2.13.1",
  "wayland-backend",
  "wayland-client",
- "wayland-protocols 0.32.13",
+ "wayland-protocols",
  "wayland-scanner",
 ]
 

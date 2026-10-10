@@ -38,7 +38,7 @@ a11y = ["dep:accesskit_unix"]
 [dependencies]
 # The GUI-free half: config, input, motion, units, ipc and the spec parsers,
 # re-exported at their old paths (`cce_ui::config`, …). See lib.rs.
-cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "ea9d65d5e0ea4ec3849b65b7394817637d1d9f05", features = ["l10n"] }
+cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "27a2567b217312898a5de44ce430533d9870b4e4", features = ["l10n"] }
 # The accessibility tree's schema (rfc-accessibility-locale § 5): pure data, built for
 # every target; `crate::a11y` produces its TreeUpdate. The platform adapters are separate.
 accesskit = "0.25"
@@ -261,7 +261,7 @@ crate-type = ["cdylib"]
 # The same crate with its `cfg(test)` behaviour switched on, so this suite reads
 # no machine config now that config/input/motion live there (cce-core's
 # `test-isolation`; resolver 2 keeps it out of normal builds).
-cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "ea9d65d5e0ea4ec3849b65b7394817637d1d9f05", features = ["test-isolation"] }
+cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "27a2567b217312898a5de44ce430533d9870b4e4", features = ["test-isolation"] }
 
 [build-dependencies]
 # build.rs compiles the fixed WGSL shaders to SPIR-V once, instead of in every
