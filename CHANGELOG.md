@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **`Float3` is a directory module** (`widget/display/float3/`): `mod.rs` (the struct,
+  construction, components and values, the rows' layout, `impl Layout` and `impl Paint`), `ball`
+  (the trackball: the camera view, rolling, rings, its paint, drag and scroll), `input` (the
+  wheel routed to a row, `impl Input`) and `tests`. A pure move, checked line for line. The
+  module doc spoke of hosts reading the group "through the legacy flat views", which are gone;
+  it now describes the group as it is, two to four rows included. Clippy, the suite and
+  `cargo check --workspace --exclude cce-fx` pass.
 - **`ColorSelector` is a directory module** (`widget/input/color_selector/`): `mod.rs` (the
   struct, construction and builders, the field's relief, the hex value, `impl Layout`, placing
   the picker), `paint`, `input` (editing the hex, launching the picker and reading its stream)
