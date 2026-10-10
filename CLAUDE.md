@@ -407,7 +407,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
   concern (its `mod.rs` has the table). The largest files are now the accessibility tree,
-  `src/a11y.rs` (largest file, ~940 lines), the browser shell and the checkbox.
+  `src/a11y.rs` (largest file, ~940 lines), the browser shell and the Vulkan frame.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`

@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **`Checkbox` and `Toggle` are split** (`widget/input/checkbox/`): `mod.rs` (the box both share,
+  `paint_box`, which the radio group also draws with, the value parser, `Checkbox` whole),
+  `toggle` (`Toggle` whole, re-exported) and `tests`. A pure move, checked line for line; two of
+  `Toggle`'s fields the tests set (`slide_t`, `focused`) are `pub(super)`. The module doc
+  ("Phase 5e", byte parity with the legacy `extra_quads` / `extra_arcs` views, which are gone)
+  describes the two controls as they are. Clippy, the suite and `cargo check --workspace
+  --exclude cce-fx` pass.
 - **Materials are a directory module** (`scene/material/`): `mod.rs` (`Material`, `PlateRole`),
   `finish`, `frost`, `def` (`MaterialDef`, `FrostDef`, `PlateRung`) and `tests`; all
   re-exported, so `scene::material::…` paths are unchanged. A pure move, checked line for line;
