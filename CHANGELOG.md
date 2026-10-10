@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The box model is a directory module** (`scene/layout/`): `mod.rs` (`Size`, `Rect`, `Edges`,
+  `fit_rect`), `style` (axes, modes, lengths, alignment, `Style` and its presets, `LayoutBox`),
+  `solve` (`compute_layout`, `measure`, `arrange` and their per-mode halves) and `tests`; all
+  re-exported, so `scene::layout::…` paths are unchanged. A pure move, checked line for line.
+  The module doc's account of the legacy layout it replaced and its "Phase 2" framing are cut;
+  what it does not handle stays, stated as a limit. Clippy, the suite and `cargo check
+  --workspace --exclude cce-fx` pass.
 - **`Breadcrumb` is a directory module** (`widget/container/breadcrumb/`): `mod.rs` (the
   struct, its constants and associated constants, construction and setters, the path,
   `impl Layout`, `PathController`), `geometry` (the visible segments and their elision, hit
