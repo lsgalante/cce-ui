@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-09
 
+- **The input `Driver` is a directory module** (`backend/driver/`): `mod.rs` (the vocabulary a
+  shell speaks — `Turn`, `Modifiers`, `PressSite`, `ScrollFrame`, … — the `Driver`, its tick,
+  and the small helpers), `pointer`, `scroll` (wheel frames, touch, the pinch fallback), `keys`
+  (modifiers, focus, keys, committed and composed text, repeat, the Tab and undo/redo chords)
+  and `tests`. A pure move, checked line for line; the children reach `touch` as
+  `crate::backend::touch`. Clippy, the suite and `cargo check --workspace --exclude cce-fx`
+  pass.
 - **`MenuBar` is a directory module** (`widget/container/menu/`): `mod.rs` (the struct, its
   geometry, construction and builders, `impl Layout`, its `Send` / `Sync`), `paint`, `input`,
   `controller` (`MenuController` and `PageSelector`) and `tests`. A pure move, checked line for
