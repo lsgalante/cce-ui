@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The context menu's API and marks have files of their own** (`widget/core/context_menu/`):
+  `api.rs` (the free-function API apps and the runner call, each acting on the current window's
+  menu) and `marks.rs` (the row marks and chevrons, `split_mark`, the label-to-action
+  fallback); `mod.rs` keeps the constants, slider rows and `ContextMenuState`. Re-exported, so
+  `context_menu::…` paths are unchanged. A pure move, checked line for line. Clippy, the suite
+  and `cargo check --workspace` pass, excluding cce-fx and two crates another session had
+  mid-edit (cce-sheets, cce-documents), whose errors are in their own uncommitted changes.
 - **`Prim` has a file of its own** (`scene/paint/prim.rs`): the enum (one 280-line item), `faded`,
   `Cap`, `Radii`, the relief-family naming note, the `DropletSpec` re-export and `DropletFinish`;
   `paint/mod.rs` keeps the display list and `PaintCtx`'s stacks, `push`, `append_items`, `replay`
