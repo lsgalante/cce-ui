@@ -10,6 +10,11 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **`file_dialog` is a feature.** rfd, and through it ashpd and its D-Bus stack, was a
+  dependency of every client for a 19-line module seven apps use. It is now optional behind
+  `file_dialog` (cce-data-editor, cce-documents, cce-graph, cce-image, cce-mail, cce-model and
+  cce-sheets turn it on): a client without it resolves 194 crates instead of 313. A workspace
+  build still unifies it on; a standalone build of any other app sheds them.
 - **The `colors` alias is gone; the module is `color`.** `colors` re-exported all of `color`,
   and the two spellings were used about equally (134 and 110), in the toolkit and 18 apps,
   so readers met one module under two names. Every path now says `color`; the ramp widget,

@@ -25,7 +25,7 @@ pub mod backend;
 pub mod context;
 pub mod draw;
 pub mod scene;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "file_dialog", not(target_arch = "wasm32")))]
 pub mod file_dialog;
 pub mod icon;
 #[cfg(not(target_arch = "wasm32"))]

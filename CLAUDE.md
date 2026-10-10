@@ -107,7 +107,9 @@ Wayland protocol bindings (`protocol/*.xml`) are generated inline by `wayland-sc
 `src/protocol.rs`.
 
 **Features**: `markdown` (`widget::markdown`, brings in cce-vault), `doc_editor`
-(`widget::doc_editor`), `a11y` (AT-SPI publishing; see "Accessibility" below).
+(`widget::doc_editor`), `a11y` (AT-SPI publishing; see "Accessibility" below), `file_dialog`
+(`file_dialog::pick_file` / `save_file` through rfd, which brings ashpd's D-Bus stack: 119 of
+the 313 crates a client builds with it on).
 
 ## Verify on screen, not just in tests
 
