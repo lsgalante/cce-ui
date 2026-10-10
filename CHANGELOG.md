@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **`Prim` has a file of its own** (`scene/paint/prim.rs`): the enum (one 280-line item), `faded`,
+  `Cap`, `Radii`, the relief-family naming note, the `DropletSpec` re-export and `DropletFinish`;
+  `paint/mod.rs` keeps the display list and `PaintCtx`'s stacks, `push`, `append_items`, `replay`
+  and `finish`. Re-exported, so `scene::paint::Prim` and the rest are unchanged. A pure move,
+  checked line for line; CLAUDE.md now points at `prim.rs` for the prim list. Clippy, the suite
+  and `cargo check --workspace --exclude cce-fx` pass.
 - **The Vulkan core is a directory module** (`vk/core/`): `mod.rs` (`VkCore`, its constructors,
   the device setup in `new_inner` — one 295-line function, left whole — and `Drop`), `instance`
   (the process-wide shared instance, its validation layer and debug callback), `surface`

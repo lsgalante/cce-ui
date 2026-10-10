@@ -32,7 +32,7 @@ that the tests, source paths and `(~N lines)` figures cited here and in the topi
   swash for text, shaped into the toolkit's own glyph atlas (`draw::glyphs`). No wgpu, no
   glyphon, no DOM. The UI is GPU primitives — quads, rounded rects, vectors, arcs, circles, and
   the lit **relief primitives** (bevels, plates, recesses, bosses, ridges, fillets, grooves,
-  fields, frames…; see the `Prim` enum in `src/scene/paint/mod.rs`).
+  fields, frames…; see the `Prim` enum in `src/scene/paint/prim.rs`).
 - **Three shells over one `Driver`/`Pacer`**: Wayland (the real one), the browser (WebGPU on a
   `<canvas>`), and macOS (AppKit + MoltenVK, type-checked only — it has never run). See
   `docs/platforms.md`.
