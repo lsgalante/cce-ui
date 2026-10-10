@@ -155,8 +155,8 @@ pub struct TextBox {
     line_shift: Vec<f32>,
     /// The shaped runs those positions came from, for selections drawn as the boxes of
     /// the clusters they cover (two pieces where one crosses a change of direction).
-    glyph_run: Option<crate::backend::text::ShapedRun>,
-    line_runs: Vec<crate::backend::text::ShapedRun>,
+    glyph_run: Option<crate::text::ShapedRun>,
+    line_runs: Vec<crate::text::ShapedRun>,
     /// Multiline counterpart of `glyph_positions`: per WRAPPED line, per-column x
     /// offsets of that line as drawn (`[line][col]`, one extra entry per line = its
     /// total advance), recorded by [`Paint::prepare_text`] over the same wrap the

@@ -40,7 +40,8 @@ that the tests, source paths and `(~N lines)` figures cited here and in the topi
   `Application` (display-list frame, scene-solver layout, routed events, in-frame popovers,
   widgets on handles). **Copy it when starting a new client.**
 - **The GUI-free half is the sibling crate `cce-core`**: `config`, `input`, `motion`, `units`,
-  `relief_spec`, `ipc`, `locale`, `l10n` and the spec parsers (hex colours, ramps, droplets).
+  `relief_spec`, `ipc` (with `ipc::ctl`, the compositor's sockets and lines), `locale`, `l10n`,
+  `plan`, `process`, `fmt`, `desktop_entry` and the spec parsers (hex colours, ramps, droplets).
   cce-ui re-exports each at its old path (`cce_ui::config::…`). The compositor and
   cce-window-manager depend on `cce-core` alone. A change to those modules is a change to
   `cce-core`: push it, then run the workspace's `bump-revs.sh`.
@@ -400,7 +401,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `app.rs` (the `Application` trait, `AppSender`), `driver/` (input state and routing:
   modifiers, key repeat, undo/redo and Tab chords, CSD hit zones, popover close, scroll phase,
   touch — unit-tested with no compositor), `frame.rs` (`build_frame`, damage), `shell.rs` (the
-  `Shell` trait and `Pacer`: one turn of the loop over any shell), `tessellate/` (its `mod.rs` has the table), `text/` (shaping, the buffer cache, fonts, bidi),
+  `Shell` trait and `Pacer`: one turn of the loop over any shell), `tessellate/` (its `mod.rs` has the table),
   `dom.rs` / `appkit.rs` (the browser's and AppKit's input vocabularies, portable),
   `touch.rs`, and the Wayland-only `window_runner/` (`EngineState`; its `mod.rs` has the table), `menu_popup.rs`,
   `dnd.rs`, `text_input.rs`, `a11y_unix.rs`. A routing change belongs in `driver/`, a frame
@@ -426,6 +427,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
 - `color/` — the palette constants and the style slots (`mod.rs`, with the table), the getters
   and setters by topic (`surfaces.rs`, `controls.rs`, `lists.rs`, `graph.rs`), `load.rs` (config →
   colours, `retired_surface_keys`), `math.rs` (sRGB/linear, OKLab), `materials.rs`, `chords.rs`.
+- `text/` — shaping, the shaped-buffer cache, fonts, bidi (`backend::text` re-exports it).
 - `style.rs` (the snapshot), `window_state.rs`, `ime.rs` (composition shared by widgets and
   shells), `text_input.rs` (the per-frame field claim), `history.rs` (`History<T>`), `a11y.rs`,
   `l10n.rs`, `compute.rs` (what a compute job is, device-free).

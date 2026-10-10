@@ -289,7 +289,7 @@ impl ContextMenuState {
                     .lock()
                     .ok()
                     .and_then(|mut fs| {
-                        crate::backend::text::shaped_cluster_offsets(&mut fs, s, size, Some(&family))
+                        crate::text::shaped_cluster_offsets(&mut fs, s, size, Some(&family))
                             .last()
                             .map(|&(_, total)| total)
                     })

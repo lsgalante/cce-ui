@@ -55,7 +55,7 @@ fn a_label_is_centred_on_its_drawn_width() {
     for label in ["Attach...", "Load Images", "Cancel"] {
         let drawn = {
             let mut fs = crate::geometry_font_system().lock().unwrap();
-            crate::backend::text::shaped_cluster_offsets(&mut fs, label, size, font.as_deref())
+            crate::text::shaped_cluster_offsets(&mut fs, label, size, font.as_deref())
                 .last()
                 .map(|&(_, t)| t)
                 .unwrap()
@@ -97,7 +97,7 @@ fn intrinsic_size_holds_the_label_as_the_walk_draws_it() {
     // 8px in from the left.
     let drawn = {
         let mut fs = crate::geometry_font_system().lock().unwrap();
-        crate::backend::text::shaped_cluster_offsets(&mut fs, &text.0, text.2, text.3.as_deref())
+        crate::text::shaped_cluster_offsets(&mut fs, &text.0, text.2, text.3.as_deref())
             .last()
             .map(|&(_, t)| t)
             .unwrap()

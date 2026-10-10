@@ -5,7 +5,10 @@ pub mod driver;
 pub mod frame;
 pub mod shell;
 pub mod tessellate;
-pub mod text;
+/// Text shaping and the shaped-buffer cache moved to the top-level `text`
+/// module (2026-10-10): widgets need it, and it is not part of a shell.
+/// Re-exported here for apps that still name the old path.
+pub use crate::text;
 pub mod touch;
 // The Wayland shell: native, but for macOS.
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]

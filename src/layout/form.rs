@@ -322,7 +322,7 @@ pub fn text_width(text: &str, size: f32) -> f32 {
     crate::geometry_font_system()
         .lock()
         .ok()
-        .and_then(|mut fs| crate::backend::text::shaped_cluster_offsets(&mut fs, text, size, None).last().map(|&(_, total)| total))
+        .and_then(|mut fs| crate::text::shaped_cluster_offsets(&mut fs, text, size, None).last().map(|&(_, total)| total))
         .unwrap_or(0.0)
 }
 

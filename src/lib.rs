@@ -48,6 +48,8 @@ pub use cce_core::locale;
 pub mod l10n;
 pub mod window_state;
 pub mod style;
+/// Text shaping, the shaped-buffer cache and the font set (was `backend::text`).
+pub mod text;
 pub mod text_input;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vk;
@@ -309,7 +311,7 @@ pub fn rescan_fonts(fs: &mut cosmic_text::FontSystem) -> bool {
     fn files(db: &Database) -> Vec<PathBuf> {
         let mut seen = HashSet::new();
         db.faces()
-            .filter(|f| !crate::backend::text::is_alias_face(f))
+            .filter(|f| !crate::text::is_alias_face(f))
             .filter_map(|f| match &f.source {
                 Source::File(p) | Source::SharedFile(p, _) => Some(p.clone()),
                 _ => None,
@@ -327,16 +329,16 @@ pub fn rescan_fonts(fs: &mut cosmic_text::FontSystem) -> bool {
     let now_set: HashSet<PathBuf> = now.iter().cloned().collect();
 
     // `fs` as every earlier change leaves it, so the delta is against that.
-    crate::backend::text::sync_font_set(fs);
+    crate::text::sync_font_set(fs);
     let before: HashSet<PathBuf> = files(fs.db()).into_iter().collect();
     let added: Vec<PathBuf> = now.into_iter().filter(|p| !before.contains(p)).collect();
     let removed: HashSet<PathBuf> = before.difference(&now_set).cloned().collect();
-    let rescan = crate::backend::text::Rescan::new(added, removed, files(&bundled).into_iter().collect());
+    let rescan = crate::text::Rescan::new(added, removed, files(&bundled).into_iter().collect());
     if rescan.is_empty() {
         return false;
     }
-    crate::backend::text::push_rescan(rescan);
-    crate::backend::text::sync_font_set(fs);
+    crate::text::push_rescan(rescan);
+    crate::text::sync_font_set(fs);
     true
 }
 

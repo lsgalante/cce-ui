@@ -16,7 +16,7 @@ pub use crate::backend::tessellate::{
     push_plate_bevel_vertices,
     circle_vertices, push_arc_background_vertices, push_plate_solid_border_vertices,
 };
-pub use crate::backend::text::{get_text_buffer_laid_out, shaped_cluster_offsets, shaping_for};
+pub use crate::text::{get_text_buffer_laid_out, shaped_cluster_offsets, shaping_for};
 pub use cursor_icon::CursorIcon;
 
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]

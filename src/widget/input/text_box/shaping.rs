@@ -84,7 +84,7 @@ impl TextBox {
         let font_fam = key.font.as_deref();
         let attrs = key.attrs;
         let shared = |fs: &mut cosmic_text::FontSystem, text: &str, size: f32| {
-            crate::backend::text::shared_text_buffer_at(fs, text, size, font_fam, attrs, scale)
+            crate::text::shared_text_buffer_at(fs, text, size, font_fam, attrs, scale)
         };
 
         let render_text = if key.password {
@@ -104,7 +104,7 @@ impl TextBox {
             let (lines, map) = self.wrap_text(f32::from_bits(bits));
             // Each wrapped line's paragraph, and whether that paragraph is right to left: a
             // paragraph's direction is its first strong character's, for all its lines.
-            let para_rtl: Vec<bool> = src.split('\n').map(crate::backend::text::paragraph_rtl).collect();
+            let para_rtl: Vec<bool> = src.split('\n').map(crate::text::paragraph_rtl).collect();
             let mut para_of_line = vec![0usize; lines.len()];
             let mut para = 0usize;
             let mut seen = vec![false; lines.len()];
@@ -128,7 +128,7 @@ impl TextBox {
             self.line_runs.clear();
             for (li, line) in lines.iter().enumerate() {
                 let line_buffer = shared(fs, line, self.font_size);
-                let run = crate::backend::text::shaped_run(&line_buffer, line, scale);
+                let run = crate::text::shaped_run(&line_buffer, line, scale);
                 let rtl = para_rtl.get(para_of_line[li]).copied().unwrap_or(false);
                 let shift = if rtl { (room - run.width).max(0.0) } else { 0.0 };
                 self.line_glyph_positions.push(run.stops.iter().map(|s| s.1 + shift).collect());
@@ -141,7 +141,7 @@ impl TextBox {
         }
 
         let buffer = shared(fs, &render_text, self.font_size);
-        let run = crate::backend::text::shaped_run(&buffer, &render_text, scale);
+        let run = crate::text::shaped_run(&buffer, &render_text, scale);
         let total_w = run.width;
         // A right-to-left line that fits is set against the right. One that does not
         // overflows to the LEFT, its start being at the right: shown and not being edited,
@@ -149,7 +149,7 @@ impl TextBox {
         // 2026-10-08 it showed its left end too, which is the END of a right-to-left line).
         // While editing, the caret is followed (`scroll_to_cursor`) as for any line.
         let room = f32::from_bits(key.room_bits);
-        let rtl = crate::backend::text::paragraph_rtl(&render_text);
+        let rtl = crate::text::paragraph_rtl(&render_text);
         let shift = if rtl && total_w < room { room - total_w } else { 0.0 };
         self.glyph_positions = run.stops.iter().map(|s| s.1 + shift).collect();
         self.glyph_shift = shift;
@@ -202,8 +202,8 @@ impl TextBox {
                 out.push(0.0); // the newline
             }
             let shown = if self.is_password { "•".repeat(para.chars().count()) } else { para.to_string() };
-            let buf = crate::backend::text::shared_text_buffer_at(fs, &shown, self.font_size, font.as_deref(), self.font_attrs, scale);
-            let run = crate::backend::text::shaped_run(&buf, &shown, scale);
+            let buf = crate::text::shared_text_buffer_at(fs, &shown, self.font_size, font.as_deref(), self.font_attrs, scale);
+            let run = crate::text::shaped_run(&buf, &shown, scale);
             let mut adv = vec![0.0f32; shown.chars().count()];
             let char_at: std::collections::HashMap<usize, usize> =
                 shown.char_indices().enumerate().map(|(ci, (b, _))| (b, ci)).collect();

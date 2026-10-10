@@ -78,7 +78,7 @@ impl Paint for TextBox {
 
         // One column's advance, from the same shaping path as the labels (buffer-cached,
         // so this is a lookup after the first frame per family/size).
-        let probe = crate::backend::text::shared_text_buffer_at(
+        let probe = crate::text::shared_text_buffer_at(
             fs,
             "MMMMMMMM",
             self.font_size,
@@ -86,7 +86,7 @@ impl Paint for TextBox {
             self.font_attrs,
             scale,
         );
-        self.shaped_char_advance = crate::backend::text::shaped_run(&probe, "MMMMMMMM", scale).width / 8.0;
+        self.shaped_char_advance = crate::text::shaped_run(&probe, "MMMMMMMM", scale).width / 8.0;
 
         // `char_width()` returns this frame's shaped advance from here on, so the
         // wrap below matches the one `selection_quads`/`value_labels` compute at
@@ -101,7 +101,7 @@ impl Paint for TextBox {
             font: font_fam.clone(),
             attrs: self.font_attrs,
             scale_bits: scale.to_bits(),
-            vertical: crate::backend::text::vertical_text().is_some(),
+            vertical: crate::text::vertical_text().is_some(),
             wrap,
             room_bits: (self.rect.width - 2.0 * self.pad()).max(0.0).to_bits(),
         };

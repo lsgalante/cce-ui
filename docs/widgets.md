@@ -265,7 +265,7 @@ the host implements it. `a_widget_glyph_reaches_a_flat_host` and
   `read_from_clipboard`, behind every widget's copy, cut and paste — `wl-copy` / `wl-paste`
   (`xclip`) on Wayland, `NSPasteboard` on macOS, the page's clipboard events in a browser
   (`docs/platforms.md`).
-- **Vertical text** (`backend::text::set_vertical_text(Some(bar_thickness))`): the status bar's
+- **Vertical text** (`text::set_vertical_text(Some(bar_thickness))`): the status bar's
   mode on a screen edge — labels stack their characters at 1.05 line height. Process-wide.
 - **Settings-page sections** (`layout/section.rs`, `layout/form.rs`): `PageFlow` places sections
   in a masonry of columns at least `grid_min_col_width` wide; `PageLayoutBuilder` draws each once;

@@ -278,7 +278,7 @@ impl Button {
             .lock()
             .ok()
             .and_then(|mut fs| {
-                crate::backend::text::shaped_cluster_offsets(&mut fs, label, size, font.as_deref())
+                crate::text::shaped_cluster_offsets(&mut fs, label, size, font.as_deref())
                     .last()
                     .map(|&(_, total)| total)
             })

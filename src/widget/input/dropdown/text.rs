@@ -60,7 +60,7 @@ pub(super) fn shaped_clusters(text: &str, font_size: f32) -> Option<Vec<(usize, 
     let font = crate::layout::control_label_font_detached();
     let mut fs = crate::geometry_font_system().lock().ok()?;
     let clusters =
-        crate::backend::text::shaped_cluster_offsets(&mut fs, text, font_size, Some(&font));
+        crate::text::shaped_cluster_offsets(&mut fs, text, font_size, Some(&font));
     (clusters.len() > 1 && clusters.last().is_some_and(|&(_, total)| total > 0.0)).then_some(clusters)
 }
 

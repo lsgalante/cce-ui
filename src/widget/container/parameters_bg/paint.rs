@@ -177,7 +177,7 @@ impl Paint for ParametersBg {
         for c in self.colors.iter_mut().flatten() {
             c.prepare_text(fs);
         }
-        let clusters = crate::backend::text::shaped_cluster_offsets(
+        let clusters = crate::text::shaped_cluster_offsets(
             fs,
             "MMMMMMMM",
             12.0,

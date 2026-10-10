@@ -8,9 +8,9 @@
 //!
 //! 0. the base: crate-root helpers and the re-exported cce-core modules
 //! 1. `style`, `color`, `scale`
-//! 2. `draw`, `layout`, `text`
+//! 2. `draw`, `layout`
 //! 3. `scene`
-//! 4. `context`, `widget`, `ime`, `text_input`, `window_state`, `a11y`
+//! 4. `context`, `widget`, `text`, `ime`, `text_input`, `window_state`, `a11y`
 //! 5. the shells and the renderer: `backend`, `vk`, `wayland`, `web`, `mac`,
 //!    `protocol`, `file_dialog`, `mcp`
 //! 6. `engine`, the facade apps import
@@ -38,9 +38,10 @@ fn layer(name: &str) -> Option<u8> {
         | "icon_pixels" | "icon_source" | "icon_tint" | "icons_dir" | "rasterize_svg" | "upload_icon"
         | "upload_icon_tinted" | "page_fonts" | "scroll_debug" | "impl_widget_base" => 0,
         "style" | "color" | "colors" | "scale" => 1,
-        "draw" | "layout" | "text" => 2,
+        "draw" | "layout" => 2,
         "scene" => 3,
-        "context" | "ime" | "text_input" | "window_state" | "a11y" | "widget" => 4,
+        // `text` shapes with `scene::paint` and widget types: it sits with them.
+        "context" | "ime" | "text_input" | "window_state" | "a11y" | "widget" | "text" => 4,
         "backend" | "vk" | "wayland" | "web" | "mac" | "protocol" | "file_dialog" | "mcp" => 5,
         "engine" => 6,
         _ => return None,
@@ -55,16 +56,16 @@ const ALLOWED_UPWARD: &[(&str, &str)] = &[
     ("color", "scene"),
     ("draw", "backend"),
     ("icon", "draw"),
-    ("layout", "backend"),
     ("layout", "context"),
     ("layout", "scene"),
+    // Was layout -> backend: the same use of text shaping, renamed when
+    // backend::text became the top-level text module.
+    ("layout", "text"),
     ("layout", "widget"),
     ("scale", "window_state"),
     ("scene", "widget"),
     ("style", "layout"),
     ("vk", "engine"),
-    ("widget", "backend"),
-    ("window_state", "backend"),
 ];
 
 /// The code a module ships: everything before a trailing `#[cfg(test)] mod

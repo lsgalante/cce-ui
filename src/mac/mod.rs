@@ -89,7 +89,7 @@ use crate::backend::frame::build_frame;
 use crate::backend::shell::{Pacer, Shell, Step, ACTIVE_DISPATCH};
 use crate::vk::{SurfaceTarget, VkRenderer};
 use crate::widget::{context_menu, ElementState, Key};
-use crate::backend::text::DlText;
+use crate::text::DlText;
 
 use delegate::Delegate;
 use shell::MacShell;

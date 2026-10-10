@@ -75,5 +75,5 @@ impl TextLabel {
 }
 
 pub(crate) fn make_widget_text_buffer(fs: &mut cosmic_text::FontSystem, text: &str, size: f32, font_family: &str) -> cosmic_text::Buffer {
-    crate::backend::text::get_text_buffer(fs, text, size, Some(font_family))
+    crate::text::get_text_buffer(fs, text, size, Some(font_family))
 }

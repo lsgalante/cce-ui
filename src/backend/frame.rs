@@ -654,7 +654,7 @@ mod damage_tests {
         };
         let key = |attrs: TextAttrs| {
             let mut fs = crate::geometry_font_system().lock().unwrap();
-            let buffer = crate::backend::text::shared_text_buffer(&mut fs, "The quick brown fox", 14.0, Some(&family), attrs);
+            let buffer = crate::text::shared_text_buffer(&mut fs, "The quick brown fox", 14.0, Some(&family), attrs);
             let t = DlText { buffer, x: 10.0, y: 10.0, color: cosmic_text::Color::rgb(255, 255, 255), bounds: None, clip_circle: None, clip_rrect: None };
             FrameSig::of(&frame, &[t]).texts[0].0
         };

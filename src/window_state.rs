@@ -68,7 +68,7 @@ impl Props {
             app_id: crate::scale::process_app_id(),
             fullscreen: false,
             maximized: false,
-            vertical_text: crate::backend::text::process_vertical_text(),
+            vertical_text: crate::text::process_vertical_text(),
         }
     }
 }

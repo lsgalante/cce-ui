@@ -79,7 +79,7 @@ use crate::backend::driver::{Driver, Modifiers, PressSite, ScrollFrame, ScrollSo
 use crate::backend::frame::build_frame;
 use crate::backend::shell::{Pacer, Shell, Step, ACTIVE_DISPATCH};
 use crate::widget::{clipboard, context_menu, ElementState, Key, MouseButton};
-use crate::backend::text::DlText;
+use crate::text::DlText;
 
 
 /// Who decides the canvas's size.

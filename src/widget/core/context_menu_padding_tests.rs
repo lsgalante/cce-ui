@@ -128,7 +128,7 @@ fn a_fallback_glyph_widens_the_plate_as_drawn() {
     let (family, size) = super::context_menu::label_font();
     let drawn = {
         let mut fs = crate::geometry_font_system().lock().unwrap();
-        crate::backend::text::shaped_cluster_offsets(&mut fs, "● Follow Active Editor", size, Some(&family))
+        crate::text::shaped_cluster_offsets(&mut fs, "● Follow Active Editor", size, Some(&family))
             .last()
             .map(|&(_, t)| t)
             .unwrap()

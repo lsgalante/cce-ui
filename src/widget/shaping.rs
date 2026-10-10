@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::scene::paint::TextAttrs;
 
-pub use crate::backend::text::{ShapedCluster, ShapedRun};
+pub use crate::text::{ShapedCluster, ShapedRun};
 
 /// Text widths in logical px, for one run in one style.
 pub trait Measure {
@@ -38,12 +38,12 @@ impl Measure for ShapingMeasure {
         if let Some(w) = self.cache.get(&key) {
             return *w;
         }
-        let buf = crate::backend::text::shared_text_buffer_at(&mut self.fs, text, size, Some(font), attrs, scale);
+        let buf = crate::text::shared_text_buffer_at(&mut self.fs, text, size, Some(font), attrs, scale);
         // The glyphs' extent, trailing spaces included — the same measure
         // `offsets` ends on. (A layout run's `line_w` leaves trailing
         // whitespace out, so a width taken from it disagreed with where
         // the next run was placed by a space.)
-        let w = crate::backend::text::normalized_glyph_starts(&buf, text)
+        let w = crate::text::normalized_glyph_starts(&buf, text)
             .into_iter()
             .map(|(_, x, w)| x + w)
             .fold(0.0, f32::max)
@@ -59,8 +59,8 @@ impl ShapingMeasure {
     /// for text of either direction (see [`ShapedRun`]).
     pub fn shape(&mut self, text: &str, size: f32, font: &str, attrs: TextAttrs) -> ShapedRun {
         let scale = crate::scale::scale_factor().max(0.01);
-        let buf = crate::backend::text::shared_text_buffer_at(&mut self.fs, text, size, Some(font), attrs, scale);
-        crate::backend::text::shaped_run(&buf, text, scale)
+        let buf = crate::text::shared_text_buffer_at(&mut self.fs, text, size, Some(font), attrs, scale);
+        crate::text::shaped_run(&buf, text, scale)
     }
 
     /// The x (logical px) of every char boundary in `text` shaped as one

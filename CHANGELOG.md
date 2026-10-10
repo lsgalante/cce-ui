@@ -10,6 +10,31 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **Text shaping is the top-level `text` module** (was `backend/text/`): shaping, the
+  shaped-buffer cache, the font set and bidi. Widgets, `layout` and `window_state` need it and
+  it is not part of a shell, so `widget -> backend` and `window_state -> backend` are gone
+  from the import graph. `backend::text` stays as a re-export for apps
+  (cce-status-interface and cce-system-interface still name it). A path rewrite, nothing
+  else: the suite and a whole-workspace build pass.
+- **`tests/layering.rs` holds the module layering.** An audit found 17 top-level modules in
+  one import cycle. The test fixes a direction (base; `style`/`color`/`scale`;
+  `draw`/`layout`; `scene`; `widget`, `text` and their peers; the shells and the renderer;
+  `engine`) and fails on an upward `crate::` edge in non-test code unless it is in
+  `ALLOWED_UPWARD`, the edges that already existed. An allowance whose edge is gone fails too,
+  so the list only shrinks: 15 at first, 12 after the `text` move.
+- **cce-core's `plan`, `process`, `fmt` and `desktop_entry` are re-exported** at
+  `cce_ui::plan` (the `/run/cce` files), `cce_ui::process` (`spawn_detached`, `de_bin`),
+  `cce_ui::fmt` (byte-safe `percent_decode`) and `cce_ui::desktop_entry`, so apps dropped
+  their private copies (twelve `spawn_detached`, eight `percent_decode`, five desktop-entry
+  parsers).
+- **The colour selector places its picker through `ipc::ctl`**: `pointer-location` and
+  `place-next` are `ctl::Request`s with a one-second timeout, and the reply is read by
+  `ctl::parse_pointer_location`. They were hand-built lines sent with no deadline, on the
+  click.
+- **`wayland-protocols` is 0.32**, the version smithay-client-toolkit 0.19.2 and ashpd already
+  use; pinning 0.31 put both in every client. No API change; checked by a whole-workspace
+  build and cce-gallery mapping in a scale-2 shadow session.
+
 - **The code wash is a theme key, `style.text.code_background`** (`color/text.rs`): the wash
   behind inline code and code blocks in the reading view and `DocEditor`, and the box an image
   draws until it loads, read `colors::text_code_background_color`. Unlike the tag and highlight

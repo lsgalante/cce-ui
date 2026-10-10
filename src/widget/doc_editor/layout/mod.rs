@@ -301,8 +301,8 @@ pub fn layout_line(text: &str, line: &preview::Line, active: bool, width: f32, t
     // run of plain text can hold an English word and a Hebrew one, which the reordering
     // below must be able to place apart. Levels are the whole line's, neutrals (spaces,
     // markup) resolved from their neighbours.
-    let para_rtl = crate::backend::text::paragraph_rtl(text);
-    let levels = crate::backend::text::bidi_levels(text, para_rtl);
+    let para_rtl = crate::text::paragraph_rtl(text);
+    let levels = crate::text::bidi_levels(text, para_rtl);
     let level_at = |b: usize| levels.get(b).copied().unwrap_or(if para_rtl { 1 } else { 0 });
     let mut split: Vec<Run> = Vec::with_capacity(runs.len());
     for r in runs {
@@ -352,7 +352,7 @@ pub fn layout_line(text: &str, line: &preview::Line, active: bool, width: f32, t
         }
         let order = {
             let run_levels: Vec<u8> = idx.iter().map(|&i| level_at(runs[i].src.start)).collect();
-            crate::backend::text::visual_order(&run_levels)
+            crate::text::visual_order(&run_levels)
         };
         if !align_right && order.iter().enumerate().all(|(k, &o)| k == o) {
             continue;
