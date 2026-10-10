@@ -33,6 +33,13 @@ pub use cce_core::ipc;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub mod mcp;
 pub use cce_core::motion;
+/// The power plan's `/run/cce` files, spelled once for every reader.
+pub use cce_core::plan;
+/// `spawn_detached` (the child reaped on a thread) and `de_bin`.
+#[cfg(not(target_arch = "wasm32"))]
+pub use cce_core::process;
+/// Byte-safe `percent_decode`.
+pub use cce_core::fmt;
 /// The user's locale (`locale::locale()`), what every font system is built with.
 pub use cce_core::locale;
 pub mod l10n;

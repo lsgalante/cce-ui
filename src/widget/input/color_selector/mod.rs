@@ -212,28 +212,18 @@ fn parse_hex(s: &str) -> Option<[u8; 4]> {
 fn place_picker_at_pointer(command: &str) {
     // The pointer is on the swatch right now, so its location IS the
     // control's location. One-shot, best-effort (`place-next` consumed at
-    // the picker's map; ignored off-cce).
-    if let Ok(reply) = crate::ipc::send_command("cce", "pointer-location") {
-        let mut px = None;
-        let mut py = None;
-        for tok in reply.split_whitespace() {
-            if let Some(v) = tok.strip_prefix("x=") {
-                px = v.parse::<f64>().ok();
-            } else if let Some(v) = tok.strip_prefix("y=") {
-                py = v.parse::<f64>().ok();
-            }
-        }
-        if let (Some(x), Some(y)) = (px, py) {
-            let app_id = std::path::Path::new(&command)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| command.to_string());
-            let _ = crate::ipc::send_command(
-                "cce",
-                &format!("place-next {} {:.0} {:.0}", app_id, x, y),
-            );
-        }
-    }
+    // the picker's map; ignored off-cce). Bounded: this runs on the click,
+    // and a compositor wedged mid-frame must not hang the app with it.
+    use crate::ipc::ctl::{self, Request};
+    const REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+    let Ok(reply) = ctl::request(&Request::PointerLocation, Some(REPLY_TIMEOUT)) else { return };
+    let Some((x, y)) = ctl::parse_pointer_location(&reply) else { return };
+    let app_id = std::path::Path::new(&command)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| command.to_string());
+    let place = Request::PlaceNext { app_id, x: x.round(), y: y.round(), cell: false };
+    let _ = ctl::request(&place, Some(REPLY_TIMEOUT));
 }
 
 #[cfg(target_arch = "wasm32")]
