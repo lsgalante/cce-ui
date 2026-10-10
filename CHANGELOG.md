@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The Vulkan image stage is a directory module** (`vk/image/`): `mod.rs` (the GPU image, the
+  stage and its limits, the descriptor bindings, `new` and `destroy`), `pending` (draining the
+  upload queue, freeing images), `upload` (the shared staging buffer, one-shot and batched
+  uploads, recording the copy and the mip chain), `write` (replacing pixels in place, whole or by
+  regions), `draw` (the frame's quad vertices, descriptors, recording a quad) and `tests`. A
+  pure move, checked line for line. Clippy, the suite and `cargo check --workspace --exclude
+  cce-fx` pass; not run on screen.
 - **`ScrollRegion` is a directory module** (`widget/scroll_region/`): `mod.rs` (the region:
   construction, rect and bounds, scroll position, the virtualization maths), `activity`
   (`ScrollbarActivity` and its timings), `scrollbar` (the bars' geometry, hit tests and

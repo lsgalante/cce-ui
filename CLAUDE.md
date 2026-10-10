@@ -407,7 +407,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
   concern (its `mod.rs` has the table). The largest files are now the params pane's tests,
-  `src/widget/container/parameters_bg/tests.rs` (largest file, ~1.2k lines), and the image stage.
+  `src/widget/container/parameters_bg/tests.rs` (largest file, ~1.2k lines), and the colour selector.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry), `bridge.rs` (the flat-host bridge: `RenderTarget`, `render_widget_h`), `section.rs`
@@ -419,7 +419,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   shells), `text_input.rs` (the per-frame field claim), `history.rs` (`History<T>`), `a11y.rs`,
   `l10n.rs`, `compute.rs` (what a compute job is, device-free).
 - `draw/` — renderer-free drawing (above); `draw::scene` and `draw::rt` for 3D and the tracer.
-- `vk/` — the Vulkan renderer (`renderer/`, `rt/` and `scene/`, each `mod.rs` with its table; `compute.rs`,
+- `vk/` — the Vulkan renderer (`renderer/`, `rt/`, `scene/` and `image/`, each `mod.rs` with its table; `compute.rs`,
   `plate_probe.rs`); `web/` — wasm32 only: `WebRenderer`, the browser shell, its 3D, tracer and
   compute; `mac/` — macOS only: the AppKit shell.
 - `icon.rs` (XDG icon-theme lookup for names other apps ship — not `lib.rs`'s `upload_icon`, which
