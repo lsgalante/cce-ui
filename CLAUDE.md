@@ -51,7 +51,7 @@ that the tests, source paths and `(~N lines)` figures cited here and in the topi
 
 ```sh
 cargo build -p cce-ui                       # the toolkit + demo binary
-cargo test  -p cce-ui                        # headless unit tests (~650; under a second)
+cargo test  -p cce-ui                        # headless unit tests (~680; under a second)
 cargo test  -p cce-ui scene::                # one module's tests
 cargo clippy -p cce-ui --all-features --all-targets -- -D warnings   # CI's clippy gate
 cargo run   -p cce-ui                        # the demo (needs a Wayland session)
