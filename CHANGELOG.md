@@ -10,6 +10,33 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The Vulkan tracer's construction and tests have files of their own** (`vk/rt/`): `init.rs`
+  (`RtStage::new`, one 250-line function — the tier's pipelines, descriptor layouts and sets,
+  the frames in flight) and `tests.rs` (the GPU tests); `mod.rs` keeps the tier, `RtStage`'s
+  state, staging and teardown. A pure move, checked line for line. Clippy, the suite, the
+  tracer's GPU tests (`CCE_VK_RT=compute`, `--ignored`) and `cargo check --workspace --exclude
+  cce-fx` pass.
+- **A text measurement reads the scale once** (`backend/text/shape.rs`, the text box's
+  `prepare_text` and shaping, `shaped_cluster_offsets`, `ShapingMeasure`): the new
+  `shared_text_buffer_at` shapes at a scale the caller passes, and every path that divides a
+  buffer's physical positions by a scale now shapes that buffer at the same value.
+  `shared_text_buffer` read `scale_factor()` for the buffer by itself, so when the scale changed
+  between the caller's read and its own, the offsets came out multiplied by the ratio — on CI's
+  macos job (run 38064718562) a key read at 1.0 and a buffer shaped at 1.5 gave offsets 1.5× too
+  large. The text box's key, its column-advance probe, its single-line and per-line offsets and
+  its advance cache all take the key's scale; `shared_laid_out_buffer` passes its scale to the
+  single run it starts from. The `.max(1.0)` the text box and `shaped_cluster_offsets` put on
+  the division (but not on the buffer) is gone from both: the glyph pass draws the buffer shaped
+  at the raw scale, so the measurement uses the raw scale too — below 1 the clamp put the carets
+  at `scale×` their place (at 0.75, three quarters of the way along the text). Checked by two
+  tests that pin the window's scale on their own thread through `window_state::enter`:
+  `a_shape_keyed_at_one_scale_is_measured_at_that_scale` (a key taken at 1.0, the window at 1.5
+  while it shapes) and `offsets_are_logical_px_at_every_window_scale` (0.75, 1.5, 2.0 against
+  1.0, one line and wrapped). Against the tree before, the first fails with the CI failure's
+  1.5× offsets and the second with 0.75× offsets; both pass after. This is the reader's half of
+  "Tests no longer share the process-wide scale" below, which fixed the writer: that one stops
+  tests rescaling each other, this one makes a scale change mid-shape harmless anywhere.
+
 - **The material setters change their cells under one guard, merged by name and by rung.**
   `color::set_named_material` and `set_material_binding` read the whole cell (`style_read`),
   changed one entry and wrote the whole cell back (`style_write`): two guards, so a material

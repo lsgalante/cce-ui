@@ -83,7 +83,9 @@ impl TextBox {
         let scale = f32::from_bits(key.scale_bits);
         let font_fam = key.font.as_deref();
         let attrs = key.attrs;
-        let shared = crate::backend::text::shared_text_buffer;
+        let shared = |fs: &mut cosmic_text::FontSystem, text: &str, size: f32| {
+            crate::backend::text::shared_text_buffer_at(fs, text, size, font_fam, attrs, scale)
+        };
 
         let render_text = if key.password {
             "•".repeat(key.text.chars().count())
@@ -98,7 +100,7 @@ impl TextBox {
             // Measure the wrapped text's advances with the paint's font system first, so
             // the wrap below never reaches for the shared one (which may be this one).
             let src = if self.editing { self.edit_buffer.clone() } else { self.text.clone() };
-            self.cache_advances(fs, &src);
+            self.cache_advances(fs, &src, scale);
             let (lines, map) = self.wrap_text(f32::from_bits(bits));
             // Each wrapped line's paragraph, and whether that paragraph is right to left: a
             // paragraph's direction is its first strong character's, for all its lines.
@@ -125,7 +127,7 @@ impl TextBox {
             self.line_shift.clear();
             self.line_runs.clear();
             for (li, line) in lines.iter().enumerate() {
-                let line_buffer = shared(fs, line, self.font_size, font_fam, attrs);
+                let line_buffer = shared(fs, line, self.font_size);
                 let run = crate::backend::text::shaped_run(&line_buffer, line, scale);
                 let rtl = para_rtl.get(para_of_line[li]).copied().unwrap_or(false);
                 let shift = if rtl { (room - run.width).max(0.0) } else { 0.0 };
@@ -138,7 +140,7 @@ impl TextBox {
             return;
         }
 
-        let buffer = shared(fs, &render_text, self.font_size, font_fam, attrs);
+        let buffer = shared(fs, &render_text, self.font_size);
         let run = crate::backend::text::shaped_run(&buffer, &render_text, scale);
         let total_w = run.width;
         // A right-to-left line that fits is set against the right. One that does not
@@ -180,19 +182,19 @@ impl TextBox {
         }
     }
 
-    pub(super) fn advance_key(&self, text: &str) -> AdvanceKey {
+    pub(super) fn advance_key(&self, text: &str, scale: f32) -> AdvanceKey {
         AdvanceKey {
             text: text.to_string(),
             font_size_bits: self.font_size.to_bits(),
             font: self.value_font(),
             attrs: self.font_attrs,
-            scale_bits: crate::scale::scale_factor().to_bits(),
+            scale_bits: scale.to_bits(),
         }
     }
 
-    /// Each char's shaped advance in `text` (see the `advances` field), shaped with `fs`.
-    pub(super) fn measure_advances(&self, fs: &mut cosmic_text::FontSystem, text: &str) -> Vec<f32> {
-        let scale = crate::scale::scale_factor().max(0.01);
+    /// Each char's shaped advance in `text` (see the `advances` field), shaped with `fs` at
+    /// `scale` — the buffer and the division by it take the one value.
+    pub(super) fn measure_advances(&self, fs: &mut cosmic_text::FontSystem, text: &str, scale: f32) -> Vec<f32> {
         let font = self.value_font();
         let mut out = Vec::with_capacity(text.chars().count());
         for (pi, para) in text.split('\n').enumerate() {
@@ -200,7 +202,7 @@ impl TextBox {
                 out.push(0.0); // the newline
             }
             let shown = if self.is_password { "•".repeat(para.chars().count()) } else { para.to_string() };
-            let buf = crate::backend::text::shared_text_buffer(fs, &shown, self.font_size, font.as_deref(), self.font_attrs);
+            let buf = crate::backend::text::shared_text_buffer_at(fs, &shown, self.font_size, font.as_deref(), self.font_attrs, scale);
             let run = crate::backend::text::shaped_run(&buf, &shown, scale);
             let mut adv = vec![0.0f32; shown.chars().count()];
             let char_at: std::collections::HashMap<usize, usize> =
@@ -215,13 +217,14 @@ impl TextBox {
         out
     }
 
-    /// Measure `text`'s advances with `fs` into the cache, unless it already holds them.
-    pub(super) fn cache_advances(&self, fs: &mut cosmic_text::FontSystem, text: &str) {
-        let key = self.advance_key(text);
+    /// Measure `text`'s advances at `scale` with `fs` into the cache, unless it already
+    /// holds them.
+    pub(super) fn cache_advances(&self, fs: &mut cosmic_text::FontSystem, text: &str, scale: f32) {
+        let key = self.advance_key(text, scale);
         if self.advances.borrow().as_ref().is_some_and(|(k, _)| *k == key) {
             return;
         }
-        let adv = self.measure_advances(fs, text);
+        let adv = self.measure_advances(fs, text, scale);
         *self.advances.borrow_mut() = Some((key, adv));
     }
 
@@ -233,18 +236,19 @@ impl TextBox {
         thread_local! {
             static OWN_FS: std::cell::RefCell<Option<cosmic_text::FontSystem>> = const { std::cell::RefCell::new(None) };
         }
-        let key = self.advance_key(text);
+        let scale = crate::scale::scale_factor();
+        let key = self.advance_key(text, scale);
         if let Some((k, adv)) = self.advances.borrow().as_ref() {
             if *k == key {
                 return adv.clone();
             }
         }
         let adv = match crate::geometry_font_system().try_lock() {
-            Ok(mut fs) => self.measure_advances(&mut fs, text),
+            Ok(mut fs) => self.measure_advances(&mut fs, text, scale),
             Err(_) => OWN_FS.with(|own| {
                 let mut own = own.borrow_mut();
                 let fs = own.get_or_insert_with(crate::create_font_system);
-                self.measure_advances(fs, text)
+                self.measure_advances(fs, text, scale)
             }),
         };
         *self.advances.borrow_mut() = Some((key, adv.clone()));

@@ -38,7 +38,7 @@ impl Measure for ShapingMeasure {
         if let Some(w) = self.cache.get(&key) {
             return *w;
         }
-        let buf = crate::backend::text::shared_text_buffer(&mut self.fs, text, size, Some(font), attrs);
+        let buf = crate::backend::text::shared_text_buffer_at(&mut self.fs, text, size, Some(font), attrs, scale);
         // The glyphs' extent, trailing spaces included — the same measure
         // `offsets` ends on. (A layout run's `line_w` leaves trailing
         // whitespace out, so a width taken from it disagreed with where
@@ -59,7 +59,7 @@ impl ShapingMeasure {
     /// for text of either direction (see [`ShapedRun`]).
     pub fn shape(&mut self, text: &str, size: f32, font: &str, attrs: TextAttrs) -> ShapedRun {
         let scale = crate::scale::scale_factor().max(0.01);
-        let buf = crate::backend::text::shared_text_buffer(&mut self.fs, text, size, Some(font), attrs);
+        let buf = crate::backend::text::shared_text_buffer_at(&mut self.fs, text, size, Some(font), attrs, scale);
         crate::backend::text::shaped_run(&buf, text, scale)
     }
 

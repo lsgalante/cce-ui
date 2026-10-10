@@ -202,3 +202,80 @@ fn offsets_count_chars_and_reshape_on_change() {
     tb.prepare_text(&mut fs);
     assert_eq!(tb.glyph_positions.len(), 3, "a changed text is reshaped");
 }
+
+/// Make a window drawn at `scale` current on this thread for the guard's life. Only this
+/// thread's reads see it: the process-wide scale, which other tests read, is left alone.
+fn at_scale(scale: f32) -> (std::rc::Rc<crate::window_state::WindowState>, crate::window_state::Entered) {
+    let w = crate::window_state::WindowState::new();
+    w.props.borrow_mut().scale = scale;
+    let guard = crate::window_state::enter(&w);
+    (w, guard)
+}
+
+fn assert_offsets_match(got: &[f32], want: &[f32], what: &str) {
+    assert_eq!(got.len(), want.len(), "{what}: {got:?} vs {want:?}");
+    for (g, w) in got.iter().zip(want) {
+        assert!((g - w).abs() < 0.05 + 0.002 * w.abs(), "{what}: {got:?} vs {want:?}");
+    }
+}
+
+/// The offsets are logical px at every scale the window draws at, below 1 included: the
+/// buffer and the division by the scale take one value. (Below 1 the division was clamped to
+/// 1 and the buffer was not, so at 0.75 the carets stood at three quarters of the text.)
+#[test]
+fn offsets_are_logical_px_at_every_window_scale() {
+    let mut fs = crate::create_font_system();
+    let shape = |fs: &mut cosmic_text::FontSystem, scale: f32| {
+        let _window = at_scale(scale);
+        let mut one = TextBox::new("hello world".to_string());
+        one.set_rect(10.0, 10.0, 300.0, 30.0);
+        one.prepare_text(fs);
+        let mut multi = TextBox::new("hello there\ngeneral".to_string()).with_multiline(true).with_line_wrap(true);
+        multi.set_rect(10.0, 10.0, 300.0, 200.0);
+        multi.prepare_text(fs);
+        (one.glyph_positions.clone(), one.shaped_char_advance, multi.line_glyph_positions.clone())
+    };
+    let (want, want_adv, want_lines) = shape(&mut fs, 1.0);
+    if want.last().copied().unwrap_or(0.0) == 0.0 {
+        return; // nothing shaped (no fonts at all): nothing to check
+    }
+    for scale in [0.75, 1.5, 2.0] {
+        let (got, adv, lines) = shape(&mut fs, scale);
+        assert_offsets_match(&got, &want, &format!("one line at {scale}"));
+        assert_offsets_match(&[adv], &[want_adv], &format!("column advance at {scale}"));
+        assert_eq!(lines.len(), want_lines.len(), "lines at {scale}");
+        for (l, w) in lines.iter().zip(&want_lines) {
+            assert_offsets_match(l, w, &format!("multiline at {scale}"));
+        }
+    }
+}
+
+/// The CI failure's shape, made deterministic: the shaping key was taken at scale 1.0 and the
+/// window's scale reads 1.5 while the box shapes. The offsets are still the key's logical px,
+/// not 1.5× them, because the buffer is shaped at the key's scale rather than at a second read.
+#[test]
+fn a_shape_keyed_at_one_scale_is_measured_at_that_scale() {
+    let mut fs = crate::create_font_system();
+    for multiline in [false, true] {
+        let mut tb = TextBox::new("hello there world".to_string()).with_multiline(multiline).with_line_wrap(multiline);
+        tb.set_rect(10.0, 10.0, 300.0, 120.0);
+        let key = {
+            let _window = at_scale(1.0);
+            tb.prepare_text(&mut fs);
+            tb.inner().prep_key.clone().expect("prepare_text records its key")
+        };
+        let (want, want_lines) = (tb.glyph_positions.clone(), tb.line_glyph_positions.clone());
+        if want.last().copied().unwrap_or(0.0) == 0.0 && want_lines.iter().flatten().all(|x| *x == 0.0) {
+            return; // nothing shaped
+        }
+        {
+            let _window = at_scale(1.5);
+            tb.inner_mut().shape_columns(&mut fs, &key);
+        }
+        assert_offsets_match(&tb.glyph_positions, &want, &format!("multiline {multiline}"));
+        assert_eq!(tb.line_glyph_positions.len(), want_lines.len());
+        for (l, w) in tb.line_glyph_positions.iter().zip(&want_lines) {
+            assert_offsets_match(l, w, "a wrapped line");
+        }
+    }
+}

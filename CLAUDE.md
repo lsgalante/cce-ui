@@ -253,6 +253,9 @@ code that matches displayed text.
   `shader2d.wgsl` / `glyph.wgsl` / the 3D ones) is shared by Vulkan and WebGPU; `vk` re-exports
   it at its old paths. Portable code reaches it through `crate::draw`, never `crate::vk`.
 - **Never key behaviour off vertex values.** Say it in the draw (e.g. `SceneDraw::screen_space`).
+- **A text measurement reads the scale once.** Shape with `shared_text_buffer_at(.., scale)` and
+  divide by that same, unclamped `scale`. Two reads can disagree, and then the offsets come out
+  multiplied by their ratio.
 - **The context menu draws in its own `xdg_popup`** on toplevels (in-window on layer surfaces,
   or with `CCE_UI_MENU_POPUP=0`); the popup's configure is written back so hit tests match the
   screen. `docs/widgets.md` has the menu in full.

@@ -71,22 +71,22 @@ impl Paint for TextBox {
 
         // Measured in the family the value text is DRAWN in — see `value_font`.
         let font_fam = self.value_font();
-        let scale = crate::scale::scale_factor().max(1.0);
+        // Read once: the key, every buffer shaped below and every division by the scale
+        // take this value, so the offsets are logical px whatever the scale does meanwhile.
+        // Not clamped: the glyph pass draws the buffer shaped at this same scale.
+        let scale = crate::scale::scale_factor();
 
         // One column's advance, from the same shaping path as the labels (buffer-cached,
         // so this is a lookup after the first frame per family/size).
-        let probe = crate::backend::text::shared_text_buffer(
+        let probe = crate::backend::text::shared_text_buffer_at(
             fs,
             "MMMMMMMM",
             self.font_size,
             font_fam.as_deref(),
             self.font_attrs,
+            scale,
         );
-        self.shaped_char_advance = probe
-            .layout_runs()
-            .next()
-            .and_then(|run| run.glyphs.last().map(|g| (g.x + g.w) / scale / 8.0))
-            .unwrap_or(0.0);
+        self.shaped_char_advance = crate::backend::text::shaped_run(&probe, "MMMMMMMM", scale).width / 8.0;
 
         // `char_width()` returns this frame's shaped advance from here on, so the
         // wrap below matches the one `selection_quads`/`value_labels` compute at
