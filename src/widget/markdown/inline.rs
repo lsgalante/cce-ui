@@ -166,7 +166,7 @@ impl<'a> Layouter<'a> {
             attrs: TextAttrs { italic: s.italic, weight: (s.bold || base.bold).then_some(700), ..Default::default() },
             color,
             bg: if code {
-                Some(CODE_BG)
+                Some(crate::colors::text_code_background_color())
             } else if s.highlight {
                 Some(crate::colors::text_highlight_background_color())
             } else if matches!(span.link, Some(SpanLink::Tag(_))) {

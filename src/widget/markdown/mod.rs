@@ -48,14 +48,12 @@ impl Theme {
     }
 }
 
-// Colours. Links, tags, the quote bar and the highlight read the theme
-// (`style.text.*`, through `colors::text_link_color` and its kin); FG, DIM and
-// the white washes are linear constants.
+// Colours. Links, tags, the quote bar, the highlight and the code wash read the
+// theme (`style.text.*`, through `colors::text_link_color` and its kin); FG, DIM
+// and the rule are linear constants.
 const FG: [f32; 4] = crate::colors::TEXT_FG;
 
 const DIM: [f32; 4] = crate::colors::TEXT_DIM;
-
-const CODE_BG: [f32; 4] = [1.0, 1.0, 1.0, 0.06];
 
 const RULE: [f32; 4] = [1.0, 1.0, 1.0, 0.12];
 
@@ -188,7 +186,7 @@ impl Layout {
                 }
                 Draw::Image { target, rect: r } => match image(target) {
                     Some(img) => pc.image(img.id, rect(r), 1.0),
-                    None => pc.rounded_rect(rect(r), 4.0 * k, (true, true, true, true), CODE_BG),
+                    None => pc.rounded_rect(rect(r), 4.0 * k, (true, true, true, true), crate::colors::text_code_background_color()),
                 },
                 Draw::Icon { name, rect: r, color } => {
                     pc.icon(name, rect(r), *color);

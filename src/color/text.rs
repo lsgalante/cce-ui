@@ -1,7 +1,7 @@
 //! Text colours outside a control: the link colour (`style.text.link`), the tag colour
-//! (`style.text.tag`), the quote bar (`style.text.quote_bar`) and the highlight
-//! (`style.text.highlight`). The unresolved link and the tag's and highlight's washes are derived
-//! from them, not set.
+//! (`style.text.tag`), the quote bar (`style.text.quote_bar`), the highlight
+//! (`style.text.highlight`) and the code wash (`style.text.code_background`). The unresolved link
+//! and the tag's and highlight's washes are derived from them, not set.
 
 use super::*;
 
@@ -21,6 +21,11 @@ pub(super) const DEFAULT_HIGHLIGHT_SRGB: [f32; 4] = [1.0, 0.82, 0.0, 1.0];
 /// stands on it, so an opaque key colour still leaves the text readable.
 const HIGHLIGHT_WASH_ALPHA: f32 = 0.40;
 
+/// The built-in wash behind code (linear, and white either way): a faint lift off the page.
+/// The key sets the wash itself, alpha and all: an 8-digit hex keeps it translucent, a 6-digit
+/// one makes a solid panel.
+pub(super) const DEFAULT_CODE_BACKGROUND: [f32; 4] = [1.0, 1.0, 1.0, 0.06];
+
 /// The opacity of the wash behind a tag, as a share of the tag colour's own.
 const TAG_WASH_ALPHA: f32 = 0.15;
 
@@ -37,6 +42,8 @@ pub(super) static TEXT_TAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::sty
 pub(super) static TEXT_QUOTE_BAR_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXT_QUOTE_BAR_COLOR, |s| &mut s.color.TEXT_QUOTE_BAR_COLOR);
 
 pub(super) static TEXT_HIGHLIGHT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXT_HIGHLIGHT_COLOR, |s| &mut s.color.TEXT_HIGHLIGHT_COLOR);
+
+pub(super) static TEXT_CODE_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXT_CODE_BACKGROUND_COLOR, |s| &mut s.color.TEXT_CODE_BACKGROUND_COLOR);
 
 /// The colour of a link in text (linear): a URL, a note link that resolves, the link glyph.
 pub fn text_link_color() -> [f32; 4] {
@@ -91,6 +98,16 @@ pub fn set_text_highlight_color(c: [f32; 4]) {
 pub fn text_highlight_background_color() -> [f32; 4] {
     let h = text_highlight_color();
     [h[0], h[1], h[2], h[3] * HIGHLIGHT_WASH_ALPHA]
+}
+
+/// The wash behind inline code and code blocks (linear), and the box an image draws until it
+/// loads.
+pub fn text_code_background_color() -> [f32; 4] {
+    style_read(&TEXT_CODE_BACKGROUND_COLOR)
+}
+
+pub fn set_text_code_background_color(c: [f32; 4]) {
+    style_write(&TEXT_CODE_BACKGROUND_COLOR, c);
 }
 
 fn unresolved_from(link: [f32; 4]) -> [f32; 4] {
@@ -176,5 +193,23 @@ mod tests {
         reload_colors("");
         assert_eq!(h, [1.0, 0.0, 1.0, 1.0]);
         assert_eq!(wash, [1.0, 0.0, 1.0, HIGHLIGHT_WASH_ALPHA]);
+    }
+
+    /// `style.text.code_background` is the wash itself: an 8-digit hex keeps its alpha, a
+    /// 6-digit one is solid.
+    #[test]
+    fn the_code_background_key_is_the_wash_itself() {
+        let _lock = test_color_state_lock();
+        assert_eq!(text_code_background_color(), [1.0, 1.0, 1.0, 0.06]);
+        reload_colors("style {\n text {\n code_background \"#ffffff80\"\n }\n}\n");
+        let translucent = text_code_background_color();
+        reload_colors("style {\n text {\n code_background \"#000000\"\n }\n}\n");
+        let solid = text_code_background_color();
+        if let Ok(mut lock) = TEXT_CODE_BACKGROUND_COLOR.write() {
+            *lock = DEFAULT_CODE_BACKGROUND;
+        }
+        reload_colors("");
+        assert_eq!(translucent, [1.0, 1.0, 1.0, 128.0 / 255.0]);
+        assert_eq!(solid, [0.0, 0.0, 0.0, 1.0]);
     }
 }

@@ -383,6 +383,9 @@ fn parse_and_set_colors_in_batch(content: &str) {
     if let Some(c) = get_color("/style/text/highlight") {
         if let Ok(mut lock) = TEXT_HIGHLIGHT_COLOR.write() { *lock = c; }
     }
+    if let Some(c) = get_color("/style/text/code_background") {
+        if let Ok(mut lock) = TEXT_CODE_BACKGROUND_COLOR.write() { *lock = c; }
+    }
     if let Some(c) = get_color("/style/data/tree/type_text_color") {
         if let Ok(mut lock) = TREE_TYPE_TEXT_COLOR.write() { *lock = c; }
     }

@@ -219,7 +219,9 @@ Opt-in features for the note clients.
   (`colors::text_highlight_color`), in both views. A link with no target is the link colour
   darker and greyer (`colors::text_link_unresolved_color`, derived in OKLab); a tag's and a
   highlight's washes are their colours made translucent (`colors::text_tag_background_color`,
-  `text_highlight_background_color`). No derived colour has a key of its own. `EditorTheme::new` reads them once, so an editor built before a
+  `text_highlight_background_color`). No derived colour has a key of its own. The code wash,
+  `style.text.code_background` (`colors::text_code_background_color`), is set directly, alpha
+  included; it also fills an image's box until the image loads. `EditorTheme::new` reads them once, so an editor built before a
   reload keeps the old colours.
 - **`doc_editor`** — `widget::doc_editor::DocEditor`, the editor with live preview: markup is
   hidden except on the caret's lines (the selection's, or the whole fenced block the caret is in),

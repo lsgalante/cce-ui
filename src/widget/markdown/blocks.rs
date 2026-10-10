@@ -211,7 +211,7 @@ impl<'a> Layouter<'a> {
         let lh = self.theme.line_h(size);
         let n = text.split('\n').count().max(1);
         let h = n as f32 * lh + 2.0 * CODE_PAD;
-        self.out.draws.push(Draw::Round { rect: Rect { x, y, width: w, height: h }, radius: 6.0, color: CODE_BG });
+        self.out.draws.push(Draw::Round { rect: Rect { x, y, width: w, height: h }, radius: 6.0, color: crate::colors::text_code_background_color() });
         // Code does not wrap; overlong lines are cut at the block's edge
         // by the paint clip, as a scrolled source view would show them.
         for (i, line) in text.split('\n').enumerate() {

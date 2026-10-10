@@ -30,7 +30,7 @@ pub struct EditorTheme {
 
 impl EditorTheme {
     /// Obsidian-ish dark defaults at `size`, in the DE's sans and mono; the link, tag,
-    /// quote bar and highlight colours are the theme's (`style.text.*`), read once here.
+    /// quote bar, highlight and code colours are the theme's (`style.text.*`), read once here.
     pub fn new(size: f32) -> EditorTheme {
         let lin = crate::colors::to_linear;
         EditorTheme {
@@ -42,7 +42,7 @@ impl EditorTheme {
             dim: crate::colors::TEXT_DIM,
             link: crate::colors::text_link_color(),
             link_unresolved: crate::colors::text_link_unresolved_color(),
-            code_bg: [1.0, 1.0, 1.0, 0.06],
+            code_bg: crate::colors::text_code_background_color(),
             highlight_bg: crate::colors::text_highlight_background_color(),
             tag: crate::colors::text_tag_color(),
             tag_bg: crate::colors::text_tag_background_color(),

@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The code wash is a theme key, `style.text.code_background`** (`color/text.rs`): the wash
+  behind inline code and code blocks in the reading view and `DocEditor`, and the box an image
+  draws until it loads, read `colors::text_code_background_color`. Unlike the tag and highlight
+  washes it is set directly, alpha and all — there is no code colour to derive it from — so an
+  8-digit hex keeps it translucent (the default is white at 0.06) and a 6-digit one makes a
+  solid panel. The rule and the callout kinds' colours stay constants. Clippy, the suite and
+  `cargo doc` pass (`the_code_background_key_is_the_wash_itself`).
 - **The highlight is a theme key, `style.text.highlight`** (`color/text.rs`): the wash behind
   `==highlighted==` text in the reading view and `DocEditor` reads
   `colors::text_highlight_background_color`. The key names the colour; the wash is derived, at
