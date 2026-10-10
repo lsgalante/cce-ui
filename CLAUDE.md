@@ -344,7 +344,9 @@ any off-standard row), and `src/main.rs` is the reference.
   on each other, so another write to the same field may publish while one is held). An
   unchanged guard publishes nothing; a changed one is a store, unless its cell is
   `StyleCell::merging` — a slot whose writers each change a piece of a collection (the
-  registry, key by key) declares its merge, or concurrent writers lose each other's pieces.
+  registry, key by key; the named materials, by name) declares its merge, or concurrent
+  writers lose each other's pieces. A read-modify-write is ONE guard (`color::style_update`),
+  never a read and then a write: the write puts back whatever the read saw.
 - **A layout style key has one home, the registry** (`layout/registry.rs`). Its getter reads
   `registry_float` / `registry_string` / `registry_bool` with the default; its setter writes the
   registry. Do not add a separate slot or a config re-scan for a key. The flatten maps the paths
