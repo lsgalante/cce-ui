@@ -13,7 +13,7 @@
 //! | `controls` | buttons, text boxes, dropdowns, sliders, spinboxes, progress bars, control labels, the ramp |
 //! | `lists` | lists, breadcrumbs, the tree list, scrollbars |
 //! | `graph` | the node graph: nodes, wires, connectors, its grid |
-//! | `text` | text colours outside a control: links, tags and the quote bar, and the colours derived from them |
+//! | `text` | text colours outside a control: links, tags, the quote bar and the highlight, and the colours derived from them |
 //! | `load` | reading the config into the slots, retired surface keys, reloads |
 //! | `math` | sRGB / linear, OKLab, the perceptual fade |
 //! | `materials` | named materials and the rung bindings |
@@ -167,6 +167,7 @@ crate::style::style_slots! {
     TEXT_LINK_COLOR: [f32; 4] = to_linear(text::DEFAULT_LINK_SRGB);
     TEXT_TAG_COLOR: [f32; 4] = to_linear(text::DEFAULT_TAG_SRGB);
     TEXT_QUOTE_BAR_COLOR: [f32; 4] = to_linear(text::DEFAULT_QUOTE_BAR_SRGB);
+    TEXT_HIGHLIGHT_COLOR: [f32; 4] = to_linear(text::DEFAULT_HIGHLIGHT_SRGB);
     SCROLLBAR_TRACK_COLOR: [f32; 4] = [0.15, 0.15, 0.20, 0.3];
     SCROLLBAR_THUMB_COLOR: [f32; 4] = [0.60, 0.60, 0.65, 0.4];
     GRAPH_GRID_COLOR: [f32; 3] = [0.07, 0.07, 0.09];

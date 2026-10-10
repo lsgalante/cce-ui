@@ -380,6 +380,9 @@ fn parse_and_set_colors_in_batch(content: &str) {
     if let Some(c) = get_color("/style/text/quote_bar") {
         if let Ok(mut lock) = TEXT_QUOTE_BAR_COLOR.write() { *lock = c; }
     }
+    if let Some(c) = get_color("/style/text/highlight") {
+        if let Ok(mut lock) = TEXT_HIGHLIGHT_COLOR.write() { *lock = c; }
+    }
     if let Some(c) = get_color("/style/data/tree/type_text_color") {
         if let Ok(mut lock) = TREE_TYPE_TEXT_COLOR.write() { *lock = c; }
     }

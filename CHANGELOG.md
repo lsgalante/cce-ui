@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The highlight is a theme key, `style.text.highlight`** (`color/text.rs`): the wash behind
+  `==highlighted==` text in the reading view and `DocEditor` reads
+  `colors::text_highlight_background_color`. The key names the colour; the wash is derived, at
+  0.40 of its alpha (what it was), so an opaque hex in a theme still leaves the text on it
+  readable. With it, every colour the two views drew from Obsidian's theme is the DE's; the
+  code wash, the rule and the callout kinds' colours stay constants. Clippy, the suite and
+  `cargo doc` pass (`the_highlight_key_sets_the_highlight_and_its_wash`).
 - **The quote bar is a theme key, `style.text.quote_bar`** (`color/text.rs`): the reading
   view's block-quote and callout bar, and `DocEditor`'s, read `colors::text_quote_bar_color`.
   The default is the link's violet, as before. `EditorTheme::accent`, whose only use was the

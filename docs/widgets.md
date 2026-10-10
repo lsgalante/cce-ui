@@ -213,12 +213,13 @@ Opt-in features for the note clients.
 - **`markdown`** — `widget::markdown`, the reading view: cce-vault's blocks laid out at a width
   into draw items and click targets (`layout`, `Layout::paint` / `paint_scaled`). cce-notes'
   reading mode and cce-grid's note cards.
-- **Links, tags and the quote bar take the theme's colours**, `style.text.link`
-  (`colors::text_link_color`), `style.text.tag` (`colors::text_tag_color`) and
-  `style.text.quote_bar` (`colors::text_quote_bar_color`), in both views. A link with no target is the
-  link colour darker and greyer (`colors::text_link_unresolved_color`, derived in OKLab); a
-  tag's wash is the tag colour, faint (`colors::text_tag_background_color`). Neither derived
-  colour has a key of its own. `EditorTheme::new` reads them once, so an editor built before a
+- **Links, tags, the quote bar and the highlight take the theme's colours**, `style.text.link`
+  (`colors::text_link_color`), `style.text.tag` (`colors::text_tag_color`),
+  `style.text.quote_bar` (`colors::text_quote_bar_color`) and `style.text.highlight`
+  (`colors::text_highlight_color`), in both views. A link with no target is the link colour
+  darker and greyer (`colors::text_link_unresolved_color`, derived in OKLab); a tag's and a
+  highlight's washes are their colours made translucent (`colors::text_tag_background_color`,
+  `text_highlight_background_color`). No derived colour has a key of its own. `EditorTheme::new` reads them once, so an editor built before a
   reload keeps the old colours.
 - **`doc_editor`** — `widget::doc_editor::DocEditor`, the editor with live preview: markup is
   hidden except on the caret's lines (the selection's, or the whole fenced block the caret is in),

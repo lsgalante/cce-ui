@@ -1,6 +1,7 @@
 //! Text colours outside a control: the link colour (`style.text.link`), the tag colour
-//! (`style.text.tag`) and the quote bar (`style.text.quote_bar`). The unresolved link and the
-//! tag's wash are derived from them, not set.
+//! (`style.text.tag`), the quote bar (`style.text.quote_bar`) and the highlight
+//! (`style.text.highlight`). The unresolved link and the tag's and highlight's washes are derived
+//! from them, not set.
 
 use super::*;
 
@@ -12,6 +13,13 @@ pub(super) const DEFAULT_TAG_SRGB: [f32; 4] = [0.66, 0.55, 0.98, 1.0];
 
 /// The built-in quote bar (sRGB): the link's violet too.
 pub(super) const DEFAULT_QUOTE_BAR_SRGB: [f32; 4] = [0.66, 0.55, 0.98, 1.0];
+
+/// The built-in highlight (sRGB): a marker yellow.
+pub(super) const DEFAULT_HIGHLIGHT_SRGB: [f32; 4] = [1.0, 0.82, 0.0, 1.0];
+
+/// The opacity of the highlight's wash, as a share of the highlight colour's own: the text
+/// stands on it, so an opaque key colour still leaves the text readable.
+const HIGHLIGHT_WASH_ALPHA: f32 = 0.40;
 
 /// The opacity of the wash behind a tag, as a share of the tag colour's own.
 const TAG_WASH_ALPHA: f32 = 0.15;
@@ -27,6 +35,8 @@ pub(super) static TEXT_LINK_COLOR: crate::style::StyleCell<[f32; 4]> = crate::st
 pub(super) static TEXT_TAG_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXT_TAG_COLOR, |s| &mut s.color.TEXT_TAG_COLOR);
 
 pub(super) static TEXT_QUOTE_BAR_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXT_QUOTE_BAR_COLOR, |s| &mut s.color.TEXT_QUOTE_BAR_COLOR);
+
+pub(super) static TEXT_HIGHLIGHT_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.TEXT_HIGHLIGHT_COLOR, |s| &mut s.color.TEXT_HIGHLIGHT_COLOR);
 
 /// The colour of a link in text (linear): a URL, a note link that resolves, the link glyph.
 pub fn text_link_color() -> [f32; 4] {
@@ -66,6 +76,21 @@ pub fn text_quote_bar_color() -> [f32; 4] {
 
 pub fn set_text_quote_bar_color(c: [f32; 4]) {
     style_write(&TEXT_QUOTE_BAR_COLOR, c);
+}
+
+/// The highlight colour (linear), as the theme states it; text is marked with its wash.
+pub fn text_highlight_color() -> [f32; 4] {
+    style_read(&TEXT_HIGHLIGHT_COLOR)
+}
+
+pub fn set_text_highlight_color(c: [f32; 4]) {
+    style_write(&TEXT_HIGHLIGHT_COLOR, c);
+}
+
+/// The wash behind `==highlighted==` text (linear): the highlight colour, translucent.
+pub fn text_highlight_background_color() -> [f32; 4] {
+    let h = text_highlight_color();
+    [h[0], h[1], h[2], h[3] * HIGHLIGHT_WASH_ALPHA]
 }
 
 fn unresolved_from(link: [f32; 4]) -> [f32; 4] {
@@ -135,5 +160,21 @@ mod tests {
         reload_colors("");
         assert_eq!(bar, [0.0, 0.0, 1.0, 1.0]);
         assert_eq!((link_after, tag_after), (link, tag));
+    }
+
+    /// `style.text.highlight` sets the highlight and its wash; the default wash is the one the
+    /// views drew before the key existed.
+    #[test]
+    fn the_highlight_key_sets_the_highlight_and_its_wash() {
+        let _lock = test_color_state_lock();
+        assert_eq!(text_highlight_background_color(), to_linear([1.0, 0.82, 0.0, 0.40]));
+        reload_colors("style {\n text {\n highlight \"#ff00ff\"\n }\n}\n");
+        let (h, wash) = (text_highlight_color(), text_highlight_background_color());
+        if let Ok(mut lock) = TEXT_HIGHLIGHT_COLOR.write() {
+            *lock = to_linear(DEFAULT_HIGHLIGHT_SRGB);
+        }
+        reload_colors("");
+        assert_eq!(h, [1.0, 0.0, 1.0, 1.0]);
+        assert_eq!(wash, [1.0, 0.0, 1.0, HIGHLIGHT_WASH_ALPHA]);
     }
 }

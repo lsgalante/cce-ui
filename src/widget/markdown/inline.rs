@@ -168,7 +168,7 @@ impl<'a> Layouter<'a> {
             bg: if code {
                 Some(CODE_BG)
             } else if s.highlight {
-                Some(lin(HIGHLIGHT_BG))
+                Some(crate::colors::text_highlight_background_color())
             } else if matches!(span.link, Some(SpanLink::Tag(_))) {
                 Some(crate::colors::text_tag_background_color())
             } else {
