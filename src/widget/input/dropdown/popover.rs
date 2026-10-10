@@ -187,9 +187,9 @@ impl Dropdown {
     /// with the base-rect reads rewritten in content-rect terms (`base.y + base.h` ⇒
     /// `content.y + content.height`, `base.y + label_offset` ⇒ `content.y`).
     ///
-    /// The box is the row strip PLUS [`Self::popover_pads`] — it is a plate,
+    /// The box is the row strip PLUS `Self::popover_pads` — it is a plate,
     /// and its outer edges are relief wall, not face. Rows start at
-    /// [`Self::rows_top`], never at `ry`.
+    /// `Self::rows_top`, never at `ry`.
     pub fn popover_geom(&self, content: Rect) -> (f32, f32, f32, f32) {
         let (pad_top, pad_bottom) = self.popover_pads(content);
         let content = self.popover_anchor.unwrap_or(content);

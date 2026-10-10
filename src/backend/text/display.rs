@@ -17,7 +17,7 @@ pub struct TextBounds {
 
 /// A display-list text prim ready for the glyph pass: a [`TextItem`](crate::widget::TextItem) whose
 /// buffer is the cache's own, shared rather than copied. Public so a shell
-/// outside the crate can hold what [`build_frame`](super::frame::build_frame)
+/// outside the crate can hold what [`build_frame`](crate::backend::frame::build_frame)
 /// fills; its fields are the frame's own.
 pub struct DlText {
     pub(crate) buffer: Rc<Buffer>,

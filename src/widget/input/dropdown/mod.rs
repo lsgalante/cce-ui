@@ -217,7 +217,7 @@ impl Dropdown {
     }
 
     /// Set (or clear) the app-owned concentric frame — see the `corner_frame` field docs.
-    /// [`Self::radii`]: the raised trigger plate's corners, or `None` for
+    /// `Self::radii`: the raised trigger plate's corners, or `None` for
     /// the configured radius.
     pub fn set_radii(&mut self, radii: Option<(f32, f32, f32, f32)>) {
         self.radii = radii;

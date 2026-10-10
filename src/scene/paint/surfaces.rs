@@ -12,7 +12,7 @@ use super::*;
 /// applied by [`Self::fill`] per the role (see the Phase 7b blur-regime note
 /// in `docs/rfc-core-rebuild.md`): a root plate stays positive-alpha (the
 /// COMPOSITOR frosts behind the window), a nested plate whose material is
-/// [`Frost::Frosted`] encodes the in-app frost pass's negative-alpha sentinel.
+/// [`Frost::Frosted`](crate::scene::material::Frost::Frosted) encodes the in-app frost pass's negative-alpha sentinel.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlateSpec {
     pub rect: Rect,

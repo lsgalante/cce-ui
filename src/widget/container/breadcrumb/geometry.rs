@@ -129,7 +129,7 @@ impl Breadcrumb {
     }
 
     /// The seam between each pair of abutting segments, as (top, bottom) line
-    /// endpoints. Each leans right at the top by [`SEG_SLANT`], so it reads as a
+    /// endpoints. Each leans right at the top by `SEG_SLANT`, so it reads as a
     /// "/" between the two names. Only interior boundaries appear here — the
     /// run's outer ends are the plate's own upright edges.
     pub fn seams(&self, rect: Rect) -> Vec<((f32, f32), (f32, f32))> {

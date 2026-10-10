@@ -179,7 +179,7 @@ pub struct EngineState<A: Application> {
     /// clock (see the render gate in `run`).
     pub frame_callback_armed_at: Option<std::time::Instant>,
     /// A warm-down commit's frame callback is outstanding (see
-    /// [`EngineState::keepalive_commit`]). Separate from
+    /// `EngineState::keepalive_commit`). Separate from
     /// `frame_callback_pending` on purpose: a genuine redraw never waits on it.
     pub keepalive_pending: bool,
     pub keepalive_armed_at: Option<std::time::Instant>,
@@ -445,7 +445,7 @@ impl<A: Application> EngineState<A> {
     }
 }
 
-/// User data of a warm-down frame callback ([`EngineState::keepalive_commit`]),
+/// User data of a warm-down frame callback (`EngineState::keepalive_commit`),
 /// which clears `keepalive_pending` rather than `frame_callback_pending`.
 pub struct KeepAlive;
 

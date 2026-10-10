@@ -347,8 +347,8 @@ impl ParametersBg {
     /// current cursor (and consume no vertical space), so every index-parallel consumer
     /// keeps working while the row draws and hit-tests as nothing.
     ///
-    /// Rows advance on a uniform [`ROW_GAP`] pitch, except a section header, which is placed
-    /// [`SECTION_GAP`] below the previous section's drawn bottom edge — see [`SECTION_GAP`].
+    /// Rows advance on a uniform `ROW_GAP` pitch, except a section header, which is placed
+    /// `SECTION_GAP` below the previous section's drawn bottom edge — see `SECTION_GAP`.
     pub fn get_param_rects(&self) -> Vec<(f32, f32, f32, f32)> {
         let hidden = self.hidden_rows();
         let mut rects = Vec::new();

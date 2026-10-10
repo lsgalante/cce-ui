@@ -266,7 +266,7 @@ pub(super) fn ramp_slope_lut(keys: &[(f32, f32)], smooth: bool) -> [f32; BEVEL_P
 }
 
 /// Install a custom EDGE profile for the plate perimeter roll from ramp keys —
-/// the [`set_bevel_profile_keys`] twin for [`ROLL_PROFILE`]. The curve is the
+/// the [`set_bevel_profile_keys`] twin for `ROLL_PROFILE`. The curve is the
 /// roll's descent progress from the face join (0) to the silhouette (1); the
 /// shader's `roll_slope` samples it in place of the analytic superellipse
 /// quadrant. Empty or single-key lists clear back to the analytic roll.

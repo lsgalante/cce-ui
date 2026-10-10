@@ -28,7 +28,7 @@ pub const MARK_OFF: &str = "○ ";
 
 /// The glyph a label's leading mark names, and the label without it.
 /// A row's action read off its English label: the fallback for a menu built without
-/// [`set_row_actions`], as every menu was until 2026-10-08. It breaks the moment a label
+/// [`set_row_actions`](super::set_row_actions). It breaks the moment a label
 /// is translated (`docs/rfc-accessibility-locale.md`), so the toolkit's own menus set
 /// their actions and this serves only menus that do not.
 pub fn legacy_action_for_label(label: &str) -> Option<crate::widget::ContextAction> {

@@ -283,7 +283,7 @@ pub(super) fn superellipse_pt(theta: f32, e: f32) -> (f32, f32) {
 /// a per-pixel-smooth falloff between rings — stacked translucent layers band
 /// visibly; this cannot. Ring alphas sit on a quadratic ease-out, giving the
 /// vignette profile piecewise-linearly with kinks below visibility at glow
-/// alphas. Corners sample [`superellipse_pt`], so a glow's silhouette sits in
+/// alphas. Corners sample `superellipse_pt`, so a glow's silhouette sits in
 /// the same corner family as the cells, nodes, and plates it highlights.
 pub fn push_glow_vertices(
     x: f32, y: f32, ww: f32, h: f32,

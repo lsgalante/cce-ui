@@ -6,7 +6,7 @@ use super::*;
 // --- Headless offscreen rendering (thumbnails, previews) ---
 
 /// One-shot path-traced rendering with no window anywhere: a headless
-/// [`crate::vk::VkCore`] + an [`RtStage`] whose "backdrop" is a private sRGB
+/// [`crate::vk::VkCore`] + an `RtStage` whose "backdrop" is a private sRGB
 /// target image, read back to CPU pixels. This is the seam consumers like
 /// the cce-files thumbnailer sit on.
 ///

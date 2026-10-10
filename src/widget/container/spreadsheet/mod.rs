@@ -1,10 +1,10 @@
 //! `Spreadsheet`: a read-only table with a header row, zebra rows, selectable rows (a press
 //! selects one, ctrl toggles one, shift extends from the last pressed — see
-//! [`Spreadsheet::press_row`]), column dividers, and an inertially scrolled body: wheel input
+//! `Spreadsheet::press_row`), column dividers, and an inertially scrolled body: wheel input
 //! feeds a velocity that [`Input::tick`] integrates and decays each frame, the scrollbar thumb is
 //! host-drag-driven through the drag surface, and arrow/page/home/end keys jump the scroll. The
 //! scroll geometry (content and viewport heights, thumb position) is derived in one place
-//! ([`ScrollGeom`]). [`SpreadsheetController`] rides the `Input` capability hooks.
+//! (`ScrollGeom`). [`SpreadsheetController`] rides the `Input` capability hooks.
 //!
 //! **The two scrollbars cross at the body's centre**: the vertical bar rides the pane's vertical
 //! centre line and the horizontal one the body's horizontal centre line, as the params pane's and

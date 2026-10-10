@@ -332,11 +332,10 @@ impl Adapted<Button> {
     /// Icon face from a bundled cce-icons glyph, by NAME — the form to prefer
     /// over [`with_icon`] whenever the artwork is one of cce-icons', because
     /// the id is re-resolved per read and so survives a renderer rebuild (see
-    /// the [`icon_name`] field). `fallback` is the label drawn instead when
+    /// the `icon_name` field). `fallback` is the label drawn instead when
     /// the icon set is missing on this machine.
     ///
     /// [`with_icon`]: Adapted::<Button>::with_icon
-    /// [`icon_name`]: Button::icon_name
     pub fn with_icon_name(mut self, name: &str, fallback: &str) -> Self {
         if crate::upload_icon(name, 32).is_some() {
             self.icon_name = Some(name.to_string());

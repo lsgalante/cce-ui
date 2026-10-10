@@ -77,7 +77,7 @@ fn parse_bool(val: &str) -> Option<bool> {
 
 /// A check box: a square well ([`Field::well`]) with an optional label to
 /// its right — empty unchecked; checked, a flush square plate standing in the
-/// middle of it ([`Field::run`] on [`PLATE_SHARE`] of its side), the well
+/// middle of it ([`Field::run`] on `PLATE_SHARE` of its side), the well
 /// showing all round. Not the toggle's run with no travel, though it was: a
 /// run spans its field's whole height, so in a square it is a tall bar.
 /// Standalone, the box is the largest square in the rect, centred.
@@ -133,7 +133,7 @@ impl Checkbox {
     }
 
     /// A checked box's plate in `well` ([`Checkbox::box_field`]): a square
-    /// [`PLATE_SHARE`] of its side, centred, all run — its corner the well's
+    /// `PLATE_SHARE` of its side, centred, all run — its corner the well's
     /// in proportion, so it is the box again, smaller.
     pub fn box_plate(well: &Field) -> Field {
         let o = well.rect;

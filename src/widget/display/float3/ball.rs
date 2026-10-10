@@ -159,7 +159,7 @@ impl Float3 {
     /// Roll the ball by a scroll: the ball is scrolled as content is, its
     /// surface moving the way a page under the pointer would — a two-finger
     /// gesture in both axes at once, a wheel notch in one — by
-    /// [`SCROLL_TURN`] a notch. The length is kept.
+    /// `SCROLL_TURN` a notch. The length is kept.
     pub fn ball_scroll(&mut self, delta: &MouseScrollDelta) -> bool {
         let Some((_, _, r)) = self.ball_circle() else {
             return false;

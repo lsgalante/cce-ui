@@ -30,7 +30,7 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
 }
 
 /// [`get_text_buffer`] plus shaping attributes (italic / weight) — the backend's shape entry
-/// for `Prim::Text` prims that carry [`TextAttrs`] (the font picker's style-variant previews).
+/// for `Prim::Text` prims that carry [`TextAttrs`](crate::scene::paint::TextAttrs) (the font picker's style-variant previews).
 pub fn get_text_buffer_attrs(
     fs: &mut FontSystem,
     text: &str,
@@ -187,7 +187,7 @@ pub(crate) fn shared_text_buffer_at(
     buf
 }
 
-/// Shape a boxed [`Prim::Text`] (word-wrap + alignment) and return `(buffer, vertical_offset)`.
+/// Shape a boxed [`Prim::Text`](crate::scene::paint::Prim::Text) (word-wrap + alignment) and return `(buffer, vertical_offset)`.
 /// Starts from [`get_text_buffer_attrs`]'s single run for all the family resolution, then
 /// re-lays it out: a 1.4 line-height (the placed-text convention), the wrap width, per-line
 /// horizontal alignment, and re-shapes. The vertical offset positions the shaped block inside

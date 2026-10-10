@@ -126,7 +126,7 @@ impl ParametersBg {
 
     /// The scrollbar's track + thumb quads (empty when no scrollbar is needed). The host draws
     /// these either behind or in front of the pane plate per [`Self::scrollbar_active`]; they
-    /// are deliberately kept out of [`Self::plain_quads`] so the host controls their depth.
+    /// are deliberately kept out of `Self::plain_quads` so the host controls their depth.
     pub fn scrollbar_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if !self.scrollbar_visible() {
             return Vec::new();

@@ -153,10 +153,10 @@ impl TextBox {
     /// draws no background).
     ///
     /// The SINGLE source for that geometry: `paint` carves it here, and the
-    /// flat-path bridge in `layout::render_widget` re-offers the same rect
-    /// through [`crate::layout::RenderTarget::recess`] for hosts that consume
-    /// `all_quads` and so never see the carve. A second copy of this math in
-    /// the bridge is exactly how the two would drift apart.
+    /// flat-host bridge (`layout::render_widget`) relays that carve to a flat
+    /// host as a [`relief_carve`](crate::layout::RenderTarget::relief_carve).
+    /// A second copy of this math in the bridge is exactly how the two would
+    /// drift apart.
     pub fn well(&self) -> Option<crate::scene::paint::Field> {
         let radius = crate::layout::textbox_corner_radius();
         if radius <= 0.0 || !self.recessed() || !self.draw_bg_border {

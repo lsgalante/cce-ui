@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The doc links resolve** (27 files): `cargo doc -p cce-ui --all-features` reported 41 warnings
+  and reports none. Sixteen links named items that had moved or been renamed — the `a11y_*`
+  reads on `WidgetHostExt`, `Application::create`, `IDLE_DISPATCH`, `build_frame`,
+  `TextAttrs`, `Prim::Text`, `Frost::Frosted`, `PaintCtx::inset_plate`, several broken when a
+  split changed what `super::` names — and now point at the item. Twenty-five public docs
+  linked private items (constants and helpers such as `PLATE_SHARE`, `Self::plain_quads`,
+  `DOUBLE_CLICK`), which rustdoc cannot render; they name them in plain code. The text box's
+  well doc named a `RenderTarget::recess` that does not exist and the removed `all_quads`; it
+  now names `relief_carve`, what the bridge calls. Clippy and the suite pass.
 - **Module docs describe the present** (24 files): the module docs that narrated the core
   rebuild ("Phase 5c leaf sweep", "until 2026-10-08", "the legacy `extra_quads`") now say what
   the module is. Several were wrong, not just dated: `scene/mod.rs` said nothing in it was wired

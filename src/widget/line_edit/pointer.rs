@@ -14,7 +14,7 @@ impl LineEdit {
     /// With `extend` (Shift held) the selection's far end stays put and the
     /// selection runs from it to `at` instead — shift+click.
     ///
-    /// Presses at the same offset within [`DOUBLE_CLICK`] of each other count
+    /// Presses at the same offset within `DOUBLE_CLICK` of each other count
     /// up: the second selects the word there (see [`LineEdit::word_at`]) and
     /// a drag from it grows by whole words; the third selects everything —
     /// the field is one line; a fourth starts over. A masked field selects

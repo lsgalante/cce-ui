@@ -86,7 +86,7 @@ pub trait RenderTarget {
     fn arc(&mut self, _cx: f32, _cy: f32, _radius: f32, _thickness: f32, _start: f32, _end: f32, _color: [f32; 4]) {}
     /// A filled disc — see `PaintCtx::circle`. A graph's ports.
     fn circle(&mut self, _cx: f32, _cy: f32, _radius: f32, _color: [f32; 4]) {}
-    /// A flush inset control plate ([`PaintCtx::inset_plate`]) — the raised
+    /// A flush inset control plate ([`PaintCtx::inset_plate`](crate::scene::paint::PaintCtx::inset_plate)) — the raised
     /// control surface (groove ring down, beveled lip back up). Lets a popover
     /// draw the ACTUAL widget surface expanded (the Dropdown's grown trigger).
     /// Hosts without relief prims degrade to a flat rounded fill.

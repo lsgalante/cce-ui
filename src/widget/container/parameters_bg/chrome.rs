@@ -108,7 +108,7 @@ impl ParametersBg {
         }
     }
 
-    /// The rounded companion to [`Self::plain_quads`]: the row controls whose boxes are
+    /// The rounded companion to `Self::plain_quads`: the row controls whose boxes are
     /// `Prim::RoundedRect` (textbox, dropdown, button, toggle, color selector), which the
     /// plain list does not carry. Returned unclipped; the pane's paint clips them to its
     /// scroll viewport. (x, y, w, h, radius, color, (tl, tr, br, bl)).
@@ -182,7 +182,7 @@ impl ParametersBg {
     /// faces, exactly the widgets' own transparent-fill bevel→boss degradation.
     /// Returned unclipped; the host clips to the pane's scroll viewport and
     /// draws these AFTER the flat quads, so the walls' shading modulates the
-    /// fills they cross (the order the widgets' own paints use). See [`Relief`].
+    /// fills they cross (the order the widgets' own paints use). See `Relief`.
     pub fn reliefs(&self) -> Vec<Relief> {
         if !self.visible || !crate::layout::control_relief() {
             return Vec::new();

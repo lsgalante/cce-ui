@@ -49,7 +49,7 @@ pub trait GraphController {
     /// its gap is a pitch, and the node body is the cell. Kept for hosts
     /// that still speak it (cce-files, cce-graph); new code sets the pitch.
     fn set_grid_sizes(&mut self, gx: f32, gy: f32);
-    /// The gap half of the cell-and-gap description; see [`set_grid_sizes`].
+    /// The gap half of the cell-and-gap description; see [`set_grid_sizes`](Self::set_grid_sizes).
     fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32);
     /// The lattice intersection node (0, 0) is centred on, window-absolute.
     fn set_grid_origin(&mut self, ox: f32, oy: f32);

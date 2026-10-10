@@ -6,12 +6,12 @@
 //! on macOS — and nothing here knows which. A node per registered, visible widget, under one
 //! window node:
 //!
-//! - **role** — the widget's explicit [`WidgetHost::a11y_role`], else [`role_for`]'s guess from
+//! - **role** — the widget's explicit [`WidgetHostExt::a11y_role`], else [`role_for`]'s guess from
 //!   its type and its [`FocusRole`];
 //! - **name** — its label;
-//! - **value** — [`WidgetHost::a11y_value`] (a widget's `value_string`): a check box or switch
+//! - **value** — [`WidgetHostExt::a11y_value`] (a widget's `value_string`): a check box or switch
 //!   as toggled, a slider, spin button or progress bar as a number, anything else as text;
-//!   a text field ([`WidgetHost::a11y_text`]) has its text as TEXT RUNS instead, one per
+//!   a text field ([`WidgetHostExt::a11y_text`]) has its text as TEXT RUNS instead, one per
 //!   line, with its caret and selection — what gives it AT-SPI's Text and EditableText
 //!   interfaces, so a reader reads it by character and line and can set it;
 //! - **bounds** — its rect in LOGICAL px, the window node carrying the HiDPI scale as its
@@ -302,7 +302,7 @@ pub fn node_id(id: WidgetId) -> NodeId {
     NodeId(id.0 as u64 + 1)
 }
 
-/// What a widget is when it does not say ([`WidgetHost::a11y_role`]): by its type, else by
+/// What a widget is when it does not say ([`WidgetHostExt::a11y_role`]): by its type, else by
 /// what it is to the keyboard — a thing you press is a button, anything else a container.
 pub fn role_for(type_name: &str, focus: FocusRole, explicit: Option<Role>) -> Role {
     if let Some(role) = explicit {

@@ -63,12 +63,12 @@ pub(super) fn raise_fd_limit() {
 /// What is repaired is the transport, never the compositor: a reconnect only
 /// goes through while the compositor that owned the lost session is still
 /// listening. If the connect itself fails the compositor has exited, and the
-/// process exits with it — see [`after_session`] for why staying alive there
+/// process exits with it — see `after_session` for why staying alive there
 /// duplicated every window on the next session restore.
 ///
 /// Caveat: GPU resources belong to the renderer, so a rebuild re-runs
 /// [`Application::renderer_init`]. Images uploaded outside it (e.g. in
-/// [`Application::new`]) are not replayed into the new renderer — upload from
+/// [`Application::create`](crate::backend::app::Application::create)) are not replayed into the new renderer — upload from
 /// `renderer_init` if they must survive a reconnect.
 pub fn run<A: Application>() {
     raise_fd_limit();

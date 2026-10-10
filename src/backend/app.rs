@@ -267,7 +267,7 @@ pub trait Application: Sized + 'static {
     /// idle — nothing to draw, no animation, no key held, no frame callback
     /// outstanding. `None` (the default) lets it sleep until a Wayland
     /// event or a message on the app's calloop `Sender` arrives, bounded by
-    /// [`IDLE_DISPATCH`]. Override with `Some` ONLY if your `tick` polls
+    /// [`IDLE_DISPATCH`](crate::backend::shell::IDLE_DISPATCH). Override with `Some` ONLY if your `tick` polls
     /// something the loop cannot see — a `std::sync::mpsc` receiver drained
     /// in `tick`, say — because with the default that poll waits for the
     /// next unrelated event. The better fix is to send through the calloop
@@ -465,7 +465,7 @@ pub trait Application: Sized + 'static {
     /// exiting. Default false, which is right for any window the compositor
     /// saves and restores: its successor respawns the app itself, and a
     /// client that rejoined too came up beside its own copy (see
-    /// [`after_session`]). Return true from a process the compositor does NOT
+    /// `after_session`). Return true from a process the compositor does NOT
     /// restore and that must outlive it — a systemd user service like the
     /// status bar or the notifier, whose D-Bus names (the tray's
     /// StatusNotifierWatcher, org.freedesktop.Notifications) other programs

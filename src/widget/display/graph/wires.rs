@@ -7,7 +7,7 @@ use super::*;
 /// port (the top of the next): `style.surface.graph.node.wire_style` in
 /// config.kdl, by [`WireStyle::name`], unless a host sets one of its own
 /// ([`Graph::set_wire_style`]). Every style is drawn and hit-tested from the
-/// one path [`wire_path`] derives, so a splice drop lands on the wire you see.
+/// one path `wire_path` derives, so a splice drop lands on the wire you see.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WireStyle {
     /// Down, across at half the height, down: three straight runs meeting

@@ -395,7 +395,7 @@ pub(super) const FACE_RATIO: f32 = 0.35;
 /// read the (much smaller) edge shading as frame decoration rather than shape.
 ///
 /// Emitted as the same two-pass white/black overlays as the relief primitives (see
-/// [`overlay_light`]/[`overlay_dark`]): fixed RGB per pass, per-corner alphas clamped at
+/// `overlay_light`/`overlay_dark`): fixed RGB per pass, per-corner alphas clamped at
 /// the terminator, bilinear across the quad. The quad is square — its corners poke past
 /// a rounded plate's arcs — but the compositor clips the window surface to the same
 /// radius, so the overhang never reaches the screen.
