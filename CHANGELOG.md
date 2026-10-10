@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **Smooth scrolling is a directory module** (`widget/scroll_motion/`): `mod.rs` (the scroll phase,
+  the shared constants, `Bounds`), `settings` (`ScrollSettings`, the animations switch, the
+  per-thread pin), `axis` (`ScrollAxis`), `motion` (`ScrollMotion`) and `tests`; re-exported, so
+  `widget::scroll_motion::…` paths are unchanged. A pure move, checked line for line;
+  `ScrollAxis`'s fields are `pub(super)`, since `ScrollMotion` stops both axes directly. Clippy,
+  the suite and `cargo check --workspace --exclude cce-fx` pass.
 - **The `DocEditor`'s line layout is a directory module** (`widget/doc_editor/layout/`): `mod.rs`
   (`Run`, `Deco`, `LineLayout` and `layout_line`, one 320-line function left whole), `theme` (the
   `EditorTheme`, indents, the pill metrics), `geometry` (image layouts, the caret's x, selection
