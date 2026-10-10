@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The params pane's paint is split** (`widget/container/parameters_bg/`): `paint.rs` keeps row
+  floors, section outlines and arcs, the scrollbar, the ramps and trackballs a host paints
+  through the scene path, and `impl Paint`; the labels and glyphs move to `text` (with
+  `fit_tail`), the controls' quads, reliefs, fields, grooves, spheres and fillets to `chrome`
+  (with `Relief` and its helpers). A pure move, checked line for line. Clippy, the suite and
+  `cargo check --workspace --exclude cce-fx` pass.
 - **The params pane's input is split by event** (`widget/container/parameters_bg/`): `input.rs`
   keeps hover, the row being typed into, committing a row, the pointer moving and `impl Input`;
   presses move to `press` (with `hold_focus` and `fill_from_pick`), keys to `keys`, the wheel to

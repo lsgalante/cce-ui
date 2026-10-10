@@ -27,7 +27,9 @@
 //! | `mod.rs` | the struct, its constants, construction, `impl Layout` |
 //! | `rows` | what a row's type string says, and parsing a row's value |
 //! | `geometry` | label layout, row heights, sections, control rects, the scrollbar |
-//! | `paint` | the views the pane draws, and `impl Paint` |
+//! | `paint` | row floors, section outlines, the scrollbar, the ramps and trackballs, and `impl Paint` |
+//! | `text` | the rows' labels and their controls' text and glyphs |
+//! | `chrome` | the controls' quads, reliefs, fields, grooves, spheres and fillets |
 //! | `input` | hover, typing, committing a row, and `impl Input` |
 //! | `press` | presses: the scrollbar, section titles, open popovers, row controls, focus |
 //! | `keys` | keys to the focused row |
@@ -35,6 +37,7 @@
 //! | `code` | the inline code editor |
 //! | `controller` | `impl ParamController`: the host's reads and writes |
 
+mod chrome;
 mod code;
 mod controller;
 mod geometry;
@@ -43,6 +46,7 @@ mod keys;
 mod paint;
 mod press;
 mod rows;
+mod text;
 mod wheel;
 #[cfg(test)]
 mod tests;
