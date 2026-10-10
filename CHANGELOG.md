@@ -8,6 +8,17 @@ and `docs/rfc-material.md`, and in `git log`.
 When you change behaviour: update the reference to the new state, and add an entry here under
 today's date — what changed, why, and how it was checked.
 
+## 2026-10-10
+
+- **`ScrollRegion` is a directory module** (`widget/scroll_region/`): `mod.rs` (the region:
+  construction, rect and bounds, scroll position, the virtualization maths), `activity`
+  (`ScrollbarActivity` and its timings), `scrollbar` (the bars' geometry, hit tests and
+  raising), `input`, `emit` (the frame and bars as prims or flat quads) and `tests`;
+  `ScrollbarActivity` and the timings re-exported, so paths are unchanged. A pure move,
+  checked line for line; the module doc's account of where the region was lifted from is cut
+  to the apps that share it. Clippy, the suite and `cargo check --workspace --exclude cce-fx`
+  pass.
+
 ## 2026-10-09
 
 - **The input `Driver` is a directory module** (`backend/driver/`): `mod.rs` (the vocabulary a
