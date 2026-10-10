@@ -1,10 +1,10 @@
 //! `StatusBar` — a one-line text bar along a window's edge. Under `control_relief` it is a band
 //! recessed into the plate, its wall along the top; flat, a quad in its own colour
-//! (`set_bg_color`, else `colors::STATUS_BG`). Its corners are square. The text is a
+//! (`set_bg_color`, else `color::STATUS_BG`). Its corners are square. The text is a
 //! [`Paint::paint`] prim in the configured statusbar font, and `prepare_text` keeps a shaped
 //! buffer of it that `set_text` drops.
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::make_widget_text_buffer;
@@ -63,7 +63,7 @@ impl StatusBar {
     }
 
     fn bg(&self) -> [f32; 4] {
-        self.bg_color.unwrap_or(colors::STATUS_BG)
+        self.bg_color.unwrap_or(color::STATUS_BG)
     }
 
     fn statusbar_font_size(&self) -> f32 {

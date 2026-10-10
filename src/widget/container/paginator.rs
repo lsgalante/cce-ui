@@ -8,7 +8,7 @@
 //! strip is what makes the sidebar block root plate drags). The paginator keeps the strip's
 //! place and selection and pushes them down there, on every layout and tick.
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::input::ButtonStrip;
@@ -189,7 +189,7 @@ impl Layout for Paginator {
 
 impl Paint for Paginator {
     fn color(&self) -> [f32; 4] {
-        colors::sidebar_bg_color()
+        color::sidebar_bg_color()
     }
 
     /// Own geometry: the sidebar background plus the page-area background — the latter is the
@@ -204,7 +204,7 @@ impl Paint for Paginator {
             ctx.rounded_rect(rect, r, (true, true, true, true), c);
         }
         if !self.page_labels.is_empty() {
-            let mut pc = colors::page_color();
+            let mut pc = color::page_color();
             pc[3] *= crate::layout::page_opacity();
             if pc[3] > 0.0 {
                 let sidebar_w = self.sidebar_w();
@@ -340,7 +340,7 @@ mod tests {
 
         // The sidebar background is a rounded rect of the paginator's own paint, never a
         // plain quad.
-        let bg = colors::sidebar_bg_color();
+        let bg = color::sidebar_bg_color();
         if bg[3] > 0.0 {
             let r = crate::layout::plate_corner_radius();
             let bg_quad = (0.0, 0.0, 400.0, 300.0, r, bg, (true, true, true, true));

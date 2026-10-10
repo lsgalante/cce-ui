@@ -214,13 +214,13 @@ Opt-in features for the note clients.
   into draw items and click targets (`layout`, `Layout::paint` / `paint_scaled`). cce-notes'
   reading mode and cce-grid's note cards.
 - **Links, tags, the quote bar and the highlight take the theme's colours**, `style.text.link`
-  (`colors::text_link_color`), `style.text.tag` (`colors::text_tag_color`),
-  `style.text.quote_bar` (`colors::text_quote_bar_color`) and `style.text.highlight`
-  (`colors::text_highlight_color`), in both views. A link with no target is the link colour
-  darker and greyer (`colors::text_link_unresolved_color`, derived in OKLab); a tag's and a
-  highlight's washes are their colours made translucent (`colors::text_tag_background_color`,
+  (`color::text_link_color`), `style.text.tag` (`color::text_tag_color`),
+  `style.text.quote_bar` (`color::text_quote_bar_color`) and `style.text.highlight`
+  (`color::text_highlight_color`), in both views. A link with no target is the link colour
+  darker and greyer (`color::text_link_unresolved_color`, derived in OKLab); a tag's and a
+  highlight's washes are their colours made translucent (`color::text_tag_background_color`,
   `text_highlight_background_color`). No derived colour has a key of its own. The code wash,
-  `style.text.code_background` (`colors::text_code_background_color`), is set directly, alpha
+  `style.text.code_background` (`color::text_code_background_color`), is set directly, alpha
   included; it also fills an image's box until the image loads. `EditorTheme::new` reads them once, so an editor built before a
   reload keeps the old colours.
 - **`doc_editor`** — `widget::doc_editor::DocEditor`, the editor with live preview: markup is

@@ -55,7 +55,7 @@ pub use rows::SEPARATOR;
 use rows::*;
 use press::fill_from_pick;
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::{Float3, TextLabel};

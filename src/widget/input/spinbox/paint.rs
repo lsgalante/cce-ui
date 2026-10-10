@@ -59,9 +59,9 @@ impl Paint for Spinbox {
         }
         let radius = crate::layout::spinbox_corner_radius();
         let rounded = radius > 0.0;
-        let display_bg = if self.editing { [0.06, 0.10, 0.18, 1.0] } else { colors::spinbox_display() };
-        let inc_col = if self.hover_inc { colors::spinbox_button_hover() } else { colors::spinbox_button() };
-        let dec_col = if self.hover_dec { colors::spinbox_button_hover() } else { colors::spinbox_button() };
+        let display_bg = if self.editing { [0.06, 0.10, 0.18, 1.0] } else { color::spinbox_display() };
+        let inc_col = if self.hover_inc { color::spinbox_button_hover() } else { color::spinbox_button() };
+        let dec_col = if self.hover_dec { color::spinbox_button_hover() } else { color::spinbox_button() };
 
         if crate::layout::control_relief() {
             // The DE relief style: transparent faces, the relief is the
@@ -93,7 +93,7 @@ impl Paint for Spinbox {
                     // the value, plus the caret — a flat stand-in for the
                     // tinted-recess focus treatment the pane's relief tuple
                     // cannot carry.
-                    let accent = colors::highlight_primary_color();
+                    let accent = color::highlight_primary_color();
                     ctx.quad(
                         Rect { x: g.x + crate::layout::CONTROL_TEXT_INSET, y: g.y + g.h - 4.0, width: g.w * 0.55 - 8.0, height: 1.5 },
                         accent,
@@ -173,7 +173,7 @@ impl Paint for Spinbox {
         }
 
         // Value, unit, and the minus/plus glyphs.
-        let tc = colors::spinbox_text_color();
+        let tc = color::spinbox_text_color();
         let text_color = [(tc[0] * 255.0) as u8, (tc[1] * 255.0) as u8, (tc[2] * 255.0) as u8];
         // The value and its unit live in the FIELD, which ends where the -/+
         // buttons begin (`split_dec`). The caret above is already clamped to

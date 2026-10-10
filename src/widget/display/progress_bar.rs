@@ -3,7 +3,7 @@
 //! [`Input`]; [`ProgressBar::new`] returns it already wrapped in [`Adapted`], ready to insert
 //! (optionally `.with_label(..)`).
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{Adapted, Input, Layout, Paint};
@@ -47,7 +47,7 @@ impl Layout for ProgressBar {
 
 impl Paint for ProgressBar {
     fn color(&self) -> [f32; 4] {
-        colors::progress_bg()
+        color::progress_bg()
     }
 
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
@@ -69,7 +69,7 @@ impl Paint for ProgressBar {
                     Rect { width: fill_w, ..floor },
                     radius.min(floor.height / 2.0),
                     (true, true, true, true),
-                    colors::progress_fill(),
+                    color::progress_fill(),
                 );
             }
             let (well, radii) = crate::layout::carve_inside(rect, (radius, radius, radius, radius), depth);
@@ -77,7 +77,7 @@ impl Paint for ProgressBar {
             return;
         }
         // Track.
-        ctx.rounded_rect(rect, radius, (true, true, true, true), colors::progress_bg());
+        ctx.rounded_rect(rect, radius, (true, true, true, true), color::progress_bg());
         // Fill.
         let fill_w = rect.width * self.value.clamp(0.0, 1.0);
         if fill_w > 0.0 {
@@ -85,7 +85,7 @@ impl Paint for ProgressBar {
                 Rect { x: rect.x, y: rect.y, width: fill_w, height: rect.height },
                 radius.min(rect.height / 2.0),
                 (true, true, true, true),
-                colors::progress_fill(),
+                color::progress_fill(),
             );
         }
     }
@@ -108,10 +108,10 @@ mod tests {
         let quads = crate::widget::shown_rounded_quads(&bar);
         let radius = crate::layout::slider_corner_radius();
         assert_eq!(quads.len(), 2, "track + fill");
-        assert_eq!(quads[0], (10.0, 20.0, 100.0, 8.0, radius, colors::progress_bg(), (true, true, true, true)));
+        assert_eq!(quads[0], (10.0, 20.0, 100.0, 8.0, radius, color::progress_bg(), (true, true, true, true)));
         assert_eq!(
             quads[1],
-            (10.0, 20.0, 50.0, 8.0, radius.min(4.0), colors::progress_fill(), (true, true, true, true)),
+            (10.0, 20.0, 50.0, 8.0, radius.min(4.0), color::progress_fill(), (true, true, true, true)),
         );
     }
 

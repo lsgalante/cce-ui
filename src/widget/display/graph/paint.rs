@@ -152,11 +152,11 @@ impl Graph {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
                 let mut bg_color = if self.dragging_idx == Some(i) || self.swap_target_idx() == Some(i) {
-                    colors::node_drag_color()
+                    color::node_drag_color()
                 } else if self.selected_idx == Some(i) {
-                    colors::node_selected_color()
+                    color::node_selected_color()
                 } else {
-                    colors::node_color()
+                    color::node_color()
                 };
                 bg_color[3] *= self.node_opacity;
                 if nx + nw > min_x && nx < max_x && ny + nh > min_y && ny < max_y {
@@ -240,7 +240,7 @@ impl Graph {
                 if self.toggle_hovered_idx == Some(i) {
                     r *= 1.15;
                 }
-                let mut c = colors::TOGGLE_ON;
+                let mut c = color::TOGGLE_ON;
                 if !self.nodes[i].geom_visible {
                     c[3] *= 0.25;
                 }
@@ -250,8 +250,8 @@ impl Graph {
         }
 
         let conn_size = crate::layout::graph_connector_size();
-        let mut conn_color = colors::graph_connector_color();
-        let mut conn_hl_color = colors::graph_connector_highlight_color();
+        let mut conn_color = color::graph_connector_color();
+        let mut conn_hl_color = color::graph_connector_highlight_color();
         conn_color[3] *= self.node_opacity;
         conn_hl_color[3] *= self.node_opacity;
 

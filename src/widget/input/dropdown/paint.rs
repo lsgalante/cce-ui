@@ -82,7 +82,7 @@ impl Paint for Dropdown {
             if x1 > x0 && y1 > y0 { Some((x0, y0, x1 - x0, y1 - y0)) } else { None }
         };
 
-        let theme = colors::active_theme();
+        let theme = color::active_theme();
         let (ux, uy, uw, uh) = self.unified_geom_drawn(rect);
 
         // The ACTUAL button surface, expanded: the raised trigger's flush
@@ -95,7 +95,7 @@ impl Paint for Dropdown {
         // the content beneath it blurred and tinted rather than covering it.
         // Encoded here because the flat-path `RenderTarget` speaks colours.
         let radius = crate::layout::dropdown_corner_radius();
-        let raw_bg = colors::dropdown_background_color();
+        let raw_bg = color::dropdown_background_color();
         let face = {
             let base = if raw_bg[3] > 0.001 { raw_bg } else { crate::color::page_low_color() };
             crate::scene::Material::popover(base).fill(crate::scene::PlateRole::Nested)
@@ -194,10 +194,10 @@ impl Dropdown {
         if self.open && !self.closing {
             [0.30, 0.50, 0.32, 1.0]
         } else if self.hovered {
-            let bc = colors::dropdown_border_color();
+            let bc = color::dropdown_border_color();
             [(bc[0] + 0.15).min(1.0), (bc[1] + 0.15).min(1.0), (bc[2] + 0.15).min(1.0), bc[3]]
         } else {
-            colors::dropdown_border_color()
+            color::dropdown_border_color()
         }
     }
 
@@ -210,7 +210,7 @@ impl Dropdown {
         let y = content.y;
         let visual_h = content.height;
 
-        let raw_bg = colors::dropdown_background_color();
+        let raw_bg = color::dropdown_background_color();
         let mut bg_color = raw_bg;
         bg_color[3] = 1.0; // Force opaque background to prevent subpixel blending artifacts
         let border_color = self.border_color();
@@ -384,14 +384,14 @@ impl Dropdown {
         let right_limit = x + w - 28.0; // 10px margin before the arrow
         let fade_start_x = (right_limit - 24.0).max(start_x); // Fade out over the last 24px
         let text_y = crate::layout::center_text_y(content.y, content.height, font_size);
-        let tc = colors::dropdown_text_color();
+        let tc = color::dropdown_text_color();
         let default_color = [
-            (colors::linear_to_srgb(tc[0]) * 255.0).round() as u8,
-            (colors::linear_to_srgb(tc[1]) * 255.0).round() as u8,
-            (colors::linear_to_srgb(tc[2]) * 255.0).round() as u8,
+            (color::linear_to_srgb(tc[0]) * 255.0).round() as u8,
+            (color::linear_to_srgb(tc[1]) * 255.0).round() as u8,
+            (color::linear_to_srgb(tc[2]) * 255.0).round() as u8,
         ];
-        let bg_color = colors::dropdown_background_color();
-        let mut parent_color = colors::page_color();
+        let bg_color = color::dropdown_background_color();
+        let mut parent_color = color::page_color();
         if let Some(snap) = self.parent_snapshot {
             parent_color = snap.color;
         }

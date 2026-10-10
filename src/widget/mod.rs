@@ -59,7 +59,7 @@ pub enum ContextAction {
     ToggleRampControls,
 }
 
-use crate::colors;
+use crate::color;
 
 use std::sync::atomic::AtomicUsize;
 

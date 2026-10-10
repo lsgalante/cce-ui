@@ -10,7 +10,7 @@ impl Paint for Spreadsheet {
     /// bevels like the params plate and tracks a live retint / opacity / blur
     /// toggle with it.
     fn color(&self) -> [f32; 4] {
-        colors::param_plate_fill()
+        color::param_plate_fill()
     }
 
     /// The shared plate corner radius (rounded on all four corners when non-zero),
@@ -24,7 +24,7 @@ impl Paint for Spreadsheet {
     /// The shared plate border — under `control_relief` the host promotes this to
     /// the plate bevel, like `ParametersBg`.
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
-        colors::plate_border_color().map(|bc| (bc, colors::plate_border_thickness()))
+        color::plate_border_color().map(|bc| (bc, color::plate_border_thickness()))
     }
 
     /// Subtree painter: `paint` authors the pane's complete text with
@@ -47,7 +47,7 @@ impl Paint for Spreadsheet {
         let body_top = y + HEADER_H;
         let body_bottom = y + h;
         let selected_fill = {
-            let [r, g, b, _] = colors::highlight_primary_color();
+            let [r, g, b, _] = color::highlight_primary_color();
             [r, g, b, 0.28]
         };
         for i in 0..self.row_count {

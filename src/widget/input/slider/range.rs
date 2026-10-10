@@ -80,7 +80,7 @@ impl Paint for RangeSlider {
         // A band has no rim to light: focused, the swell the keyboard is on
         // is the highlight — the colour rides the swell's own bell, so it
         // blooms over that end and fades back to the band along its flanks.
-        let base = if self.active_thumb.is_some() { colors::rangeslider_thumb_drag() } else { colors::rangeslider_thumb() };
+        let base = if self.active_thumb.is_some() { color::rangeslider_thumb_drag() } else { color::rangeslider_thumb() };
         let focus_center = self.focused.then_some(if matches!(self.focus_end, ActiveThumb::Low) { lo } else { hi });
         let hl = crate::color::highlight_primary_color();
         let bulge_w = crate::layout::slider_bulge_width().max(2.0);

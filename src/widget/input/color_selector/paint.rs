@@ -29,7 +29,7 @@ impl Paint for ColorSelector {
     }
 
     fn color(&self) -> [f32; 4] {
-        colors::to_linear([
+        color::to_linear([
             self.color[0] as f32 / 255.0,
             self.color[1] as f32 / 255.0,
             self.color[2] as f32 / 255.0,
@@ -78,7 +78,7 @@ impl Paint for ColorSelector {
         // real text wells draw no fill, so even a neutral one read as "the
         // color selector has a background". Neutral greys for the frame; the
         // caret is the editing affordance.
-        let border_color = crate::colors::well_frame_color(self.hovered, self.editing);
+        let border_color = crate::color::well_frame_color(self.hovered, self.editing);
 
         // A real frame, not a border-quad-under-fill-quad: with no fill, the
         // old full-rect border quad would read as a solid slab. Rounded at the
@@ -100,14 +100,14 @@ impl Paint for ColorSelector {
             quads.push((caret_x, caret_y, 1.5, caret_h, [0.80, 0.80, 0.85, 1.0]));
         }
 
-        let linear_c = colors::to_linear([
+        let linear_c = color::to_linear([
             self.color[0] as f32 / 255.0,
             self.color[1] as f32 / 255.0,
             self.color[2] as f32 / 255.0,
             self.alpha as f32 / 255.0,
         ]);
         let border_w = 1.0;
-        let border_c = colors::color_borders_color();
+        let border_c = color::color_borders_color();
         
         let r = border_c[0];
         let g = border_c[1];

@@ -199,7 +199,7 @@ impl Paint for ParametersBg {
         if !self.visible {
             return [0.0, 0.0, 0.0, 0.0];
         }
-        colors::param_plate_fill()
+        color::param_plate_fill()
     }
 
     /// The shared plate corner radius (rounded on all four corners when non-zero).
@@ -211,7 +211,7 @@ impl Paint for ParametersBg {
 
     /// The shared plate border (folded in from the retired backing plate widget).
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
-        colors::plate_border_color().map(|bc| (bc, colors::plate_border_thickness()))
+        color::plate_border_color().map(|bc| (bc, color::plate_border_thickness()))
     }
 
     fn widget_font(&self) -> Option<String> {

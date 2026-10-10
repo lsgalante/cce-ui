@@ -19,7 +19,7 @@ mod paint;
 #[cfg(test)]
 mod tests;
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::TextLabel;
@@ -231,7 +231,7 @@ impl MenuBar {
     }
 
     pub fn text_color(&self) -> [f32; 4] {
-        crate::colors::menubar_tab_label_color()
+        crate::color::menubar_tab_label_color()
     }
 
     pub fn is_blur_enabled(&self) -> bool {
@@ -245,7 +245,7 @@ impl MenuBar {
     }
 
     fn bg_color(&self) -> [f32; 4] {
-        self.color.unwrap_or_else(colors::sidebar_bg_color)
+        self.color.unwrap_or_else(color::sidebar_bg_color)
     }
 
     /// Position the embedded strip inside `rect` — the legacy `set_rect` body, minus the

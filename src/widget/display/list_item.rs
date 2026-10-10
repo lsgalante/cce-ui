@@ -2,7 +2,7 @@
 //! press/release with themed
 //! selected/hover/press overlays and title/subtitle text.
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::{Adapted, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
@@ -85,9 +85,9 @@ impl Paint for InteractiveListItem {
     }
 
     fn color(&self) -> [f32; 4] {
-        let theme = colors::active_theme();
+        let theme = color::active_theme();
         if self.selected {
-            let mut base_color = colors::highlight_primary_color();
+            let mut base_color = color::highlight_primary_color();
             if self.pressed {
                 base_color[3] = (base_color[3] + theme.press_overlay[3]).min(1.0);
             } else if self.hovered {
@@ -121,7 +121,7 @@ impl Paint for InteractiveListItem {
         } else {
             crate::layout::align_text_y(y, h, 12.0, 0.0)
         };
-        let fc = colors::list_font_color();
+        let fc = color::list_font_color();
         let title_col = [(fc[0] * 255.0) as u8, (fc[1] * 255.0) as u8, (fc[2] * 255.0) as u8];
         // Clipped to the row. A row's width comes from the LIST, not from its
         // own text, so a long title or path is routine here — and unbounded it

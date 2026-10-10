@@ -1,7 +1,7 @@
 //! `InfoBox` — pure display: a card with a title and lines of text. Under relief the card is a
 //! raised pane plate (the DE plate fill under a rolled edge); flat, a themed card with a border.
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::{Adapted, Input, Layout, Paint};
@@ -41,21 +41,21 @@ impl Paint for InfoBox {
             // A pane plate, raised: the DE plate fill under a rolled edge —
             // the same surface a popover or a menu stands on. Its roll is the
             // control wall, capped by its height like every plate's.
-            let fill = colors::plate_color().unwrap_or_else(|| colors::active_theme().surface_bg);
+            let fill = color::plate_color().unwrap_or_else(|| color::active_theme().surface_bg);
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
             ctx.plate(rect, radii, &crate::scene::material::Material::from_fill(fill), depth);
         } else {
             // Flat: the themed surface in a hairline frame.
-            let theme = colors::active_theme();
+            let theme = color::active_theme();
             ctx.border(rect, radii, theme.surface_bg, theme.surface_border, 1.0);
         }
 
         // The title in the DE highlight accent, the lines in the label colour;
         // sizes from the label font so the box reads like the controls around it.
         let (_, font_size) = crate::layout::control_label_font_parsed();
-        let hc = colors::to_srgb(crate::color::highlight_primary_color());
+        let hc = color::to_srgb(crate::color::highlight_primary_color());
         let title_color = [(hc[0] * 255.0).round() as u8, (hc[1] * 255.0).round() as u8, (hc[2] * 255.0).round() as u8];
-        let line_color = colors::control_label_color_u8();
+        let line_color = color::control_label_color_u8();
         let pad = crate::layout::plate_padding().max(8.0);
         let line_h = crate::layout::line_height(font_size);
         // Clipped to the box. The title and lines are caller-supplied text in

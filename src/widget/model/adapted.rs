@@ -337,7 +337,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         let b = &self.base;
         if let Some(ref label) = b.label {
             let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            let color = crate::colors::control_label_color_detached_for_state(b.hovered, b.focused);
+            let color = crate::color::control_label_color_detached_for_state(b.hovered, b.focused);
             let inset = Layout::detached_label_inset(&self.inner);
             return vec![TextLabel { text: label.clone(), x: b.x + inset, y: b.y, font_size, color }];
         }

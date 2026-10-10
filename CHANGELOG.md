@@ -10,6 +10,11 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The `colors` alias is gone; the module is `color`.** `colors` re-exported all of `color`,
+  and the two spellings were used about equally (134 and 110), in the toolkit and 18 apps,
+  so readers met one module under two names. Every path now says `color`; the ramp widget,
+  which has its own `color` submodule, names the palette `crate::color::` in full. A rename:
+  a whole-workspace build passes, and the cce-ui suite (624) and every app's suite pass.
 - **`layout` is the style getters again; `compose` and `scene::paint::target` take the rest.**
   `layout/bridge.rs` mixed the flat-host target with the walk that replays widgets onto it,
   and `layout/section.rs` / `form.rs` placed widgets: all four upward edges out of `layout`

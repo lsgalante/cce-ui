@@ -4,7 +4,7 @@
 //! background color itself is drawn by hosts reading `color()` (the geometry here is only the
 //! cell/gap gradient grid).
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::{Adapted, GraphController, GraphNode, Input, Layout, Paint};
@@ -40,7 +40,7 @@ impl Paint for ContentBg {
         if self.show_network_grid {
             [0.0, 0.0, 0.0, 0.0]
         } else {
-            colors::CONTENT_BG
+            color::CONTENT_BG
         }
     }
 
@@ -60,7 +60,7 @@ impl ContentBg {
         }
         let mut quads = Vec::new();
         let grid_color = [0.0, 0.0, 0.0, 0.0];
-        let max_alpha = colors::CONTENT_BG[3]; // Peak opacity in the middle of gradient cells matches non-gradient cells
+        let max_alpha = color::CONTENT_BG[3]; // Peak opacity in the middle of gradient cells matches non-gradient cells
         let steps = 20; // Silky-smooth gradient transition
 
         let step_y = self.grid_size_y + self.skipped_row_h;
@@ -88,7 +88,7 @@ impl ContentBg {
                         let draw_start_x = x1.max(x);
                         let draw_end_x = (x1 + self.grid_size_x).min(x + w);
                         if draw_start_x < draw_end_x {
-                            quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, colors::CONTENT_BG));
+                            quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, color::CONTENT_BG));
                         }
                     }
                 }
@@ -141,7 +141,7 @@ impl ContentBg {
                                 // Fade the cell background color from max_alpha in the middle to transparent at the edges
                                 let alpha = max_alpha * (1.0 - d);
                                 if alpha > 0.001 {
-                                    quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, [colors::CONTENT_BG[0], colors::CONTENT_BG[1], colors::CONTENT_BG[2], alpha]));
+                                    quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, [color::CONTENT_BG[0], color::CONTENT_BG[1], color::CONTENT_BG[2], alpha]));
                                 }
                             }
                         }
@@ -196,7 +196,7 @@ impl ContentBg {
                                 // Fade the cell background color from max_alpha in the middle to transparent at the edges
                                 let alpha = max_alpha * (1.0 - d);
                                 if alpha > 0.001 {
-                                    quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, [colors::CONTENT_BG[0], colors::CONTENT_BG[1], colors::CONTENT_BG[2], alpha]));
+                                    quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, [color::CONTENT_BG[0], color::CONTENT_BG[1], color::CONTENT_BG[2], alpha]));
                                 }
                             }
                         }

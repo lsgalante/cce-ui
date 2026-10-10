@@ -201,7 +201,7 @@ impl Paint for Toggle {
             // reverse bridge reads only those, never a `Border`, so a
             // legacy-view host still shows which end the run is at.
             let bw = crate::layout::toggle_border_width().max(1.0);
-            ctx.border(field.rect, field.radii, [0.0; 4], colors::well_frame_color(self.hovered, self.focused), bw);
+            ctx.border(field.rect, field.radii, [0.0; 4], color::well_frame_color(self.hovered, self.focused), bw);
             let (face, face_r) = self.face(rect);
             let lit = (0.16 * (crate::layout::bevel_depth() / 0.15)).clamp(0.0, 0.5);
             ctx.rounded_rect(face, face_r, (true, true, true, true), [1.0, 1.0, 1.0, lit]);
@@ -227,7 +227,7 @@ impl Paint for Toggle {
                 tx,
                 crate::layout::align_text_y(y, h, font_size, 0.0),
                 font_size,
-                colors::control_label_color_for_state(self.hovered, false),
+                color::control_label_color_for_state(self.hovered, false),
                 None,
                 Some([x, y, x + w, y + h]),
             );

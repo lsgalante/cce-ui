@@ -20,7 +20,7 @@ impl Label {
         let mut l = Adapted::new(Label {
             text: text.to_string(),
             font_size,
-            color: colors::control_label_color_u8(),
+            color: color::control_label_color_u8(),
         });
         // Keep the base copy in step too (context menus, fallback machinery).
         l.set_text(text);

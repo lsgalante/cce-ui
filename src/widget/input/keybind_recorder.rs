@@ -1,4 +1,4 @@
-use crate::colors;
+use crate::color;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
@@ -95,11 +95,11 @@ impl Paint for KeybindRecorder {
             self.paint_text(rect, ctx);
             return;
         }
-        // The flat style: the one well frame (`colors::well_frame_color`), lit
+        // The flat style: the one well frame (`color::well_frame_color`), lit
         // while recording, over the plate — no floor of its own, like the
         // TextBox it stands beside. Rounded like the text wells.
         let radius = crate::layout::textbox_corner_radius();
-        let frame = colors::well_frame_color(self.hovered, self.recording || self.pressed);
+        let frame = color::well_frame_color(self.hovered, self.recording || self.pressed);
         ctx.border(rect, (radius, radius, radius, radius), [0.0; 4], frame, 1.0);
 
         self.paint_text(rect, ctx);

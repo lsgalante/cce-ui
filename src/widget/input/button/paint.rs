@@ -15,31 +15,31 @@ impl Paint for Button {
         match self.kind {
             ButtonKind::Primary => {
                 if self.pressed {
-                    colors::button_press_color()
+                    color::button_press_color()
                 } else if self.hovered {
-                    colors::button_hover_color()
+                    color::button_hover_color()
                 } else {
-                    colors::button_background_color()
+                    color::button_background_color()
                 }
             }
             ButtonKind::MenuItem => {
                 // Idle is fully transparent so the shared recess reads as one
                 // continuous well; only the hovered row lifts out of it.
                 if self.pressed {
-                    colors::button_press_color()
+                    color::button_press_color()
                 } else if self.hovered {
-                    colors::button_hover_color()
+                    color::button_hover_color()
                 } else {
                     [0.0, 0.0, 0.0, 0.0]
                 }
             }
             ButtonKind::Reset => {
                 if self.pressed {
-                    colors::RESET_BTN_PRESS
+                    color::RESET_BTN_PRESS
                 } else if self.hovered {
-                    colors::RESET_BTN_HOVER
+                    color::RESET_BTN_HOVER
                 } else {
-                    colors::RESET_BTN_IDLE
+                    color::RESET_BTN_IDLE
                 }
             }
             ButtonKind::ListRow => {
@@ -112,11 +112,11 @@ impl Paint for Button {
             // changes for a button that is not focused. It overrides the ListRow
             // opt-out too: a focused row must show the ring, which is the whole point.
             let border_color = if self.focused {
-                Some(colors::tree_border_focus_color())
+                Some(color::tree_border_focus_color())
             } else if self.kind == ButtonKind::ListRow || self.kind == ButtonKind::MenuItem {
                 None
             } else {
-                colors::button_border_color()
+                color::button_border_color()
             };
             // Background (+ optional configured border), split by radius exactly as the legacy
             // `all_rounded_quads` (rounded) / `extra_quads` (square) overrides emitted it.
@@ -158,7 +158,7 @@ impl Paint for Button {
                     ButtonKind::ListRow | ButtonKind::CopyIcon => {
                         if self.selected { [230, 230, 242] } else { [178, 178, 191] }
                     }
-                    _ => colors::control_label_color_u8(),
+                    _ => color::control_label_color_u8(),
                 }
             };
             let justify = if self.kind == ButtonKind::ListRow {

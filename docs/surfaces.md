@@ -24,9 +24,9 @@ History is in `CHANGELOG.md`; the material design record is `rfc-material.md`.
   Text boxes, keybind and spinbox fields, slider and progress tracks, the trackpad, the
   ColorSelector's recess. A well's floor may carry fills (a progress fill, a swatch) — floor
   segments, not plates. A **canvas well** (Trackpad, Slider2D, the bevel and ramp previews) is
-  cut from one material: the plate darkened for its floor (`colors::WELL_FLOOR`) and the recess
+  cut from one material: the plate darkened for its floor (`color::WELL_FLOOR`) and the recess
   for its rim (`PaintCtx::well_floor` / `well_rim`). With relief off a well is its frame, the one
-  hairline `colors::well_frame_color`, lit in the highlight while active.
+  hairline `color::well_frame_color`, lit in the highlight while active.
 - **Segments** share one silhouette, parted by **seams** (`Groove`s dying into the rolled edge):
   Breadcrumb and ButtonStrip segments, the ColorSelector's text/swatch split. A `Separator` is the
   same cut with no segments to part.
@@ -258,7 +258,7 @@ as `h=` beside `w=` and `d=` (light; `l=` is an alias). Registry keys: `bevel_de
 `roll_profile_spec`.
 
 **There is one roll width**, `style.surface.relief.width`: the root plate's perimeter, pane plates,
-bordered widget plates under relief (`colors::plate_bevel_width` returns it), every control wall.
+bordered widget plates under relief (`color::plate_bevel_width` returns it), every control wall.
 `the_pane_roll_is_the_relief_width` is the test.
 
 **cce-relief's Height knob** writes `wall.height` in the unit the config already spells (an

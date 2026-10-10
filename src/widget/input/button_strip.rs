@@ -1,4 +1,4 @@
-use crate::colors;
+use crate::color;
 use crate::widget::*;
 use crate::widget::input::get_font_db;
 
@@ -188,8 +188,8 @@ impl ButtonStrip {
             return;
         }
 
-        let active_color = colors::menubar_tab_label_color();
-        let active_srgb = colors::to_srgb(active_color);
+        let active_color = color::menubar_tab_label_color();
+        let active_srgb = color::to_srgb(active_color);
         let active_r = (active_srgb[0] * 255.0) as u8;
         let active_g = (active_srgb[1] * 255.0) as u8;
         let active_b = (active_srgb[2] * 255.0) as u8;
@@ -398,11 +398,11 @@ impl crate::widget::Paint for ButtonStrip {
             let r = self.item_rect(i);
             let mut bg_color = [0.0, 0.0, 0.0, 0.0];
             if Some(i) == self.selected {
-                bg_color = colors::PANEL_MENU_FOCUSED;
+                bg_color = color::PANEL_MENU_FOCUSED;
             } else if Some(i) == self.pressed_idx {
-                bg_color = colors::BUTTON_PRESS;
+                bg_color = color::BUTTON_PRESS;
             } else if Some(i) == self.hovered_idx {
-                bg_color = colors::PANEL_MENU_HOVER;
+                bg_color = color::PANEL_MENU_HOVER;
             }
             // The segment's footprint: in the well, inset by the wall's inner
             // half-span so it stands on the floor (the selected plateau's rect);

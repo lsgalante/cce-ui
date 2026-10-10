@@ -47,7 +47,7 @@ mod tests;
 
 pub use column::SheetColumn;
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::scroll_motion::{scroll_settings, Bounds, ScrollMotion};

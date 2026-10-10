@@ -149,15 +149,15 @@ impl<'a> Layouter<'a> {
         let code = s.code || s.math;
         let size = if code { (base.size * 0.92).round() } else { base.size };
         let color = match &span.link {
-            Some(SpanLink::Tag(_)) => crate::colors::text_tag_color(),
+            Some(SpanLink::Tag(_)) => crate::color::text_tag_color(),
             Some(l @ (SpanLink::Note { .. } | SpanLink::Embed { .. })) => {
                 if (self.resolved)(l) {
-                    crate::colors::text_link_color()
+                    crate::color::text_link_color()
                 } else {
-                    crate::colors::text_link_unresolved_color()
+                    crate::color::text_link_unresolved_color()
                 }
             }
-            Some(SpanLink::Url(_)) => crate::colors::text_link_color(),
+            Some(SpanLink::Url(_)) => crate::color::text_link_color(),
             None => base.color.unwrap_or(FG),
         };
         Look {
@@ -166,11 +166,11 @@ impl<'a> Layouter<'a> {
             attrs: TextAttrs { italic: s.italic, weight: (s.bold || base.bold).then_some(700), ..Default::default() },
             color,
             bg: if code {
-                Some(crate::colors::text_code_background_color())
+                Some(crate::color::text_code_background_color())
             } else if s.highlight {
-                Some(crate::colors::text_highlight_background_color())
+                Some(crate::color::text_highlight_background_color())
             } else if matches!(span.link, Some(SpanLink::Tag(_))) {
-                Some(crate::colors::text_tag_background_color())
+                Some(crate::color::text_tag_background_color())
             } else {
                 None
             },

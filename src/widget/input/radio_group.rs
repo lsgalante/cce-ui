@@ -20,7 +20,7 @@ use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::{Field, PaintCtx};
 use crate::widget::{ElementState, Event, Key, MouseButton, NamedKey};
 use crate::widget::model::EventCtx;
-use crate::widget::{colors, Adapted, Input, Layout, Paint};
+use crate::widget::{Adapted, Input, Layout, Paint};
 
 /// The gap between an option's box and its label.
 const LABEL_GAP: f32 = 8.0;
@@ -193,7 +193,7 @@ impl Paint for RadioGroup {
                 lx,
                 ty,
                 font_size,
-                colors::control_label_color_for_state(false, lit),
+                crate::color::control_label_color_for_state(false, lit),
                 None,
                 Some([option.x, option.y, rect.x + rect.width.max(option.width), option.y + option.height]),
             );

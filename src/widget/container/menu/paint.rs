@@ -82,15 +82,15 @@ impl Paint for MenuBar {
             let tr = self.title_rect(rect);
             if flat_modes {
                 if self.context_dropdown_open {
-                    ctx.quad(Rect { x: tr.0, y: tr.1, width: tr.2, height: tr.3 }, colors::highlight_primary_color());
+                    ctx.quad(Rect { x: tr.0, y: tr.1, width: tr.2, height: tr.3 }, color::highlight_primary_color());
                 } else if self.context_title_hovered {
-                    ctx.quad(Rect { x: tr.0, y: tr.1, width: tr.2, height: tr.3 }, colors::HIGHLIGHT_SECONDARY);
+                    ctx.quad(Rect { x: tr.0, y: tr.1, width: tr.2, height: tr.3 }, color::HIGHLIGHT_SECONDARY);
                 }
             } else {
                 let fill = if self.context_dropdown_open {
-                    Some(colors::highlight_primary_color())
+                    Some(color::highlight_primary_color())
                 } else if self.context_title_hovered {
-                    Some(colors::HIGHLIGHT_SECONDARY)
+                    Some(color::HIGHLIGHT_SECONDARY)
                 } else {
                     None
                 };
@@ -116,11 +116,11 @@ impl Paint for MenuBar {
                 let r = self.menus.item_rect(i);
                 let r = (r.0 + 3.0, r.1, (r.2 - 6.0).max(8.0), r.3);
                 let fill = if Some(i) == self.menus.selected {
-                    Some(colors::highlight_primary_color())
+                    Some(color::highlight_primary_color())
                 } else if Some(i) == self.menus.pressed_idx {
-                    Some(colors::BUTTON_PRESS)
+                    Some(color::BUTTON_PRESS)
                 } else if Some(i) == self.menus.hovered_idx {
-                    Some(colors::HIGHLIGHT_SECONDARY)
+                    Some(color::HIGHLIGHT_SECONDARY)
                 } else {
                     None
                 };
@@ -140,7 +140,7 @@ impl Paint for MenuBar {
         // Text: the sidebar label (vertical), the title (curved / vertical / horizontal), and
         // the strip's button labels — the legacy `text_labels` body.
         let label_color = self.text_color();
-        let srgb = crate::colors::to_srgb(label_color);
+        let srgb = crate::color::to_srgb(label_color);
         let text_color = [
             (srgb[0] * 255.0) as u8,
             (srgb[1] * 255.0) as u8,
@@ -282,7 +282,7 @@ impl Paint for MenuBar {
 
     fn draw_popover(&self, rect: Rect, pc: &mut dyn crate::scene::paint::RenderTarget) {
         let label_color = self.text_color();
-        let srgb = crate::colors::to_srgb(label_color);
+        let srgb = crate::color::to_srgb(label_color);
         let color_f32 = [srgb[0], srgb[1], srgb[2], 1.0];
         let font = Paint::widget_font(self);
 
@@ -290,7 +290,7 @@ impl Paint for MenuBar {
         // (layered soft shadows, surface border/bg, accent hover, blue
         // selected) so menubar menus read as the DE's normal dropdowns.
         let draw_panel = |pc: &mut dyn crate::scene::paint::RenderTarget, dx: f32, dy: f32, dw: f32, dh: f32, hovered: Option<usize>| {
-            let theme = colors::active_theme();
+            let theme = color::active_theme();
             pc.rect([0.02, 0.02, 0.05, 0.15], dx + 1.0, dy + 1.0, dw, dh);
             pc.rect([0.02, 0.02, 0.05, 0.08], dx + 3.0, dy + 3.0, dw, dh);
             pc.rect([0.02, 0.02, 0.05, 0.04], dx + 5.0, dy + 5.0, dw, dh);

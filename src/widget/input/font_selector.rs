@@ -1,4 +1,4 @@
-use crate::colors;
+use crate::color;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
@@ -164,9 +164,9 @@ impl Paint for FontSelector {
                     .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint)),
             );
             let wash = if self.pressed {
-                Some(colors::button_press_color())
+                Some(color::button_press_color())
             } else if self.hovered {
-                Some(colors::button_hover_color())
+                Some(color::button_hover_color())
             } else {
                 None
             };
@@ -176,9 +176,9 @@ impl Paint for FontSelector {
             self.paint_labels(rect, ctx);
             return;
         }
-        // The flat style: the one well frame (`colors::well_frame_color`) over
+        // The flat style: the one well frame (`color::well_frame_color`) over
         // the plate, lit while pressed, rounded at the selector's radius.
-        ctx.border(rect, (r, r, r, r), [0.0; 4], colors::well_frame_color(self.hovered, self.pressed), 1.0);
+        ctx.border(rect, (r, r, r, r), [0.0; 4], color::well_frame_color(self.hovered, self.pressed), 1.0);
 
         self.paint_labels(rect, ctx);
     }

@@ -49,11 +49,11 @@ impl Theme {
 }
 
 // Colours. Links, tags, the quote bar, the highlight and the code wash read the
-// theme (`style.text.*`, through `colors::text_link_color` and its kin); FG, DIM
+// theme (`style.text.*`, through `color::text_link_color` and its kin); FG, DIM
 // and the rule are linear constants.
-const FG: [f32; 4] = crate::colors::TEXT_FG;
+const FG: [f32; 4] = crate::color::TEXT_FG;
 
-const DIM: [f32; 4] = crate::colors::TEXT_DIM;
+const DIM: [f32; 4] = crate::color::TEXT_DIM;
 
 const RULE: [f32; 4] = [1.0, 1.0, 1.0, 0.12];
 
@@ -186,7 +186,7 @@ impl Layout {
                 }
                 Draw::Image { target, rect: r } => match image(target) {
                     Some(img) => pc.image(img.id, rect(r), 1.0),
-                    None => pc.rounded_rect(rect(r), 4.0 * k, (true, true, true, true), crate::colors::text_code_background_color()),
+                    None => pc.rounded_rect(rect(r), 4.0 * k, (true, true, true, true), crate::color::text_code_background_color()),
                 },
                 Draw::Icon { name, rect: r, color } => {
                     pc.icon(name, rect(r), *color);
@@ -198,11 +198,11 @@ impl Layout {
 
 /// An sRGB colour (alpha untouched) in the linear space prims take.
 fn lin(srgb: [f32; 4]) -> [f32; 4] {
-    crate::colors::to_linear(srgb)
+    crate::color::to_linear(srgb)
 }
 
 pub fn srgb_u8(linear: [f32; 4]) -> [u8; 3] {
-    let s = crate::colors::to_srgb(linear);
+    let s = crate::color::to_srgb(linear);
     [(s[0] * 255.0) as u8, (s[1] * 255.0) as u8, (s[2] * 255.0) as u8]
 }
 

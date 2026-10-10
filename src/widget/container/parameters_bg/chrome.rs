@@ -68,7 +68,7 @@ impl ParametersBg {
             // A section's line is its outline's, above.
         } else if kind == SEPARATOR {
             // A hairline across the row, inset from the pane's edges.
-            let c = crate::colors::active_theme().surface_border;
+            let c = crate::color::active_theme().surface_border;
             out.push((r.0 + 6.0, r.1, (r.2 - 12.0).max(0.0), 1.0, [c[0], c[1], c[2], c[3] * 0.8]));
         } else if is_vec_row(kind) {
             if let Some(f) = &self.float3s[i] {

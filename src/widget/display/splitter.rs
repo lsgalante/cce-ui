@@ -2,7 +2,7 @@
 //! the splitter itself via [`Input::drag_reposition`] (the adapter applies the new origin to the
 //! base rect). Hover/drag drive the color, tracked from the forwarded events.
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::{Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
@@ -26,11 +26,11 @@ impl Layout for Splitter {}
 impl Paint for Splitter {
     fn color(&self) -> [f32; 4] {
         if self.dragging {
-            colors::SPLITTER_DRAG
+            color::SPLITTER_DRAG
         } else if self.hovered {
-            colors::SPLITTER_HOVER
+            color::SPLITTER_HOVER
         } else {
-            colors::SPLITTER_IDLE
+            color::SPLITTER_IDLE
         }
     }
 

@@ -158,6 +158,6 @@ impl DocEditor {
 }
 
 pub(super) fn srgb_u8(linear: [f32; 4]) -> [u8; 3] {
-    let s = crate::colors::to_srgb(linear);
+    let s = crate::color::to_srgb(linear);
     [(s[0] * 255.0) as u8, (s[1] * 255.0) as u8, (s[2] * 255.0) as u8]
 }

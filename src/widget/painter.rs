@@ -82,7 +82,7 @@ pub fn append_widget_plate_radii(w: &dyn WidgetHost, pc: &mut PaintCtx, tint: Op
     let tint = tint.unwrap_or([1.0, 1.0, 1.0]);
     if let Some((border_color, thickness)) = w.solid_border() {
         if crate::layout::control_relief() {
-            pc.bevel_tinted(rect, radii_tuple, &crate::scene::material::Material::from_fill(w.color()), crate::colors::plate_bevel_width(), tint);
+            pc.bevel_tinted(rect, radii_tuple, &crate::scene::material::Material::from_fill(w.color()), crate::color::plate_bevel_width(), tint);
         } else {
             pc.border(rect, radii_tuple, w.color(), border_color, thickness);
         }
@@ -106,7 +106,7 @@ pub fn base_control_label(w: &dyn WidgetHost) -> Vec<TextLabel> {
         let b = w.base();
         if let Some(ref label) = b.label {
             let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            let color = crate::colors::control_label_color_detached_for_state(b.hovered, b.focused);
+            let color = crate::color::control_label_color_detached_for_state(b.hovered, b.focused);
             return vec![TextLabel { text: label.clone(), x: b.x, y: b.y, font_size, color }];
         }
     }

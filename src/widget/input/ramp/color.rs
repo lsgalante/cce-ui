@@ -149,7 +149,7 @@ impl Layout for ColorRamp {
 
 impl Paint for ColorRamp {
     fn color(&self) -> [f32; 4] {
-        colors::ramp_background_color()
+        crate::color::ramp_background_color()
     }
 
     // Field children are ctx-linked for event propagation but painted here (gated on a
@@ -170,7 +170,7 @@ impl Paint for ColorRamp {
         let by = self.base.y;
         let bw = self.base.w;
         let bh = self.base.h;
-        let border_color = colors::ramp_border_color();
+        let border_color = crate::color::ramp_border_color();
         quads.push((bx, by, bw, 1.0, border_color));                 // Top
         quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));         // Bottom
         quads.push((bx, by, 1.0, bh, border_color));                 // Left

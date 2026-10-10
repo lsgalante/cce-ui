@@ -42,7 +42,7 @@ pub use wires::WireStyle;
 #[cfg(test)]
 use wires::*;
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::TextLabel;

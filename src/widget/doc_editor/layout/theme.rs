@@ -32,22 +32,22 @@ impl EditorTheme {
     /// Obsidian-ish dark defaults at `size`, in the DE's sans and mono; the link, tag,
     /// quote bar, highlight and code colours are the theme's (`style.text.*`), read once here.
     pub fn new(size: f32) -> EditorTheme {
-        let lin = crate::colors::to_linear;
+        let lin = crate::color::to_linear;
         EditorTheme {
             body_font: "sans-serif".into(),
             mono_font: "monospace".into(),
             size,
             spacing: 1.55,
-            fg: crate::colors::TEXT_FG,
-            dim: crate::colors::TEXT_DIM,
-            link: crate::colors::text_link_color(),
-            link_unresolved: crate::colors::text_link_unresolved_color(),
-            code_bg: crate::colors::text_code_background_color(),
-            highlight_bg: crate::colors::text_highlight_background_color(),
-            tag: crate::colors::text_tag_color(),
-            tag_bg: crate::colors::text_tag_background_color(),
+            fg: crate::color::TEXT_FG,
+            dim: crate::color::TEXT_DIM,
+            link: crate::color::text_link_color(),
+            link_unresolved: crate::color::text_link_unresolved_color(),
+            code_bg: crate::color::text_code_background_color(),
+            highlight_bg: crate::color::text_highlight_background_color(),
+            tag: crate::color::text_tag_color(),
+            tag_bg: crate::color::text_tag_background_color(),
             pill_bg: [1.0, 1.0, 1.0, 0.09],
-            quote_bar: crate::colors::text_quote_bar_color(),
+            quote_bar: crate::color::text_quote_bar_color(),
             rule: [1.0, 1.0, 1.0, 0.14],
             caret: lin([0.85, 0.85, 0.92, 1.0]),
             selection: lin([0.40, 0.45, 0.75, 0.45]),

@@ -16,7 +16,7 @@ mod tests;
 
 pub use toggle::Toggle;
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::{Field, PaintCtx};
 use crate::widget::{
@@ -45,7 +45,7 @@ pub(crate) fn paint_box(ctx: &mut PaintCtx, well: &Field, plate: Option<&Field>,
         return;
     }
     let bw = crate::layout::toggle_border_width().max(1.0);
-    ctx.border(well.rect, well.radii, [0.0; 4], colors::well_frame_color(hovered, focused), bw);
+    ctx.border(well.rect, well.radii, [0.0; 4], color::well_frame_color(hovered, focused), bw);
     if let Some(plate) = plate {
         let (face, face_r) = inset(plate.rect, plate.radii.0, plate.depth * 0.5);
         let lit = (0.16 * (crate::layout::bevel_depth() / 0.15)).clamp(0.0, 0.5);
@@ -220,7 +220,7 @@ impl Paint for Checkbox {
                 box_right + 8.0,
                 ty,
                 font_size,
-                colors::control_label_color_for_state(self.hovered, self.focused),
+                color::control_label_color_for_state(self.hovered, self.focused),
                 None,
                 // The label is caller text and the box is caller-sized; a
                 // control has no business drawing past its own rect.

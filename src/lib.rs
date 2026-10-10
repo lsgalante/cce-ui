@@ -63,9 +63,6 @@ pub mod mac;
 #[cfg(test)]
 mod config_style_tests;
 
-pub mod colors {
-    pub use crate::color::*;
-}
 
 /// The text-shaping library, re-exported so clients need no text dependency of
 /// their own: `cce_ui::cosmic_text::FontSystem` rather than a per-crate

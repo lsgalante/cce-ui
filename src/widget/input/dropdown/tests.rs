@@ -234,11 +234,11 @@ fn test_dropdown_label_fade_out() {
     let first_char = &labels[0];
     let last_char = &labels[last_char_idx];
 
-    let tc = colors::dropdown_text_color();
+    let tc = color::dropdown_text_color();
     let expected_color = [
-        (colors::linear_to_srgb(tc[0]) * 255.0).round() as u8,
-        (colors::linear_to_srgb(tc[1]) * 255.0).round() as u8,
-        (colors::linear_to_srgb(tc[2]) * 255.0).round() as u8,
+        (color::linear_to_srgb(tc[0]) * 255.0).round() as u8,
+        (color::linear_to_srgb(tc[1]) * 255.0).round() as u8,
+        (color::linear_to_srgb(tc[2]) * 255.0).round() as u8,
     ];
     assert_eq!(first_char.color, expected_color);
     assert_ne!(last_char.color, expected_color); // color has shifted towards background

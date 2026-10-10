@@ -24,7 +24,6 @@ mod tests;
 
 pub use color::{ColorRamp, ColorRampKey};
 
-use crate::colors;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::{Cap, PaintCtx};
 use crate::widget::model::{EventCtx, Input, Layout, Paint};

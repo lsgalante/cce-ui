@@ -18,7 +18,7 @@ mod focus_ring_tests;
 #[cfg(test)]
 mod tests;
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{

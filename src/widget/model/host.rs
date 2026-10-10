@@ -199,7 +199,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         if Paint::legacy_focus_highlight(&self.inner) && ui.is_focused_id(self.base.id()) {
             let b = &self.base;
             let (hx, hw) = if b.row_w > 0.0 { (b.row_x, b.row_w) } else { (b.x, b.w) };
-            ctx.quad(Rect { x: hx, y: b.y, width: hw, height: b.h }, crate::colors::highlight_primary_color());
+            ctx.quad(Rect { x: hx, y: b.y, width: hw, height: b.h }, crate::color::highlight_primary_color());
         }
         // Own text with per-label font+bounds: the hatch view verbatim for hatched widgets
         // (caveat: its contract includes raw container children — those few widgets keep the

@@ -24,7 +24,7 @@ mod tests;
 pub use band::*;
 pub use range::{ActiveThumb, RangeSlider};
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{
@@ -243,14 +243,14 @@ impl Slider {
         // A band has no rim to light: focused, the band itself is the
         // highlight; hovered, it lifts by the dropdown border's step.
         let color = if self.dragging {
-            colors::slider_thumb_drag()
+            color::slider_thumb_drag()
         } else if self.focused {
             crate::color::highlight_primary_color()
         } else if self.hovered {
-            let c = colors::slider_thumb();
+            let c = color::slider_thumb();
             [(c[0] + 0.15).min(1.0), (c[1] + 0.15).min(1.0), (c[2] + 0.15).min(1.0), c[3]]
         } else {
-            colors::slider_thumb()
+            color::slider_thumb()
         };
         paint_band_shape(ctx, g.track_x, g.track_w, g.y + g.h * 0.5, color, &|x| self.band_height_at(g, x));
     }

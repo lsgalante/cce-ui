@@ -349,7 +349,7 @@ impl PaintCtx {
     /// the plate.
     ///
     /// An opaque host's floor is that plate darkened, drawn as the darkening
-    /// itself ([`crate::colors::WELL_FLOOR`] over whatever the plate resolved
+    /// itself ([`crate::color::WELL_FLOOR`] over whatever the plate resolved
     /// to — exact at any plate alpha, and what every floor drew before
     /// materials). A FROSTED host's floor is deeper glass
     /// ([`Material::floor`]: the host's material with the tint darkened,
@@ -360,9 +360,9 @@ impl PaintCtx {
         let fill = if host.frost.is_frosted() {
             host.floor(lifted).fill(PlateRole::Nested)
         } else if lifted {
-            crate::colors::WELL_FLOOR_LIFTED
+            crate::color::WELL_FLOOR_LIFTED
         } else {
-            crate::colors::WELL_FLOOR
+            crate::color::WELL_FLOOR
         };
         self.rounded_rect(rect, radius, (true, true, true, true), fill);
     }
@@ -371,7 +371,7 @@ impl PaintCtx {
     /// over whatever runs to the edge. Under `relief` it is the recess carved
     /// inside `rect` ([`crate::layout::carve_inside`], the wall the DE width
     /// capped at a fifth of the height — every well's rule); flat, the
-    /// hairline frame every well shares ([`crate::colors::well_frame_color`]).
+    /// hairline frame every well shares ([`crate::color::well_frame_color`]).
     pub fn well_rim(&mut self, rect: Rect, radius: f32, relief: bool) {
         let radii = (radius, radius, radius, radius);
         if relief {
@@ -379,7 +379,7 @@ impl PaintCtx {
             let (well, radii) = crate::layout::carve_inside(rect, radii, depth);
             self.recess(well, radii, depth);
         } else {
-            self.border(rect, radii, [0.0; 4], crate::colors::well_frame_color(false, false), 1.0);
+            self.border(rect, radii, [0.0; 4], crate::color::well_frame_color(false, false), 1.0);
         }
     }
 

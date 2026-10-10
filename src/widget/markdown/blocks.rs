@@ -62,7 +62,7 @@ impl<'a> Layouter<'a> {
                 self.out.draws.push(Draw::Icon {
                     name: "link",
                     rect: Rect { x, y: y + 0.5 * (size * 1.3 - side), width: side, height: side },
-                    color: crate::colors::text_link_color(),
+                    color: crate::color::text_link_color(),
                 });
                 let span = Span {
                     text: shown,
@@ -199,7 +199,7 @@ impl<'a> Layouter<'a> {
             None => {
                 self.out.draws.insert(
                     start,
-                    Draw::Quad { rect: Rect { x, y, width: 2.0, height: end - y }, color: crate::colors::text_quote_bar_color() },
+                    Draw::Quad { rect: Rect { x, y, width: 2.0, height: end - y }, color: crate::color::text_quote_bar_color() },
                 );
             }
         }
@@ -211,7 +211,7 @@ impl<'a> Layouter<'a> {
         let lh = self.theme.line_h(size);
         let n = text.split('\n').count().max(1);
         let h = n as f32 * lh + 2.0 * CODE_PAD;
-        self.out.draws.push(Draw::Round { rect: Rect { x, y, width: w, height: h }, radius: 6.0, color: crate::colors::text_code_background_color() });
+        self.out.draws.push(Draw::Round { rect: Rect { x, y, width: w, height: h }, radius: 6.0, color: crate::color::text_code_background_color() });
         // Code does not wrap; overlong lines are cut at the block's edge
         // by the paint clip, as a scrolled source view would show them.
         for (i, line) in text.split('\n').enumerate() {

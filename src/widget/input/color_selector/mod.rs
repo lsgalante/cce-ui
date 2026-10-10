@@ -16,7 +16,7 @@ mod paint;
 #[cfg(test)]
 mod tests;
 
-use crate::colors;
+use crate::color;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
