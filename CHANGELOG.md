@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-10
 
+- **The text box's tests are split by topic** (`widget/input/text_box/tests/`): `shaping` (glyph
+  offsets, right-to-left text, wrapping), `pointer` (focus, clicks, drags, selection, the
+  context menu), `editing` (composition, undo runs, the clipboard and passwords, the search
+  box's clear) and `geometry` (horizontal scrolling, the border, where tall text starts). A pure
+  move, checked line for line, except one doc: `multiline_shaped_offsets_round_trip`'s, which had
+  ended up at the top of the file glued to the first right-to-left test's, is back on it. The
+  suite still runs 657 tests.
 - **Smooth scrolling is a directory module** (`widget/scroll_motion/`): `mod.rs` (the scroll phase,
   the shared constants, `Bounds`), `settings` (`ScrollSettings`, the animations switch, the
   per-thread pin), `axis` (`ScrollAxis`), `motion` (`ScrollMotion`) and `tests`; re-exported, so
