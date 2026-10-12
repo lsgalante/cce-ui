@@ -49,11 +49,30 @@ pub(crate) async fn request_device(
         js_sys::Reflect::set(&desc, &JsValue::from_str("requiredLimits"), &required)?;
     }
     let device: web_sys::GpuDevice = adapter.request_device_with_descriptor(&desc).await?;
-    js_sys::Function::new_with_args(
-        "d",
-        "d.onuncapturederror = (e) => console.error('cce-ui WebGPU:', e.error.message); \
-         d.lost.then((i) => console.error('cce-ui WebGPU device lost:', i.reason, i.message));",
-    )
-    .call1(&JsValue::NULL, &device)?;
+    log_device_errors(&device)?;
     Ok((gpu, adapter, device))
+}
+
+/// Report the device's uncaptured errors and its loss on the console. Plain
+/// closures, never a function built from a string: a page whose
+/// Content-Security-Policy has no `unsafe-eval` refuses `new Function`, and
+/// the shell failed to start under one.
+fn log_device_errors(device: &web_sys::GpuDevice) -> Result<(), JsValue> {
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::JsCast;
+    let prop = |v: &JsValue, k: &str| js_sys::Reflect::get(v, &JsValue::from_str(k)).unwrap_or(JsValue::UNDEFINED);
+    let on_error = Closure::<dyn FnMut(JsValue)>::new(move |e: JsValue| {
+        let msg = prop(&prop(&e, "error"), "message");
+        web_sys::console::error_2(&"cce-ui WebGPU:".into(), &msg);
+    });
+    js_sys::Reflect::set(device, &JsValue::from_str("onuncapturederror"), on_error.as_ref())?;
+    on_error.forget();
+    if let Ok(lost) = js_sys::Reflect::get(device, &JsValue::from_str("lost"))?.dyn_into::<js_sys::Promise>() {
+        let on_lost = Closure::<dyn FnMut(JsValue)>::new(move |i: JsValue| {
+            web_sys::console::error_3(&"cce-ui WebGPU device lost:".into(), &prop(&i, "reason"), &prop(&i, "message"));
+        });
+        let _ = lost.then(&on_lost);
+        on_lost.forget();
+    }
+    Ok(())
 }

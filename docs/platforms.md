@@ -22,7 +22,8 @@ unorm format; the parameter block as a dynamic-offset uniform (WebGPU has no pus
 `WEBGPU_BLOCK_STRIDE`); a 1×1 backdrop; the blur snapshot as end-pass / copy / resume; every
 frame drawn whole; the backdrop sampled with `textureSampleLevel(…, 0.0)` (no implicit LOD in a
 non-uniform branch). `request_device` asks for the adapter's own limits where a caller needs more
-than the spec defaults.
+than the spec defaults. Nothing in the browser half builds code from a string, so a page may
+serve a Content-Security-Policy without `unsafe-eval` (`script-src 'self' 'wasm-unsafe-eval'`).
 
 **The browser shell** (`web::run::<App>(canvas, fonts, sizing).await`, `src/web/shell/`) runs an
 `Application` over a `<canvas>` on the same `Driver` and `Pacer`:

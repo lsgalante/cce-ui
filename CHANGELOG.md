@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-12
 
+- **The browser shell starts under a strict Content-Security-Policy.** `request_device`
+  installed the device's error and loss logging through `js_sys::Function::new_with_args`,
+  i.e. `new Function(…)`, which a page without `unsafe-eval` refuses, so the shell failed
+  before its first frame. It is two closures set through `Reflect` now. Checked by serving
+  cce-vault-web's site with `script-src 'self' 'wasm-unsafe-eval'` in Chromium: it starts,
+  with no console errors.
 - **Touch in the browser shell.** A finger on a phone was a mouse: a drag selected instead of
   scrolling, and every press focused the keyboard sink, so iOS raised its keyboard for every
   scroll and tap. Touch pointers now go through `backend::touch::TouchTracker`, the tracker
