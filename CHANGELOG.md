@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-12
 
+- **An MCP tool can answer with images.** `mcp::content` wraps ready-built content blocks
+  (`image_block`, `text_block`) so a tool's result is sent as they are rather than as one text
+  block; every other `Ok` value is serialized exactly as before. For cce-browser's agent tools,
+  whose screenshot is an image an agent has to see. Checked by
+  `content_results_are_sent_as_built`, and end to end against cce-browser with `claude mcp`.
+
 - **The browser shell starts under a strict Content-Security-Policy.** `request_device`
   installed the device's error and loss logging through `js_sys::Function::new_with_args`,
   i.e. `new Function(…)`, which a page without `unsafe-eval` refuses, so the shell failed

@@ -90,12 +90,46 @@ pub struct McpTool {
 /// A `tools/call` in flight: delivered to the app's event loop wrapped in its
 /// `Application::Message`; the handler sends the outcome back over `reply`.
 /// An `Ok` value becomes the result's text content (strings verbatim, other
-/// JSON pretty-printed); an `Err` becomes an `isError` tool result.
+/// JSON pretty-printed) — unless it was built by [`content`], whose blocks
+/// are sent as they are; an `Err` becomes an `isError` tool result.
 #[derive(Debug, Clone)]
 pub struct McpToolCall {
     pub name: String,
     pub arguments: Value,
     pub reply: mpsc::Sender<Result<Value, String>>,
+}
+
+/// The key [`content`] wraps its blocks under. Spelled so that no ordinary
+/// JSON result a tool returns could carry it by accident.
+const CONTENT_KEY: &str = "$mcp-content";
+
+/// A tool result made of ready-built MCP content blocks — an image beside
+/// its caption, say — rather than one text block. Return it as the `Ok`
+/// value of a [`McpToolCall`].
+pub fn content(blocks: Vec<Value>) -> Value {
+    json!({ CONTENT_KEY: blocks })
+}
+
+/// A text content block, for [`content`].
+pub fn text_block(text: impl Into<String>) -> Value {
+    json!({ "type": "text", "text": text.into() })
+}
+
+/// An image content block, for [`content`]: `data` is the base64 of the
+/// encoded image, `mime_type` its type (`image/png`, `image/jpeg`).
+pub fn image_block(data: String, mime_type: &str) -> Value {
+    json!({ "type": "image", "data": data, "mimeType": mime_type })
+}
+
+/// The content blocks a tool's `Ok` value stands for.
+fn content_blocks(value: Value) -> Value {
+    match value {
+        Value::Object(mut map) if map.len() == 1 && map.get(CONTENT_KEY).is_some_and(Value::is_array) => {
+            map.remove(CONTENT_KEY).unwrap_or_default()
+        }
+        Value::String(s) => json!([text_block(s)]),
+        other => json!([text_block(serde_json::to_string_pretty(&other).unwrap_or_default())]),
+    }
 }
 
 /// Spawn the MCP server on `127.0.0.1:port` (one thread per connection,
@@ -281,13 +315,7 @@ where
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             match call_tool(name, arguments) {
-                Ok(value) => {
-                    let text = match value {
-                        Value::String(s) => s,
-                        other => serde_json::to_string_pretty(&other).unwrap_or_default(),
-                    };
-                    json!({ "content": [{ "type": "text", "text": text }], "isError": false })
-                }
+                Ok(value) => json!({ "content": content_blocks(value), "isError": false }),
                 Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
             }
         }
@@ -366,6 +394,30 @@ mod tests {
         let resp = handle_jsonrpc(&req, "test", &tools(), &|_, _| Err("boom".to_string())).unwrap();
         assert_eq!(resp["result"]["isError"], true);
         assert_eq!(resp["result"]["content"][0]["text"], "boom");
+    }
+
+    #[test]
+    fn content_results_are_sent_as_built() {
+        let req = json!({
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": { "name": "echo", "arguments": {} }
+        });
+        let resp = handle_jsonrpc(&req, "test", &tools(), &|_, _| {
+            Ok(content(vec![image_block("iVBO".into(), "image/png"), text_block("a shot")]))
+        })
+        .unwrap();
+        let blocks = &resp["result"]["content"];
+        assert_eq!(blocks[0]["type"], "image");
+        assert_eq!(blocks[0]["data"], "iVBO");
+        assert_eq!(blocks[0]["mimeType"], "image/png");
+        assert_eq!(blocks[1]["text"], "a shot");
+
+        // A result that merely has the key among others is plain JSON.
+        let resp = handle_jsonrpc(&req, "test", &tools(), &|_, _| {
+            Ok(json!({ CONTENT_KEY: [], "other": 1 }))
+        })
+        .unwrap();
+        assert_eq!(resp["result"]["content"][0]["type"], "text");
     }
 
     #[test]
