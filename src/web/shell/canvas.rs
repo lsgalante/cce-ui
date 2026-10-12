@@ -31,6 +31,12 @@ pub(super) struct WebShell<A: Application> {
     /// where it was last put (page px: left, top, height).
     pub(super) sink: HtmlTextAreaElement,
     pub(super) sink_at: Option<(f64, f64, f64)>,
+    /// The finger being followed, through the tracker the Wayland shell
+    /// uses (`backend::touch`): a tap clicks, a drag scrolls, a held finger
+    /// drags.
+    pub(super) touch: crate::backend::touch::TouchTracker,
+    /// Where that finger went down: where its scroll is dispatched.
+    pub(super) touch_scroll_at: Option<(f32, f32)>,
 }
 
 impl<A: Application> WebShell<A> {

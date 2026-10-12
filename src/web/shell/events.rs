@@ -130,6 +130,15 @@ impl<A: Application> Loop<A> {
         let target: &web_sys::EventTarget = canvas.as_ref();
         let l = lp.clone();
         listen(target, "pointermove", false, move |e: PointerEvent| {
+            if is_touch(&e) {
+                let (x, y) = (e.offset_x() as f32, e.offset_y() as f32);
+                let (id, ms) = (e.pointer_id(), e.time_stamp() as u32);
+                l.event(|s| {
+                    let actions = s.touch.motion(id, x, y, ms);
+                    s.run_touch(actions);
+                });
+                return;
+            }
             l.event(|s| {
                 let pos = s.pointer_pos(&e);
                 let (driver, t) = s.turn();
@@ -157,6 +166,25 @@ impl<A: Application> Loop<A> {
         let c = canvas.clone();
         let k = sink.clone();
         listen(target, "pointerdown", true, move |e: PointerEvent| {
+            if is_touch(&e) {
+                // A finger is not a mouse: whether it taps, scrolls or drags
+                // is decided by what it does next (`backend::touch`). The
+                // keyboard is not taken here — on a phone that raises the
+                // on-screen keyboard for every scroll — but at the lift.
+                let _ = c.set_pointer_capture(e.pointer_id());
+                e.prevent_default();
+                let (x, y) = (e.offset_x() as f32, e.offset_y() as f32);
+                let (id, ms) = (e.pointer_id(), e.time_stamp() as u32);
+                l.event(|s| {
+                    s.driver.cursor_pos = (x, y);
+                    let actions = s.touch.down(id, x, y, ms);
+                    if s.touch.id() == Some(id) {
+                        s.touch_scroll_at = Some((x, y));
+                    }
+                    s.run_touch(actions);
+                });
+                return;
+            }
             let Some(btn) = dom_button(e.button()) else { return };
             // Take the keyboard first: the focus event this fires is
             // dispatched now, before the shell is borrowed below. Capture
@@ -175,7 +203,26 @@ impl<A: Application> Loop<A> {
             })
         })?;
         let l = lp.clone();
+        let k2 = sink.clone();
         listen(target, "pointerup", false, move |e: PointerEvent| {
+            if is_touch(&e) {
+                let id = e.pointer_id();
+                l.event(|s| {
+                    let actions = s.touch.up(id);
+                    s.run_touch(actions);
+                });
+                // Take or drop the keyboard while the lift is still a user
+                // gesture: a phone shows its keyboard only for a focus made
+                // inside one. Turn now, so the frame reports the caret of a
+                // field the tap just opened (`ime::caret`).
+                l.on_frame();
+                if crate::ime::caret().is_some() {
+                    let _ = k2.focus();
+                } else {
+                    let _ = k2.blur();
+                }
+                return;
+            }
             let Some(btn) = dom_button(e.button()) else { return };
             l.event(|s| {
                 let pos = s.pointer_pos(&e);
@@ -183,6 +230,16 @@ impl<A: Application> Loop<A> {
                 driver.pointer_release(t, btn, pos);
                 s.update_cursor();
             })
+        })?;
+        let l = lp.clone();
+        listen(target, "pointercancel", false, move |e: PointerEvent| {
+            if is_touch(&e) {
+                l.event(|s| {
+                    let actions = s.touch.cancel();
+                    s.run_touch(actions);
+                    s.touch_scroll_at = None;
+                });
+            }
         })?;
         // The right button is the app's, not the page's menu.
         listen(target, "contextmenu", true, |e: web_sys::Event| e.prevent_default())?;
@@ -396,5 +453,19 @@ impl<A: Application> Loop<A> {
             let (driver, t) = s.turn();
             driver.scroll(t, frame, LogicalPosition::new(x, y));
         });
+    }
+}
+
+/// A finger on a touchscreen (not a mouse, nor a pen).
+fn is_touch(e: &PointerEvent) -> bool {
+    e.pointer_type() == "touch"
+}
+
+impl<A: Application> WebShell<A> {
+    /// Hand a finger's actions to the driver, as the Wayland shell does.
+    fn run_touch(&mut self, actions: Vec<crate::backend::touch::TouchAction>) {
+        let scroll_at = self.touch_scroll_at;
+        let (driver, t) = self.turn();
+        driver.touch(t, actions, scroll_at);
     }
 }

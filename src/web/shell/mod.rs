@@ -183,6 +183,8 @@ pub async fn run<A: Application>(canvas: HtmlCanvasElement, fonts: Fonts, sizing
         mac: is_mac(),
         sink: sink.clone(),
         sink_at: None,
+        touch: Default::default(),
+        touch_scroll_at: None,
     };
     let lp = Rc::new(Loop {
         shell: RefCell::new(shell),

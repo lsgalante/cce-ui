@@ -8,6 +8,16 @@ and `docs/rfc-material.md`, and in `git log`.
 When you change behaviour: update the reference to the new state, and add an entry here under
 today's date — what changed, why, and how it was checked.
 
+## 2026-10-12
+
+- **Touch in the browser shell.** A finger on a phone was a mouse: a drag selected instead of
+  scrolling, and every press focused the keyboard sink, so iOS raised its keyboard for every
+  scroll and tap. Touch pointers now go through `backend::touch::TouchTracker`, the tracker
+  `wl_touch` already used, and the keyboard is taken at the lift, after an immediate turn, only
+  when the frame reports a caret (`ime::caret`). Checked in a shadow session with Chromium
+  (WebGPU) driven by `ccectl touch`: taps open rows and buttons, a field's tap focuses the sink,
+  leaving it blurs it, and the mouse path is unchanged.
+
 ## 2026-10-10
 
 - **`file_dialog` is a feature.** rfd, and through it ashpd and its D-Bus stack, was a

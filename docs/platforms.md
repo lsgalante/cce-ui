@@ -34,6 +34,13 @@ than the spec defaults.
   (`map_key` gives the text xkb's `utf8` would: Tab `"\t"`, Enter `"\r"`, Ctrl+letter its control
   code). Browser key repeats are dropped (the driver repeats). On a Mac, Command is the shortcut
   key. A page has no grabs, so a press on a CSD border is the app's.
+- **Touch**: a `pointerType == "touch"` pointer goes through `backend::touch::TouchTracker`,
+  as `wl_touch` does on Wayland (a tap clicks, a drag scrolls at the down point, a held finger
+  drags; `WebShell::run_touch` hands its actions to `Driver::touch`), never through the mouse
+  path. A finger's press does not take the keyboard: the lift does, after turning the loop at
+  once so the frame reports the caret a tap opened — the sink is focused when `ime::caret()` is
+  `Some` and blurred when it is not. A phone shows its keyboard only for a focus made inside a
+  user gesture, and a focus on every press raised it for every scroll.
 - **Pacing**: a turn per animation frame at the pacer's ACTIVE cadence, a timer at its idle one;
   any event or `AppSender::send` (`backend::app::set_wake`) wakes the loop.
 - **Size**: `Sizing::App` sizes the canvas from `WindowSettings` / `desired_size` (CSS px);
