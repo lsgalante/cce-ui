@@ -10,6 +10,21 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-12
 
+- **Each test thread has its own style.** The style was one process-wide snapshot every unit
+  test wrote, kept apart by a per-thread colour overlay, a per-thread registry overlay and
+  `test_color_state_lock` — with holes (setters that wrote the global style even under test,
+  getters that skipped the overlay, config tests that never reset). `style::Store` holds the
+  snapshot; under `cfg(test)` each thread has its own, and the overlays and the lock are gone.
+  Tests that race writers across threads share theirs (`style::share` / `style::adopt`).
+  Checked: 631 lib tests, ten runs in a row; the style integration tests pass.
+- **Window properties are per thread off a window.** The scale, app id, fullscreen, maximized
+  and vertical text were written to the entered window AND to process statics, and a read off
+  any window got whichever window wrote last. No production worker reads them (every
+  off-window reader is a custom shell such as cce-cloud's, a tool or a test, each on one
+  thread), so `scale::Props` now holds them: the entered window's, else the thread's own. The
+  `cfg(test)` scale thread-local and the layering test's `scale -> window_state` allowance
+  are gone. Checked by the lib tests and `layering`.
+
 - **An MCP tool can answer with images.** `mcp::content` wraps ready-built content blocks
   (`image_block`, `text_block`) so a tool's result is sent as they are rather than as one text
   block; every other `Ok` value is serialized exactly as before. For cce-browser's agent tools,
