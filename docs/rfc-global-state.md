@@ -177,6 +177,17 @@ Checked at a forced scale of 2 against the real config: the demo and the setting
 identically to the pixel before and after (the settings app's run-to-run hover noise
 aside).
 
+**2026-10-12: the process-wide fallbacks are gone.** No production worker thread turned out
+to read these (an inventory found every off-window read was a custom shell that enters no
+window — cce-cloud, cce-lock — a headless tool, or a test), so the last-written process value
+served only to let one window's write leak into another thread's read. `Props` moved into
+`scale`, which keeps the current properties per thread: the entered window's (handed over by
+`window_state::enter`), else the thread's own. A shell that enters no window sets and reads on
+its own thread exactly as before; tests no longer need the `cfg(test)` per-thread scale; and
+`scale` no longer imports `window_state` (the layering test's last `scale -> window_state`
+allowance is deleted). The display metric's process value is cce-core's, read by a thread
+that never set one, and stays.
+
 Scale, metric, scroll phase and vertical text travel with the frame and the event context
 instead of process statics.
 

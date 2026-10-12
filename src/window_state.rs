@@ -6,9 +6,9 @@
 //! - the side swipe being recognized (`widget::side_swipe`),
 //! - the input method's composition and the caret it is drawn at (`ime`),
 //! - the phase of the wheel event being dispatched (`widget::scroll_motion`),
-//! - and the window's own properties ([`Props`]): its HiDPI scale, the display metric,
-//!   its app id, whether it is fullscreen or maximized, and vertical text (`scale`,
-//!   `units`, `backend::text`).
+//! - and the window's own properties ([`Props`], defined in `scale`): its HiDPI scale, the
+//!   display metric, its app id, whether it is fullscreen or maximized, and vertical text
+//!   (`scale`, `units`, `text`).
 //!
 //! A window OWNS a [`WindowState`], and its shell makes it the current one ([`enter`]) for
 //! as long as it
@@ -18,13 +18,12 @@
 //! know which window they serve. With none entered — a test, a tool that draws no window —
 //! each thread has a default one.
 //!
-//! **The window's properties read differently off a window.** A worker thread asking for the
-//! scale (a page rasterized at it, a tile decoded for it) has no window entered; it reads the
-//! process-wide value, which every window's setter also writes — the last one set. So a
-//! process with one window reads the same value on and off it, and two windows on one
-//! thread each read their own (`docs/rfc-global-state.md`, phase 4).
-//! Under `cfg(test)` the process-wide scale is per thread, so a test's write reaches no other
-//! test (`scale.rs`).
+//! **Off a window, a thread reads its own properties.** Entering a window makes its
+//! properties `scale`'s current ones; with none entered, a thread has its own, which its
+//! setters write and its getters read. There is no process-wide copy any more (until
+//! 2026-10-12 every setter also wrote one, and an off-window read got whichever window wrote
+//! last): a custom shell that enters no window (cce-cloud) sets and reads on its one thread,
+//! and no test sees another's (`scale.rs`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -41,37 +40,11 @@ pub struct WindowState {
     pub(crate) swipe: RefCell<SideSwipe>,
     pub(crate) ime: RefCell<crate::ime::State>,
     pub(crate) scroll_phase: Cell<crate::widget::ScrollPhase>,
-    pub(crate) props: RefCell<Props>,
+    /// Shared with `scale`, which reads them while this window is entered.
+    pub(crate) props: Rc<RefCell<Props>>,
 }
 
-/// A window's own properties (see the module docs).
-#[derive(Debug, Clone)]
-pub struct Props {
-    /// The HiDPI scale it is drawn at (`scale::scale_factor`).
-    pub scale: f32,
-    /// The display it is on, in logical px per mm (`units::metric`).
-    pub metric: Option<crate::units::Metric>,
-    pub app_id: String,
-    pub fullscreen: bool,
-    pub maximized: bool,
-    /// Set while it stands on a screen edge as a vertical bar of this thickness
-    /// (`backend::text::vertical_text`).
-    pub vertical_text: Option<u32>,
-}
-
-impl Props {
-    /// The process-wide values: what a window starts from.
-    fn from_process() -> Props {
-        Props {
-            scale: crate::scale::process_scale_factor(),
-            metric: None,
-            app_id: crate::scale::process_app_id(),
-            fullscreen: false,
-            maximized: false,
-            vertical_text: crate::text::process_vertical_text(),
-        }
-    }
-}
+pub use crate::scale::Props;
 
 impl WindowState {
     /// A window's state with nothing open, hovered, swiped or composed.
@@ -83,7 +56,7 @@ impl WindowState {
             swipe: RefCell::new(SideSwipe::new()),
             ime: RefCell::new(crate::ime::State::default()),
             scroll_phase: Cell::new(crate::widget::ScrollPhase::Wheel),
-            props: RefCell::new(Props::from_process()),
+            props: Rc::new(RefCell::new(Props::default())),
         })
     }
 }
@@ -101,7 +74,7 @@ pub fn with<R>(f: impl FnOnce(&WindowState) -> R) -> R {
 }
 
 /// Run `f` on the window entered on this thread, if one is: `None` off any window's thread
-/// (where a window's properties read as the process-wide values).
+/// (where a window's properties read as the thread's own, `scale::with_props`).
 pub fn entered<R>(f: impl FnOnce(&WindowState) -> R) -> Option<R> {
     let state = CURRENT.with(|c| c.borrow().clone())?;
     Some(f(&state))
@@ -110,13 +83,14 @@ pub fn entered<R>(f: impl FnOnce(&WindowState) -> R) -> Option<R> {
 /// The display metric of the window whose code is running: what `units::metric` answers
 /// first ([`crate::units::set_metric_resolver`]).
 fn window_metric() -> Option<crate::units::Metric> {
-    entered(|w| w.props.borrow().metric).flatten()
+    crate::scale::with_props(|p| p.borrow().metric)
 }
 
-/// The display metric changed: the current window's, if one is entered, and the
-/// process-wide one (a forced PPI applied to both, `units::effective`).
+/// The display metric changed: the current properties' (the entered window's, else this
+/// thread's), and cce-core's process-wide one (a forced PPI applied to both,
+/// `units::effective`), which a thread that never set one reads.
 pub fn set_metric(m: crate::units::Metric) {
-    entered(|w| w.props.borrow_mut().metric = Some(crate::units::effective(m)));
+    crate::scale::with_props(|p| p.borrow_mut().metric = Some(crate::units::effective(m)));
     crate::units::set_metric(m);
 }
 
@@ -124,12 +98,14 @@ pub fn set_metric(m: crate::units::Metric) {
 #[must_use = "the window's state is current only while this guard lives"]
 pub struct Entered {
     previous: Option<Rc<WindowState>>,
+    previous_props: Option<Rc<RefCell<Props>>>,
 }
 
 impl Drop for Entered {
     fn drop(&mut self) {
         let previous = self.previous.take();
         CURRENT.with(|c| *c.borrow_mut() = previous);
+        crate::scale::make_current(self.previous_props.take());
     }
 }
 
@@ -138,18 +114,19 @@ impl Drop for Entered {
 pub fn enter(state: &Rc<WindowState>) -> Entered {
     crate::units::set_metric_resolver(window_metric);
     let previous = CURRENT.with(|c| c.replace(Some(Rc::clone(state))));
-    Entered { previous }
+    let previous_props = crate::scale::make_current(Some(Rc::clone(&state.props)));
+    Entered { previous, previous_props }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Two windows draw at their own scales; off a window, the thread reads the last one
-    /// set — and, the process-wide scale being per thread in tests, no other test's thread
-    /// sees it; and the scroll phase is the window's.
+    /// Two windows draw at their own scales; off a window, a thread reads its own (no
+    /// window's last write leaks out), as does any other thread; and the scroll phase is
+    /// the window's.
     #[test]
-    fn each_window_has_its_own_scale_and_a_worker_reads_the_last() {
+    fn each_window_and_each_thread_has_its_own_scale() {
         let (a, b) = (WindowState::new(), WindowState::new());
         {
             let _in_a = enter(&a);
@@ -162,9 +139,11 @@ mod tests {
             assert_eq!(crate::scale::scale_factor(), 1.5);
             assert_eq!(crate::widget::scroll_motion::current_scroll_phase(), crate::widget::ScrollPhase::Wheel, "b's own phase");
         }
-        assert_eq!(crate::scale::scale_factor(), 1.5, "on no window, the last scale any window set");
+        assert_eq!(crate::scale::scale_factor(), 1.0, "on no window, the thread's own scale");
+        crate::scale::set_scale_factor(3.0);
+        assert_eq!(crate::scale::scale_factor(), 3.0, "which its setter writes");
         let other = std::thread::spawn(crate::scale::scale_factor).join().unwrap();
-        assert_eq!(other, 1.0, "another test's thread keeps the default scale");
+        assert_eq!(other, 1.0, "another thread keeps the default scale");
         let _in_a = enter(&a);
         assert_eq!(crate::scale::scale_factor(), 2.0, "a keeps its own");
         assert_eq!(crate::widget::scroll_motion::current_scroll_phase(), crate::widget::ScrollPhase::Finger);

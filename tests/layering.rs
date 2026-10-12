@@ -58,7 +58,6 @@ const ALLOWED_UPWARD: &[(&str, &str)] = &[
     ("color", "layout"),
     ("color", "scene"),
     ("layout", "scene"),
-    ("scale", "window_state"),
     ("style", "layout"),
 ];
 

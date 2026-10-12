@@ -1,16 +1,20 @@
-use std::sync::{OnceLock, RwLock};
+//! A window's own properties ([`Props`]): its HiDPI scale, the display metric, its app id,
+//! whether it is fullscreen or maximized, and vertical text — and which of them the code
+//! running now reads (`docs/rfc-global-state.md`, phase 4).
+//!
+//! The current properties are those of the window entered on this thread
+//! (`window_state::enter` makes them current), else this THREAD's own. There is no
+//! process-wide copy: until 2026-10-12 every setter also wrote process statics, so a read
+//! off any window got whichever window wrote last, and tests pinned the scale per thread to
+//! keep from seeing each other's. Code that runs no window (a custom shell such as
+//! cce-cloud's, a tool, a test) sets and reads its own thread's; no worker thread reads
+//! these. This module names no window type: `window_state` hands it the properties to make
+//! current.
 
-#[cfg(not(test))]
-static SCALE_FACTOR: RwLock<f32> = RwLock::new(1.0);
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::OnceLock;
 
-// Under `cfg(test)` the process-wide scale is per thread: no test enters a window but
-// `window_state`'s, so every shaping test reads this value, and one test setting it would
-// rescale another's text mid-shape (`prepare_text` once read 1.0 for its key and 1.5 for
-// its buffer, and kept offsets in physical px).
-#[cfg(test)]
-thread_local! {
-    static SCALE_FACTOR: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
-}
 static FORCED_SCALE: OnceLock<Option<f32>> = OnceLock::new();
 
 /// `CCE_FORCE_SCALE`: HiDPI override for foreign compositors that report a
@@ -28,73 +32,75 @@ pub fn forced_scale() -> Option<f32> {
             .filter(|s| *s > 0.0 && (*s - 1.0).abs() > 0.001)
     })
 }
-static APP_ID: RwLock<String> = RwLock::new(String::new());
-static FULLSCREEN: RwLock<bool> = RwLock::new(false);
-static MAXIMIZED: RwLock<bool> = RwLock::new(false);
+/// A window's own properties (see the module docs).
+#[derive(Debug, Clone)]
+pub struct Props {
+    /// The HiDPI scale it is drawn at ([`scale_factor`]).
+    pub scale: f32,
+    /// The display it is on, in logical px per mm (`units::metric`).
+    pub metric: Option<crate::units::Metric>,
+    pub app_id: String,
+    pub fullscreen: bool,
+    pub maximized: bool,
+    /// Set while it stands on a screen edge as a vertical bar of this thickness
+    /// (`text::vertical_text`).
+    pub vertical_text: Option<u32>,
+}
 
-// A window's properties are its own (`crate::window_state::Props`): read from the window
-// whose code is running, else from these process-wide values, which every setter also
-// writes — the last any window set, what a worker thread reads (`docs/rfc-global-state.md`,
-// phase 4).
+impl Default for Props {
+    fn default() -> Props {
+        Props { scale: 1.0, metric: None, app_id: String::new(), fullscreen: false, maximized: false, vertical_text: None }
+    }
+}
 
-/// The HiDPI scale of the window being drawn (off a window's thread, the last one set).
+thread_local! {
+    /// The entered window's properties, if a window is entered on this thread.
+    static CURRENT: RefCell<Option<Rc<RefCell<Props>>>> = const { RefCell::new(None) };
+    /// This thread's own, current while no window is entered.
+    static THREAD: Rc<RefCell<Props>> = Rc::new(RefCell::new(Props::default()));
+}
+
+/// Run `f` on the current properties: the entered window's, else this thread's own.
+pub fn with_props<R>(f: impl FnOnce(&RefCell<Props>) -> R) -> R {
+    let props = CURRENT.with(|c| c.borrow().clone()).unwrap_or_else(|| THREAD.with(Rc::clone));
+    f(&props)
+}
+
+/// Make `props` the current properties (`None`: this thread's own again), returning the
+/// ones current before: what `window_state::enter` and its guard do.
+pub(crate) fn make_current(props: Option<Rc<RefCell<Props>>>) -> Option<Rc<RefCell<Props>>> {
+    CURRENT.with(|c| c.replace(props))
+}
+
+/// The HiDPI scale of the window being drawn (see the module docs).
 pub fn scale_factor() -> f32 {
-    crate::window_state::entered(|w| w.props.borrow().scale).unwrap_or_else(process_scale_factor)
-}
-
-#[cfg(not(test))]
-pub(crate) fn process_scale_factor() -> f32 {
-    *SCALE_FACTOR.read().unwrap()
-}
-
-#[cfg(test)]
-pub(crate) fn process_scale_factor() -> f32 {
-    SCALE_FACTOR.with(|s| s.get())
+    with_props(|p| p.borrow().scale)
 }
 
 pub fn set_scale_factor(scale: f32) {
-    crate::window_state::entered(|w| w.props.borrow_mut().scale = scale);
-    #[cfg(not(test))]
-    if let Ok(mut lock) = SCALE_FACTOR.write() {
-        *lock = scale;
-    }
-    #[cfg(test)]
-    SCALE_FACTOR.with(|s| s.set(scale));
+    with_props(|p| p.borrow_mut().scale = scale);
 }
 
 pub fn app_id() -> String {
-    crate::window_state::entered(|w| w.props.borrow().app_id.clone()).unwrap_or_else(process_app_id)
-}
-
-pub(crate) fn process_app_id() -> String {
-    APP_ID.read().unwrap().clone()
+    with_props(|p| p.borrow().app_id.clone())
 }
 
 pub fn set_app_id(id: String) {
-    crate::window_state::entered(|w| w.props.borrow_mut().app_id = id.clone());
-    if let Ok(mut lock) = APP_ID.write() {
-        *lock = id;
-    }
+    with_props(|p| p.borrow_mut().app_id = id);
 }
 
 pub fn is_fullscreen() -> bool {
-    crate::window_state::entered(|w| w.props.borrow().fullscreen).unwrap_or_else(|| *FULLSCREEN.read().unwrap())
+    with_props(|p| p.borrow().fullscreen)
 }
 
 pub fn set_fullscreen(fs: bool) {
-    crate::window_state::entered(|w| w.props.borrow_mut().fullscreen = fs);
-    if let Ok(mut lock) = FULLSCREEN.write() {
-        *lock = fs;
-    }
+    with_props(|p| p.borrow_mut().fullscreen = fs);
 }
 
 pub fn is_maximized() -> bool {
-    crate::window_state::entered(|w| w.props.borrow().maximized).unwrap_or_else(|| *MAXIMIZED.read().unwrap())
+    with_props(|p| p.borrow().maximized)
 }
 
 pub fn set_maximized(m: bool) {
-    crate::window_state::entered(|w| w.props.borrow_mut().maximized = m);
-    if let Ok(mut lock) = MAXIMIZED.write() {
-        *lock = m;
-    }
+    with_props(|p| p.borrow_mut().maximized = m);
 }

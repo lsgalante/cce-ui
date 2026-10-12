@@ -78,11 +78,11 @@ is gone, never add one).
 - **Pin what a result depends on, per thread.** `motion::force_for_test`,
   `input::force_natural_scroll`, `scroll_motion::force_scroll_settings` pin the animations
   switch, natural scrolling and kinetic settings for the calling thread. Never set a
-  process-wide env var in a test (the suite is parallel). The window properties' process-wide
-  fallback (`scale::set_scale_factor` off a window) is per thread under `cfg(test)`: no test
-  but `window_state`'s enters a window, so every shaping test reads it, and one test's write
-  once rescaled another's text mid-shape. A dependent crate's test binary links
-  cce-ui WITHOUT `cfg(test)`, so it reads the machine unless it pins.
+  process-wide env var in a test (the suite is parallel). The window properties
+  (`scale::set_scale_factor` and kin) are per thread off a window, in every build: a test that
+  sets the scale sets its own thread's (one test's write once rescaled another's text
+  mid-shape, when they were process-wide). A dependent crate's test binary links cce-ui
+  WITHOUT `cfg(test)`, so it reads the machine's config unless it pins.
 - **A colour test that reloads a knob reloads its default back.** `reload_colors` writes
   process-wide globals and an absent frost knob keeps its last value; `reload_colors("")` does
   not reset it. Assert-tests pin every knob they read through the setter; `test_color_state_lock`
@@ -378,9 +378,12 @@ Style is the snapshot above. **A window's interaction and properties live in its
 `window_state::WindowState`** — the context menu, hover highlight, side swipe, input-method
 composition, scale, display metric, app id, scroll phase — which the shell makes current
 (`window_state::enter`) while it runs that window's code. The modules' free functions act on the
-current one; a thread with no window (a worker, a test) gets a default or the process-wide value.
-**Do not add a static for state that belongs to a window: give it a field in `WindowState`.**
-Caches and process-wide switches (vertical text, the icon cache) are fine as statics.
+current one; a thread with no window (a custom shell, a tool, a test) gets its own default. The
+properties (`scale::Props`: scale, metric, app id, fullscreen, maximized, vertical text) live
+in `scale`, which `window_state::enter` hands the window's; there is no process-wide copy
+(2026-10-12). **Do not add a static for state that belongs to a window: give it a field in
+`WindowState` (or `scale::Props`).** Caches and process-wide switches (the icon cache) are
+fine as statics.
 `docs/rfc-global-state.md` has the inventory.
 
 ## Accessibility and locale — paused
