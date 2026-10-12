@@ -160,8 +160,8 @@ fn test_grid_layout() {
 /// These keys have ONE home, the style registry (since 2026-10-08): the setter writes
 /// it, the getter reads it, an unset key is its default, and a length in other units
 /// resolves through the metric — which the slot each used to have, filled by a scan
-/// of `key = number` lines, ignored. Writes go to this thread's test overlay, so no
-/// other test sees them.
+/// of `key = number` lines, ignored. Writes go to this test thread's own style
+/// (`crate::style`), so no other test sees them.
 #[test]
 fn a_style_key_lives_in_the_registry_alone() {
     set_button_height(33.0);
@@ -345,8 +345,9 @@ fn control_rung_radius_flattens_beside_widget_overrides() {
 ///
 /// The graph-style test below used to pin ~20 of these and restore none
 /// (it now reads the live registry instead: see
-/// `graph_style_getters_resolve_their_own_registry_keys`). Before the
-/// per-thread overlay that reached every test running alongside —
+/// `graph_style_getters_resolve_their_own_registry_keys`). Before tests had
+/// their own style (a per-thread overlay, then since 2026-10-12 the thread's
+/// own style store), that reached every test running alongside —
 /// provably: `dual_geometry_views_stay_consistent` bakes
 /// quads with `graph_node_corner_radius`, then re-reads the getter to
 /// compare, and a write landing between the two made them disagree.
@@ -357,15 +358,13 @@ fn a_pinned_style_is_private_to_its_thread() {
     assert_eq!(graph_node_corner_radius(), base + 17.0, "the pinning thread sees its own value");
 
     let elsewhere = std::thread::spawn(graph_node_corner_radius).join().unwrap();
-    assert_eq!(elsewhere, base, "a thread beside it must still see the shared base");
+    assert_eq!(elsewhere, base, "a thread beside it keeps its own (default) style");
 }
 
 /// Every graph style getter resolves the registry key it is named for,
 /// falling back to its own documented default — checked against the live
-/// registry as it stands. Nothing is written: the style registry and the
-/// colour statics are process-global and the suite runs in parallel, so a
-/// set/assert here would be visible to every other test (this one used to
-/// set all twenty-one and restore none).
+/// registry as it stands. Nothing is written (this one used to set all
+/// twenty-one and restore none, when the style was shared between tests).
 #[test]
 fn graph_style_getters_resolve_their_own_registry_keys() {
     fn stored(key: &str) -> Option<f32> {

@@ -83,10 +83,13 @@ is gone, never add one).
   sets the scale sets its own thread's (one test's write once rescaled another's text
   mid-shape, when they were process-wide). A dependent crate's test binary links cce-ui
   WITHOUT `cfg(test)`, so it reads the machine's config unless it pins.
-- **A colour test that reloads a knob reloads its default back.** `reload_colors` writes
-  process-wide globals and an absent frost knob keeps its last value; `reload_colors("")` does
-  not reset it. Assert-tests pin every knob they read through the setter; `test_color_state_lock`
-  orders reloaders but cannot undo what one left behind.
+- **Each test thread has its own style** (`crate::style`, since 2026-10-12): a test's
+  `reload_colors`, setters and registry writes reach no other test, so there is no test lock
+  and no per-thread overlay. A test that spawns threads racing on the style hands them its
+  store (`style::share` / `style::adopt`); a thread it does not hand one starts from the
+  defaults. Within one test a reload still leaves absent knobs at their last value
+  (`reload_colors("")` resets nothing). A dependent crate's test binary links cce-ui without
+  `cfg(test)` and shares one process-wide style.
 - **GPU tests run on whatever Vulkan exists** and skip with a printed note where none does
   (`vk::compute`, `vk::plate_probe`); the path tracer's are `#[ignore]`d
   (`CCE_VK_RT=compute cargo test --lib vk::rt -- --ignored`).

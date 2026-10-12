@@ -24,7 +24,6 @@ fn fill_encodes_by_role() {
 /// tint at plate opacity, negated under plate blur.
 #[test]
 fn pane_resolves_like_param_plate_fill_did() {
-    let _lock = crate::color::test_color_state_lock();
     let old = |blur: bool| {
         let mut c = crate::color::param_bg_color();
         c[3] *= crate::layout::plate_opacity();
@@ -75,7 +74,6 @@ fn finish_defaults_and_layout() {
 /// whenever that neighbour ran first (one run in eight, 2026-09-28).
 #[test]
 fn frost_from_style_and_flag() {
-    let _lock = crate::color::test_color_state_lock();
     crate::color::set_plate_backdrop_compression(0.6);
     crate::color::set_plate_refraction(0.3);
     crate::color::set_plate_frost_radius(Frost::DEFAULT_RADIUS);
@@ -188,7 +186,6 @@ const DESIGNER_NAMED: &str = r##"
 /// the step-4 exit test: same Material, same bytes (steps 2–3).
 #[test]
 fn named_material_round_trips_the_legacy_spelling() {
-    let _lock = crate::color::test_color_state_lock();
     crate::layout::lazy_init_style_registry();
     let _ = crate::color::plate_blur(); // fire the once-per-process load BEFORE the reload
     crate::layout::set_plate_opacity(1.0);
@@ -234,7 +231,6 @@ fn named_material_round_trips_the_legacy_spelling() {
 /// inside the block is ignored too.
 #[test]
 fn the_frost_block_is_the_only_spelling_of_the_default_recipe() {
-    let _lock = crate::color::test_color_state_lock();
     crate::layout::lazy_init_style_registry();
     let _ = crate::color::plate_blur();
     let doc = |plate: &str| format!("style {{\n surface {{\n plate {{\n {plate}\n }}\n }}\n}}\n");
@@ -274,7 +270,6 @@ fn the_frost_block_is_the_only_spelling_of_the_default_recipe() {
 /// by the top-level `plate_opacity` line.
 #[test]
 fn the_pane_colour_spelling_is_the_whole_tint() {
-    let _lock = crate::color::test_color_state_lock();
     crate::layout::lazy_init_style_registry();
     let _ = crate::color::plate_blur();
     let was = crate::layout::plate_opacity();
@@ -297,7 +292,6 @@ fn the_pane_colour_spelling_is_the_whole_tint() {
 /// material.
 #[test]
 fn binding_semantics() {
-    let _lock = crate::color::test_color_state_lock();
     crate::layout::lazy_init_style_registry();
     let _ = crate::color::plate_blur(); // fire the once-per-process load BEFORE the reload
     // The DE finish this reload changes is process-wide, and an absent
@@ -347,7 +341,6 @@ fn binding_semantics() {
 /// three menu sites used to write by negating an alpha.
 #[test]
 fn popover_is_the_menu_recipe() {
-    let _lock = crate::color::test_color_state_lock();
     let m = Material::popover([0.1, 0.2, 0.3, 1.0]);
     let mut old = [0.1, 0.2, 0.3, 1.0];
     old[3] = -crate::color::menu_opacity();
@@ -359,7 +352,6 @@ fn popover_is_the_menu_recipe() {
 /// the two are independent dials.
 #[test]
 fn popover_compresses_at_the_menu_key() {
-    let _lock = crate::color::test_color_state_lock();
     crate::color::set_plate_backdrop_compression(0.1);
     crate::color::set_menu_compression(0.7);
     let m = Material::popover([0.1, 0.2, 0.3, 1.0]);

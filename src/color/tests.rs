@@ -50,7 +50,6 @@ fn the_default_highlight_is_not_a_plain_bevel_tint() {
 /// and nothing, a loaded `plate.bevel_width` included, moves them off it.
 #[test]
 fn the_pane_roll_is_the_relief_width() {
-    let _lock = test_color_state_lock();
     crate::layout::lazy_init_style_registry();
     let _ = plate_blur();
     reload_colors("style {\n surface {\n plate bevel_width=(f64)12.0\n }\n}\n");
@@ -141,10 +140,11 @@ fn backdrop_compression_defaults_off_and_clamps() {
 
 /// A colour pinned by one test is invisible to a test beside it.
 ///
-/// The invariant that ends the parallel-flake class here. These statics
-/// are process-wide, and `test_graph_style_configuration` pins a dozen of
-/// them without restoring any; before `style_write` became per-thread
-/// under `cfg(test)`, every test running alongside it saw those values.
+/// The invariant that ends the parallel-flake class here.
+/// `test_graph_style_configuration` pins a dozen colours without restoring
+/// any; before tests had their own style (a per-thread overlay, then since
+/// 2026-10-12 each test thread's own style store), every test running
+/// alongside it saw those values.
 #[test]
 fn a_pinned_colour_is_private_to_its_thread() {
     let base = node_color();
@@ -155,5 +155,5 @@ fn a_pinned_colour_is_private_to_its_thread() {
     assert_eq!(node_color(), pinned, "the pinning thread sees its own value");
 
     let elsewhere = std::thread::spawn(node_color).join().unwrap();
-    assert_eq!(elsewhere, base, "a thread beside it must still see the shared base");
+    assert_eq!(elsewhere, base, "a thread beside it keeps its own (default) style");
 }

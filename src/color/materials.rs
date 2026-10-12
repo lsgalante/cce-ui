@@ -118,12 +118,13 @@ mod tests {
     /// thread defined, or a rung it bound, while this write's guard was held survives the drop.
     #[test]
     fn concurrent_material_writes_keep_each_others_change() {
-        // Colour reloads replace both cells whole; keep them out of the window.
-        let _lock = test_color_state_lock();
         let bindings_before = MATERIAL_BINDINGS.get();
         let (held, wait_held) = channel();
         let (published, wait_published) = channel::<()>();
+        // The writer shares this test's style (each test thread has its own).
+        let store = crate::style::share();
         let writer = std::thread::spawn(move || {
+            crate::style::adopt(store);
             let mut list = NAMED_MATERIALS.write().unwrap();
             put_material(&mut list, "race-held", Some(def(1.0)));
             let mut bindings = MATERIAL_BINDINGS.write().unwrap();

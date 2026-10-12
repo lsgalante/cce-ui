@@ -132,7 +132,6 @@ mod tests {
     /// `style.text.link` sets the link and moves the unresolved link with it.
     #[test]
     fn the_link_key_sets_both_link_colours() {
-        let _lock = test_color_state_lock();
         let before = text_link_unresolved_color();
         reload_colors("style {\n text {\n link \"#ff0000\"\n }\n}\n");
         let (link, unresolved) = (text_link_color(), text_link_unresolved_color());
@@ -149,7 +148,6 @@ mod tests {
     /// is the one the reading view drew before the key existed.
     #[test]
     fn the_tag_key_sets_the_tag_and_its_wash() {
-        let _lock = test_color_state_lock();
         assert_eq!(text_tag_background_color(), to_linear([0.66, 0.55, 0.98, 0.15]));
         let link = text_link_color();
         reload_colors("style {\n text {\n tag \"#00ff00\"\n }\n}\n");
@@ -166,7 +164,6 @@ mod tests {
     /// `style.text.quote_bar` sets the quote bar and nothing else.
     #[test]
     fn the_quote_bar_key_sets_the_quote_bar() {
-        let _lock = test_color_state_lock();
         assert_eq!(text_quote_bar_color(), to_linear([0.66, 0.55, 0.98, 1.0]));
         let (link, tag) = (text_link_color(), text_tag_color());
         reload_colors("style {\n text {\n quote_bar \"#0000ff\"\n }\n}\n");
@@ -183,7 +180,6 @@ mod tests {
     /// views drew before the key existed.
     #[test]
     fn the_highlight_key_sets_the_highlight_and_its_wash() {
-        let _lock = test_color_state_lock();
         assert_eq!(text_highlight_background_color(), to_linear([1.0, 0.82, 0.0, 0.40]));
         reload_colors("style {\n text {\n highlight \"#ff00ff\"\n }\n}\n");
         let (h, wash) = (text_highlight_color(), text_highlight_background_color());
@@ -199,7 +195,6 @@ mod tests {
     /// 6-digit one is solid.
     #[test]
     fn the_code_background_key_is_the_wash_itself() {
-        let _lock = test_color_state_lock();
         assert_eq!(text_code_background_color(), [1.0, 1.0, 1.0, 0.06]);
         reload_colors("style {\n text {\n code_background \"#ffffff80\"\n }\n}\n");
         let translucent = text_code_background_color();

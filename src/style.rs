@@ -25,8 +25,12 @@
 //!   batch wrote carried onto it, so a write another thread published meanwhile is kept
 //!   (field by field: a field both wrote ends with the batch's value).
 //!
-//! The per-thread test overlays (`color::style_write`, the registry's) are unchanged: they
-//! key on a cell's address, which a `StyleCell` has as a `static` as the lock did.
+//! **Under `cfg(test)` each thread has its own [`Store`]** (since 2026-10-12): a test's
+//! writes reach no other test, so tests need no lock and no per-thread overlay (the colour
+//! and registry overlays this replaced had holes: setters that bypassed them, getters that
+//! skipped them). A test that races writers on several threads hands them its store
+//! ([`share`], [`adopt`]). Config loads read nothing under test (cce-core's
+//! `test-isolation`), so a fresh store, all defaults, is what the shared base was.
 
 use std::any::TypeId;
 use std::cell::{Cell, RefCell};
@@ -46,12 +50,60 @@ pub struct Style {
     probe_registry: crate::layout::StyleRegistry,
 }
 
-static GLOBAL: RwLock<Option<Arc<Style>>> = RwLock::new(None);
-static GENERATION: AtomicU64 = AtomicU64::new(1);
+/// Where snapshots are published: the newest one and its generation. One for the process;
+/// one per thread under `cfg(test)` (see the module docs).
+pub struct Store {
+    /// Unique among stores, so a thread's read cache never mistakes one for another.
+    id: u64,
+    global: RwLock<Option<Arc<Style>>>,
+    generation: AtomicU64,
+}
+
+static NEXT_STORE: AtomicU64 = AtomicU64::new(1);
+
+impl Store {
+    fn new() -> Store {
+        Store { id: NEXT_STORE.fetch_add(1, Ordering::Relaxed), global: RwLock::new(None), generation: AtomicU64::new(1) }
+    }
+}
+
+#[cfg(not(test))]
+static PROCESS: std::sync::LazyLock<Store> = std::sync::LazyLock::new(Store::new);
+
+#[cfg(test)]
+thread_local! {
+    static THREAD_STORE: RefCell<Arc<Store>> = RefCell::new(Arc::new(Store::new()));
+}
+
+/// Run `f` on the store this thread publishes to.
+fn with_store<R>(f: impl FnOnce(&Store) -> R) -> R {
+    #[cfg(not(test))]
+    {
+        f(&PROCESS)
+    }
+    #[cfg(test)]
+    {
+        let store = THREAD_STORE.with(|s| Arc::clone(&s.borrow()));
+        f(&store)
+    }
+}
+
+/// This thread's store, to hand to a thread a test spawns ([`adopt`]).
+#[cfg(test)]
+pub(crate) fn share() -> Arc<Store> {
+    THREAD_STORE.with(|s| Arc::clone(&s.borrow()))
+}
+
+/// Publish to (and read from) `store` on this thread from now on: a thread a test spawned
+/// joins the test's style ([`share`]).
+#[cfg(test)]
+pub(crate) fn adopt(store: Arc<Store>) {
+    THREAD_STORE.with(|s| *s.borrow_mut() = store);
+}
 
 thread_local! {
-    /// The snapshot this thread read last, and the generation it was.
-    static CACHE: RefCell<(u64, Option<Arc<Style>>)> = const { RefCell::new((0, None)) };
+    /// The snapshot this thread read last: its store's id and the generation it was.
+    static CACHE: RefCell<((u64, u64), Option<Arc<Style>>)> = const { RefCell::new(((0, 0), None)) };
     /// A batch in progress on this thread: its pending snapshot and its depth.
     static PENDING: Cell<*mut Style> = const { Cell::new(std::ptr::null_mut()) };
     static DEPTH: Cell<u32> = const { Cell::new(0) };
@@ -77,20 +129,22 @@ fn touch<T: Clone + 'static>(get: fn(&Style) -> &T, get_mut: fn(&mut Style) -> &
 
 /// The current snapshot.
 pub fn current() -> Arc<Style> {
-    let generation = GENERATION.load(Ordering::Acquire);
-    CACHE.with(|c| {
-        let mut c = c.borrow_mut();
-        if c.0 == generation {
-            if let Some(s) = &c.1 {
-                return Arc::clone(s);
+    with_store(|store| {
+        let key = (store.id, store.generation.load(Ordering::Acquire));
+        CACHE.with(|c| {
+            let mut c = c.borrow_mut();
+            if c.0 == key {
+                if let Some(s) = &c.1 {
+                    return Arc::clone(s);
+                }
             }
-        }
-        let s = {
-            let mut g = GLOBAL.write().unwrap_or_else(|e| e.into_inner());
-            Arc::clone(g.get_or_insert_with(|| Arc::new(Style::default())))
-        };
-        *c = (generation, Some(Arc::clone(&s)));
-        s
+            let s = {
+                let mut g = store.global.write().unwrap_or_else(|e| e.into_inner());
+                Arc::clone(g.get_or_insert_with(|| Arc::new(Style::default())))
+            };
+            *c = (key, Some(Arc::clone(&s)));
+            s
+        })
     })
 }
 
@@ -98,7 +152,11 @@ pub fn current() -> Arc<Style> {
 /// that is `pending` itself; otherwise the fields the batch wrote are carried onto the newest
 /// snapshot, so another thread's publish meanwhile is kept, not reverted.
 fn publish_batch(pending: Style, base: &Arc<Style>, touched: &[Touched]) {
-    let mut g = GLOBAL.write().unwrap_or_else(|e| e.into_inner());
+    with_store(|store| publish_batch_to(store, pending, base, touched));
+}
+
+fn publish_batch_to(store: &Store, pending: Style, base: &Arc<Style>, touched: &[Touched]) {
+    let mut g = store.global.write().unwrap_or_else(|e| e.into_inner());
     let style = match g.as_ref() {
         Some(newest) if !Arc::ptr_eq(newest, base) => {
             let mut style = (**newest).clone();
@@ -110,16 +168,18 @@ fn publish_batch(pending: Style, base: &Arc<Style>, touched: &[Touched]) {
         _ => pending,
     };
     *g = Some(Arc::new(style));
-    GENERATION.fetch_add(1, Ordering::AcqRel);
+    store.generation.fetch_add(1, Ordering::AcqRel);
 }
 
 /// Apply `change` to a copy of the current snapshot and publish it.
 fn change(change: impl FnOnce(&mut Style)) {
-    let mut g = GLOBAL.write().unwrap_or_else(|e| e.into_inner());
-    let mut style = g.as_deref().cloned().unwrap_or_default();
-    change(&mut style);
-    *g = Some(Arc::new(style));
-    GENERATION.fetch_add(1, Ordering::AcqRel);
+    with_store(|store| {
+        let mut g = store.global.write().unwrap_or_else(|e| e.into_inner());
+        let mut style = g.as_deref().cloned().unwrap_or_default();
+        change(&mut style);
+        *g = Some(Arc::new(style));
+        store.generation.fetch_add(1, Ordering::AcqRel);
+    });
 }
 
 fn pending() -> Option<*mut Style> {
@@ -343,19 +403,32 @@ mod tests {
         StyleCell::merging(|s| &s.probe_registry, |s| &mut s.probe_registry, StyleRegistry::merge);
 
     /// A write publishes; a batch publishes once, and its own reads see its writes before.
+    fn generation() -> u64 {
+        with_store(|s| s.generation.load(Ordering::Acquire))
+    }
+
+    /// Spawn `f` on a thread that shares this test's store.
+    fn spawn_sharing<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> std::thread::JoinHandle<R> {
+        let store = share();
+        std::thread::spawn(move || {
+            adopt(store);
+            f()
+        })
+    }
+
     #[test]
     fn writes_publish_and_a_batch_publishes_once() {
-        let before = GENERATION.load(Ordering::Acquire);
+        let before = generation();
         *A.write().unwrap() = 1;
         assert_eq!(A.get(), 1);
-        assert!(GENERATION.load(Ordering::Acquire) > before);
+        assert!(generation() > before);
 
         batch(|| {
             *B.write().unwrap() = 2;
             *C.write().unwrap() = 3;
             assert_eq!((B.get(), C.get()), (2, 3), "a batch reads its own writes");
             // Another thread still sees the snapshot from before the batch.
-            let seen = std::thread::spawn(|| (B.get(), C.get())).join().unwrap();
+            let seen = spawn_sharing(|| (B.get(), C.get())).join().unwrap();
             assert_eq!(seen, (0, 0), "nothing published yet");
         });
         assert_eq!((B.get(), C.get()), (2, 3));
@@ -367,7 +440,7 @@ mod tests {
     fn a_batch_keeps_what_another_thread_published_meanwhile() {
         let (began, wait_began) = std::sync::mpsc::channel();
         let (published, wait_published) = std::sync::mpsc::channel::<()>();
-        let reload = std::thread::spawn(move || {
+        let reload = spawn_sharing(move || {
             batch(|| {
                 *X.write().unwrap() = 1;
                 began.send(()).unwrap();
@@ -388,7 +461,7 @@ mod tests {
     fn a_write_keeps_what_another_thread_published_to_its_field_meanwhile() {
         let (held, wait_held) = channel();
         let (published, wait_published) = channel::<()>();
-        let writer = std::thread::spawn(move || {
+        let writer = spawn_sharing(move || {
             let mut r = R.write().unwrap();
             r.load_float("held", 1.0);
             let unchanged = Z.write().unwrap();
@@ -407,14 +480,14 @@ mod tests {
         assert_eq!(Z.get(), 7, "the guard that changed nothing did not put back its 0");
     }
 
-    /// The case that showed it: under `cfg(test)` a registry setter writes this thread's
-    /// overlay, so its guard changes nothing — and must not re-publish the registry it copied
-    /// over a load another thread made meanwhile.
+    /// A registry setter held across another thread's load keeps both: its guard must not
+    /// re-publish the registry it copied over the load (the case that first showed it was a
+    /// setter whose guard changed nothing, when tests wrote a per-thread overlay).
     #[test]
     fn a_registry_setter_does_not_revert_a_load_meanwhile() {
         let (held, wait_held) = channel();
         let (published, wait_published) = channel::<()>();
-        let setter = std::thread::spawn(move || {
+        let setter = spawn_sharing(move || {
             let mut r = crate::layout::get_style_registry().write().unwrap();
             r.set_float("style-test-set", 1.0);
             held.send(()).unwrap();
@@ -425,7 +498,7 @@ mod tests {
         published.send(()).unwrap();
         setter.join().unwrap();
         let r = crate::layout::get_style_registry().read().unwrap();
-        assert_eq!(r.floats.get("style-test-loaded"), Some(&2.0));
+        assert_eq!((r.floats.get("style-test-loaded"), r.floats.get("style-test-set")), (Some(&2.0), Some(&1.0)));
     }
 
     /// Writes to one field nest on one thread: the outer guard's drop merges onto what the

@@ -10,7 +10,6 @@ fn test_plate_root_canonical_spelling() {
     // Global color state: serialize against the other reload_colors tests,
     // and fire both once-per-process live-config loads before our reload
     // so neither can rewrite the state mid-assert.
-    let _guard = crate::color::test_color_state_lock();
     let _ = crate::color::root_plate_corner_radius();
     crate::layout::lazy_init_style_registry();
 
@@ -48,7 +47,6 @@ fn test_root_plate_menubar_statusbar_styling() {
     // Global color state: serialize against the other reload_colors tests,
     // and fire both once-per-process live-config loads before our reload
     // so neither can rewrite the state mid-assert.
-    let _guard = crate::color::test_color_state_lock();
     let _ = crate::color::root_plate_statusbar_blur();
     crate::layout::lazy_init_style_registry();
 

@@ -195,68 +195,26 @@ crate::style::style_slots! {
     PLATE_FROST_RADIUS: f32 = crate::scene::material::Frost::DEFAULT_RADIUS;
 }
 
-/// Per-thread overrides for runtime colour writes, under `cfg(test)` only.
-///
-/// Same defect as the font flake (cce-ui 1dc0ab1) and the style registry
-/// beside it: these are process-wide `RwLock` statics, so a test that pins a
-/// colour pins it for every test running alongside. It was live —
-/// `test_graph_style_configuration` sets a dozen of them and restores none.
-///
-/// Keyed by the address of the static itself, so a slot needs no name
-/// repeated in two places and cannot be typo'd into a silent miss. Config
-/// loading is unaffected: `parse_and_set_colors` writes the statics directly
-/// and never goes through these setters, so the loaded palette stays the
-/// shared base every test thread reads.
-#[cfg(test)]
-mod test_overlay {
-    use std::any::Any;
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-    thread_local! {
-        static MAP: RefCell<HashMap<usize, Box<dyn Any>>> = RefCell::new(HashMap::new());
-    }
-    pub fn get<T: Clone + 'static>(key: usize) -> Option<T> {
-        MAP.with(|m| m.borrow().get(&key).and_then(|b| b.downcast_ref::<T>()).cloned())
-    }
-    pub fn set<T: 'static>(key: usize, val: T) {
-        MAP.with(|m| m.borrow_mut().insert(key, Box::new(val)));
-    }
-}
-
-/// Read a style static, preferring this thread's test override.
+/// Read a style slot.
 #[inline]
 fn style_read<T: Clone + 'static>(cell: &'static crate::style::StyleCell<T>) -> T {
-    #[cfg(test)]
-    if let Some(v) = test_overlay::get::<T>(cell as *const _ as usize) {
-        return v;
-    }
     cell.read().unwrap().clone()
 }
 
-/// Write a style static: per-thread under `cfg(test)`, process-wide otherwise.
+/// Write a style slot. Under `cfg(test)` the style is the test thread's own
+/// (`crate::style`), so a test's write reaches no other test.
 #[inline]
 fn style_write<T: Clone + PartialEq + 'static>(cell: &'static crate::style::StyleCell<T>, val: T) {
-    #[cfg(test)]
-    test_overlay::set(cell as *const _ as usize, val);
-    #[cfg(not(test))]
     if let Ok(mut lock) = cell.write() {
         *lock = val;
     }
 }
 
-/// Change a style static in place, under ONE write guard, so a change another thread
+/// Change a style slot in place, under ONE write guard, so a change another thread
 /// publishes meanwhile is merged with this one rather than overwritten (a `style_read` then a
-/// `style_write` is two guards, and the write puts back what the read saw). Per-thread under
-/// `cfg(test)`, as [`style_write`].
+/// `style_write` is two guards, and the write puts back what the read saw).
 #[inline]
 fn style_update<T: Clone + PartialEq + 'static>(cell: &'static crate::style::StyleCell<T>, f: impl FnOnce(&mut T)) {
-    #[cfg(test)]
-    {
-        let mut val = style_read(cell);
-        f(&mut val);
-        test_overlay::set(cell as *const _ as usize, val);
-    }
-    #[cfg(not(test))]
     if let Ok(mut lock) = cell.write() {
         f(&mut lock);
     }

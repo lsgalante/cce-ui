@@ -1,24 +1,10 @@
-//! The style registry: the config flattened into one process-wide map of style keys, the
-//! per-thread test overlay over it, and the font-string helpers its readers share. Every
+//! The style registry: the config flattened into one map of style keys (a field of the
+//! style snapshot, `crate::style`), and the font-string helpers its readers share. Every
 //! getter in `layout` and `color` reads through it.
 
 use super::*;
 use std::collections::HashMap;
 
-/// Per-thread overrides for runtime style writes, under `cfg(test)` only.
-///
-/// Every `graph_*`, corner-radius and control-height slot in this file is
-/// backed by the one process-wide [`STYLE_REGISTRY`], so a test that pins any
-/// of them pins it for every test running beside it. That is the same defect
-/// as the font flake fixed in 1dc0ab1, and it was live:
-/// `test_graph_style_configuration` sets ~20 style values and restores none,
-/// while `dual_geometry_views_stay_consistent` bakes quads with
-/// `graph_node_corner_radius` and then re-reads that getter to compare — so a
-/// write landing between the two makes them disagree. Widening the write
-/// window to 300ms reproduced it on demand.
-///
-/// Fixing it at the registry rather than per accessor covers every slot it
-/// holds in one place, including ones no test pins yet.
 /// The family fontconfig matches for `monospace` (`fc-match`), asked once.
 pub fn get_system_monospace_font() -> &'static str {
     static MONOSPACE_FONT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -55,43 +41,6 @@ pub fn get_system_sans_serif_font() -> &'static str {
     })
 }
 
-#[cfg(test)]
-mod test_overlay {
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-    thread_local! {
-        static FLOATS: RefCell<HashMap<String, f32>> = RefCell::new(HashMap::new());
-        static LENS: RefCell<HashMap<String, crate::units::Len>> = RefCell::new(HashMap::new());
-        static STRINGS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
-    }
-    pub fn set_float(k: &str, v: f32) {
-        LENS.with(|m| m.borrow_mut().remove(k));
-        FLOATS.with(|m| m.borrow_mut().insert(k.to_string(), v));
-    }
-    pub fn set_len(k: &str, v: crate::units::Len) {
-        FLOATS.with(|m| m.borrow_mut().remove(k));
-        LENS.with(|m| m.borrow_mut().insert(k.to_string(), v));
-    }
-    pub fn set_string(k: &str, v: String) {
-        STRINGS.with(|m| m.borrow_mut().insert(k.to_string(), v));
-    }
-    pub fn get_float(k: &str) -> Option<f32> {
-        if let Some(l) = LENS.with(|m| m.borrow().get(k).copied()) {
-            return Some(l.to_px());
-        }
-        FLOATS.with(|m| m.borrow().get(k).copied())
-    }
-    pub fn get_len(k: &str) -> Option<crate::units::Len> {
-        if let Some(l) = LENS.with(|m| m.borrow().get(k).copied()) {
-            return Some(l);
-        }
-        FLOATS.with(|m| m.borrow().get(k).copied()).map(crate::units::Len::px)
-    }
-    pub fn get_string(k: &str) -> Option<String> {
-        STRINGS.with(|m| m.borrow().get(k).cloned())
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StyleRegistry {
     pub floats: HashMap<String, f32>,
@@ -114,10 +63,6 @@ impl StyleRegistry {
     }
 
     pub fn get_float(&self, key: &str) -> Option<f32> {
-        #[cfg(test)]
-        if let Some(v) = test_overlay::get_float(key) {
-            return Some(v);
-        }
         if let Some(len) = self.lens.get(key) {
             return Some(len.to_px());
         }
@@ -128,10 +73,6 @@ impl StyleRegistry {
     /// given, else the plain number as logical px. For editors that show the
     /// unit the user chose rather than the resolved pixel count.
     pub fn get_len(&self, key: &str) -> Option<crate::units::Len> {
-        #[cfg(test)]
-        if let Some(v) = test_overlay::get_len(key) {
-            return Some(v);
-        }
         if let Some(len) = self.lens.get(key) {
             return Some(*len);
         }
@@ -139,47 +80,26 @@ impl StyleRegistry {
     }
 
     pub fn get_string(&self, key: &str) -> Option<String> {
-        #[cfg(test)]
-        if let Some(v) = test_overlay::get_string(key) {
-            return Some(v);
-        }
         self.strings.get(key).cloned()
     }
 
     /// A plain number wins over any earlier unit value for the slot — a
     /// runtime `set_float` is the newest opinion.
     pub fn set_float(&mut self, key: &str, val: f32) {
-        #[cfg(test)]
-        {
-            test_overlay::set_float(key, val);
-        }
-        #[cfg(not(test))]
         self.load_float(key, val);
     }
 
     pub fn set_len(&mut self, key: &str, len: crate::units::Len) {
-        #[cfg(test)]
-        {
-            test_overlay::set_len(key, len);
-        }
-        #[cfg(not(test))]
         self.load_len(key, len);
     }
 
     pub fn set_string(&mut self, key: &str, val: String) {
-        #[cfg(test)]
-        {
-            test_overlay::set_string(key, val);
-        }
-        #[cfg(not(test))]
         self.load_string(key, val);
     }
 
-    /// The CONFIG-LOAD writes, as opposed to the runtime `set_*` ones above.
-    /// Kept apart because under `cfg(test)` a runtime set goes to a per-thread
-    /// overlay while the loaded config must stay the shared base every test
-    /// reads — routing config through `set_*` would put one thread's config
-    /// in its overlay and leave every other thread with an empty registry.
+    /// The CONFIG-LOAD writes, as opposed to the runtime `set_*` ones above (the same
+    /// writes since the per-thread test overlay went, 2026-10-12: under `cfg(test)` the
+    /// whole style is the test thread's own, `crate::style`).
     pub fn load_float(&mut self, key: &str, val: f32) {
         self.lens.remove(key);
         self.floats.insert(key.to_string(), val);
@@ -519,8 +439,8 @@ pub(super) fn registry_bool(key: &str) -> Option<bool> {
 }
 
 /// A configured font string parsed into (family, size; 12 when the string names none),
-/// cached against the string it was parsed from — a reload, a setter or a test's
-/// per-thread overlay that changes the string parses it again.
+/// cached against the string it was parsed from — a reload or a setter that changes the
+/// string parses it again.
 pub(super) fn parsed_font(cache: &crate::style::StyleCell<Option<(String, (String, f32))>>, font: String) -> (String, f32) {
     if let Ok(c) = cache.read() {
         if let Some((src, val)) = &*c {
