@@ -2,6 +2,7 @@
 //! code, strike, highlight, link, tag, comment, marker), and the pair-finding it rests on.
 
 use super::*;
+use cce_core::markdown::{is_url, split_target, tag_name};
 
 /// Mark the inline syntax of `text[from..]` in `flags`.
 pub(super) fn inline(text: &str, from: usize, flags: &mut [u16], link_of: &mut [Option<usize>], links: &mut Vec<Target>) {
@@ -56,12 +57,9 @@ pub(super) fn inline(text: &str, from: usize, flags: &mut [u16], link_of: &mut [
             Some(p) => (&inner[..p], Some(o + 2 + p + 1)),
             None => (inner, None),
         };
-        let (t, sub) = match target.split_once('#') {
-            Some((t, s)) => (t.to_string(), Some(s.to_string())),
-            None => (target.to_string(), None),
-        };
+        let (t, sub) = split_target(target);
         let idx = links.len();
-        links.push(Target::Note { target: t.trim().to_string(), subpath: sub.filter(|s| !s.is_empty()) });
+        links.push(Target::Note { target: t.to_string(), subpath: sub.map(String::from) });
         // An embed's alias that is only a size (`![[pic.png|300]]`) is not
         // a caption: show the file name and hide the `|300`, as for links.
         let size_alias = start < o && alias_at.is_some_and(|a| embed_size_spec(&text[a..c]));
@@ -89,15 +87,12 @@ pub(super) fn inline(text: &str, from: usize, flags: &mut [u16], link_of: &mut [
         let dest = text[c + 2..e].trim();
         let start = if o > 0 && b[o - 1] == b'!' && !taken[o - 1] { o - 1 } else { o };
         let idx = links.len();
-        let decoded = dest.replace("%20", " ");
-        links.push(if dest.contains("://") || dest.starts_with("mailto:") {
+        links.push(if is_url(dest) {
             Target::Url(dest.to_string())
         } else {
-            let (t, s) = match decoded.split_once('#') {
-                Some((t, s)) => (t.to_string(), Some(s.to_string())),
-                None => (decoded.clone(), None),
-            };
-            Target::Note { target: t, subpath: s }
+            let decoded = cce_core::fmt::percent_decode(dest);
+            let (t, s) = split_target(&decoded);
+            Target::Note { target: t.to_string(), subpath: s.map(String::from) }
         });
         mark(flags, start..o + 1, MARKER);
         mark(flags, o + 1..c, LINK);
@@ -150,15 +145,13 @@ pub(super) fn inline(text: &str, from: usize, flags: &mut [u16], link_of: &mut [
             i = c + delim.len();
         }
     }
-    // Tags: #name at a word start, not all digits.
+    // Tags: #name at a word start, by the index's rule (`tag_name`).
     let mut i = from;
     while i < n {
         if b[i] == b'#' && !taken[i] && (i == 0 || text[..i].chars().next_back().is_some_and(char::is_whitespace)) {
-            let rest = &text[i + 1..];
-            let len: usize = rest.chars().take_while(|&c| c.is_alphanumeric() || "_-/".contains(c)).map(char::len_utf8).sum();
-            if len > 0 && !rest[..len].chars().all(|c| c.is_ascii_digit() || c == '/') {
-                mark(flags, i..i + 1 + len, TAG);
-                i += 1 + len;
+            if let Some(name) = tag_name(&text[i + 1..]) {
+                mark(flags, i..i + 1 + name.len(), TAG);
+                i += 1 + name.len();
                 continue;
             }
         }

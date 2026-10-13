@@ -1,4 +1,4 @@
-//! `MarkdownView`: a note's blocks (`cce_vault::markdown`) laid out at a
+//! `MarkdownView`: a note's blocks (`cce_core::markdown`) laid out at a
 //! width into draw items and click targets — the reading view of
 //! cce-notes, the note cards on cce-grid's desktop, and any other surface
 //! that shows a vault note. Behind the `markdown` feature, which brings in
@@ -29,7 +29,7 @@ mod tests;
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::{Cap, PaintCtx, TextAttrs};
-pub use cce_vault::markdown::{blocks, Block, Callout, EmbedSize, ListItem, Span, SpanLink, Style};
+pub use cce_core::markdown::{blocks, Block, Callout, EmbedSize, ListItem, Span, SpanLink, Style};
 pub use crate::widget::EmbedImage;
 
 pub use crate::widget::shaping::{Measure, ShapingMeasure};

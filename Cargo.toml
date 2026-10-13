@@ -23,9 +23,9 @@ new_without_default = "allow"
 
 [features]
 # `widget::markdown` (MarkdownView): lays out vault notes for reading views
-# and note cards. Brings in cce-vault and its Markdown parser, so only the
-# clients that show notes turn it on.
-markdown = ["dep:cce-vault"]
+# and note cards, from cce-core's Markdown reading view (pulldown-cmark and
+# yaml-rust2), so only the clients that show notes turn it on.
+markdown = ["cce-core/markdown"]
 # `widget::doc_editor` (DocEditor): the line-buffer document editor with
 # Markdown live preview (cce-notes' editing mode). No extra dependencies.
 doc_editor = []
@@ -54,14 +54,13 @@ graph = []
 [dependencies]
 # The GUI-free half: config, input, motion, units, ipc and the spec parsers,
 # re-exported at their old paths (`cce_ui::config`, …). See lib.rs.
-cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "5b8dcb30f1b0d7d607ab49d637069560eca0cb14", features = ["l10n"] }
+cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "388473078207ff41208e8648c04499e94632f20a", features = ["l10n"] }
 # The accessibility tree's schema (rfc-accessibility-locale § 5): pure data, built for
 # every target; `crate::a11y` produces its TreeUpdate. The platform adapters are separate.
 accesskit = "0.25"
 # Calendar dates for `DatePicker`: `NaiveDate` arithmetic only. No default features, so no
 # clock and nothing platform-bound — the picker is handed "today" by its host.
 chrono = { version = "0.4", default-features = false }
-cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "9697535b1721d00efb6e0cfc88c2349072d5f5bd", optional = true }
 glam = { version = "0.29", optional = true }
 bytemuck = { version = "1", features = ["derive"] }
 # WGSL parsing and validation everywhere — a compute kernel is checked, and
@@ -283,7 +282,7 @@ crate-type = ["cdylib"]
 # The same crate with its `cfg(test)` behaviour switched on, so this suite reads
 # no machine config now that config/input/motion live there (cce-core's
 # `test-isolation`; resolver 2 keeps it out of normal builds).
-cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "5b8dcb30f1b0d7d607ab49d637069560eca0cb14", features = ["test-isolation"] }
+cce-core = { git = "https://github.com/lsgalante/cce-core.git", rev = "388473078207ff41208e8648c04499e94632f20a", features = ["test-isolation"] }
 
 [build-dependencies]
 # build.rs compiles the fixed WGSL shaders to SPIR-V once, instead of in every

@@ -197,3 +197,36 @@ fn block_contexts() {
     );
     assert!(style_line("let x;", Context::Code, false).segs[0].look.mono);
 }
+
+/// The editor reads tags, link targets, URLs and embed sizes by `cce_core::markdown`'s rules,
+/// the reading view's and the vault index's. Each case here is one the three used to read
+/// differently.
+#[test]
+fn links_tags_and_sizes_read_as_the_reading_view_does() {
+    let tags = |t: &str| {
+        let l = style_line(t, Context::Normal, false);
+        l.segs.iter().filter(|g| g.look.tag).map(|g| t[g.range.clone()].to_string()).collect::<Vec<_>>()
+    };
+    assert_eq!(tags("a #x/y/ b"), ["#x/y"], "a trailing slash is not part of a tag");
+    assert!(tags("#2024/10").is_empty());
+
+    let targets = |t: &str| style_line(t, Context::Normal, false).links;
+    assert_eq!(
+        targets("[[ Note # Sec ]] [[Other#]]"),
+        [
+            Target::Note { target: "Note".into(), subpath: Some("Sec".into()) },
+            Target::Note { target: "Other".into(), subpath: None },
+        ]
+    );
+    assert_eq!(
+        targets("[a](caf%C3%A9.md#%20Top) [b](tel:123) [c](obsidian://open?x)"),
+        [
+            Target::Note { target: "café.md".into(), subpath: Some("Top".into()) },
+            Target::Url("tel:123".into()),
+            Target::Url("obsidian://open?x".into()),
+        ]
+    );
+
+    assert_eq!(standalone_embed("![[a.png|0]]"), Some(("a.png".into(), None, None)), "a zero size is no size");
+    assert_eq!(standalone_embed("![](data:image/png;base64,AA)"), None, "a scheme leaves the vault");
+}

@@ -213,7 +213,14 @@ Behind the `graph` feature (`widget::Graph`, `GraphNode`, `TaggedQuad`, `node_wi
 
 Opt-in features for the note clients.
 
-- **`markdown`** — `widget::markdown`, the reading view: cce-vault's blocks laid out at a width
+- **One set of rules.** Both read Obsidian's syntax by `cce_core::markdown`: the reading view's
+  blocks come from its parser (the `markdown` feature turns on cce-core's), and the DocEditor,
+  which takes no dependencies, uses its leaf rules (`tag_name`, `split_target`, `is_url`,
+  `embed_size`, `fmt::percent_decode`), as cce-vault's index does. A tag drops a trailing `/`,
+  a `#subpath` is trimmed and an empty one is none, any `scheme:` leaves the vault, and a size
+  of `0` is no size — in all three. `links_tags_and_sizes_read_as_the_reading_view_does` is
+  the editor's test.
+- **`markdown`** — `widget::markdown`, the reading view: cce-core's blocks laid out at a width
   into draw items and click targets (`layout`, `Layout::paint` / `paint_scaled`). cce-notes'
   reading mode and cce-grid's note cards.
 - **Links, tags, the quote bar and the highlight take the theme's colours**, `style.text.link`

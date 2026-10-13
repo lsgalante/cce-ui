@@ -1,5 +1,8 @@
 //! Embeds: a line that is nothing but one embed (`![[pic.png|300]]`, `![alt|300x200](pic.png)`),
-//! and the embeds inside a line, each with the size it asks for, read as Obsidian reads it.
+//! and the embeds inside a line, each with the size it asks for, read as Obsidian reads it — by
+//! `cce_core::markdown`'s rules, the reading view's.
+
+use cce_core::markdown::{embed_size, is_url, split_target};
 
 /// A line that is nothing but one embed — `![[pic.png|300]]` or
 /// `![alt|300x200](pic%20one.png)` — as (link text, wanted width, wanted
@@ -20,25 +23,17 @@ pub fn standalone_embed(text: &str) -> Option<(String, Option<u32>, Option<u32>)
         let (alt, dest) = rest.split_once("](")?;
         let dest = dest.strip_suffix(')')?.trim();
         let dest = dest.strip_prefix('<').and_then(|d| d.strip_suffix('>')).unwrap_or(dest);
-        if dest.contains("://") || dest.contains(')') || alt.contains(']') {
+        if is_url(dest) || dest.contains(')') || alt.contains(']') {
             return None;
         }
-        (dest.replace("%20", " "), alt)
+        (cce_core::fmt::percent_decode(dest), alt)
     };
-    let target = target.split('#').next().unwrap_or("").trim().to_string();
+    let target = split_target(&target).0;
     if target.is_empty() {
         return None;
     }
-    let spec = alias.rsplit('|').next().unwrap_or(alias).trim();
-    let num = |v: &str| v.trim().parse::<u32>().ok().filter(|n| *n > 0);
-    let (w, h) = match spec.split_once('x') {
-        Some((w, h)) => match (num(w), num(h)) {
-            (Some(w), Some(h)) => (Some(w), Some(h)),
-            _ => (None, None),
-        },
-        None => (num(spec), None),
-    };
-    Some((target, w, h))
+    let size = embed_size(alias);
+    Some((target.to_string(), size.map(|s| s.width), size.and_then(|s| s.height)))
 }
 
 /// Every embed in a line, in order — `![[…]]` and `![…](…)` anywhere in
@@ -63,11 +58,8 @@ pub fn inline_embeds(text: &str) -> Vec<(String, Option<u32>, Option<u32>)> {
     out
 }
 
-/// Whether an embed alias is Obsidian's size form (`300`, `300x200`).
+/// Whether an embed's whole alias is Obsidian's size form (`300`, `300x200`) rather than a
+/// caption (or a caption and a size).
 pub(super) fn embed_size_spec(alias: &str) -> bool {
-    let num = |v: &str| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit());
-    match alias.trim().split_once('x') {
-        Some((w, h)) => num(w.trim()) && num(h.trim()),
-        None => num(alias.trim()),
-    }
+    !alias.contains('|') && embed_size(alias).is_some()
 }

@@ -10,6 +10,16 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-12
 
+- **Markdown without the notes domain.** The `markdown` feature turns on cce-core's `markdown`
+  (the reading view's parser and the frontmatter properties, moved there from cce-vault)
+  instead of depending on cce-vault, so the toolkit no longer pulls the notes crate in
+  (architecture RFC phase 3, extraction). The DocEditor's live preview reads tags, link
+  targets, URLs, percent-escapes and embed sizes by cce-core's leaf rules, the reading view's
+  and the vault index's: it used to keep a trailing `/` in a tag, keep an untrimmed or empty
+  `#subpath`, decode only `%20`, treat only `://` and `mailto:` as leaving the vault and accept
+  a size of 0. Its line-role frontmatter classifier stays its own — it styles lines being
+  edited rather than reading values. Checked: lib tests with every feature (672), the new
+  `links_tags_and_sizes_read_as_the_reading_view_does`, clippy, the wasm build.
 - **3D is a feature.** The scene pass, lit meshes and the path tracer — `draw::{scene, lit,
   rt}`, `vk::{scene, rt}`, `web::{scene, rt}`, their seven shaders, `Stage3D`,
   `Application::init_3d` / `stage_3d` and glam — are behind `3d` (architecture RFC phase 3,

@@ -109,7 +109,7 @@ a build failure; `precompiled_spirv_matches_runtime_compile` is the test).
 Wayland protocol bindings (`protocol/*.xml`) are generated inline by `wayland-scanner` macros in
 `src/protocol.rs`.
 
-**Features**: `markdown` (`widget::markdown`, brings in cce-vault), `doc_editor`
+**Features**: `markdown` (`widget::markdown`, on cce-core's `markdown` reading view), `doc_editor`
 (`widget::doc_editor`), `a11y` (AT-SPI publishing; see "Accessibility" below), `file_dialog`
 (`file_dialog::pick_file` / `save_file` through rfd, which brings ashpd's D-Bus stack: 119 of
 the 313 crates a client builds with it on), `graph` (`widget::Graph`, the node-graph editor, and

@@ -16,7 +16,7 @@ impl<'a> Layouter<'a> {
         let boxes: Vec<Option<(f32, f32)>> = spans.iter().map(|s| self.inline_image(s, w)).collect();
         // One with no image yet (loading, missing) shows as its link — by
         // file name when its alias is only a size (`|300`), not "300".
-        let sized_link = |s: &Span| matches!(&s.link, Some(SpanLink::Embed { .. })) && cce_vault::markdown::embed_size(&s.text).is_some();
+        let sized_link = |s: &Span| matches!(&s.link, Some(SpanLink::Embed { .. })) && cce_core::markdown::embed_size(&s.text).is_some();
         let owned: Vec<Span>;
         let spans: &[Span] = if boxes.iter().any(Option::is_some) || spans.iter().any(sized_link) {
             owned = spans
@@ -121,7 +121,7 @@ impl<'a> Layouter<'a> {
     pub(super) fn inline_image(&self, span: &Span, w: f32) -> Option<(f32, f32)> {
         let Some(SpanLink::Embed { target, .. }) = &span.link else { return None };
         let img = (self.image)(target)?;
-        let want = cce_vault::markdown::embed_size(&span.text);
+        let want = cce_core::markdown::embed_size(&span.text);
         Some(img.fit(want.map(|s| s.width), want.and_then(|s| s.height), w))
     }
 
