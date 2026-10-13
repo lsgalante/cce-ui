@@ -51,11 +51,12 @@ pub use spacing::*;
 /// defaults lines up; a per-control key is the deliberate exception.
 pub const DEFAULT_CONTROL_HEIGHT: f32 = 24.0;
 
-/// The one gap between controls — one control height — in BOTH axes: what every
-/// layout strategy's `Default` puts between children's blocks (a detached label
-/// and the control below it, see `WidgetHost::label_strip`) and around them, and
-/// what the legacy row builders advance by. One number, one module, so the space
-/// beside a control and the space below it read the same.
+/// The one gap between controls — one control height — in BOTH axes: the default
+/// of [`control_gap`], which the box model's `controls_column` / `controls_row`
+/// put between children's blocks (a detached label and the control below it, see
+/// `WidgetHost::label_strip`), and what the legacy row builders advance by. One
+/// number, one module, so the space beside a control and the space below it read
+/// the same.
 pub const CONTROL_GAP: f32 = DEFAULT_CONTROL_HEIGHT;
 
 /// The one inset from a control's edge to its text: the field text of a TextBox,

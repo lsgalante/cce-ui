@@ -1,4 +1,3 @@
-use crate::widget::WidgetHost;
 
 #[test]
 fn unit_slots_resolve_through_the_metric_at_read_time() {
@@ -100,32 +99,6 @@ fn a_widget_glyph_reaches_a_flat_host() {
     let mut dd = crate::widget::Dropdown::new(vec!["One".to_string(), "Two".to_string()], 0);
     render_widget(&mut pc, &mut dd, 10.0, 10.0, 160.0, 24.0, &mut ctx);
     assert!(pc.0.iter().any(|n| n == "chevron-down"), "the arrow reached the host: {:?}", pc.0);
-}
-
-
-
-
-
-
-struct MockWidget {
-    base: crate::widget::Widget,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-}
-
-impl WidgetHost for MockWidget {
-    crate::impl_widget_base!(MockWidget);
-    fn rect(&self) -> (f32, f32, f32, f32) {
-        (self.x, self.y, self.w, self.h)
-    }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.x = x;
-        self.y = y;
-        self.w = w;
-        self.h = h;
-    }
 }
 
 #[test]
@@ -416,73 +389,6 @@ fn graph_style_getters_resolve_their_own_registry_keys() {
     for (name, c) in rgba {
         assert!(c.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)), "{name}: {c:?}");
     }
-}
-
-#[test]
-fn test_mosaic_layout() {
-    use crate::widget::MosaicLayout;
-    use crate::widget::ContainerLayout;
-    
-    let layout = MosaicLayout {
-        gap: 10.0,
-        padding_x: 5.0,
-        padding_y: 5.0,
-    };
-
-    let mut dummy = crate::context::UiContext::new();
-    let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
-    let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 100.0, h: 80.0 };
-    let mut w3 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 80.0, h: 40.0 };
-    
-    let children = vec![
-        &mut w1 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
-        &mut w2 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
-        &mut w3 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
-    ];
-
-    let _ = layout.layout(10.0, 20.0, 250.0, 500.0, &children, &mut dummy);
-
-    assert_eq!(w1.x, 15.0);
-    assert_eq!(w1.y, 25.0);
-    assert_eq!(w2.x, 15.0);
-    assert_eq!(w2.y, 85.0);
-    assert_eq!(w3.x, 125.0);
-    assert_eq!(w3.y, 25.0);
-}
-
-#[test]
-fn test_reverse_mosaic_layout() {
-    use crate::widget::ReverseMosaicLayout;
-    use crate::widget::ContainerLayout;
-    
-    let layout = ReverseMosaicLayout {
-        gap: 10.0,
-        padding_x: 5.0,
-        padding_y: 5.0,
-    };
-
-    let mut dummy = crate::context::UiContext::new();
-    let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
-    let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 100.0, h: 80.0 };
-    let mut w3 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 80.0, h: 40.0 };
-    
-    let children = vec![
-        &mut w1 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
-        &mut w2 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
-        &mut w3 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
-    ];
-
-    let _ = layout.layout(10.0, 20.0, 250.0, 300.0, &children, &mut dummy);
-
-    assert_eq!(w1.x, 15.0);
-    assert_eq!(w1.y, 25.0);
-    assert!((w1.w - 126.315).abs() < 0.01);
-    assert!((w1.h - 103.57).abs() < 0.01);
-
-    assert!((w3.x - 153.947).abs() < 0.01);
-    assert_eq!(w3.y, 25.0);
-    assert!((w3.w - 101.05).abs() < 0.01);
-    assert!((w3.h - 82.857).abs() < 0.01);
 }
 
 /// The LUT is checked on `ramp_profile_lut`, the pure half of

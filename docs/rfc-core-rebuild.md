@@ -336,6 +336,11 @@ Constraint respected: **each crate still builds standalone** — the new core is
     CONTENT is still immediate-mode `SectionContext` — porting each page's content to box
     trees is not done. Every settings page, cce-files (relief on and off, save mode) and the
     gallery drew identically to the pixel before and after, live readings aside.
+  - **`ContainerLayout` and its 7 strategies: DELETED 2026-10-13.** The gallery was the one
+    user; it arranges its exhibits with its own pure functions (`cce-gallery/src/arrange.rs`,
+    which carries the Mosaic and Reverse Mosaic golden numbers), landing each through
+    `UiContext::lend`. The trait's raw child-pointer walks (13 `unsafe` blocks, 581 lines) went
+    with it.
 - **Phase 3 — Paint unification.** Introduce `DisplayList` + `PaintCtx` (clip/transform);
   route the backend `render()` through the arena walk; retire the top-level `widgets` Vec and
   `render_widget`/`SectionContext`.

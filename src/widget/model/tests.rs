@@ -68,7 +68,7 @@ fn rect_of(w: &dyn WidgetHost) -> Rect {
 
 /// One rhythm for labeled controls: the preferred height is the CONTENT height
 /// for every kind (ProgressBar, Slider, Spinbox, Dropdown), and `layout` places that
-/// content at the origin with the label strip hanging above it — so a strategy
+/// content at the origin with the label strip hanging above it — so a layout
 /// placing content boxes lines mixed controls up by content, neither squashes a
 /// track to the label's leftovers nor lets a label spill into the gap below.
 #[test]

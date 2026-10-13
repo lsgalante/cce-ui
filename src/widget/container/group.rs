@@ -110,7 +110,7 @@ impl Group {
     /// The vertical room this lasso takes ABOVE its members' hull: the padding
     /// and the title tab. A lasso is laid out by its members, so a host that
     /// places them in rows leaves this much between the row before and the
-    /// first member — the row a strategy would reserve for the title were the
+    /// first member — the row a layout would reserve for the title were the
     /// group its child — or the tab lands on that row.
     pub fn headroom(&self) -> f32 {
         self.padding + self.tab_height()

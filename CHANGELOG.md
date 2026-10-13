@@ -8,6 +8,21 @@ and `docs/rfc-material.md`, and in `git log`.
 When you change behaviour: update the reference to the new state, and add an entry here under
 today's date — what changed, why, and how it was checked.
 
+## 2026-10-13
+
+- **`ContainerLayout` and its seven strategies are gone.** `widget::ContainerLayout`,
+  `OverlayLayout`, `VerticalLayout`, `GridLayout`, `AdaptiveGridLayout`, `ColumnsLayout`,
+  `MosaicLayout` and `ReverseMosaicLayout` (`widget/container/container_layout.rs`: 581 lines, 13
+  `unsafe` blocks walking raw child pointers, and a `measure` half nothing called) had one user,
+  cce-gallery, which now arranges its exhibits with pure functions of its own
+  (`cce-gallery/src/arrange.rs`) and lands each one through `UiContext::lend`. The golden numbers
+  of `test_mosaic_layout` and `test_reverse_mosaic_layout` moved there with them, so those two
+  tests and their `MockWidget` go too. The doc comments that described layout as "a strategy"
+  (`WidgetHost::label_strip`, `preferred_height`, `CONTROL_GAP`, `control_gap`) now name the
+  host's layout and the box model's `controls_column` / `controls_row`. Checked: lib tests with
+  every feature (699), every integration test, clippy with every feature and target, the wasm
+  build with and without features (warnings denied), and `cargo check --workspace --all-targets`.
+
 ## 2026-10-12
 
 - **The layering gate is closed: no module names a layer above its own.** `tests/layering.rs`'s

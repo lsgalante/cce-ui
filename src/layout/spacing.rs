@@ -224,10 +224,9 @@ pub fn plate_gap() -> f32 {
 }
 
 /// Gap between controls, in logical px (`style.control.gap`) — the control
-/// rung of the ladder: what the layout strategies put between a form's
-/// controls (and between a detached label's block and the next), in both
-/// axes. Unset, it is [`CONTROL_GAP`], one control height, the value every
-/// strategy's `Default` carried as a literal.
+/// rung of the ladder: what a form's layout puts between its controls (and
+/// between a detached label's block and the next), in both axes. Unset, it is
+/// [`CONTROL_GAP`], one control height.
 pub fn control_gap() -> f32 {
     registry_float("control_gap").unwrap_or(CONTROL_GAP)
 }

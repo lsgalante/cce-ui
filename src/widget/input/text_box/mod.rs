@@ -394,7 +394,7 @@ impl Adapted<TextBox> {
 impl Layout for TextBox {
 
     /// One row for a single-line box; a multiline box has no natural height of its own —
-    /// the host sizes it, and a layout strategy leaves its assigned rect alone.
+    /// the host sizes it, and a host's layout leaves its assigned rect alone.
     fn intrinsic_size(&self) -> Option<Size> {
         if self.multiline {
             return None;

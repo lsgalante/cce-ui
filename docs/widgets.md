@@ -367,5 +367,6 @@ the host implements it. `a_widget_glyph_reaches_a_flat_host` and
   `space`, `draw`, `fill`), placed by `SectionContext::place` in declaration order with the
   ladder's spacing. `lay_row(rect, &[Cell])` lays one list row's cells `list_gap()` apart.
   cce-system-interface is the user.
-- **Container layouts** (`widget::ContainerLayout`) are a trait of `layout` and `measure`; new
-  layout uses `scene::layout`.
+- **Laying out a set of widgets** is the box model, `scene::layout` (measure → arrange), or a
+  `Form` on it (above). A widget's block is its content plus its label strip
+  (`WidgetHost::label_strip`).

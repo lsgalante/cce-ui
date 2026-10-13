@@ -21,9 +21,9 @@ pub trait WidgetHost {
     /// unlabeled widgets and for those whose base label IS their content
     /// ([`Layout::inline_label`]). A widget's rect is always its content plus this
     /// strip — `set_rect` takes that block, `layout` lands the content at the origin
-    /// and hangs the strip above it. A strategy reserves that
-    /// row above every child's content (`container_layout::label_lead`) and puts
-    /// `layout::CONTROL_GAP` between the blocks.
+    /// and hangs the strip above it. A host placing labelled widgets in rows or
+    /// columns reserves that row above each child's content and puts
+    /// `layout::control_gap()` between the blocks.
     fn label_strip(&self) -> f32 { self.base().label_offset() }
 
     /// Where the detached label is drawn: the strip above the content, as wide as the
@@ -371,7 +371,7 @@ pub trait WidgetHostExt: WidgetHost {
     }
 
     /// The widget's natural CONTENT height — the control below its detached label, if
-    /// any. What a layout strategy allots; [`WidgetHost::layout`] places that content
+    /// any. What a host's layout allots; [`WidgetHost::layout`] places that content
     /// box at the origin it is given and hangs the label ([`WidgetHost::label_strip`])
     /// above it. `None` when the widget has no natural height.
     fn preferred_height(&self) -> Option<f32> {
