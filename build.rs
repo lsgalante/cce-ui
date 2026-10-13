@@ -15,11 +15,15 @@
 
 use std::path::Path;
 
-const SHADERS: [&str; 5] = ["shader2d", "glyph", "scene3d", "scene3d_image", "scene3d_lit"];
+const SHADERS: [&str; 2] = ["shader2d", "glyph"];
+/// The scene pass's, built only with the `3d` feature (the renderer's `scene3d_spirv` and
+/// friends are gated with it).
+const SHADERS_3D: [&str; 3] = ["scene3d", "scene3d_image", "scene3d_lit"];
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
-    for name in SHADERS {
+    let with_3d = std::env::var_os("CARGO_FEATURE_3D").is_some();
+    for name in SHADERS.iter().chain(if with_3d { &SHADERS_3D[..] } else { &[] }) {
         let src_path = format!("src/draw/{name}.wgsl");
         println!("cargo:rerun-if-changed={src_path}");
         let source = std::fs::read_to_string(&src_path)

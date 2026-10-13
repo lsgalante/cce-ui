@@ -119,6 +119,65 @@ pub(crate) fn clear_image_levels_to_shader_read(
 }
 
 /// The wgpu-convention viewport: Y flipped via negative height (Vulkan >= 1.1).
+/// The scene backdrop: a colour image at `extent` the 3D pass renders into (a colour
+/// attachment), the 2D shader samples (binding 0), and the frame copies to and from. Left
+/// UNDEFINED; the caller clears it to shader-read. Made by `vk::scene`'s stage either way —
+/// the 3D one at the surface size once a scene is staged, the backdrop-only one without the
+/// `3d` feature at 1×1.
+pub(crate) fn create_backdrop_image(
+    device: &ash::Device,
+    allocator: &mut Allocator,
+    format: vk::Format,
+    extent: vk::Extent2D,
+) -> (vk::Image, vk::ImageView, Allocation) {
+    unsafe {
+        let image = device
+            .create_image(
+                &vk::ImageCreateInfo::default()
+                    .image_type(vk::ImageType::TYPE_2D)
+                    .format(format)
+                    .extent(vk::Extent3D { width: extent.width, height: extent.height, depth: 1 })
+                    .mip_levels(1)
+                    .array_layers(1)
+                    .samples(vk::SampleCountFlags::TYPE_1)
+                    .tiling(vk::ImageTiling::OPTIMAL)
+                    .usage(
+                        vk::ImageUsageFlags::COLOR_ATTACHMENT
+                            | vk::ImageUsageFlags::SAMPLED
+                            | vk::ImageUsageFlags::TRANSFER_SRC
+                            | vk::ImageUsageFlags::TRANSFER_DST,
+                    )
+                    .initial_layout(vk::ImageLayout::UNDEFINED),
+                None,
+            )
+            .expect("Failed to create backdrop image");
+        let requirements = device.get_image_memory_requirements(image);
+        let allocation = allocator
+            .allocate(&AllocationCreateDesc {
+                name: "backdrop",
+                requirements,
+                location: MemoryLocation::GpuOnly,
+                linear: false,
+                allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+            })
+            .expect("Failed to allocate backdrop memory");
+        device
+            .bind_image_memory(image, allocation.memory(), allocation.offset())
+            .expect("Failed to bind backdrop memory");
+        let view = device
+            .create_image_view(
+                &vk::ImageViewCreateInfo::default()
+                    .image(image)
+                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .format(format)
+                    .subresource_range(COLOR_RANGE),
+                None,
+            )
+            .expect("Failed to create backdrop view");
+        (image, view, allocation)
+    }
+}
+
 pub(crate) fn flipped_viewport(extent: vk::Extent2D) -> vk::Viewport {
     vk::Viewport {
         x: 0.0,

@@ -42,9 +42,14 @@ mod compute;
 mod core;
 pub mod image;
 mod renderer;
+#[cfg(feature = "3d")]
 mod rt;
 #[cfg(test)]
 mod plate_probe;
+#[cfg(feature = "3d")]
+mod scene;
+#[cfg(not(feature = "3d"))]
+#[path = "scene_off.rs"]
 mod scene;
 mod text;
 
@@ -56,7 +61,9 @@ pub use image::{
 };
 pub use renderer::{Batch2D, Frame2D, PlatePush, VkRenderer, MAX_PLATE_FEATURES};
 pub(crate) use renderer::present_debug;
+#[cfg(feature = "3d")]
 pub use rt::{PreparedRtScene, RtCamera, RtEnvironment, RtImage, RtImagePixels, RtMaterial, RtOffscreen, RtTriangle};
+#[cfg(feature = "3d")]
 pub use scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
 pub use text::TextSpan;
 
@@ -69,6 +76,7 @@ pub use text::TextSpan;
 pub fn prewarm() {
     renderer::shader2d_spirv();
     renderer::glyph_spirv();
+    #[cfg(feature = "3d")]
     renderer::scene3d_spirv();
     drop(VkCore::new_headless());
 }

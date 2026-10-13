@@ -10,6 +10,7 @@ impl VkRenderer {
     pub(super) unsafe fn record_backdrop(&mut self, cmd: vk::CommandBuffer, frame_index: usize, image_index: u32) -> bool {
         // Offscreen 3D pass (only when a scene was staged); leaves the
         // backdrop in TRANSFER_SRC.
+        #[cfg_attr(not(feature = "3d"), allow(unused_mut))]
         let mut scene_recorded =
             self.scene.record(&self.core.device, cmd, frame_index, &self.image);
 
@@ -17,6 +18,7 @@ impl VkRenderer {
         // accumulation dispatch, blitted into the backdrop's pane region —
         // it fills the same slot as the raster scene pass and leaves the
         // backdrop in TRANSFER_SRC likewise.
+        #[cfg(feature = "3d")]
         if let Some(rt) = self.rt.as_mut() {
             let rt_recorded = rt.record(
                 &self.core.device,

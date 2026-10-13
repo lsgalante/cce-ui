@@ -409,8 +409,11 @@ impl VkRenderer {
             text,
             scene,
             image,
+            #[cfg(feature = "3d")]
             rt: None,
+            #[cfg(feature = "3d")]
             rt_background: None,
+            #[cfg(feature = "3d")]
             rt_environment: RtEnvironment::default(),
             desired_extent: vk::Extent2D { width: width.max(1), height: height.max(1) },
             corner_radius_px,

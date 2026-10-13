@@ -35,6 +35,7 @@ mod present;
 mod record;
 mod shaders;
 mod snapshot;
+#[cfg(feature = "3d")]
 mod stage3d;
 mod surface;
 
@@ -60,8 +61,11 @@ use super::core::SurfaceLost;
 use super::image::ImageStage;
 pub use crate::draw::{Batch2D, Frame2D, PlatePush, MAX_PLATE_FEATURES};
 pub(crate) use crate::draw::{batch_push_constants, PUSH_CONSTANT_FLOATS};
+#[cfg(feature = "3d")]
 use super::rt::{PreparedRtScene, RtCamera, RtEnvironment, RtImage, RtImageSource, RtMaterial, RtStage, RtTriangle};
-use super::scene::{MeshId, SceneDraw, SceneImage, SceneStage, Vertex3D};
+use super::scene::SceneStage;
+#[cfg(feature = "3d")]
+use super::scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
 use super::text::{TextSpan, TextStage};
 pub(crate) use crate::draw::PLATE_FEATURE_BYTES;
 pub(crate) use crate::draw::relief_px_at;
@@ -181,10 +185,13 @@ pub struct VkRenderer {
     image: ImageStage,
     /// Built lazily on the first `set_rt_scene`, so ordinary UI apps never
     /// compile the path-tracer pipeline.
+    #[cfg(feature = "3d")]
     rt: Option<RtStage>,
     /// See [`VkRenderer::set_rt_background`].
+    #[cfg(feature = "3d")]
     rt_background: Option<[f32; 3]>,
     /// See [`VkRenderer::set_rt_environment`].
+    #[cfg(feature = "3d")]
     rt_environment: RtEnvironment,
 
     desired_extent: vk::Extent2D,
@@ -240,6 +247,7 @@ impl Drop for VkRenderer {
             if let Some(allocator) = self.core.allocator.as_mut() {
                 self.scene.destroy(&self.core.device, allocator);
                 self.image.destroy(&self.core.device, allocator);
+                #[cfg(feature = "3d")]
                 if let Some(mut rt) = self.rt.take() {
                     rt.destroy(&self.core.device, allocator);
                 }
@@ -318,11 +326,13 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "3d")]
     fn scene3d_compiles() {
         assert!(!super::scene3d_spirv().is_empty());
     }
 
     #[test]
+    #[cfg(feature = "3d")]
     fn scene3d_image_compiles() {
         assert!(!super::scene3d_image_spirv().is_empty());
     }
@@ -341,13 +351,17 @@ mod tests {
     /// longer what this crate means by the shader; compare word for word.
     #[test]
     fn precompiled_spirv_matches_runtime_compile() {
-        let cases: [(&str, &str, fn() -> &'static [u32]); 5] = [
+        #[allow(unused_mut)]
+        let mut cases: Vec<(&str, &str, fn() -> &'static [u32])> = vec![
             ("shader2d", crate::draw::shaders::SHADER2D, super::shader2d_spirv),
             ("glyph", crate::draw::shaders::GLYPH, super::glyph_spirv),
-            ("scene3d", crate::draw::shaders::SCENE3D, super::scene3d_spirv),
+        ];
+        #[cfg(feature = "3d")]
+        cases.extend([
+            ("scene3d", crate::draw::shaders::SCENE3D, super::scene3d_spirv as fn() -> &'static [u32]),
             ("scene3d_image", crate::draw::shaders::SCENE3D_IMAGE, super::scene3d_image_spirv),
             ("scene3d_lit", crate::draw::shaders::SCENE3D_LIT, super::scene3d_lit_spirv),
-        ];
+        ]);
         for (name, source, precompiled) in cases {
             assert!(
                 super::compile_wgsl(source) == precompiled(),

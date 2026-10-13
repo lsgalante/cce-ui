@@ -69,58 +69,8 @@ impl SceneStage {
         self.extent = extent;
         self.backdrop_valid = false;
         unsafe {
-            let backdrop_image = device
-                .create_image(
-                    &vk::ImageCreateInfo::default()
-                        .image_type(vk::ImageType::TYPE_2D)
-                        .format(self.format)
-                        .extent(vk::Extent3D {
-                            width: extent.width,
-                            height: extent.height,
-                            depth: 1,
-                        })
-                        .mip_levels(1)
-                        .array_layers(1)
-                        .samples(vk::SampleCountFlags::TYPE_1)
-                        .tiling(vk::ImageTiling::OPTIMAL)
-                        .usage(
-                            vk::ImageUsageFlags::COLOR_ATTACHMENT
-                                | vk::ImageUsageFlags::SAMPLED
-                                | vk::ImageUsageFlags::TRANSFER_SRC
-                                | vk::ImageUsageFlags::TRANSFER_DST,
-                        )
-                        .initial_layout(vk::ImageLayout::UNDEFINED),
-                    None,
-                )
-                .expect("Failed to create backdrop image");
-            let requirements = device.get_image_memory_requirements(backdrop_image);
-            let allocation = allocator
-                .allocate(&AllocationCreateDesc {
-                    name: "backdrop",
-                    requirements,
-                    location: MemoryLocation::GpuOnly,
-                    linear: false,
-                    allocation_scheme: AllocationScheme::GpuAllocatorManaged,
-                })
-                .expect("Failed to allocate backdrop memory");
-            device
-                .bind_image_memory(backdrop_image, allocation.memory(), allocation.offset())
-                .expect("Failed to bind backdrop memory");
-            let backdrop_view = device
-                .create_image_view(
-                    &vk::ImageViewCreateInfo::default()
-                        .image(backdrop_image)
-                        .view_type(vk::ImageViewType::TYPE_2D)
-                        .format(self.format)
-                        .subresource_range(
-                            vk::ImageSubresourceRange::default()
-                                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                .level_count(1)
-                                .layer_count(1),
-                        ),
-                    None,
-                )
-                .expect("Failed to create backdrop view");
+            let (backdrop_image, backdrop_view, allocation) =
+                create_backdrop_image(device, allocator, self.format, extent);
             self.backdrop_image = backdrop_image;
             self.backdrop_view = backdrop_view;
             self.backdrop_allocation = Some(allocation);

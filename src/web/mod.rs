@@ -11,7 +11,9 @@
 
 mod compute;
 mod renderer;
+#[cfg(feature = "3d")]
 mod rt;
+#[cfg(feature = "3d")]
 mod scene;
 mod shell;
 

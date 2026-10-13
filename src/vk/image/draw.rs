@@ -36,6 +36,7 @@ impl ImageStage {
 
     /// The descriptor set an uploaded image is drawn with, or None while its
     /// upload has not landed (or after it was freed).
+    #[cfg(feature = "3d")]
     pub(crate) fn descriptor_set(&self, image_id: u32) -> Option<vk::DescriptorSet> {
         self.images.get(&image_id).map(|gpu| gpu.descriptor_set)
     }
@@ -43,6 +44,7 @@ impl ImageStage {
     /// An uploaded image's view and size, for a pass that samples it under
     /// bindings of its own (the path tracer). None while its upload has not
     /// landed.
+    #[cfg(feature = "3d")]
     pub(crate) fn view_and_size(&self, image_id: u32) -> Option<(vk::ImageView, u32, u32)> {
         self.images.get(&image_id).map(|gpu| (gpu.view, gpu.width, gpu.height))
     }

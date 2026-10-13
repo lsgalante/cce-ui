@@ -56,6 +56,7 @@ pub struct VkCore {
     /// The VK_KHR_acceleration_structure device loader — present exactly when
     /// the ray-query stack (accel structs + ray_query + BDA) was enabled at
     /// device creation. Its presence IS the tier-2 capability signal.
+    #[cfg_attr(not(feature = "3d"), allow(dead_code))]
     pub(crate) accel_loader: Option<ash::khr::acceleration_structure::Device>,
     pub(crate) device: ash::Device,
     pub(crate) physical_device: vk::PhysicalDevice,
@@ -63,6 +64,7 @@ pub struct VkCore {
     pub(crate) instance: ash::Instance,
     pub(crate) min_uniform_align: vk::DeviceSize,
     /// minAccelerationStructureScratchOffsetAlignment; 1 when no ray-query stack.
+    #[cfg_attr(not(feature = "3d"), allow(dead_code))]
     pub(crate) as_scratch_align: vk::DeviceSize,
     /// Widest rasterizable line (device lineWidthRange cap); 1.0 when the
     /// wideLines feature is absent or disabled.
@@ -292,7 +294,8 @@ impl VkCore {
         // The ray-query stack (the RT engine's tier 2): needs the three
         // extensions plus the BDA / accel-structure / ray-query features and
         // an API >= 1.2 device (SPIR-V 1.4 shaders). Enabled whenever the
-        // device offers it; consumers check `accel_loader`.
+        // device offers it and the `3d` feature (the path tracer, its only
+        // user) is on; consumers check `accel_loader`.
         let ext_props = instance
             .enumerate_device_extension_properties(physical_device)
             .unwrap_or_default();
@@ -305,7 +308,8 @@ impl VkCore {
             .get_physical_device_properties(physical_device)
             .api_version
             .min(api_version);
-        let mut ray_query = device_api >= vk::API_VERSION_1_2
+        let mut ray_query = cfg!(feature = "3d")
+            && device_api >= vk::API_VERSION_1_2
             && has_ext(ash::khr::acceleration_structure::NAME)
             && has_ext(ash::khr::ray_query::NAME)
             && has_ext(ash::khr::deferred_host_operations::NAME);

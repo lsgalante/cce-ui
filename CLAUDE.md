@@ -114,7 +114,9 @@ Wayland protocol bindings (`protocol/*.xml`) are generated inline by `wayland-sc
 (`file_dialog::pick_file` / `save_file` through rfd, which brings ashpd's D-Bus stack: 119 of
 the 313 crates a client builds with it on), `graph` (`widget::Graph`, the node-graph editor, and
 `GraphController`; no extra dependencies — the grid lattice in `layout::graph` / `color::graph`
-stays in the core).
+stays in the core), `3d` (the 3D scene pass, lit meshes and the path tracer on both
+renderers, `Stage3D`, `init_3d` / `stage_3d`, and glam; without it a renderer keeps only the 1×1
+backdrop the 2D frost samples — `vk/scene_off.rs`).
 
 ## Verify on screen, not just in tests
 
@@ -164,9 +166,9 @@ Every client implements `Application` (`src/backend/app.rs`, re-exported from `e
 - **Undo/redo**: the runner routes the `undo`/`redo` chords (input.kdl; `ctrl+z` /
   `ctrl+shift+z`) to the focused widget first, then the app's `undo` / `redo` hooks, and only
   then to `handle_key_input`. Apps keep document history on `history::History<T>`.
-- **3D**: `init_3d(stage)` / `stage_3d(stage, size, scale)` through `&mut dyn Stage3D` — portable.
-  The native `renderer_init` / `stage_renderer` take the `VkRenderer` and forward to them by
-  default.
+- **3D** (the `3d` feature): `init_3d(stage)` / `stage_3d(stage, size, scale)` through
+  `&mut dyn Stage3D` — portable. The native `renderer_init` / `stage_renderer` take the
+  `VkRenderer` and forward to them by default (without the feature they do nothing).
 - **Behaviour hooks** (all defaulted): `standard_csd`, `csd_resize_borders`, `csd_titlebar_move`,
   `plate_navigation` (Tab walk, default on), `outlives_compositor`, `wants_surface`,
   `idle_poll_interval`, `load_system_fonts`, `is_movable_root_plate_at`, `take_window_action`,

@@ -11,6 +11,7 @@ use crate::vk::VkRenderer;
 use super::window_runner::EngineState;
 use cursor_icon::CursorIcon;
 use super::tessellate::Vertex;
+#[cfg(feature = "3d")]
 pub use crate::draw::scene::Stage3D;
 
 #[derive(Debug, Clone)]
@@ -533,7 +534,10 @@ pub trait Application: Sized + 'static {
     /// so an app written against that runs here unchanged.
     #[cfg(not(target_arch = "wasm32"))]
     fn renderer_init(&mut self, renderer: &mut VkRenderer) {
+        #[cfg(feature = "3d")]
         self.init_3d(renderer);
+        #[cfg(not(feature = "3d"))]
+        let _ = renderer;
     }
 
     /// Direct renderer staging, called every frame after the engine's own text
@@ -547,20 +551,31 @@ pub trait Application: Sized + 'static {
     /// [`stage_3d`](Self::stage_3d).
     #[cfg(not(target_arch = "wasm32"))]
     fn stage_renderer(&mut self, renderer: &mut VkRenderer, size: LogicalSize, scale: f64) -> bool {
-        self.stage_3d(renderer, size, scale)
+        #[cfg(feature = "3d")]
+        {
+            self.stage_3d(renderer, size, scale)
+        }
+        #[cfg(not(feature = "3d"))]
+        {
+            let _ = (renderer, size, scale);
+            false
+        }
     }
 
     /// The portable [`renderer_init`](Self::renderer_init): once per
     /// renderer, before its first frame, through [`Stage3D`] — the 3D half
     /// every renderer has, the Vulkan one natively and the WebGPU one in a
     /// browser. Make the app's meshes here. Called by the browser shell, and
-    /// natively by `renderer_init`'s default.
+    /// natively by `renderer_init`'s default. With the `3d` feature.
+    #[cfg(feature = "3d")]
     fn init_3d(&mut self, _stage: &mut dyn Stage3D) {}
 
     /// The portable [`stage_renderer`](Self::stage_renderer): every frame,
     /// just before it is drawn, stage the scene through [`Stage3D`]. `size`
     /// is the window's logical size and `scale` its pixel ratio; a scissor is
-    /// physical px. Return `true` to ask for another frame at once.
+    /// physical px. Return `true` to ask for another frame at once. With the
+    /// `3d` feature.
+    #[cfg(feature = "3d")]
     fn stage_3d(&mut self, _stage: &mut dyn Stage3D, _size: LogicalSize, _scale: f64) -> bool {
         false
     }

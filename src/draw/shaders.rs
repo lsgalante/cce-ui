@@ -15,23 +15,31 @@ pub const SHADER2D: &str = include_str!("shader2d.wgsl");
 pub const GLYPH: &str = include_str!("glyph.wgsl");
 
 /// The 3D scene pass's meshes ([`super::scene`]).
+#[cfg(feature = "3d")]
 pub const SCENE3D: &str = include_str!("scene3d.wgsl");
 
 /// The 3D scene pass's images: textured quads under the meshes' uniforms.
+#[cfg(feature = "3d")]
 pub const SCENE3D_IMAGE: &str = include_str!("scene3d_image.wgsl");
 
 /// The lit, textured mesh path of the scene pass (`draw::lit`).
+#[cfg(feature = "3d")]
 pub const SCENE3D_LIT: &str = include_str!("scene3d_lit.wgsl");
 
 /// The path tracer ([`super::rt`]): its shared core, then one trace tier
 /// after it — the compute BVH traversal, or (Vulkan only) hardware ray
 /// queries — and the à-trous denoiser that runs over its output.
+#[cfg(feature = "3d")]
 pub const RT_COMMON: &str = include_str!("rt_common.wgsl");
+#[cfg(feature = "3d")]
 pub const RT_BVH: &str = include_str!("rt_bvh.wgsl");
+#[cfg(feature = "3d")]
 pub const RT_QUERY: &str = include_str!("rt_query.wgsl");
+#[cfg(feature = "3d")]
 pub const RT_DENOISE: &str = include_str!("rt_denoise.wgsl");
 
 /// The compute tier's tracer: [`RT_COMMON`] with [`RT_BVH`] after it.
+#[cfg(feature = "3d")]
 pub fn rt_bvh_source() -> String {
     format!("{RT_COMMON}\n{RT_BVH}")
 }

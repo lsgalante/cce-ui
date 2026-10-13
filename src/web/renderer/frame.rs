@@ -101,24 +101,8 @@ impl WebRenderer {
         self.process_images()?;
         let target = self.context.get_current_texture()?;
         let (w, h) = (target.width(), target.height());
-        // The scene's backdrop follows the canvas; a resized one holds no
-        // scene until the next is drawn into it, as on Vulkan.
-        let rt_staged = self.rt.as_ref().is_some_and(|rt| rt.staged());
-        if self.scene.has_staged() || rt_staged || self.scene.target.is_some() {
-            let had = self.scene.target.as_ref().map(|t| (t.width, t.height));
-            self.scene.fit(&self.device, w, h)?;
-            if had != Some((w, h)) {
-                let t = self.scene.target.as_ref().expect("fit made one");
-                self.scene_group_0 = Some(Self::group_0(
-                    &self.device,
-                    &self.layout_0,
-                    &t.view,
-                    &self.backdrop_sampler,
-                    &self.window_info,
-                    &self.plate_features,
-                ));
-            }
-        }
+        #[cfg(feature = "3d")]
+        self.fit_scene(w, h)?;
         let view_desc = GpuTextureViewDescriptor::new();
         view_desc.set_format(self.view_format);
         let view = target.create_view_with_descriptor(&view_desc)?;
@@ -181,29 +165,10 @@ impl WebRenderer {
         // the backdrop is copied into the canvas and the UI pass loads it
         // (rather than clearing) and samples it for its blur plates.
         let encoder = self.device.create_command_encoder();
-        let images_for_scene = &self.images;
-        self.scene.record(&self.device, &self.queue, &encoder, &|id| images_for_scene.get(&id).map(|i| i.group.clone()))?;
-        // The traced pane, into the same backdrop after the raster scene.
-        if let (Some(rt), Some(t)) = (self.rt.as_mut(), self.scene.target.as_ref()) {
-            let image_view = |id: u32| {
-                let img = images_for_scene.get(&id)?;
-                Some((img.texture.create_view().ok()?, img.width, img.height))
-            };
-            if rt.record(&self.device, &self.queue, &encoder, &t.view, (t.width, t.height), &image_view)? {
-                self.scene.backdrop_valid = true;
-            }
-        }
-        let base_group_0 = match (&self.scene_group_0, &self.scene.target) {
-            (Some(group), Some(t)) if self.scene.backdrop_valid => {
-                encoder.copy_texture_to_texture_with_gpu_extent_3d_dict(
-                    &GpuTexelCopyTextureInfo::new(&t.backdrop),
-                    &GpuTexelCopyTextureInfo::new(&target),
-                    &extent(w, h),
-                )?;
-                Some(group.clone())
-            }
-            _ => None,
-        };
+        #[cfg(feature = "3d")]
+        let base_group_0 = self.record_scene(&encoder, &target, w, h)?;
+        #[cfg(not(feature = "3d"))]
+        let base_group_0: Option<GpuBindGroup> = None;
         let mut pass = Self::begin_pass(&encoder, &view, if base_group_0.is_some() { None } else { Some(frame.clear_color) })?;
         let base_group_0 = base_group_0.unwrap_or_else(|| self.group_0.clone());
         let clamp_scissor = |pass: &GpuRenderPassEncoder, (x, y, sw, sh): (u32, u32, u32, u32)| {

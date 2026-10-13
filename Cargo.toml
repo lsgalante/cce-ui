@@ -44,6 +44,12 @@ file_dialog = ["dep:rfd"]
 # The grid lattice and its colours (`layout::graph`, `color::graph`) stay in
 # the core, since `ContentBg` and the compositor's grid read them.
 graph = []
+# The 3D half of the renderers: the mesh scene pass (`draw::scene`, `Stage3D`),
+# lit meshes (`draw::lit`) and the path tracer (`draw::rt`), on Vulkan and
+# WebGPU, with their shaders and glam. Without it a renderer keeps only the
+# scene's 1×1 backdrop, which the 2D frost samples, and `init_3d` / `stage_3d`
+# are gone from `Application`. cce-designer and cce-model turn it on.
+3d = ["dep:glam"]
 
 [dependencies]
 # The GUI-free half: config, input, motion, units, ipc and the spec parsers,
@@ -56,7 +62,7 @@ accesskit = "0.25"
 # clock and nothing platform-bound — the picker is handed "today" by its host.
 chrono = { version = "0.4", default-features = false }
 cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "9697535b1721d00efb6e0cfc88c2349072d5f5bd", optional = true }
-glam = "0.29"
+glam = { version = "0.29", optional = true }
 bytemuck = { version = "1", features = ["derive"] }
 # WGSL parsing and validation everywhere — a compute kernel is checked, and
 # its `@workgroup_size` read, before any device sees it; native adds the
@@ -255,6 +261,12 @@ crate-type = ["cdylib"]
 [[example]]
 name = "probe3d_web"
 crate-type = ["cdylib"]
+required-features = ["3d"]
+
+# The 3D probe's native half.
+[[example]]
+name = "probe3d_native"
+required-features = ["3d"]
 
 # The compute probe's browser half (examples/compute_probe/); empty natively.
 [[example]]

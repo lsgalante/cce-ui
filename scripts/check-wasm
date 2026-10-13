@@ -17,6 +17,6 @@ if ! rustup target list --installed 2>/dev/null | grep -qx wasm32-unknown-unknow
     exit 2
 fi
 cargo check --lib --target wasm32-unknown-unknown
-cargo check --lib --target wasm32-unknown-unknown --features markdown,doc_editor,graph
-cargo check --example probe_web --example demo_web --example compute_web --example probe3d_web --target wasm32-unknown-unknown
+cargo check --lib --target wasm32-unknown-unknown --features markdown,doc_editor,graph,3d
+cargo check --example probe_web --example demo_web --example compute_web --example probe3d_web --features 3d --target wasm32-unknown-unknown
 echo "check-wasm: ok"

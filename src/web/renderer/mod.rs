@@ -32,16 +32,20 @@
 
 mod frame;
 mod gpu;
+#[cfg(feature = "3d")]
+mod scene3d;
 
 use gpu::*;
 pub(super) use gpu::{alpha_blending, shader_module, texture, whole_view};
 
 use std::collections::HashMap;
 
+#[cfg(feature = "3d")]
 use super::rt::WebRt;
+#[cfg(feature = "3d")]
 use super::scene::WebScene;
-use crate::draw::rt::{PreparedRtScene, RtCamera, RtEnvironment};
-use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Stage3D, Vertex3D};
+#[cfg(feature = "3d")]
+use crate::draw::rt::RtEnvironment;
 
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
@@ -184,12 +188,17 @@ pub struct WebRenderer {
     snapshot: Option<(GpuTexture, GpuBindGroup, u32, u32)>,
     /// The 3D scene pass, and `@group(0)` over its backdrop (rebuilt with
     /// the backdrop) — what the 2D pass binds while a scene is shown.
+    #[cfg(feature = "3d")]
     scene: WebScene,
+    #[cfg(feature = "3d")]
     scene_group_0: Option<GpuBindGroup>,
     /// The path tracer, made by the first `set_rt_scene`; the background and
     /// environment it is handed at each `stage_rt`, as on Vulkan.
+    #[cfg(feature = "3d")]
     rt: Option<WebRt>,
+    #[cfg(feature = "3d")]
     rt_background: Option<[f32; 3]>,
+    #[cfg(feature = "3d")]
     rt_environment: RtEnvironment,
     blocks: Growable,
     group_1: GpuBindGroup,
@@ -336,6 +345,7 @@ impl WebRenderer {
         )?;
         let atlas_sampler = sampler(&device, GpuFilterMode::Nearest, GpuMipmapFilterMode::Nearest);
         let atlas_group = texture_group(&device, &glyph_layout, &whole_view(&atlas_texture)?, &atlas_sampler);
+        #[cfg(feature = "3d")]
         let scene = WebScene::new(&device, view_format, &glyph_layout)?;
         let glyph_vertices = Growable::new(&device, 64 * 1024, buffer_usage::VERTEX, "glyph-vertices")?;
 
@@ -363,10 +373,15 @@ impl WebRenderer {
             backdrop_sampler,
             group_0,
             snapshot: None,
+            #[cfg(feature = "3d")]
             scene,
+            #[cfg(feature = "3d")]
             scene_group_0: None,
+            #[cfg(feature = "3d")]
             rt: None,
+            #[cfg(feature = "3d")]
             rt_background: None,
+            #[cfg(feature = "3d")]
             rt_environment: RtEnvironment::default(),
             blocks,
             group_1,
@@ -450,61 +465,5 @@ impl WebRenderer {
     pub fn take_pending_capture(&mut self) -> Option<PendingCapture> {
         let (buffer, width, height, row) = self.capture.take()?;
         Some(PendingCapture { buffer, width, height, row, bgra: matches!(self.canvas_format, GpuTextureFormat::Bgra8unorm) })
-    }
-}
-
-/// The 3D half of the renderer (see `draw::scene::Stage3D`): the scene pass
-/// in `web::scene`.
-impl Stage3D for WebRenderer {
-    fn create_mesh(&mut self, verts: &[Vertex3D]) -> MeshId {
-        self.scene.create_mesh(&self.device, &self.queue, verts)
-    }
-    fn update_mesh(&mut self, id: MeshId, verts: &[Vertex3D]) {
-        self.scene.update_mesh(&self.device, &self.queue, id, verts)
-    }
-    fn stage_scene(&mut self, scissor: (u32, u32, u32, u32), draws: Vec<SceneDraw>) {
-        self.scene.stage(scissor, draws)
-    }
-    fn stage_scene_images(&mut self, images: Vec<SceneImage>) {
-        self.scene.stage_images(images)
-    }
-    fn set_scene_light(&mut self, toward: [f32; 3]) {
-        let v = glam::Vec3::from_array(toward);
-        if v.length_squared() > 1e-12 {
-            self.scene.light = v.normalize().to_array();
-        }
-    }
-    fn set_rt_scene_prepared(&mut self, scene: &PreparedRtScene) {
-        if self.rt.is_none() {
-            match WebRt::new(&self.device, self.view_format) {
-                Ok(rt) => self.rt = Some(rt),
-                Err(e) => {
-                    web_sys::console::error_2(&"cce-ui: no path tracer:".into(), &e);
-                    return;
-                }
-            }
-        }
-        let rt = self.rt.as_mut().unwrap();
-        if let Err(e) = rt.set_scene(&self.device, &self.queue, scene) {
-            web_sys::console::error_2(&"cce-ui: the traced scene was not uploaded:".into(), &e);
-        }
-    }
-    fn set_rt_environment(&mut self, environment: RtEnvironment) {
-        self.rt_environment = environment;
-    }
-    fn set_rt_background(&mut self, color: Option<[f32; 3]>) {
-        self.rt_background = color;
-    }
-    fn stage_rt(&mut self, pane: (u32, u32, u32, u32), camera: RtCamera) {
-        if let Some(rt) = self.rt.as_mut() {
-            rt.set_background(self.rt_background);
-            rt.set_environment(self.rt_environment);
-            if let Err(e) = rt.stage(&self.device, pane, camera) {
-                web_sys::console::error_2(&"cce-ui: the traced pane was not staged:".into(), &e);
-            }
-        }
-    }
-    fn rt_accumulating(&self) -> bool {
-        self.rt.as_ref().is_some_and(|rt| rt.accumulating())
     }
 }

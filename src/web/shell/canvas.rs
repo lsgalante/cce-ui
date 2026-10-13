@@ -217,6 +217,7 @@ impl<A: Application> Shell for WebShell<A> {
         }
         // The app's 3D scene, staged last, as the Wayland shell's
         // `stage_renderer`; true asks for another frame.
+        #[cfg(feature = "3d")]
         if self.app.stage_3d(&mut self.renderer, size, self.scale) {
             self.redraw = true;
         }

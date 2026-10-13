@@ -3,10 +3,15 @@
 //! native shell's entry point and Wayland-typed items after it.
 
 pub use crate::backend::app::{
-    accessibility_tree, Application, AppSender, LogicalPosition, LogicalSize, RenderContext, Stage3D, WindowAction, WindowSettings,
+    accessibility_tree, Application, AppSender, LogicalPosition, LogicalSize, RenderContext, WindowAction, WindowSettings,
 };
+#[cfg(feature = "3d")]
+pub use crate::backend::app::Stage3D;
+#[cfg(feature = "3d")]
 pub use crate::draw::lit::{LitDraw, LitLight, LitMaterial, LitMeshId, LitStage3D, LitVertex};
+#[cfg(feature = "3d")]
 pub use crate::draw::rt::{PreparedRtScene, RtCamera, RtEnvironment, RtImage, RtMaterial, RtTriangle};
+#[cfg(feature = "3d")]
 pub use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
 pub use crate::backend::driver::PressedKey;
 pub use crate::backend::tessellate::{

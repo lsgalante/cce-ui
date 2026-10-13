@@ -23,8 +23,11 @@ use cosmic_text::Buffer as TextBuffer;
 
 pub mod glyphs;
 pub mod images;
+#[cfg(feature = "3d")]
 pub mod lit;
+#[cfg(feature = "3d")]
 pub mod rt;
+#[cfg(feature = "3d")]
 pub mod scene;
 pub mod shaders;
 

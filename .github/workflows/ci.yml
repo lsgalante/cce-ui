@@ -59,7 +59,7 @@ jobs:
       # device; lavapipe has one, and its compute tier is what every Vulkan
       # device without RT cores (and WebGPU) runs.
       - name: Path tracer GPU tests (compute tier)
-        run: CCE_VK_RT=compute cargo test --lib vk::rt -- --ignored
+        run: CCE_VK_RT=compute cargo test --lib --features 3d vk::rt -- --ignored
 
       # The GPU tests skip with a note when no Vulkan device opens, and a
       # skipped test passes. Fail instead if they skipped here, so losing
@@ -67,7 +67,7 @@ jobs:
       - name: GPU tests ran on a real device
         shell: bash
         run: |
-          cargo test --lib vk:: -- --nocapture 2>&1 | tee vk-tests.log
+          cargo test --lib --features 3d vk:: -- --nocapture 2>&1 | tee vk-tests.log
           if grep -i "skipping" vk-tests.log; then
             echo "::error::the Vulkan tests skipped: no device opened on the runner"
             exit 1

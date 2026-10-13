@@ -130,6 +130,12 @@ reads its `@workgroup_size`). `vk::compute` re-exports them.
 
 ## 3D scenes (`Stage3D`)
 
+All of this section and the path tracer below are behind the `3d` feature (cce-designer and
+cce-model turn it on). Without it, `draw::{scene, lit, rt}`, their `vk` / `web` stages and
+shaders, `Stage3D` and `Application::init_3d` / `stage_3d` are not compiled, the device never
+enables the ray-query stack, and a renderer keeps only the scene's 1×1 backdrop
+(`vk/scene_off.rs`; the WebGPU renderer's empty one), which the 2D frost samples.
+
 An app stages a scene through the trait `draw::scene::Stage3D` (`create_mesh`, `update_mesh`,
 `stage_scene`, `stage_scene_images`, `set_scene_light`), implemented by `VkRenderer` and
 `WebRenderer`. Types: `Vertex3D`, `MeshId`, `SceneDraw`, `SceneImage`, `scene_uniforms`,
@@ -202,7 +208,7 @@ with GPU compositing it loses the device on first present.
 |---|---|---|---|
 | 2D renderer: one 1280×800 frame of nearly every prim (`examples/probe/scene.rs`) | `cargo run --example probe_native` (with `CCE_LOAD_SYSTEM_FONTS=1`), screenshot | `scripts/web-probe/run <out.rgba>` (fonts from `$PROBE_FONTS_DIR`) | `scripts/web-probe/compare.py native.png out.rgba 1280 800` |
 | The demo, 24 scripted steps (`examples/demo_web.rs` includes `src/main.rs`) | the native harness's screenshots | `scripts/web-probe/demo <dir>` (`drive.mjs`; `DEMO_FAMILIES` to match native's fonts) | `compare.py --mask` |
-| 3D scene (`examples/probe3d/scene.rs`) | `probe3d_native` (`PROBE3D_TRACE=1` for the traced mode, eight frames) | `scripts/web-probe/probe3d <out> [traced]` | `compare.py` |
+| 3D scene (`examples/probe3d/scene.rs`) | `probe3d_native --features 3d` (`PROBE3D_TRACE=1` for the traced mode, eight frames) | `scripts/web-probe/probe3d <out> [traced]` | `compare.py` |
 | Compute jobs (`examples/compute_probe/jobs.rs`) | `compute_native` | `scripts/web-probe/compute` | exact |
 | Clipboard, IME | — | `scripts/web-probe/clipboard`, `scripts/web-probe/ime` (CDP `Input.imeSetComposition`) | pass/fail |
 

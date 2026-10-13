@@ -10,6 +10,19 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-12
 
+- **3D is a feature.** The scene pass, lit meshes and the path tracer — `draw::{scene, lit,
+  rt}`, `vk::{scene, rt}`, `web::{scene, rt}`, their seven shaders, `Stage3D`,
+  `Application::init_3d` / `stage_3d` and glam — are behind `3d` (architecture RFC phase 3,
+  extraction): about 6,000 lines a 2D app no longer compiles, and its device no longer enables
+  the ray-query stack (acceleration structures, buffer device address) it never used. The 2D
+  shader still samples a backdrop at binding 0, so without the feature the Vulkan renderer's
+  scene stage is `vk/scene_off.rs`, the same 1×1 zeroed image the 3D stage makes before its
+  first scene, and the WebGPU renderer keeps its empty one; `create_backdrop_image` is shared
+  by both stages. `probe3d_native` / `probe3d_web` need the feature; CI's GPU tests and
+  check-wasm / check-mac turn it on. cce-designer and cce-model enable it. Checked: lib tests
+  without (601) and with (631), clippy both ways, check-wasm's three builds with warnings
+  denied, and cce-gallery built from one tree with and without it, shot in a scale-2 shadow:
+  pixel-identical.
 - **The node graph is a feature.** `widget::Graph` (with `GraphNode`, `TaggedQuad`,
   `node_wires`, `WireStyle`) and the `GraphController` trait are behind `graph`, so the apps
   that draw no node graph stop compiling its 2,300 lines (architecture RFC phase 3,

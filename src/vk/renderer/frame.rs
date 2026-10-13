@@ -239,6 +239,7 @@ impl VkRenderer {
             frame_index,
             clip_radius,
         );
+        #[cfg(feature = "3d")]
         if let Some(rt) = self.rt.as_mut() {
             let images = &self.image;
             rt.write_frame_uniforms(&self.core.device, frame_index, &|id| {

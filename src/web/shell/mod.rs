@@ -135,15 +135,18 @@ pub async fn run<A: Application>(canvas: HtmlCanvasElement, fonts: Fonts, sizing
     std::mem::forget(crate::window_state::enter(&crate::window_state::WindowState::new()));
     let fs = crate::create_font_system();
 
+    #[cfg_attr(not(feature = "3d"), allow(unused_mut))]
     let mut renderer = WebRenderer::new(canvas.clone()).await?;
     // The scale is known before the app is built, as the Wayland shell sets
     // it before `create`: a widget may read it as it is made.
     let dpr = device_pixel_ratio();
     crate::scale::set_scale_factor(dpr as f32);
     let (tx, rx) = std::sync::mpsc::channel();
+    #[cfg_attr(not(feature = "3d"), allow(unused_mut))]
     let mut app = A::create(AppSender::from(tx));
     // The app's persistent GPU resources, as the Wayland shell's
     // `renderer_init` makes them: once, before the first frame.
+    #[cfg(feature = "3d")]
     app.init_3d(&mut renderer);
     let settings = app.settings();
     crate::scale::set_app_id(settings.app_id.clone());

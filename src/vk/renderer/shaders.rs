@@ -1,6 +1,7 @@
 //! Shaders: the fixed ones as SPIR-V compiled by `build.rs`, and WGSL compiled at run time
 //! (the ray-query variant included).
 
+#[cfg(any(feature = "3d", test))]
 pub(crate) fn compile_wgsl(source: &str) -> Vec<u32> {
     let module = naga::front::wgsl::parse_str(source).expect("WGSL parse failed");
     let info = naga::valid::Validator::new(
@@ -39,15 +40,19 @@ precompiled_spirv!(shader2d_spirv, "shader2d.spv");
 
 precompiled_spirv!(glyph_spirv, "glyph.spv");
 
+#[cfg(feature = "3d")]
 precompiled_spirv!(scene3d_spirv, "scene3d.spv");
 
+#[cfg(feature = "3d")]
 precompiled_spirv!(scene3d_image_spirv, "scene3d_image.spv");
 
+#[cfg(feature = "3d")]
 precompiled_spirv!(scene3d_lit_spirv, "scene3d_lit.spv");
 
 /// Like [`compile_wgsl`], but with naga's RAY_QUERY capability and SPIR-V 1.4
 /// (required by SPV_KHR_ray_query). Only used on devices where the ray-query
 /// device stack was enabled — those are Vulkan 1.2+, which accepts 1.4.
+#[cfg(feature = "3d")]
 pub(crate) fn compile_wgsl_ray_query(source: &str) -> Vec<u32> {
     let module = naga::front::wgsl::parse_str(source).expect("WGSL parse failed");
     let info = naga::valid::Validator::new(

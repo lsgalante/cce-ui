@@ -29,7 +29,7 @@ use ash::vk;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator};
 use gpu_allocator::MemoryLocation;
 
-use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
+use super::renderer::{create_backdrop_image, create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 
 pub use crate::draw::scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
 use crate::draw::lit::{lit_uniforms, LitDraw, LitLight, LitMeshId, LitVertex, LIT_UNIFORM_SIZE};
