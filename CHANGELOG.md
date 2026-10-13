@@ -10,6 +10,20 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-13
 
+- **The flat-host bridge is gone: `render_widget`, `RenderTarget` and the carve types.** Every
+  app paints its widgets with `paint_root_into` into a `PaintCtx` now (cce-system-interface was
+  the last to replay them, until its Stage B), so the walk that replayed a widget onto a
+  colour-typed flat target goes: `compose::render_widget` / `render_widget_h`, the
+  `scene::paint::RenderTarget` trait and `PaintCtx`'s impl of it (`render_target.rs`), the carve
+  types it took (`ReliefCarve`, `CarveKind`) and `PaintCtx::carve`, `Button::inset_face` and
+  `ControlPlate::face_fill` (the tuple and the fill those hosts read). `compose/render.rs` keeps
+  `place` / `place_h`. The tests that probed the bridge with hand-made targets assert on display
+  lists instead: `a_placed_button_takes_its_block_and_paints_there`,
+  `a_placed_labelled_text_box_lays_its_field_out_below_its_label`, `a_placed_dot_paints_its_disc`,
+  `a_placed_graph_paints_its_wires_and_ports` and `a_placed_dropdown_paints_its_arrow_glyph`
+  (which replace the bridge's own, as the bridge had no other job). Checked: lib tests with every
+  feature (709), every integration test, clippy, the wasm build with and without features,
+  `cargo check --workspace --all-targets` (no app named any of it).
 - **`ScrollRegion`'s frame and bars paint onto a `PaintCtx`.** `push_prims`,
   `push_scrollbar_fore`, `push_scrollbar_prims` and `push_scrollbar_prims_alpha` took `&mut dyn
   RenderTarget`; every caller (cce-fonts, cce-mail, cce-cloud, cce-system-interface) passes a

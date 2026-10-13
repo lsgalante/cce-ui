@@ -86,8 +86,8 @@ wall width, the run's span clamped to the outline (`run_span`, `None` for a well
   proportion. In a parameter pane a checkbox row is a Toggle.
 - Who hands fields out: `TextBox::well`, `Toggle::field` (and `Toggle::face` for the relief-off
   path), `Checkbox::field`, `Spinbox::relief_parts` (a `SpinRelief`), `ParametersBg::fields` (a
-  `Vec<Field>`, tinted when hovered). The legacy banded path and the flat-host bridge draw a well
-  box either side of the run.
+  `Vec<Field>`, tinted when hovered). The legacy banded path draws a well box either side of the
+  run.
 
 Tests: `a_toggle_is_a_field_whose_run_glides`,
 `a_checkbox_is_a_well_with_a_square_plate_in_it_or_not`, `an_inline_check_is_the_widgets_box`,
@@ -129,8 +129,7 @@ banded path fills only below the hole. The designer's playbar is the consumer.
 **The focus ring is the rim, recoloured.** `ControlPlate::with_tint` tints the rim (a tinted
 `Trough`, `Boss` or `Bevel`; `recess_tinted` for a well while editing). The tint composites the
 rim's light in the accent and its shadow in a dark accent (`FOCUS_SHADOW_LUM`, both at
-`FOCUS_GAIN`), so a focused plate still shows which edges face the lamp. Flat-path hosts get it
-through `RenderTarget::inset_plate_tinted` and `CarveKind::Boss { tint }`.
+`FOCUS_GAIN`), so a focused plate still shows which edges face the lamp.
 
 ## Materials
 

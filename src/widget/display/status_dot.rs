@@ -1,6 +1,6 @@
 //! `StatusDot` — an indicator: a disc in its status colour, the largest circle the rect holds.
 //! It stays a shape, not a glyph (an indicator, not a symbol). The tests below hold that it
-//! draws its disc, through a flat host's `render_widget` too.
+//! draws its disc where a host places it.
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
@@ -50,8 +50,8 @@ impl Paint for StatusDot {
     }
 
     /// A disc: the colour as a rounded rect whose radius is half the short side. A rounded
-    /// rect rather than a circle prim so it survives every legacy bridge (`all_rounded_quads`,
-    /// `render_widget`), which carry rounded rects but not circles.
+    /// rect rather than a circle prim, so the rounded-quad view (`shown_rounded_quads`), which
+    /// carries rounded rects but not circles, sees it too.
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let r = rect.width.min(rect.height) * 0.5;
         ctx.rounded_rect(rect, r, (true, true, true, true), self.color());
@@ -86,26 +86,21 @@ mod tests {
         assert_eq!(dot.status, DotStatus::Error);
     }
 
-    /// Documents the behavior fix: the legacy `StatusDot` emitted **zero** rects through
-    /// `render_widget` (probe run against the pre-migration widget), i.e. the dot was invisible
-    /// wherever it was used. The migrated widget emits exactly one.
+    /// A dot placed in a row's cell paints its one disc there, in its status colour (the
+    /// pre-migration widget painted nothing at all).
     #[test]
-    fn render_widget_now_draws_the_dot() {
-        struct Probe {
-            rects: Vec<(f32, f32, f32, f32, [f32; 4])>,
-        }
-        impl crate::scene::paint::RenderTarget for Probe {
-            fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
-                self.rects.push((x, y, w, h, color));
-            }
-            fn text(&mut self, _c: &str, _x: f32, _y: f32, _s: f32, _col: [f32; 4]) {}
-        }
-
+    fn a_placed_dot_paints_its_disc() {
         let mut ctx = UiContext::new();
-        let mut probe = Probe { rects: Vec::new() };
-        let mut dot = StatusDot::new(DotStatus::Active);
-        crate::compose::render_widget(&mut probe, &mut dot, 10.0, 10.0, 10.0, 10.0, &mut ctx);
-        assert_eq!(probe.rects.len(), 1, "the dot is visible now (legacy emitted 0 here)");
-        assert_eq!(probe.rects[0].4, [0.20, 0.70, 0.35, 1.0], "active-status green");
+        let dot = ctx.insert(StatusDot::new(DotStatus::Active));
+        crate::compose::place_h(dot, 10.0, 10.0, 10.0, 10.0, &mut ctx);
+        let mut pc = crate::scene::paint::PaintCtx::new();
+        crate::widget::painter::paint_root_into(&ctx, &ctx[dot], &mut pc);
+        let prims: Vec<_> = pc.finish().items.into_iter().map(|i| i.prim).collect();
+        let rect = crate::scene::layout::Rect { x: 10.0, y: 10.0, width: 10.0, height: 10.0 };
+        assert_eq!(
+            prims,
+            [crate::scene::paint::Prim::RoundedRect { rect, radius: 5.0, corners: (true, true, true, true), color: [0.20, 0.70, 0.35, 1.0] }],
+            "one disc, active-status green"
+        );
     }
 }

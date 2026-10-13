@@ -152,11 +152,9 @@ impl TextBox {
     /// (square-cornered legacy geometry, `control_relief` off, or a box that
     /// draws no background).
     ///
-    /// The SINGLE source for that geometry: `paint` carves it here, and the
-    /// flat-host bridge (`layout::render_widget`) relays that carve to a flat
-    /// host as a [`relief_carve`](crate::scene::paint::RenderTarget::relief_carve).
-    /// A second copy of this math in the bridge is exactly how the two would
-    /// drift apart.
+    /// The SINGLE source for that geometry: `paint` carves it here, and a host
+    /// that draws the relief itself (`ParametersBg::fields`) takes it whole. A
+    /// second copy of this math is exactly how the two would drift apart.
     pub fn well(&self) -> Option<crate::scene::paint::Field> {
         let radius = crate::layout::textbox_corner_radius();
         if radius <= 0.0 || !self.recessed() || !self.draw_bg_border {

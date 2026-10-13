@@ -116,9 +116,6 @@ impl Breadcrumb {
     /// lighting evaluations and reads far hotter than one seam (the same reason
     /// `Prim::Ridge` exists). The divisions are engraved instead — see [`seams`].
     ///
-    /// For flat-path hosts (cce-files) that mirror the relief app-side — the
-    /// render_widget geometry path drops relief prims, same as the dropdown's.
-    ///
     /// [`seams`]: Breadcrumb::seams
     pub fn run_box(&self, rect: Rect) -> Option<(f32, f32, f32, f32)> {
         let segs = self.visible_segs(rect);

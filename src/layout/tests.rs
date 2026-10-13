@@ -24,35 +24,24 @@ fn unit_slots_resolve_through_the_metric_at_read_time() {
     assert_eq!(reg.get_len("probe_width"), Some(Len::px(7.0)));
 }
 
-use crate::compose::{render_widget, Grid};
-use crate::scene::paint::RenderTarget;
+use crate::compose::{place, Grid};
 use super::*;
 
-/// A graph's wires and ports reach a flat host: `render_widget` hands
-/// its strokes to `RenderTarget::line` (and arcs and discs to `arc` and
-/// `circle`), where it used to drop them, so cce-files' Graph page drew
-/// nodes and no wires.
+/// What `w` paints placed at `(x, y, w, h)`: the prims a host gets placing it and walking it.
+fn placed_prims<T: crate::widget::WidgetHost + 'static>(w: &mut T, (x, y, ww, wh): (f32, f32, f32, f32)) -> Vec<crate::scene::paint::Prim> {
+    let mut ctx = crate::context::UiContext::new();
+    place(w, x, y, ww, wh, &mut ctx);
+    let mut pc = crate::scene::paint::PaintCtx::new();
+    crate::widget::painter::paint_root_into(&ctx, w, &mut pc);
+    pc.finish().items.into_iter().map(|i| i.prim).collect()
+}
+
+/// A placed graph paints its wires (strokes and arcs) and its ports (discs). A flat host's
+/// replay of it once dropped them, so cce-files' Graph page drew nodes and no wires.
 #[test]
 #[cfg(feature = "graph")]
-fn a_graphs_wires_reach_a_flat_host() {
-    #[derive(Default)]
-    struct Strokes {
-        lines: usize,
-        circles: usize,
-    }
-    impl RenderTarget for Strokes {
-        fn rect(&mut self, _: [f32; 4], _: f32, _: f32, _: f32, _: f32) {}
-        fn text(&mut self, _: &str, _: f32, _: f32, _: f32, _: [f32; 4]) {}
-        fn line(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: [f32; 4], _: crate::scene::paint::Cap) {
-            self.lines += 1;
-        }
-        fn arc(&mut self, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: [f32; 4]) {
-            self.lines += 1;
-        }
-        fn circle(&mut self, _: f32, _: f32, _: f32, _: [f32; 4]) {
-            self.circles += 1;
-        }
-    }
+fn a_placed_graph_paints_its_wires_and_ports() {
+    use crate::scene::paint::Prim;
     use crate::widget::GraphController;
     let node = |name: &str, pos: (f32, f32), input: Option<&str>| crate::widget::GraphNode {
         id: name.to_string(),
@@ -67,38 +56,28 @@ fn a_graphs_wires_reach_a_flat_host() {
     let mut graph = crate::widget::Graph::new();
     graph.set_grid_origin(100.0, 100.0);
     graph.set_nodes(&[node("a", (0.0, 0.0), None), node("b", (0.0, 1.0), Some("a"))]);
-    let mut pc = Strokes::default();
-    let mut ctx = crate::context::UiContext::new();
-    render_widget(&mut pc, &mut graph, 0.0, 0.0, 600.0, 600.0, &mut ctx);
-    assert!(pc.lines > 0, "the wire a -> b reached the host");
-    assert!(pc.circles > 0, "the ports reached the host");
+    let prims = placed_prims(&mut graph, (0.0, 0.0, 600.0, 600.0));
+    assert!(prims.iter().any(|p| matches!(p, Prim::Vector { .. } | Prim::Arc { .. })), "the wire a -> b is painted");
+    assert!(prims.iter().any(|p| matches!(p, Prim::Circle { .. })), "the ports are painted");
 }
 
-/// A widget's glyph reaches a flat host: `render_widget` hands the
-/// dropdown's arrow to the host's `RenderTarget::icon` by name. It used
-/// to drop every image, so after the toolkit's symbols became glyphs a
-/// flat host showed a dropdown with no arrow. Skipped where the icon set
+/// A placed dropdown paints its arrow as the `chevron-down` glyph. Skipped where the icon set
 /// is not checked out (no glyph uploads, so there is nothing to name).
 #[test]
-fn a_widget_glyph_reaches_a_flat_host() {
+fn a_placed_dropdown_paints_its_arrow_glyph() {
     if !std::path::Path::new(&crate::icons_dir()).join("chevron-down.svg").is_file() {
         eprintln!("skipped: no icon set");
         return;
     }
-    #[derive(Default)]
-    struct Icons(Vec<String>);
-    impl RenderTarget for Icons {
-        fn rect(&mut self, _: [f32; 4], _: f32, _: f32, _: f32, _: f32) {}
-        fn text(&mut self, _: &str, _: f32, _: f32, _: f32, _: [f32; 4]) {}
-        fn icon(&mut self, name: &str, _: crate::scene::layout::Rect, _: [f32; 4]) {
-            self.0.push(name.to_string());
-        }
-    }
-    let mut pc = Icons::default();
-    let mut ctx = crate::context::UiContext::new();
     let mut dd = crate::widget::Dropdown::new(vec!["One".to_string(), "Two".to_string()], 0);
-    render_widget(&mut pc, &mut dd, 10.0, 10.0, 160.0, 24.0, &mut ctx);
-    assert!(pc.0.iter().any(|n| n == "chevron-down"), "the arrow reached the host: {:?}", pc.0);
+    let glyphs: Vec<String> = placed_prims(&mut dd, (10.0, 10.0, 160.0, 24.0))
+        .into_iter()
+        .filter_map(|p| match p {
+            crate::scene::paint::Prim::Image { image, .. } => crate::icon_source(image).map(|(name, _, _)| name),
+            _ => None,
+        })
+        .collect();
+    assert!(glyphs.iter().any(|n| n == "chevron-down"), "the arrow is painted: {glyphs:?}");
 }
 
 #[test]

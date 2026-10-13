@@ -66,8 +66,7 @@ impl Paint for Spinbox {
         if crate::layout::control_relief() {
             // The DE relief style: transparent faces, the relief is the
             // chrome (see [`Self::relief_parts`]). Flat prims first — hover
-            // washes and the editing cue survive a flat host's rounded-quad
-            // bridge, the carves are re-emitted host-side.
+            // washes and the editing cue — then the carves over them.
             if let Some(rel) = self.relief_parts(rect) {
                 // Carved inside the control as every well is.
                 let r = rel.radius;

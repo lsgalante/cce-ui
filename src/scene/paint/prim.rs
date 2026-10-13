@@ -160,8 +160,8 @@ pub enum Prim {
     /// fading to nothing where it meets the outer wall, the one place the
     /// two sides stand at the same height.
     ///
-    /// SDF path only; the legacy banded tessellation and flat hosts draw the
-    /// two-box form it replaced. `tint` lights it like a recess's.
+    /// SDF path only; the legacy banded tessellation draws the two-box form it
+    /// replaced. `tint` lights it like a recess's.
     Field { rect: Rect, radii: Radii, depth: f32, split: f32, end: f32, tint: Option<[f32; 3]> },
     /// The window's glass slab: a rounded fill plus a rolled, lit edge around its whole
     /// perimeter, drawn at full size. Distinct from `Bevel`, which insets its fill by

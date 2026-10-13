@@ -1,10 +1,9 @@
 //! Composing a page out of widgets: placing a widget in a block ([`place`]), settings-page
 //! sections (`section`: `PageFlow`, `SectionContext`) and [`Form`] (`form`: declared rows, cells
 //! and `lay_row`), all painting onto any `P: AsMut<PaintCtx>` — a frame's own
-//! [`PaintCtx`](crate::scene::paint::PaintCtx), or a host's page buffer around one. `render`
-//! still holds the legacy walk that replays a widget onto a flat
-//! [`RenderTarget`](crate::scene::paint::RenderTarget). Above the style getters in `layout`, which
-//! it reads, and beside `widget`, whose widgets it places and paints.
+//! [`PaintCtx`](crate::scene::paint::PaintCtx), or a host's page buffer around one. Above the
+//! style getters in `layout`, which it reads, and beside `widget`, whose widgets it places and
+//! paints.
 
 mod form;
 mod render;

@@ -40,8 +40,8 @@ pub trait Paint {
     /// Corner rounding `(radius, per-corner flags)` of the widget's background, given its
     /// laid-out rect (MenuBar's corners depend on where it sits against its parent's edges).
     /// What a host drawing the widget's PLATE reads — `WidgetHostExt::corner_radii`, the
-    /// designer's `append_widget_plate`, the flat-host bridge; the widget's own geometry is
-    /// whatever [`paint`](Paint::paint) emits. Default: sharp corners.
+    /// designer's `append_widget_plate`; the widget's own geometry is whatever
+    /// [`paint`](Paint::paint) emits. Default: sharp corners.
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         None
     }
@@ -57,15 +57,15 @@ pub trait Paint {
     /// the widget is visible). Default: none.
     fn draw_popover(&self, _rect: Rect, _pc: &mut PaintCtx) {}
 
-    /// Solid border `(color, thickness)` of the widget's background quad. **Transitional**, like
-    /// [`corner_style`](Paint::corner_style): `render_widget` gives a widget's background quad a
-    /// border+inset treatment when this is `Some` — `Toggle`'s square mode depends on it.
+    /// Solid border `(color, thickness)` of the widget's background quad: a host drawing the
+    /// widget's plate (`append_widget_plate`, the test shims' `paint_self`) gives it a border
+    /// when this is `Some`. Default: none.
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
         None
     }
 
-    /// Font for this widget's text on legacy text paths (`render_widget` reads
-    /// `WidgetHost::widget_font`). **Transitional.**
+    /// Font for this widget's text: what the paint walk attaches to the labels the widget
+    /// emits (`fonted_leaf_labels`), and the default for [`text_font`](Paint::text_font).
     fn widget_font(&self) -> Option<String> {
         None
     }

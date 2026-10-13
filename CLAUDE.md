@@ -263,7 +263,7 @@ widgets need no emit. Rules (`docs/widgets.md` has the detail):
 - Every call the context makes into a widget goes through `lend`, which takes the widget out of
   reach for the call: a widget reaching itself through the context mid-event gets `None`, never a
   second `&mut`.
-- Host-side API: `place_h`, `render_widget_h`, `Form::widget_h` / `widget_w_h`,
+- Host-side API: `place_h`, `Form::widget_h` / `widget_w_h`, `render_popover(&mut pc)`,
   `register_popover_id`, `focus_id` / `unfocus_id` / `set_focused_id` / `claim_focus`,
   `link_ids`, `paint_root_into(ctx, &ctx[h], pc)`, `get_widget(id)` / `get_widget_mut(id)` /
   `widgets()`, `tree.parent_id` / `child_ids`.
@@ -487,13 +487,12 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry).
-- `compose/` — pages composed from widgets: `render.rs` (`place` / `place_h`, and the legacy
-  `render_widget_h` / `render_popovers` walk onto a flat `scene::paint::RenderTarget`),
+- `compose/` — pages composed from widgets: `render.rs` (`place` / `place_h`: a widget laid
+  out at exactly a host's block below its label strip, shaped, its open popover registered),
   `section.rs` (settings-page sections: `PageFlow`, `SectionContext`, each carving its own
-  well), `form.rs` (`Form`, `lay_row`). Sections and forms paint onto any `P: AsMut<PaintCtx>`:
-  a widget piece is `place`d — the label strip, `layout` at exactly the block, `prepare_text`,
-  the open popover's registration — and painted with `paint_root_into`. The flat target,
-  `RenderTarget`, and the carve types it takes are `scene::paint`'s (`target.rs`).
+  well), `form.rs` (`Form`, `lay_row`). Sections and forms paint onto any `P: AsMut<PaintCtx>`;
+  a widget piece is `place`d and painted with `paint_root_into`. There is no flat-host path:
+  a host that keeps a page between frames keeps its display list.
 - `color/` — the palette constants and the style slots (`mod.rs`, with the table), the getters
   and setters by topic (`surfaces.rs`, `controls.rs`, `lists.rs`, `graph.rs`), `load.rs` (config →
   colours, `retired_surface_keys`), `math.rs` (sRGB/linear, OKLab), `materials.rs` (named

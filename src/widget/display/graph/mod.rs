@@ -2,8 +2,8 @@
 //! draggable nodes with geometry toggles, input/output ports, wire routing, and interactive
 //! connection dragging. [`GraphController`] rides the `Input` capability hooks.
 //!
-//! [`Paint::paint`] emits the graph as rounded geometry (what `render_widget` hosts — cce-files —
-//! and the scene walk — cce-graph — consume); a host that draws the nodes in its own order (the
+//! [`Paint::paint`] emits the graph as rounded geometry (what the scene walk — cce-graph,
+//! cce-files — consumes); a host that draws the nodes in its own order (the
 //! designer) reads [`Graph::geometry_quads_tagged`] and calls [`Graph::paint_wires`] itself. Node-name
 //! text is clipped to the widget rect via [`Paint::text_bounds`]. All grid geometry is in absolute screen space
 //! (hosts pan by moving `grid_origin`); the widget rect only culls and clips.

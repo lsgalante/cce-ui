@@ -165,8 +165,8 @@ impl Breadcrumb {
 
     /// Width of a seam's flat floor in px. Zero would meet the two walls in a
     /// perfect V; a hair of floor keeps the crease from aliasing into a dotted
-    /// line as the seam's subpixel position drifts with the path text. Public
-    /// because flat-path hosts engrave the seams themselves — see [`seams`].
+    /// line as the seam's subpixel position drifts with the path text. See
+    /// [`seams`].
     ///
     /// [`seams`]: Breadcrumb::seams
     pub const SEAM_WIDTH: f32 = 0.75;

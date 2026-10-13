@@ -204,11 +204,6 @@ impl Button {
     /// Where the icon face draws inside `rect`: centered, inset one 4px margin
     /// per side from the shorter extent, native aspect kept. `None` when this
     /// button has no icon.
-    ///
-    /// Public because a flat-path host draws the icon itself — it consumes
-    /// `all_quads` and a text list, so `paint` never runs for it and an image
-    /// is neither a quad nor a label. Keeping the geometry here means the icon
-    /// lands in the same place on both paths.
     pub fn icon_rect(&self, rect: Rect) -> Option<(u32, Rect, f32)> {
         let (image, iw, ih) = self.icon_face()?;
         let s = (rect.width.min(rect.height) - 8.0).max(4.0);
@@ -263,13 +258,12 @@ impl Button {
     /// swaps in `widget_font`. Under the default Berkeley Mono every label
     /// then drew ~20% wider than measured, so `intrinsic_size` cut the plate
     /// short and the glyphs ran over its right rim ("Load Images",
-    /// "View: HTML" in cce-mail). Legacy hosts (`render_widget`) draw in
-    /// `widget_font` too, so this measure holds on both paths. The inked
-    /// measure is now only the fallback for a font system that shapes nothing.
+    /// "View: HTML" in cce-mail). The inked measure is now only the fallback
+    /// for a font system that shapes nothing.
     ///
     /// Blocking lock, as the context menu takes it: `try_lock` fell back to
     /// the wrong measure whenever another thread was shaping. The one site
-    /// that holds this lock across a widget call (the flat host, around
+    /// that holds this lock across a widget call (`compose::place`, around
     /// `prepare_text`) never reaches a Button's measure — keep it that way.
     fn label_width(&self, label: &str) -> f32 {
         let (family, size) = self.font();
@@ -308,12 +302,6 @@ impl Button {
             crate::widget::ControlPlate::control(rect, radius, stance, crate::scene::Material::face(self.color()))
                 .with_tint(tint),
         )
-    }
-
-    /// [`Button::plate`] as the legacy `(rect, corner radius, depth, face
-    /// colour)` tuple — the flat-path bridge's view of the same plate.
-    pub fn inset_face(&self, rect: Rect) -> Option<(Rect, f32, f32, [f32; 4])> {
-        self.plate(rect).map(|p| (p.rect, p.radii.0, p.depth, p.face_fill()))
     }
 }
 

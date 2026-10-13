@@ -98,8 +98,8 @@ pub fn build_frame<A: Application>(
     // display-list path (the paint walk is `&dyn`, and apps were left to remember —
     // cce-list, cce-secrets, and the reference DemoApp all forgot, so their carets fell
     // back to `measure_text_width("M")`, an inked extent that drifts off the glyphs).
-    // The flat path shapes in `layout::render_widget`; apps that hand-shape still work —
-    // their call and this one hit the same shaped-buffer cache. Through the shared
+    // A widget placed with `compose::place` is shaped there too; apps that hand-shape still
+    // work — their call and this one hit the same shaped-buffer cache. Through the shared
     // `ui_context`, which every app with widgets answers (several have no `_mut`): the
     // widgets live in the context's own allocations, reached by their raw roots, and no
     // reference to one is live while it is shaped.

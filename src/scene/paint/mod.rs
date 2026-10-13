@@ -17,14 +17,10 @@
 //! | `relief` | `PaintCtx`'s relief emitters: plates, bevels, carves, fields, wells, grooves, lattices, droplets |
 //! | `flat` | `PaintCtx`'s flat emitters: quads, images and icons, rounded rects, glow, vectors, circles, arcs, borders |
 //! | `text` | the text types and `PaintCtx`'s text emitters |
-//! | `render_target` | `PaintCtx` as a flat host's `RenderTarget` |
 
 mod flat;
 mod prim;
 mod relief;
-mod render_target;
-mod target;
-pub use target::*;
 mod surfaces;
 mod text;
 #[cfg(test)]

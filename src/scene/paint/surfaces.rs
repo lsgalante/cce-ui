@@ -148,10 +148,6 @@ impl PlateSpec {
 ///   `CarveUnion`. Modes 2-4, 6-8, 13 and 14. (`Sphere`, mode 5, is neither —
 ///   a lit ball under the same model.)
 ///
-/// That split is load-bearing for flat-path hosts, which need one list for the
-/// faces and another for the edges drawn over them (cce-files' `rects` vs
-/// `reliefs`).
-///
 /// How a control plate sits on the surface beneath it — see "Plates, wells
 /// and seams" in `CLAUDE.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -361,12 +357,5 @@ impl ControlPlate {
     /// same as `None`.
     pub fn faced(&self) -> Option<&Material> {
         self.face.as_ref().filter(|m| m.tint[3] > 0.001)
-    }
-
-    /// The face as the encoded fill the flat-path bridges consume
-    /// (`Button::inset_face`, cce-system-interface's `ControlCarve`):
-    /// transparent for no face, else the material's nested fill.
-    pub fn face_fill(&self) -> [f32; 4] {
-        self.face.map_or([0.0; 4], |m| m.fill(PlateRole::Nested))
     }
 }

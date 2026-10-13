@@ -331,12 +331,12 @@ Opt-in features for the note clients.
 
 Every symbol is a cce-icons glyph (the rule is in `CLAUDE.md`). `PaintCtx::icon(name, rect,
 color)` tints like adjacent text and rasterises at twice the rect; `icon_untinted` is for the
-self-coloured `weather-*` set; `RenderTarget::icon` is the flat-host call. Underneath:
-`upload_icon_tinted` / `icon_tint` / `icon_pixels`. A vertical `ButtonStrip` / `Paginator` takes
-glyphs by name (`with_icons`). `render_widget` replays a widget onto a flat host's
-`RenderTarget`, including glyphs (`icon`), strokes (`line`), arcs and discs — each a no-op unless
-the host implements it. `a_widget_glyph_reaches_a_flat_host` and
-`a_graphs_wires_reach_a_flat_host` are the tests.
+self-coloured `weather-*` set. Underneath: `upload_icon_tinted` / `icon_tint` / `icon_pixels`
+(`icon_source` names the glyph an image id holds). A vertical `ButtonStrip` / `Paginator` takes
+glyphs by name (`with_icons`). A widget a host places (`compose::place`) and paints
+(`paint_root_into`) reaches it whole: glyphs, strokes, arcs and discs included.
+`a_placed_dropdown_paints_its_arrow_glyph` and `a_placed_graph_paints_its_wires_and_ports` are
+the tests.
 
 ## Other widget notes
 

@@ -391,34 +391,6 @@ impl PaintCtx {
         self.well_rim(rect, radius, relief);
     }
 
-    /// Emit one [`crate::scene::paint::ReliefCarve`]. The shared application point:
-    /// a widget's `paint` carves through here, and a flat host re-emits the
-    /// carves it collected through here too, so the two can only ever draw the
-    /// same prim.
-    ///
-    /// A tinted recess takes `recess_tinted`, which lights the whole rim — it
-    /// is the focus treatment, and every tinted carve the toolkit emits is a
-    /// full ring. A partial ring falls back to the untinted walls rather than
-    /// silently tinting walls the caller suppressed.
-    pub fn carve(&mut self, c: &crate::scene::paint::ReliefCarve) {
-        let rect = Rect { x: c.x, y: c.y, width: c.w, height: c.h };
-        match c.kind {
-            crate::scene::paint::CarveKind::Boss { tint: Some(t) } if c.edges == (true, true, true, true) => {
-                self.boss_edges_tinted(rect, c.radii, c.depth, c.edges, t)
-            }
-            crate::scene::paint::CarveKind::Boss { .. } => self.boss_edges(rect, c.radii, c.depth, c.edges),
-            crate::scene::paint::CarveKind::Recess { tint: Some(t) }
-                if c.edges == (true, true, true, true) =>
-            {
-                self.recess_tinted(rect, c.radii, c.depth, t)
-            }
-            crate::scene::paint::CarveKind::Recess { .. } => {
-                self.recess_edges(rect, c.radii, c.depth, c.edges)
-            }
-            crate::scene::paint::CarveKind::Trough => self.trough_edges(rect, c.radii, c.depth, c.edges),
-        }
-    }
-
     /// Sink a valley along `rect`'s boundary — see [`Prim::Trough`]. `depth` is
     /// the full width of the seam (it straddles the outline by ±depth/2).
     pub fn trough(&mut self, rect: Rect, radii: Radii, depth: f32) {

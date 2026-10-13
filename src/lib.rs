@@ -49,7 +49,7 @@ pub use cce_core::locale;
 pub mod l10n;
 pub mod window_state;
 pub mod style;
-/// Pages composed from widgets on a flat host: the widget walk, `PageFlow` sections, `Form`.
+/// Pages composed from widgets: placing a widget in a block, `PageFlow` sections, `Form`.
 pub mod compose;
 /// Text shaping, the shaped-buffer cache and the font set (was `backend::text`).
 pub mod text;
@@ -271,10 +271,10 @@ pub fn create_font_system() -> cosmic_text::FontSystem {
 /// a host that never hands one in.
 ///
 /// Paint-walk apps shape through their own (`prepare_text`) and the display
-/// list shapes through the runner's — but a flat-path host consumes
-/// `all_quads`, so nothing ever shaped for the widgets it draws and `TextBox`
-/// fell back to `measure_text_width("M")`: an SVG-rasterized INKED extent, not
-/// an advance, which walks off the glyphs a few px per character.
+/// list shapes through the runner's; a host placing a widget outside that pass
+/// (`compose::place`) shapes through this one. Unshaped, `TextBox` falls back
+/// to `measure_text_width("M")`: an SVG-rasterized INKED extent, not an
+/// advance, which walks off the glyphs a few px per character.
 ///
 /// Created on FIRST USE, so an app that shapes for itself never pays for it,
 /// and from the same bundle [`create_font_system`] gives the renderer. The

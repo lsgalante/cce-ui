@@ -95,8 +95,7 @@ impl Paint for Breadcrumb {
         // segment. No sheared primitive exists, so the wash is BANDED: one
         // thin quad per logical pixel row, each row's edges sampled from the
         // same seam-lean and corner-arc math the seams and run box use.
-        // ~24 plain Quads, hover-only — and Quads survive the flat hosts'
-        // rounded-quad bridge, so cce-files' mirror gets the same shape.
+        // ~24 plain Quads, hover-only.
         // The hover wash, and the keyboard cursor's wash in the highlight while
         // the run holds focus — the same banded silhouette.
         let mut washes: Vec<(usize, [f32; 4])> = Vec::new();

@@ -11,8 +11,6 @@
 //! | `fonts` | every font getter and setter, and the preferred-font resolution |
 //! | `controls` | control heights, corner radii, opacities, scrollbar sizes |
 //! | `graph` | the graph widget's settings |
-//! | `bridge` | the flat-host render bridge |
-//! | `section`, `form` | settings-page sections and what goes inside them |
 
 
 // This module's part of the one style snapshot (`crate::style`): every slot below,
