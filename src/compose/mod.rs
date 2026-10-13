@@ -1,8 +1,8 @@
-//! Composing a page out of widgets on a flat host: the walk that replays a widget onto a
-//! [`RenderTarget`](crate::scene::paint::RenderTarget) (`render`), settings-page sections
-//! (`section`: `PageFlow`, `SectionContext`) and [`Form`] (`form`: declared rows, cells and
-//! `lay_row`). Above the style getters in `layout`, which it reads, and beside `widget`,
-//! whose widgets it places.
+//! Composing a page out of widgets on a flat host: placing a widget in a block ([`place`]) and
+//! the walk that replays it onto a [`RenderTarget`](crate::scene::paint::RenderTarget)
+//! (`render`), settings-page sections (`section`: `PageFlow`, `SectionContext`) and [`Form`]
+//! (`form`: declared rows, cells and `lay_row`). Above the style getters in `layout`, which it
+//! reads, and beside `widget`, whose widgets it places.
 
 mod form;
 mod render;

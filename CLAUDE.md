@@ -263,10 +263,10 @@ widgets need no emit. Rules (`docs/widgets.md` has the detail):
 - Every call the context makes into a widget goes through `lend`, which takes the widget out of
   reach for the call: a widget reaching itself through the context mid-event gets `None`, never a
   second `&mut`.
-- Host-side API: `render_widget_h`, `Form::widget_h` / `widget_w_h`, `register_popover_id`,
-  `focus_id` / `unfocus_id` / `set_focused_id` / `claim_focus`, `link_ids`,
-  `paint_root_into(ctx, &ctx[h], pc)`, `get_widget(id)` / `get_widget_mut(id)` / `widgets()`,
-  `tree.parent_id` / `child_ids`.
+- Host-side API: `place_h`, `render_widget_h`, `Form::widget_h` / `widget_w_h`,
+  `register_popover_id`, `focus_id` / `unfocus_id` / `set_focused_id` / `claim_focus`,
+  `link_ids`, `paint_root_into(ctx, &ctx[h], pc)`, `get_widget(id)` / `get_widget_mut(id)` /
+  `widgets()`, `tree.parent_id` / `child_ids`.
 - **A composite's children are `widget::Embedded`**: held by value until the composite is
   inserted, then inserted under their own ids by `Layout::register_embedded_children` (which
   also places them: it runs on insert, every layout and every tick); `remove` takes them back.
@@ -480,10 +480,13 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry).
-- `compose/` — pages composed from widgets on a flat host: `render.rs` (`render_widget_h`,
-  `render_popovers`, the walk onto a `scene::paint::RenderTarget`), `section.rs` (settings-page
-  sections: `PageFlow`, `SectionContext`), `form.rs` (`Form`, `lay_row`). The target itself,
-  `RenderTarget`, and the carve types it takes are `scene::paint`'s (`target.rs`).
+- `compose/` — pages composed from widgets on a flat host: `render.rs` (`place` / `place_h`,
+  `render_widget_h`, `render_popovers`, the walk onto a `scene::paint::RenderTarget`),
+  `section.rs` (settings-page sections: `PageFlow`, `SectionContext`), `form.rs` (`Form`,
+  `lay_row`). `place` is `render_widget`'s layout half — the label strip, `layout` at exactly
+  the block, `prepare_text`, the open popover's registration — and `render_widget` calls it, so
+  a host leaving the bridge drops the target argument and paints with `paint_root_into`. The
+  target itself, `RenderTarget`, and the carve types it takes are `scene::paint`'s (`target.rs`).
 - `color/` — the palette constants and the style slots (`mod.rs`, with the table), the getters
   and setters by topic (`surfaces.rs`, `controls.rs`, `lists.rs`, `graph.rs`), `load.rs` (config →
   colours, `retired_surface_keys`), `math.rs` (sRGB/linear, OKLab), `materials.rs` (named

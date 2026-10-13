@@ -1,11 +1,52 @@
-//! Replaying a widget onto a flat-host [`RenderTarget`]: [`render_widget`] /
-//! [`render_widget_h`] and [`render_popovers`]. The target and its carve types are
-//! `scene::paint`'s. Legacy: new code paints through `scene::paint::PaintCtx`.
+//! Placing a widget in a host's block ([`place`] / [`place_h`]), and replaying it onto a
+//! flat-host [`RenderTarget`] ([`render_widget`] / [`render_widget_h`], [`render_popovers`]).
+//! The target and its carve types are `scene::paint`'s. Legacy: new code places with [`place`]
+//! and paints through `scene::paint::PaintCtx` (`widget::painter::paint_root_into`).
 
 use crate::context::UiContext;
 use crate::scene::paint::{CarveKind, ReliefCarve, RenderTarget};
 use crate::widget::WidgetHost;
 use crate::widget::WidgetHostExt;
+
+/// [`place`] for a widget the context owns, named by its handle: lent for the call.
+/// Places nothing if the widget is gone or already out on loan.
+pub fn place_h<T: WidgetHost + 'static>(h: crate::widget::Handle<T>, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
+    ctx.lend_h(h, |w, ctx| place(w, x, y, ww, wh, ctx));
+}
+
+/// The layout half of [`render_widget`]: everything it does to the widget, and no painting.
+/// The block's contract is the flat host's — `(x, y)` is the top of the detached label and
+/// `wh` the block's height, label strip included, `ww` its width — and the widget is laid out
+/// at exactly that size, shaped (`prepare_text`), and its open popover, if it has one,
+/// registered with the context. A display-list host calls this where a flat host called
+/// `render_widget` (the same arguments, less the target) and paints the widget in its frame
+/// with `widget::painter::paint_root_into`. [`render_widget`] runs it first, so the two place
+/// a widget identically.
+pub fn place<T: WidgetHost + 'static>(w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
+    // The flat-host contract, the same block `set_rect` takes: `(x, y)` is the top of
+    // the detached label and `wh` the block height, label strip included. `layout`
+    // takes the CONTENT origin and height, so step down by the strip.
+    let strip = w.label_strip();
+    let content_h = (wh - strip).max(0.0);
+    w.layout(crate::widget::Point { x, y: y + strip }, crate::widget::LayoutConstraints::new(ww, ww, content_h, content_h), ctx);
+
+    // Shape: `build_frame` does it for the registered widgets of a display-list frame, and
+    // nothing does on the flat-host path. A flat host consumes `all_quads`, so `prepare_text`
+    // — where a TextBox records the per-glyph x offsets its selection highlight, caret and
+    // click->index mapping all read — was never called for the widgets it draws. Those three then fell back to
+    // `measure_text_width("M")`, an SVG-rasterized INKED extent rather than an advance, so
+    // the highlight under-ran the glyphs by a few px per character (a full glyph by the end
+    // of "example.com"). Hosts that shape for themselves (cce-files, the TreeList) just
+    // re-read the shared buffer cache here.
+    if let Ok(mut fs) = crate::geometry_font_system().lock() {
+        w.prepare_text(&mut fs);
+    }
+    // Painting reads no popover registration, so registering before the paint (where
+    // `render_widget` paints) changes nothing.
+    if w.popover_rect().is_some() {
+        ctx.register_popover_id(w.base().id());
+    }
+}
 
 /// [`render_widget`] for a widget the context owns, named by its handle: lent for the call.
 /// Draws nothing if the widget is gone or already out on loan.
@@ -21,26 +62,10 @@ pub fn render_widget_h<T: WidgetHost + 'static>(
     ctx.lend_h(h, |w, ctx| render_widget(pc, w, x, y, ww, wh, ctx));
 }
 
+/// Place `w` in the block at `(x, y)`, `ww` × `wh` ([`place`]), then replay its paint walk
+/// onto the flat host `pc`, every prim in order, mapped onto the `RenderTarget` calls.
 pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
-    // The flat-host contract, the same block `set_rect` takes: `(x, y)` is the top of
-    // the detached label and `wh` the block height, label strip included. `layout`
-    // takes the CONTENT origin and height, so step down by the strip.
-    let strip = w.label_strip();
-    let content_h = (wh - strip).max(0.0);
-    w.layout(crate::widget::Point { x, y: y + strip }, crate::widget::LayoutConstraints::new(ww, ww, content_h, content_h), ctx);
-
-    // Shape, which on this path nobody else does. A flat host consumes
-    // `all_quads`, so `prepare_text` — where a TextBox records the per-glyph x
-    // offsets its selection highlight, caret and click->index mapping all read
-    // — was never called for the widgets it draws. Those three then fell back
-    // to `measure_text_width("M")`, an SVG-rasterized INKED extent rather than
-    // an advance, so the highlight under-ran the glyphs by a few px per
-    // character (a full glyph by the end of "example.com"). Hosts that shape
-    // for themselves (cce-files, the TreeList) just re-read the shared buffer
-    // cache here.
-    if let Ok(mut fs) = crate::geometry_font_system().lock() {
-        w.prepare_text(&mut fs);
-    }
+    place(w, x, y, ww, wh, ctx);
     let (style_r, corners) =
         w.paint_model().corner_style(w.content_rect()).unwrap_or((0.0, (false, false, false, false)));
     let r = if corners != (false, false, false, false) { style_r } else { 0.0 };
@@ -324,9 +349,6 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     if let Some((frect, fradii, fill)) = pending_face.take() {
         emit_rounded(pc, frect, fradii, fill);
     }
-    if w.popover_rect().is_some() {
-        ctx.register_popover_id(w.base().id());
-    }
 }
 
 pub fn render_popovers(pc: &mut dyn RenderTarget, ctx: &UiContext) {
@@ -351,5 +373,64 @@ pub fn render_popovers(pc: &mut dyn RenderTarget, ctx: &UiContext) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scene::paint::{DisplayList, PaintCtx};
+    use crate::widget::painter::paint_root_into;
+    use crate::widget::{Button, Dropdown, TextBox};
+
+    fn painted(ctx: &UiContext, w: &dyn WidgetHost) -> DisplayList {
+        let mut pc = PaintCtx::new();
+        paint_root_into(ctx, w, &mut pc);
+        pc.finish()
+    }
+
+    /// Two copies of a widget in the same block, one placed and one rendered through the
+    /// bridge into a `PaintCtx`: the same rect, the same paint, and the prims the bridge drew.
+    fn place_matches_render_widget<W: WidgetHost + 'static>(make: impl Fn() -> W, (x, y, ww, wh): (f32, f32, f32, f32)) {
+        let mut ctx = UiContext::new();
+        let placed = ctx.insert(make());
+        let rendered = ctx.insert(make());
+        place_h(placed, x, y, ww, wh, &mut ctx);
+        let mut bridge = PaintCtx::new();
+        render_widget_h(&mut bridge, rendered, x, y, ww, wh, &mut ctx);
+        assert_eq!(ctx[placed].rect(), (x, y, ww, wh), "the block it was given");
+        assert_eq!(ctx[placed].rect(), ctx[rendered].rect());
+        let native = painted(&ctx, &ctx[placed]);
+        assert!(native.items.iter().any(|i| matches!(i.prim, crate::scene::paint::Prim::Text { .. })), "{native:?}");
+        assert_eq!(native, painted(&ctx, &ctx[rendered]), "placed as render_widget places it");
+        assert_eq!(native, bridge.finish(), "painted as render_widget drew it");
+    }
+
+    #[test]
+    fn a_placed_button_paints_what_render_widget_drew() {
+        place_matches_render_widget(|| Button::new(0.0, 0.0, 0.0, 0.0).with_label("OK"), (10.0, 20.0, 80.0, 28.0));
+    }
+
+    /// The label strip heads the block: the field is laid out below it, the label in it.
+    #[test]
+    fn a_placed_labelled_text_box_paints_what_render_widget_drew() {
+        let make = || TextBox::new("hello".to_string()).with_label("Name");
+        assert!(make().label_strip() > 0.0, "a labelled box carries a strip");
+        place_matches_render_widget(make, (10.0, 20.0, 160.0, 48.0));
+    }
+
+    /// An open popover is registered with the context as `render_widget` registers it; a
+    /// closed one is not.
+    #[test]
+    fn placing_an_open_dropdown_registers_its_popover() {
+        let mut ctx = UiContext::new();
+        let mut open = Dropdown::new(vec!["a".to_string(), "b".to_string()], 0);
+        open.inner_mut().open = true;
+        let open = ctx.insert(open);
+        let closed = ctx.insert(Dropdown::new(vec!["a".to_string()], 0));
+        place_h(closed, 0.0, 0.0, 120.0, 24.0, &mut ctx);
+        assert!(ctx.active_popovers.is_empty());
+        place_h(open, 0.0, 40.0, 120.0, 24.0, &mut ctx);
+        assert_eq!(ctx.active_popovers, vec![ctx[open].id()]);
     }
 }
