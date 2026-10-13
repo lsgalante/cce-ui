@@ -112,7 +112,9 @@ Wayland protocol bindings (`protocol/*.xml`) are generated inline by `wayland-sc
 **Features**: `markdown` (`widget::markdown`, brings in cce-vault), `doc_editor`
 (`widget::doc_editor`), `a11y` (AT-SPI publishing; see "Accessibility" below), `file_dialog`
 (`file_dialog::pick_file` / `save_file` through rfd, which brings ashpd's D-Bus stack: 119 of
-the 313 crates a client builds with it on).
+the 313 crates a client builds with it on), `graph` (`widget::Graph`, the node-graph editor, and
+`GraphController`; no extra dependencies — the grid lattice in `layout::graph` / `color::graph`
+stays in the core).
 
 ## Verify on screen, not just in tests
 
@@ -422,7 +424,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `heightfield/`.
 - `widget/` — `host.rs` (`WidgetHost`), `tree.rs` (`WidgetTree`, on `scene::Arena`), `painter.rs` (the paint walk over widgets), `events.rs` (the input vocabulary), `controllers.rs` (the host controller traits), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
   `embedded.rs`, `container/` (params pane, tree list, spreadsheet, menus, scroll boxes…),
-  `input/` (button, slider, text box, dropdown, ramp…), `display/` (label, graph, svg…),
+  `input/` (button, slider, text box, dropdown, ramp…), `display/` (label, graph behind `graph`, svg…),
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit/` (`LineEdit`, a field an app
   draws itself), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by

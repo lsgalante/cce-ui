@@ -6,6 +6,7 @@ pub mod status_bar;
 pub mod splitter;
 pub mod list_item;
 pub mod separator;
+#[cfg(feature = "graph")]
 pub mod graph;
 pub mod usage_bar;
 pub mod info_box;
@@ -22,6 +23,7 @@ pub use self::status_bar::StatusBar;
 pub use self::splitter::Splitter;
 pub use self::list_item::{TextItem, InteractiveListItem};
 pub use self::separator::Separator;
+#[cfg(feature = "graph")]
 pub use self::graph::{GraphNode, Graph, TaggedQuad, WireStyle, node_wires};
 pub use self::usage_bar::UsageBar;
 pub use self::info_box::InfoBox;

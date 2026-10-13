@@ -14,5 +14,5 @@ if ! rustup target list --installed 2>/dev/null | grep -qx "$target"; then
     exit 2
 fi
 cargo check --target "$target" --lib --bins --examples --tests
-cargo check --target "$target" --lib --features markdown,doc_editor
+cargo check --target "$target" --lib --features markdown,doc_editor,graph
 echo "check-mac: ok"

@@ -38,6 +38,12 @@ a11y = ["dep:accesskit_unix"]
 # which brings ashpd and its D-Bus stack. Only the apps that open or save
 # files through it turn it on.
 file_dialog = ["dep:rfd"]
+# `widget::Graph` (the node-graph editor), its `GraphNode` / `TaggedQuad` /
+# `node_wires` and the `GraphController` trait. No extra dependencies; it is
+# behind a feature so the apps that draw no node graph do not compile it.
+# The grid lattice and its colours (`layout::graph`, `color::graph`) stay in
+# the core, since `ContentBg` and the compositor's grid read them.
+graph = []
 
 [dependencies]
 # The GUI-free half: config, input, motion, units, ipc and the spec parsers,

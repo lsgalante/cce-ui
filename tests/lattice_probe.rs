@@ -24,6 +24,7 @@ fn lattice_survives_tessellation_inside_a_clip() {
 /// heavier axes through the (0, 0) crossing. It used to be cells with grout
 /// between them, one `Grout` draw, which is why this test once asserted that.
 #[test]
+#[cfg(feature = "graph")]
 fn graph_paints_its_lattice_as_lines_and_axes() {
     use cce_ui::widget::GraphController;
     // The one style value this path reads. Pinned, or the user's config.kdl

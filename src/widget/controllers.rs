@@ -28,6 +28,8 @@ pub trait MenuController {
     fn get_menu_items_at(&self, px: f32, py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)>;
 }
 
+/// The node-graph editor's interface ([`Graph`]); behind the `graph` feature.
+#[cfg(feature = "graph")]
 pub trait GraphController {
     fn set_nodes(&mut self, nodes: &[GraphNode]);
     fn get_nodes(&self) -> Vec<GraphNode>;

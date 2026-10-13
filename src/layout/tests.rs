@@ -34,6 +34,7 @@ use super::*;
 /// `circle`), where it used to drop them, so cce-files' Graph page drew
 /// nodes and no wires.
 #[test]
+#[cfg(feature = "graph")]
 fn a_graphs_wires_reach_a_flat_host() {
     #[derive(Default)]
     struct Strokes {

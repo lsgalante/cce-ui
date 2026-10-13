@@ -1,13 +1,16 @@
 //! `ContentBg` — a standalone gradient-grid page background. Despite
-//! the name it owns no children; its GraphController impl is a stub except the grid-geometry
-//! setters (hosts configure the grid through the controller interface). Never hittable; the
+//! the name it owns no children; its GraphController impl (with the `graph` feature) is a stub
+//! except the grid-geometry setters (hosts configure the grid through the controller
+//! interface; without the feature the grid keeps its defaults). Never hittable; the
 //! background color itself is drawn by hosts reading `color()` (the geometry here is only the
 //! cell/gap gradient grid).
 
 use crate::color;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
-use crate::widget::{Adapted, GraphController, GraphNode, Input, Layout, Paint};
+use crate::widget::{Adapted, Input, Layout, Paint};
+#[cfg(feature = "graph")]
+use crate::widget::{GraphController, GraphNode};
 
 pub struct ContentBg {
     show_network_grid: bool,
@@ -251,6 +254,7 @@ impl ContentBg {
     }
 }
 
+#[cfg(feature = "graph")]
 impl GraphController for ContentBg {
     fn set_nodes(&mut self, _nodes: &[GraphNode]) {}
     fn get_nodes(&self) -> Vec<GraphNode> { Vec::new() }

@@ -183,6 +183,9 @@ indicator stays at the right edge, always shown — an editor keeps its place ma
 
 ## Graph
 
+Behind the `graph` feature (`widget::Graph`, `GraphNode`, `TaggedQuad`, `node_wires`,
+`GraphController`); cce-designer, cce-files and cce-graph turn it on.
+
 - **Wire styles** (`WireStyle`): orthogonal, rounded, bezier, straight;
   `style.surface.graph.node.wire_style` unless the host sets one (`Graph::set_wire_style`, `None`
   to follow config). Colour and width are `wire_color` / `wire_size` (px at 100%, scaled with the

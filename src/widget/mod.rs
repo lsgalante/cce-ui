@@ -215,10 +215,12 @@ pub use self::container::{
 pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, UsageBar,
     InfoBox, StatusDot, InteractiveListItem,
-    GraphNode, Graph, TaggedQuad, node_wires, Float3, ProgressBar, StatusBar, Splitter, Separator,
+    Float3, ProgressBar, StatusBar, Splitter, Separator,
     DotStatus, ImageView,
     truncate_head, truncate_tail,
 };
+#[cfg(feature = "graph")]
+pub use self::display::{GraphNode, Graph, TaggedQuad, node_wires};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CornerRadii {

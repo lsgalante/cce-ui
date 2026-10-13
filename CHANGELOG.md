@@ -10,6 +10,14 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-12
 
+- **The node graph is a feature.** `widget::Graph` (with `GraphNode`, `TaggedQuad`,
+  `node_wires`, `WireStyle`) and the `GraphController` trait are behind `graph`, so the apps
+  that draw no node graph stop compiling its 2,300 lines (architecture RFC phase 3,
+  extraction). `ContentBg`'s grid setters are its `GraphController` impl, so without the
+  feature its grid keeps the defaults — no client without a graph set them. The lattice
+  geometry and colours (`layout::graph`, `color::graph`) stay ungated. cce-designer, cce-files
+  and cce-graph turn it on. Checked: lib tests with and without (631 / 613), `lattice_probe`,
+  and the examples with it on.
 - **Each test thread has its own style.** The style was one process-wide snapshot every unit
   test wrote, kept apart by a per-thread colour overlay, a per-thread registry overlay and
   `test_color_state_lock` — with holes (setters that wrote the global style even under test,
