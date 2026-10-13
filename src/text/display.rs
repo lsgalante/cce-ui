@@ -84,7 +84,7 @@ pub(crate) fn dl_text_spans<'a>(
 ) -> Vec<TextSpan<'a>> {
     let mut spans: Vec<TextSpan<'a>> = Vec::new();
     for ti in items {
-        let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
+        let item_bounds = if let Some([l, t, r, b]) = ti.bounds {
             TextBounds {
                 left: ((l * scale_f32).round() as i32).clamp(0, bounds.right),
                 top: ((t * scale_f32).round() as i32).clamp(0, bounds.bottom),
@@ -94,49 +94,58 @@ pub(crate) fn dl_text_spans<'a>(
         } else {
             bounds
         };
-        popover_occlusion_clamp(overlays, ti, scale_f32, &mut item_bounds);
-        spans.push(TextSpan {
-            buffer: &ti.buffer,
-            left: (ti.x * scale_f32).round(),
-            top: (ti.y * scale_f32).round(),
-            // Buffers are shaped at physical size (get_text_buffer_attrs).
-            scale: 1.0,
-            bounds: Some([
-                item_bounds.left,
-                item_bounds.top,
-                item_bounds.right,
-                item_bounds.bottom,
-            ]),
-            default_color: [
-                ti.color.r() as f32 / 255.0,
-                ti.color.g() as f32 / 255.0,
-                ti.color.b() as f32 / 255.0,
-                ti.color.a() as f32 / 255.0,
-            ],
-            rotation: None,
-            // Circle wins when both are set (the circular pane's innermost clip);
-            // otherwise a rounded-rect clip rides as center+radius with extents.
-            clip_circle: match (ti.clip_circle, ti.clip_rrect) {
-                (Some(c), _) => [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32],
-                (None, Some(rr)) => [rr[0] * scale_f32, rr[1] * scale_f32, rr[4] * scale_f32],
-                (None, None) => [0.0; 3],
-            },
-            clip_extents: match (ti.clip_circle, ti.clip_rrect) {
-                (None, Some(rr)) => [rr[2] * scale_f32, rr[3] * scale_f32],
-                _ => [0.0; 2],
-            },
-        });
+        for piece in popover_occlusion_clamp(overlays, ti, scale_f32, item_bounds) {
+            spans.push(dl_text_span(ti, scale_f32, piece));
+        }
     }
     spans
 }
 
-/// The popover-occlusion clamp shared by the default [`Application::text_areas`] mapping and
-/// the display-list text path: clip a text item's bounds so it does not bleed through an open
-/// popover's plate. A text item whose own bounds coincide with a popover rect IS that popover's
-/// text and is left alone; anything else that intersects gets clamped horizontally toward
-/// whichever side of the popover it starts on.
-/// Clamp a text item's bounds away from the registered popover rects it
-/// runs under, so page text does not bleed through a floating plate.
+/// One glyph-pass span of `ti`, cut at `item_bounds` (physical px).
+fn dl_text_span(ti: &DlText, scale_f32: f32, item_bounds: TextBounds) -> TextSpan<'_> {
+    TextSpan {
+        buffer: &ti.buffer,
+        left: (ti.x * scale_f32).round(),
+        top: (ti.y * scale_f32).round(),
+        // Buffers are shaped at physical size (get_text_buffer_attrs).
+        scale: 1.0,
+        bounds: Some([
+            item_bounds.left,
+            item_bounds.top,
+            item_bounds.right,
+            item_bounds.bottom,
+        ]),
+        default_color: [
+            ti.color.r() as f32 / 255.0,
+            ti.color.g() as f32 / 255.0,
+            ti.color.b() as f32 / 255.0,
+            ti.color.a() as f32 / 255.0,
+        ],
+        rotation: None,
+        // Circle wins when both are set (the circular pane's innermost clip);
+        // otherwise a rounded-rect clip rides as center+radius with extents.
+        clip_circle: match (ti.clip_circle, ti.clip_rrect) {
+            (Some(c), _) => [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32],
+            (None, Some(rr)) => [rr[0] * scale_f32, rr[1] * scale_f32, rr[4] * scale_f32],
+            (None, None) => [0.0; 3],
+        },
+        clip_extents: match (ti.clip_circle, ti.clip_rrect) {
+            (None, Some(rr)) => [rr[2] * scale_f32, rr[3] * scale_f32],
+            _ => [0.0; 2],
+        },
+    }
+}
+
+/// Cut a text item's bounds around the registered popover rects it runs
+/// under, so page text does not bleed through a floating plate: the pieces of
+/// `item_bounds` (physical px) that lie outside every covering popover, one
+/// glyph-pass span each. Text drawn after all geometry cannot be covered by a
+/// plate, so this is what hides it.
+///
+/// Only the popover's own rect is taken out. Before 2026-10-13 the item's
+/// bounds were narrowed to one side of the popover, so a paragraph the list
+/// overlapped lost everything right of the list's left edge, on every one of
+/// its lines, not just the ones the list covered.
 ///
 /// A text item BELONGS to a popover when it carries exactly that popover's
 /// rect as its bounds (the convention every popover's own labels follow),
@@ -156,8 +165,8 @@ pub(super) fn popover_occlusion_clamp(
     overlay_rects: &[(f32, f32, f32, f32)],
     ti: &DlText,
     scale_f32: f32,
-    item_bounds: &mut TextBounds,
-) {
+    item_bounds: TextBounds,
+) -> Vec<TextBounds> {
     let popover_of = |[l, t, r, b]: [f32; 4]| {
         overlay_rects.iter().position(|&(ox, oy, ow, oh)| {
             (l - ox).abs() < 1.0
@@ -168,40 +177,59 @@ pub(super) fn popover_occlusion_clamp(
     };
     let owner = ti.own_bounds.and_then(popover_of).or_else(|| ti.bounds.and_then(popover_of));
     let first_above = owner.map_or(0, |k| k + 1);
+    let mut pieces = vec![item_bounds];
+    if overlay_rects.len() <= first_above {
+        return pieces;
+    }
+
+    // The text's own extent: a popover it does not reach leaves it whole,
+    // however far its bounds run (unbounded text has the whole surface).
+    let mut text_w = 0.0f32;
+    let mut run_count = 0;
+    for run in ti.buffer.layout_runs() {
+        text_w = text_w.max(run.line_w);
+        run_count += 1;
+    }
+    let text_h = run_count as f32 * ti.buffer.metrics().line_height;
+    let (tl, tt) = (ti.x * scale_f32, ti.y * scale_f32);
+    let (tr, tb) = (tl + text_w, tt + text_h);
+
     for &(ox, oy, ow, oh) in &overlay_rects[first_above..] {
         let ol = (ox * scale_f32).round() as i32;
         let ot = (oy * scale_f32).round() as i32;
         let or = ((ox + ow) * scale_f32).round() as i32;
         let ob = ((oy + oh) * scale_f32).round() as i32;
-
-        let tx_pixel = ti.x * scale_f32;
-        let ty_pixel = ti.y * scale_f32;
-
-        let mut text_w = 0.0f32;
-        let mut run_count = 0;
-        for run in ti.buffer.layout_runs() {
-            text_w = text_w.max(run.line_w);
-            run_count += 1;
+        if !(tl < or as f32 && tr > ol as f32 && tt < ob as f32 && tb > ot as f32) {
+            continue;
         }
-        let text_h = run_count as f32 * ti.buffer.metrics().line_height;
-
-        let actual_left = tx_pixel;
-        let actual_right = tx_pixel + text_w;
-        let actual_top = ty_pixel;
-        let actual_bottom = ty_pixel + text_h;
-
-        if actual_left < or as f32
-            && actual_right > ol as f32
-            && actual_top < ob as f32
-            && actual_bottom > ot as f32
-        {
-            if tx_pixel < ol as f32 {
-                item_bounds.right = item_bounds.right.min(ol);
-            } else {
-                item_bounds.left = item_bounds.left.max(or);
-            }
-        }
+        pieces = pieces
+            .into_iter()
+            .flat_map(|p| subtract(p, TextBounds { left: ol, top: ot, right: or, bottom: ob }))
+            .collect();
     }
+    pieces
+}
+
+/// `a` less `b`: at most four disjoint rects (the full-width bands above and
+/// below `b`, the strips left and right of it), empty ones left out.
+fn subtract(a: TextBounds, b: TextBounds) -> Vec<TextBounds> {
+    let empty = |r: &TextBounds| r.left >= r.right || r.top >= r.bottom;
+    if empty(&a) {
+        return Vec::new();
+    }
+    if a.left >= b.right || a.right <= b.left || a.top >= b.bottom || a.bottom <= b.top {
+        return vec![a];
+    }
+    let (mid_top, mid_bottom) = (a.top.max(b.top), a.bottom.min(b.bottom));
+    [
+        TextBounds { bottom: b.top.min(a.bottom), ..a },
+        TextBounds { top: b.bottom.max(a.top), ..a },
+        TextBounds { right: b.left.min(a.right), top: mid_top, bottom: mid_bottom, ..a },
+        TextBounds { left: b.right.max(a.left), top: mid_top, bottom: mid_bottom, ..a },
+    ]
+    .into_iter()
+    .filter(|r| !empty(r))
+    .collect()
 }
 
 #[cfg(test)]
@@ -248,8 +276,29 @@ mod tests {
         assert_eq!(span_bounds(&own), vec![well], "the popover's own text, cut at its well");
 
         let page = span_bounds(&line(None));
-        assert_eq!(page.len(), 1);
-        assert!(page[0][0] >= page[0][2], "page text under the popover is clamped away: {:?}", page[0]);
+        assert!(page.is_empty(), "page text wholly under the popover is clamped away: {page:?}");
+    }
+
+    /// Page text the popover only partly covers keeps everything outside the popover's rect:
+    /// the lines above and below it whole, and on the covered lines what runs left and right
+    /// of it. It used to be cut at the popover's left edge on every line.
+    #[test]
+    fn page_text_keeps_what_the_popover_does_not_cover() {
+        let (x, y, w, h) = POPOVER;
+        let para = "a long paragraph line that runs under the popover and out the other side\n".repeat(12);
+        let mut pc = PaintCtx::new();
+        pc.text_with(para, 10.0, 10.0, 14.0, [255; 3], None, None);
+        let (l, t, r, b) = (x as i32, y as i32, (x + w) as i32, (y + h) as i32);
+        let s = SURFACE;
+        assert_eq!(
+            span_bounds(&pc.finish()),
+            vec![
+                [s.left, s.top, s.right, t],
+                [s.left, b, s.right, s.bottom],
+                [s.left, t, l, b],
+                [r, t, s.right, b],
+            ]
+        );
     }
 
     /// A label whose bounds are the popover's rect and that no clip narrows is the popover's,
