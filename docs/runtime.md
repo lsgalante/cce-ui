@@ -41,6 +41,18 @@ plate of every themed app — samples the zeroed backdrop instead of a snapshot
 (`first_frost_exempt`). `write_window_info` marks every image stale. `CCE_UI_FULL_DAMAGE=1`
 disables derivation; `CCE_PRESENT_DEBUG=1` logs each rect.
 
+**A part of the frame built once.** An app that records part of its frame only on a rebuild
+(a page, in page coordinates) keeps it as a `DisplayList` and splices it into every frame through
+the frame's `PaintCtx`: `append_items` takes the items as they are (absolute);
+`append_translated(&list, dx, dy)` moves them first — a scroll offset — as though the walk that
+recorded them ran under `translate(dx, dy)`: each prim's geometry, a text's origin and bounds,
+and each item's scissor, circle and rounded clip. The context's own translation and clips apply
+on top. One item in, one out, in order; nothing is re-derived through the emitters, as
+`PaintCtx::replay` does. A list emitted unchanged damages nothing. The text-input claim is not
+in the list: replay it too (see "Input methods and text input").
+`an_appended_list_moves_as_though_painted_under_translate` and
+`every_prim_moves_as_its_emitter_moves_it` are the tests.
+
 ## Sessions, reconnects and GPU handles
 
 A connection is one **session**. A broken Wayland transport cannot be repaired, so `run` opens a

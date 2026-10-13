@@ -360,4 +360,82 @@ impl Prim {
             other => other,
         }
     }
+
+    /// This prim moved by `(dx, dy)`: every position it carries — its rect, a centre, a
+    /// line's ends, a frame's hole, a field's split and end, a groove's ends and host, a
+    /// lattice's or grout's origin, a union's boxes, a text's origin and its bounds. Sizes,
+    /// radii, depths, colours and materials stay as they are. What
+    /// [`PaintCtx::append_translated`] moves a cached list with. Every variant is named, so a
+    /// new one has to say how it moves.
+    pub fn translated(mut self, dx: f32, dy: f32) -> Prim {
+        let mv = |r: &mut Rect| {
+            r.x += dx;
+            r.y += dy;
+        };
+        let pt = |p: &mut (f32, f32)| {
+            p.0 += dx;
+            p.1 += dy;
+        };
+        match &mut self {
+            Prim::Quad { rect, .. }
+            | Prim::RoundedRect { rect, .. }
+            | Prim::Border { rect, .. }
+            | Prim::Bevel { rect, .. }
+            | Prim::Recess { rect, .. }
+            | Prim::Boss { rect, .. }
+            | Prim::Ridge { rect, .. }
+            | Prim::Trough { rect, .. }
+            | Prim::Plate { rect, .. }
+            | Prim::Glow { rect, .. }
+            | Prim::Droplet { rect, .. }
+            | Prim::DropletScrim { rect, .. }
+            | Prim::Fill { rect, .. }
+            | Prim::Image { rect, .. } => mv(rect),
+            Prim::Frame { rect, hole, .. } => {
+                mv(rect);
+                mv(hole);
+            }
+            // `split` and `end` are xs in `rect`'s space.
+            Prim::Field { rect, split, end, .. } => {
+                mv(rect);
+                *split += dx;
+                *end += dx;
+            }
+            Prim::Arc { cx, cy, .. }
+            | Prim::ArcShaded { cx, cy, .. }
+            | Prim::Circle { cx, cy, .. }
+            | Prim::Sphere { cx, cy, .. }
+            | Prim::ConcaveFillet { cx, cy, .. } => {
+                *cx += dx;
+                *cy += dy;
+            }
+            Prim::Vector { x1, y1, x2, y2, .. } => {
+                *x1 += dx;
+                *y1 += dy;
+                *x2 += dx;
+                *y2 += dy;
+            }
+            Prim::Groove { a, b, host, .. } => {
+                pt(a);
+                pt(b);
+                mv(host);
+            }
+            Prim::Lattice { rect, origin, .. } | Prim::Grout { rect, origin, .. } => {
+                mv(rect);
+                pt(origin);
+            }
+            Prim::CarveUnion { boxes, .. } => boxes.iter_mut().for_each(|(r, _)| mv(r)),
+            Prim::Text { x, y, bounds, .. } => {
+                *x += dx;
+                *y += dy;
+                if let Some([l, t, r, b]) = bounds {
+                    *l += dx;
+                    *t += dy;
+                    *r += dx;
+                    *b += dy;
+                }
+            }
+        }
+        self
+    }
 }

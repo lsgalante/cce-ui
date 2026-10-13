@@ -11,7 +11,7 @@
 //!
 //! | module | holds |
 //! |---|---|
-//! | `mod.rs` | the display list, [`PaintCtx`]'s stacks, `push`, `append_items`, `replay`, `finish` |
+//! | `mod.rs` | the display list, [`PaintCtx`]'s stacks, `push`, `append_items`, `append_translated`, `replay`, `finish` |
 //! | `prim` | [`Prim`], the vocabulary every widget paints in, and its parts (`Cap`, `Radii`, the droplet's finish) |
 //! | `surfaces` | [`PlateSpec`], [`PlateStance`], [`Field`], [`ControlPlate`] |
 //! | `relief` | `PaintCtx`'s relief emitters: plates, bevels, carves, fields, wells, grooves, lattices, droplets |
@@ -51,6 +51,20 @@ pub struct PaintItem {
     pub clip: Option<Rect>,
     pub clip_circle: Option<[f32; 3]>,
     pub clip_rrect: Option<[f32; 5]>,
+}
+
+impl PaintItem {
+    /// This item moved by `(dx, dy)`: its prim ([`Prim::translated`]) and every clip it
+    /// records — the scissor, the circle's centre and the rounded clip's centre (its
+    /// half-extents and radius are sizes, and stay).
+    pub fn translated(self, dx: f32, dy: f32) -> PaintItem {
+        PaintItem {
+            prim: self.prim.translated(dx, dy),
+            clip: self.clip.map(|r| Rect { x: r.x + dx, y: r.y + dy, ..r }),
+            clip_circle: self.clip_circle.map(|[cx, cy, r]| [cx + dx, cy + dy, r]),
+            clip_rrect: self.clip_rrect.map(|[cx, cy, bx, by, r]| [cx + dx, cy + dy, bx, by, r]),
+        }
+    }
 }
 
 /// An ordered list of clipped primitives — the single source of truth for a frame's geometry.
@@ -262,6 +276,20 @@ impl PaintCtx {
             item.clip_rrect = item.clip_rrect.or(cur_rrect);
             self.list.items.push(item);
         }
+    }
+
+    /// Append an already-built list moved by `(dx, dy)`, as though the walk that painted it
+    /// had run here inside [`translate`](Self::translate)`(dx, dy)`: each item's prim moves
+    /// (a text's origin and bounds too) and so does each clip it recorded — scissor, circle
+    /// and rounded rect. The list is taken in local space, so this context's own translation
+    /// applies on top; its current clips compose with the items' as in
+    /// [`append_items`](Self::append_items) (which takes items as absolute). One item in, one
+    /// out, in order, nothing re-derived through the emitters (unlike [`replay`](Self::replay)):
+    /// what a host does that records a page once at rebuild, in page coordinates, and emits it
+    /// every frame under its scroll offset.
+    pub fn append_translated(&mut self, list: &DisplayList, dx: f32, dy: f32) {
+        let (dx, dy) = (dx + self.offset.0, dy + self.offset.1);
+        self.append_items(list.items.iter().map(|item| item.clone().translated(dx, dy)));
     }
 
     /// Re-emit an already-built [`Prim`] through this context, so it re-records the

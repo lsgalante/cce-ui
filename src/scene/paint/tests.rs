@@ -266,3 +266,134 @@ fn text_with_translates_position_and_bounds() {
         other => panic!("expected Text, got {other:?}"),
     }
 }
+
+/// A list appended moved is the list painted under that translate: every prim, a text's
+/// origin and bounds, and each scissor, circle and rounded clip — under the host's own
+/// translation and clip, which apply on top.
+#[test]
+fn an_appended_list_moves_as_though_painted_under_translate() {
+    let draw = |pc: &mut PaintCtx| {
+        pc.quad(r(0.0, 0.0, 8.0, 8.0), [1.0; 4]);
+        pc.clip(r(4.0, 4.0, 100.0, 60.0), |pc| {
+            pc.rounded_rect(r(10.0, 10.0, 40.0, 20.0), 4.0, (true, false, true, false), [0.5; 4]);
+            pc.text_with("label", 12.0, 14.0, 12.0, [200, 200, 210], None, Some([10.0, 10.0, 50.0, 30.0]));
+        });
+        pc.clip_rounded(r(20.0, 20.0, 60.0, 40.0), 6.0, |pc| {
+            pc.field(&Field::spanning(r(24.0, 24.0, 50.0, 20.0), (3.0, 3.0, 3.0, 3.0), 4.0, 40.0, 74.0));
+            pc.groove((30.0, 26.0), (30.0, 42.0), 1.0, 2.0, r(24.0, 24.0, 50.0, 20.0));
+        });
+        pc.clip_circle([50.0, 50.0, 20.0], |pc| pc.circle(50.0, 50.0, 10.0, [0.25; 4]));
+    };
+    let mut page = PaintCtx::new();
+    draw(&mut page);
+    let page = page.finish();
+    let host = |emit: &dyn Fn(&mut PaintCtx)| {
+        let mut pc = PaintCtx::new();
+        pc.push_translate(2.0, 3.0);
+        pc.clip(r(0.0, 0.0, 200.0, 70.0), emit);
+        pc.pop_translate();
+        pc.finish()
+    };
+    let painted = host(&|pc| pc.translate(16.0, -24.0, draw));
+    let appended = host(&|pc| pc.append_translated(&page, 16.0, -24.0));
+    assert_eq!(appended.len(), page.len(), "one item in, one out");
+    assert_eq!(appended, painted);
+}
+
+/// Every kind of prim moves as its own emitter moves it under a translate — so
+/// `Prim::translated` misses no position a variant carries (a frame's hole, a field's span, a
+/// groove's host, a lattice's origin, a union's boxes).
+#[test]
+fn every_prim_moves_as_its_emitter_moves_it() {
+    let m = Material::opaque([0.3, 0.3, 0.35, 1.0]);
+    let radii = (2.0, 2.0, 2.0, 2.0);
+    let edges = (true, false, true, true);
+    let spec = DropletSpec::default();
+    let draw = |pc: &mut PaintCtx| {
+        pc.quad(r(1.0, 2.0, 3.0, 4.0), [0.5; 4]);
+        pc.rounded_rect(r(1.0, 2.0, 30.0, 40.0), 4.0, (true, false, true, false), [0.5; 4]);
+        pc.border(r(1.0, 2.0, 30.0, 40.0), radii, [0.1; 4], [0.9; 4], 1.5);
+        pc.bevel_tinted(r(1.0, 2.0, 30.0, 40.0), radii, &m, 2.0, [1.0, 0.5, 0.0]);
+        pc.frame(r(0.0, 0.0, 80.0, 20.0), r(10.0, 4.0, 60.0, 16.0), radii, &m, 3.0);
+        pc.recess_edges(r(1.0, 2.0, 30.0, 40.0), radii, 3.0, edges);
+        pc.boss_edges(r(1.0, 2.0, 30.0, 40.0), radii, 3.0, edges);
+        pc.ridge_edges(r(1.0, 2.0, 30.0, 40.0), radii, 3.0, edges);
+        pc.trough_edges(r(1.0, 2.0, 30.0, 40.0), radii, 3.0, edges);
+        pc.field(&Field::spanning(r(4.0, 4.0, 60.0, 20.0), radii, 4.0, 40.0, 64.0));
+        pc.plate_shaped(r(0.0, 0.0, 100.0, 50.0), radii, &m, 3.0, Some(2.0));
+        pc.arc(5.0, 6.0, 4.0, 1.0, 0.0, 1.5, [0.5; 4]);
+        pc.arc_shaded(5.0, 6.0, 4.0, 1.0, 0.0, 1.5, [0.1; 4], [0.5; 4], [0.9; 4]);
+        pc.vector(1.0, 2.0, 11.0, 7.0, 1.0, [0.5; 4], Cap::Round);
+        pc.circle(5.0, 6.0, 3.0, [0.5; 4]);
+        pc.sphere(5.0, 6.0, 3.0, &m);
+        pc.glow(r(1.0, 2.0, 30.0, 40.0), 4.0, 6.0, [0.5; 4]);
+        pc.droplet(r(1.0, 2.0, 30.0, 40.0), &m, spec);
+        pc.droplet_scrim(r(1.0, 2.0, 30.0, 40.0), &m, spec, 3.0);
+        pc.concave_fillet(5.0, 6.0, 4.0, 2.0, 0.5, true);
+        pc.groove_strength((2.0, 3.0), (20.0, 3.0), 1.0, 2.0, r(0.0, 0.0, 30.0, 10.0), 0.5);
+        pc.lattice(r(0.0, 0.0, 100.0, 50.0), (10.0, 10.0), (5.0, 6.0), (8.0, 8.0), 2.0, 1.0);
+        pc.grout(r(0.0, 0.0, 100.0, 50.0), (10.0, 10.0), (5.0, 6.0), (8.0, 8.0), 2.0, [0.5; 4]);
+        pc.fill_material(r(1.0, 2.0, 30.0, 40.0), radii, &m);
+        pc.carve_union(vec![(r(1.0, 2.0, 10.0, 10.0), radii), (r(8.0, 2.0, 10.0, 20.0), radii)], 2.0, false);
+        pc.text_with("hi", 1.0, 2.0, 12.0, [1, 2, 3], None, Some([0.0, 0.0, 50.0, 30.0]));
+        pc.image(7, r(1.0, 2.0, 16.0, 16.0), 0.5);
+    };
+    let mut page = PaintCtx::new();
+    draw(&mut page);
+    let page = page.finish();
+    let kinds: std::collections::HashSet<_> = page.items.iter().map(|i| std::mem::discriminant(&i.prim)).collect();
+    assert_eq!(kinds.len(), 27, "one of each kind of prim");
+    let mut painted = PaintCtx::new();
+    painted.translate(16.0, -24.0, draw);
+    let mut appended = PaintCtx::new();
+    appended.append_translated(&page, 16.0, -24.0);
+    assert_eq!(appended.finish(), painted.finish());
+}
+
+/// A quad and a rounded rect move with their scissor and rounded clip; an unclipped item
+/// takes the host's clip, as an appended one does.
+#[test]
+fn a_moved_rounded_rect_keeps_its_clips() {
+    let mut page = PaintCtx::new();
+    page.quad(r(0.0, 100.0, 10.0, 10.0), [1.0; 4]);
+    page.clip_rounded(r(0.0, 100.0, 80.0, 40.0), 6.0, |pc| pc.rounded_rect(r(4.0, 104.0, 20.0, 10.0), 3.0, (true, true, true, true), [0.5; 4]));
+    let page = page.finish();
+    let mut host = PaintCtx::new();
+    host.clip(r(0.0, 0.0, 300.0, 70.0), |pc| pc.append_translated(&page, 5.0, -50.0));
+    let items = host.finish().items;
+    assert_eq!(items[0].prim, Prim::Quad { rect: r(5.0, 50.0, 10.0, 10.0), color: [1.0; 4] });
+    assert_eq!(items[0].clip, Some(r(0.0, 0.0, 300.0, 70.0)), "an unclipped item takes the host's clip");
+    assert!(matches!(items[1].prim, Prim::RoundedRect { rect, radius: 3.0, .. } if rect == r(9.0, 54.0, 20.0, 10.0)), "{:?}", items[1]);
+    assert_eq!(items[1].clip, Some(r(5.0, 50.0, 80.0, 20.0)), "its scissor moved, then cut by the host's");
+    assert_eq!(items[1].clip_rrect, Some([45.0, 70.0, 34.0, 14.0, 6.0]), "the rounded clip's centre moved, its size kept");
+}
+
+/// A text moves its origin and its bounds; its scissor moves with it.
+#[test]
+fn a_moved_text_moves_its_origin_and_bounds() {
+    let mut page = PaintCtx::new();
+    page.clip(r(0.0, 0.0, 60.0, 40.0), |pc| pc.text_with("hi", 4.0, 8.0, 12.0, [1, 2, 3], Some("Mono".into()), Some([2.0, 4.0, 50.0, 30.0])));
+    let page = page.finish();
+    let mut host = PaintCtx::new();
+    host.append_translated(&page, 10.0, -20.0);
+    let item = &host.finish().items[0];
+    assert!(
+        matches!(&item.prim, Prim::Text { text, x: 14.0, y: -12.0, font_size: 12.0, color: [1, 2, 3], bounds: Some([12.0, -16.0, 60.0, 10.0]), font: Some(f), .. }
+            if text == "hi" && f == "Mono"),
+        "{item:?}"
+    );
+    assert_eq!(item.clip, Some(r(10.0, -20.0, 60.0, 40.0)));
+}
+
+/// A circular clip's centre moves with the prims under it, its radius kept.
+#[test]
+fn a_moved_circle_clip_moves_its_centre() {
+    let mut page = PaintCtx::new();
+    page.clip_circle([50.0, 50.0, 20.0], |pc| pc.circle(50.0, 50.0, 10.0, [1.0; 4]));
+    let page = page.finish();
+    let mut host = PaintCtx::new();
+    host.translate(1.0, 1.0, |pc| pc.append_translated(&page, -30.0, 30.0));
+    let item = &host.finish().items[0];
+    assert_eq!(item.prim, Prim::Circle { cx: 21.0, cy: 81.0, radius: 10.0, color: [1.0; 4] }, "the host's translation applies too");
+    assert_eq!(item.clip_circle, Some([21.0, 81.0, 20.0]));
+}
