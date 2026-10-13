@@ -10,6 +10,120 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-12
 
+- **The layering gate is closed: no module names a layer above its own.** `tests/layering.rs`'s
+  `ALLOWED_UPWARD` is empty (architecture RFC phase 3, layering). Four upward edges went. `layout`
+  moves to layer 1 beside `style` and `color`, which is what it is: its slots are part of `Style`,
+  its getters read it, and it names nothing above the base. That retires `style -> layout` and
+  `color -> layout`. For `layout -> scene`: `Rect` moves to a new layer-0 `geom` module
+  (`scene::layout` re-exports it, so `cce_ui::scene::layout::Rect` is unchanged), `carve_inside`
+  spells its radii as the `(f32, f32, f32, f32)` that `Radii` aliases, and `RECESS_DEPTH` moves
+  into `layout` beside `carve_depth_px` (`relief_shade` re-exports it). For `color -> scene`:
+  `PlateRung`, `MaterialDef` and `FrostDef` move into `color::materials` beside the slots that
+  hold them (`scene::material` re-exports them and keeps `MaterialDef::resolve`), the 5.5 frost
+  kernel default is `color`'s (`Frost::DEFAULT_RADIUS` is defined as it), and `param_plate_fill`
+  moves to `scene::material`. One public path breaks: `cce_ui::color::param_plate_fill` is now
+  `cce_ui::scene::param_plate_fill` (cce-designer, three sites). Checked: lib tests (601 default,
+  673 with every feature), every integration test including `layering`, `doc_claims` and
+  `plate_golden`, clippy with every feature and target, and the wasm build with and without
+  features, warnings denied.
+- **`Application` is a core plus four extensions.** Hooks only a few apps override move off
+  `Application` onto extension traits, each reached through one accessor on `Application` that
+  answers `None` by default (architecture RFC phase 3). `LayerApp` (`layer`, `wants_surface`;
+  Wayland shell only) goes through `layer_app`. `GridSurface` (`grid_patch`, `take_damage`) goes
+  through `grid_surface`; whether that returns `Some` replaces `grid()` and is read once per
+  session into `EngineState::is_grid`. `App3D` (`init_3d`, `stage_3d`, and the native
+  `stage_renderer`, which defaults to `stage_3d`; the `3d` feature) goes through `app_3d`. `Csd`
+  (`standard_csd`, `csd_resize_borders`, `csd_titlebar_move`, `take_window_action`) goes through
+  `csd`. The accessor is the opt-in: an extension implemented without it is never called, and each
+  trait's docs say so. Every extension is dyn-compatible, so no runner bound changed and apps that
+  override none of these hooks compile unchanged. The eight impls that did override one (gallery,
+  keyboard, notifier, the status bar and its OSD, grid, model, designer) move those methods
+  verbatim and add the accessor. `renderer_init` stays in the core as a lifecycle hook that does
+  nothing by default; `backend::app::renderer_ready` runs it and then `App3D::init_3d` for every
+  native renderer. `adjust_size`, which nothing overrode, is gone, and `Driver::cursor_icon_at`
+  now takes the app by `&mut`. The trait goes from 53 methods to 44. Checked: lib tests with every
+  feature (673), `doc_claims` and `layering`, clippy with every feature, `cargo check --all-
+  targets` with and without `3d`, and the wasm builds (library with and without features, the web
+  examples) with warnings denied.
+- **Widgets can tell the app what happened, in one sweep.** `UiContext::take_events()` returns
+  `(WidgetId, WidgetEvent)` pairs (`Clicked`, `Changed`) for every widget the context holds,
+  embedded children included, in id order. A widget raises one with the new `EventCtx::emit`, from
+  a routed event, a `tick_ctx`, or the `FocusIn`/`FocusOut` of a direct `focus()`/`unfocus()`; the
+  adapter keeps them in order until the sweep. The adapter also reports every widget's
+  `take_click`/`take_change` flags as `Clicked`/`Changed`, so no existing widget needed to change.
+  Until now an app could only poll each handle (122 calls in 19 apps), and `EventCtx` had no way
+  to send anything to the app; this is the prerequisite for moving the remaining apps to
+  `EventCtx` (architecture RFC phase 3). The per-handle polls stay, but an app uses one or the
+  other for a given widget, since both drain the same flags. Dropdown and Toggle keep one flag
+  behind both polls, so the sweep reports theirs as `Changed`. Because the sweep reaches embedded
+  children, TreeList's search now follows the search box's text instead of reading its change flag
+  a tick later. Checked: 7 tests in `context::widget_event_tests`; the embedded-search and
+  recorded-chord tests fail with their fixes reverted. Also lib tests (682), every integration
+  test, clippy, and the wasm check with and without features.
+- **FontSelector and KeybindRecorder report their changes.** Both keep their own `take_change`,
+  but their `Input` impls did not forward it, so `ctx[h].take_change()` always answered `false`. A
+  picked font family or a recorded chord never reached the app, and cce-data-editor's font and
+  keybind value editors never fired. Both `Input` impls now forward it, as TextBox and Dropdown
+  do. Checked: `a_picked_family_reaches_the_poll_and_the_sweep` and
+  `a_recorded_chord_reaches_the_hosts_poll`.
+- **`compose::place`: `render_widget`'s layout half.** `place` / `place_h` lay a widget out in a
+  flat host's block exactly as `render_widget` does — the label strip, `layout` at exactly the
+  block, `prepare_text`, the open popover's registration — and paint nothing. A display-list host
+  leaving the bridge (cce-files, cce-system-interface; architecture RFC phase 3) drops the target
+  argument and paints with `paint_root_into`. `render_widget` calls `place` first, so the two
+  cannot drift; the popover registration now comes before the replay, which reads none. Checked:
+  `a_placed_button_paints_what_render_widget_drew` and
+  `a_placed_labelled_text_box_paints_what_render_widget_drew` (same rect, prims equal to what
+  `render_widget` drew into a `PaintCtx`), `placing_an_open_dropdown_registers_its_popover`.
+- **`PaintCtx::append_translated`: a cached list under an offset.** It appends an already-built
+  `DisplayList` moved by `(dx, dy)`, as though the walk that recorded it ran under `translate(dx,
+  dy)`: each prim's geometry (`Prim::translated`, every variant named), a text's origin and
+  bounds, and each item's scissor, circle and rounded clip (`PaintItem::translated`). The
+  context's own translation and clips apply on top. One item in, one out: nothing is re-derived
+  through the emitters as `replay` does, which drops a tinted wall's partial edges and re-clamps a
+  field's span. It is for a host that records a page once in page coordinates and emits it every
+  frame under its scroll offset (cce-system-interface stage A). Checked:
+  `every_prim_moves_as_its_emitter_moves_it` (all 27 kinds equal the same paint under
+  `translate`), `an_appended_list_moves_as_though_painted_under_translate` (all three clip kinds,
+  under a host translate and clip), and three targeted tests; lib tests 681, clippy, the wasm
+  builds.
+- **Context menu: disabled rows, and the app's own rows collected.** `set_row_disabled(idx)` /
+  `set_rows_disabled(vec)` (after `show` / `show_page`, which enable every row) draw a row dim
+  (`TEXT_DIM`, its mark too) among the rows that run. It is never hovered, `step_hovered` passes
+  over it, it is never run or turned into, a press on it only closes the menu (as on a header),
+  and the accessibility tree marks it disabled with no Click. A row with no action of its own is
+  now the app's: running it — a press through `mouse_input`, Enter through the new
+  `activate_hovered(ctx)`, a screen reader's Click — closes the menu and records `(generation,
+  row)` for `take_picked()`. `activate(row, ctx)` runs any row by index, wherever it is drawn. The
+  reader's Click goes through `activate` (`a11y_unix::menu_click`) instead of a press at the row's
+  centre, so it now reaches app-owned rows and rows scrolled out of a short menu; before, it only
+  closed the menu on the terminal's rows and the cce-files breadcrumb view rows. Both are what the
+  cce-browser and cce-files menu migrations need (architecture RFC phase 3); the browser's Back /
+  Forward / Favourite rows are the first disabled ones. Checked: lib tests with every feature
+  (684), the new `a_disabled_row_is_dim_and_runs_nothing`,
+  `a_row_the_host_owns_is_picked_by_a_press_enter_or_a_reader`,
+  `a_row_scrolled_out_of_view_is_run_by_index`, `a_disabled_menu_row_is_read_but_offers_no_click`
+  and `a_readers_click_on_an_apps_menu_row_is_the_apps_pick`; clippy; doc_claims.
+- **One copy of the line-edit measuring: `LineMarks` and `paint_line`.** cce-sheets, cce-browser
+  and cce-documents each carry their own helpers to measure a `LineEdit` as drawn and paint it;
+  the cce-cloud and cce-designer query migrations would have made five.
+  `widget/line_edit/marks.rs` holds them once: `LineMarks::of(fs, &edit, size, family)` (the
+  caret's x, the selection and composition spans, `x_of` / `byte_at` / `index_at` / `width`),
+  `keep_caret` (the scroll that keeps the caret in view), and `paint_line(pc, area, origin_x,
+  &marks, &LineLook, placeholder, caret)`. That draws the selection, the text or placeholder, the
+  composition underline and the caret, and returns the caret's rect to claim. It reads
+  `text::ShapedRun` — the shaping `shaped_cluster_offsets` uses, through the same buffer cache,
+  but with a stop at every char boundary and the right end for right-to-left text — never
+  `measure_text_width`. It is named for the line, not a field: the well is the app's. The apps
+  keep their copies until they adopt it. Checked:
+  `marks_stand_on_char_boundaries_in_multibyte_text` (é, 日),
+  `a_masked_edit_is_measured_as_drawn_and_hit_back_into_its_text`,
+  `a_composition_is_measured_where_it_is_drawn`, `the_caret_stays_in_view`,
+  `a_line_paints_its_text_and_marks_and_returns_the_caret`; layering; both wasm checks.
+- **`LineEdit`: an Alt chord types nothing.** Typed text was inserted unless Ctrl was held, so
+  Alt+letter typed the letter. It is now `Ignored`, left to the host as a Ctrl chord is
+  (`DocEditor` already treats Alt this way; AltGr is not Alt). Each new adopter would otherwise
+  have guarded Alt itself. Checked: `an_alt_chord_types_nothing`.
 - **Markdown without the notes domain.** The `markdown` feature turns on cce-core's `markdown`
   (the reading view's parser and the frontmatter properties, moved there from cce-vault)
   instead of depending on cce-vault, so the toolkit no longer pulls the notes crate in
