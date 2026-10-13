@@ -28,6 +28,16 @@ pub use spatial::SpatialGrid;
 use std::collections::HashMap;
 use crate::widget::{Handle, WidgetHost, WidgetId, Key, NamedKey, MouseButton, ElementState, Event, WidgetHostExt};
 
+/// The `is_coordinate_covered` memo: the point it answers for, the ids whose popover rect
+/// contains it, and a count of the builds, which [`UiContext::lend`] compares to tell
+/// whether the memo was built while its widget was out.
+#[derive(Debug, Default)]
+struct CoverageMemo {
+    at: Option<(f32, f32)>,
+    covering: Vec<WidgetId>,
+    builds: u64,
+}
+
 /// One open modal: who opened it, what is inside it, and where focus was before.
 #[derive(Debug, Clone)]
 struct ModalScope {
@@ -58,10 +68,11 @@ pub struct UiContext {
     /// of those queries shares the same point and differs only in which id it
     /// excludes, so the scan runs once per position and each caller then asks
     /// whether some *other* id covers it. Invalidated whenever the registry
-    /// changes or a frame's registration is reset.
+    /// changes or a frame's registration is reset, and when a lent widget with a
+    /// popover comes back to a memo built while it was out (`lend`).
     /// `RefCell` because `hit_test` receives `&UiContext` — the memo is an
     /// implementation detail of a read-only query, not shared state.
-    covered_cache: std::cell::RefCell<(Option<(f32, f32)>, Vec<WidgetId>)>,
+    covered_cache: std::cell::RefCell<CoverageMemo>,
     pub cursor_pos: (f32, f32),
     pub active_grab: Option<WidgetId>,
     pub drag_start_pos: Option<(f32, f32)>,
@@ -91,7 +102,7 @@ impl UiContext {
             focused_widget: None,
             active_popovers: Vec::new(),
             modals: Vec::new(),
-            covered_cache: std::cell::RefCell::new((None, Vec::new())),
+            covered_cache: std::cell::RefCell::new(CoverageMemo::default()),
             cursor_pos: (0.0, 0.0),
             active_grab: None,
             drag_start_pos: None,
@@ -186,15 +197,22 @@ impl UiContext {
     ///
     /// Every call the context makes into a widget that hands it the context comes through
     /// here; so does a host that places or drives a widget it holds by handle.
+    ///
+    /// A coverage query made during the call (a widget's hit gate asks one) is answered
+    /// without the lent widget, which the context cannot see, and memoized for the point. So
+    /// when the widget comes back with a popover, a memo built while it was out is dropped:
+    /// the next query at that point would otherwise be told nothing covers it.
     pub fn lend<R>(&mut self, id: WidgetId, f: impl FnOnce(&mut (dyn WidgetHost + 'static), &mut UiContext) -> R) -> Option<R> {
         let ptr = self.tree.get_ptr(id)?;
         if !self.tree.set_lent(id, true) {
             return None;
         }
+        let builds = self.covered_cache.borrow().builds;
         // SAFETY: a live widget the registry resolved, now out on loan: until it is put back
         // no resolver in the context hands it out, so this `&mut` is the only one.
         let out = f(unsafe { &mut *ptr }, self);
         self.tree.set_lent(id, false);
+        self.coverage_after_lend(id, builds);
         Some(out)
     }
 
@@ -204,10 +222,26 @@ impl UiContext {
         if !self.tree.set_lent(h.id(), true) {
             return None;
         }
+        let builds = self.covered_cache.borrow().builds;
         // SAFETY: as in `lend`; the root is the tree's own `W`.
         let out = f(unsafe { &mut *root.as_ptr() }, self);
         self.tree.set_lent(h.id(), false);
+        self.coverage_after_lend(h.id(), builds);
         Some(out)
+    }
+
+    /// `id` is back from a lend that began at memo build `builds`. A memo built since then
+    /// was built without `id`; if `id` has a popover, the memo may lack it, so drop it. A
+    /// widget with no popover adds nothing to the memo, which is kept: a pointer move lends
+    /// every widget in turn, and rebuilding after each would be the N×N scan the memo is for.
+    fn coverage_after_lend(&self, id: WidgetId, builds: u64) {
+        let built_without = {
+            let memo = self.covered_cache.borrow();
+            memo.at.is_some() && memo.builds != builds
+        };
+        if built_without && self.get_widget(id).is_some_and(|w| w.popover_rect().is_some()) {
+            self.invalidate_coverage_cache();
+        }
     }
 
     /// Hand `event` to widget `id`, lent for the call; a widget that takes it is marked dirty.

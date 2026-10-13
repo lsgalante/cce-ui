@@ -10,6 +10,22 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-13
 
+- **A lent widget's popover covers again once it is back.** `is_coordinate_covered` memoizes
+  the set of popovers covering one point, built from the widgets the context can see, and a
+  widget out on loan (`UiContext::lend` / `lend_h`) is one it cannot. A query made during a lend
+  (every widget's hit gate asks one) left the lent widget's popover out, and the memo served
+  that answer to the next query at the same point after the lend: an app handing one pointer
+  event to its panes in turn (cce-designer's `broadcast_pointer`) would let a pane under an open
+  menu take the event. The memo now counts its builds; `lend` notes the count when the widget
+  goes out, and when it comes back with a popover rect, a memo built in between is dropped. A
+  widget with no popover keeps the memo, since a pointer move lends every widget in turn and a
+  rebuild after each is the N×N scan the memo exists to avoid. cce-designer's
+  `deliver_to_slot`, which dropped the memo itself after lending a slot with a popover, no
+  longer needs to. Checked: `a_lent_widgets_popover_covers_again_once_it_is_back` (fails without
+  the fix, through `lend_h` and `lend`) and `lending_a_widget_with_no_popover_keeps_the_coverage_memo`
+  (one build serves the lend and the query after it), lib tests with every feature (701), every
+  integration test, clippy, the wasm build with and without features, and cce-designer's tests
+  (520) without its workaround.
 - **`Application::custom_vertices` is gone.** The hook appended raw `Vertex`es as a final
   unclipped batch after the display list's. Its one user, cce-display-manager, draws its login
   card's blob as the last geometry of its display list (cce-display-manager 78e2f3a), which

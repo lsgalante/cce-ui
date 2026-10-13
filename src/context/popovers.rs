@@ -104,21 +104,21 @@ impl UiContext {
     ///
     /// The covering set depends only on the point, so it is computed once and
     /// memoized; `query_id` is applied afterwards as an exclusion. See the
-    /// `covered_at` field for why the previous per-call registry scan mattered.
+    /// `covered_cache` field for why the previous per-call registry scan mattered.
     pub fn is_coordinate_covered(&self, query_id: WidgetId, px: f32, py: f32) -> bool {
         // Behind an open modal everything is covered, wherever the point is.
         if !self.in_modal_scope(query_id) {
             return true;
         }
         let mut cache = self.covered_cache.borrow_mut();
-        if cache.0 != Some((px, py)) {
-            cache.1.clear();
+        if cache.at != Some((px, py)) {
+            cache.covering.clear();
             for &pop_id in self.active_popovers.iter() {
                 if let Some(ptr) = self.tree.get_ptr(pop_id) {
                     unsafe {
                         if let Some((x, y, width, height)) = (*ptr).popover_rect() {
                             if px >= x && px <= x + width && py >= y && py <= y + height {
-                                cache.1.push(pop_id);
+                                cache.covering.push(pop_id);
                             }
                         }
                     }
@@ -130,24 +130,25 @@ impl UiContext {
                         if w.visible() {
                             if let Some((x, y, width, height)) = w.popover_rect() {
                                 if px >= x && px <= x + width && py >= y && py <= y + height {
-                                    cache.1.push(id);
+                                    cache.covering.push(id);
                                 }
                             }
                         }
                     }
                 }
             }
-            cache.0 = Some((px, py));
+            cache.at = Some((px, py));
+            cache.builds += 1;
         }
-        cache.1.iter().any(|&id| id != query_id)
+        cache.covering.iter().any(|&id| id != query_id)
     }
 
     /// Drop the `is_coordinate_covered` memo — whenever the registry changes or
     /// a popover's geometry may have moved under a stationary cursor.
     pub fn invalidate_coverage_cache(&self) {
         let mut cache = self.covered_cache.borrow_mut();
-        cache.0 = None;
-        cache.1.clear();
+        cache.at = None;
+        cache.covering.clear();
     }
 
     // The hover highlight is `widget::hover_animation`'s (one store; the context's

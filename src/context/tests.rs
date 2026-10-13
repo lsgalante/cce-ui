@@ -123,3 +123,52 @@ fn drag_allowed_everywhere_except_blocking_widgets() {
     assert!(ctx.drag_allowed_at(200.0, 200.0), "empty surface is draggable");
     assert!(!ctx.drag_allowed_at(20.0, 20.0), "a drag-blocking widget denies the drag");
 }
+
+/// A widget whose popover is open over a fixed rect.
+struct Popped {
+    base: Widget,
+    popover: (f32, f32, f32, f32),
+}
+impl WidgetHost for Popped {
+    crate::impl_widget_base!(Popped);
+    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        Some(self.popover)
+    }
+}
+
+/// The coverage memo is built from the widgets the context can see, which leaves out one
+/// that is lent. A query made during a lend (a widget's own hit gate asks one) is memoized
+/// without the lent widget's popover; once the widget is back, the next query at the same
+/// point must see that popover again — through `lend_h` and through `lend` by id.
+#[test]
+fn a_lent_widgets_popover_covers_again_once_it_is_back() {
+    let mut ctx = UiContext::new();
+    let menu = ctx.insert(Popped { base: Widget::new_rect(0.0, 0.0, 40.0, 20.0), popover: (0.0, 20.0, 100.0, 100.0) });
+    let under = ctx.insert(Block { base: Widget::new_rect(10.0, 40.0, 50.0, 20.0) }).id();
+    let (px, py) = (20.0, 50.0);
+    assert!(ctx.is_coordinate_covered(under, px, py), "the open popover covers the widget under it");
+
+    ctx.invalidate_coverage_cache();
+    let during = ctx.lend_h(menu, |_, ctx| ctx.is_coordinate_covered(under, px, py));
+    assert_eq!(during, Some(false), "while lent the menu is out of the context's sight");
+    assert!(ctx.is_coordinate_covered(under, px, py), "back from lend_h, its popover covers again");
+
+    ctx.invalidate_coverage_cache();
+    ctx.lend(menu.id(), |_, ctx| ctx.is_coordinate_covered(under, px, py));
+    assert!(ctx.is_coordinate_covered(under, px, py), "back from lend, its popover covers again");
+}
+
+/// A widget with no popover adds nothing to the memo, so lending it keeps the memo: a
+/// pointer move lends every widget in turn, and a rebuild after each is the N×N scan the
+/// memo exists to avoid.
+#[test]
+fn lending_a_widget_with_no_popover_keeps_the_coverage_memo() {
+    let mut ctx = UiContext::new();
+    ctx.insert(Popped { base: Widget::new_rect(0.0, 0.0, 40.0, 20.0), popover: (0.0, 20.0, 100.0, 100.0) });
+    let plain = ctx.insert(Block { base: Widget::new_rect(10.0, 40.0, 50.0, 20.0) });
+    let other = ctx.insert(Block { base: Widget::new_rect(200.0, 0.0, 10.0, 10.0) }).id();
+    let before = ctx.covered_cache.borrow().builds;
+    ctx.lend_h(plain, |w, ctx| ctx.is_coordinate_covered(w.base().id(), 20.0, 50.0));
+    assert!(ctx.is_coordinate_covered(other, 20.0, 50.0));
+    assert_eq!(ctx.covered_cache.borrow().builds, before + 1, "one build serves the lend and after it");
+}
