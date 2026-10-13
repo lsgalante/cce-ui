@@ -279,6 +279,10 @@ impl LineEdit {
                 }
                 _ => return EditOutcome::Ignored,
             },
+            // Typed text, but not under Alt any more than under Ctrl: an Alt
+            // chord is the host's shortcut (`DocEditor` reads it the same way).
+            // AltGr, the third-level shift that types `@` or `€`, is not Alt.
+            _ if event.alt => return EditOutcome::Ignored,
             _ => {
                 let insert = match (&event.text, &event.logical_key) {
                     (Some(t), _) if !event.ctrl && !t.chars().any(char::is_control) => {

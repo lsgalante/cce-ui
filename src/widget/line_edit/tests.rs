@@ -132,6 +132,22 @@ fn arrows_collapse_a_selection_to_its_edge() {
     assert_eq!((e.cursor, e.selection), (3, None));
 }
 
+/// An Alt chord is the host's, as a Ctrl one is: its letter is not typed, the field is
+/// unchanged, and the host hears `Ignored`. Alt with a key the field owns (an arrow) still
+/// moves the caret.
+#[test]
+fn an_alt_chord_types_nothing() {
+    let mut e = LineEdit::with_text("ab");
+    let alt = |key: Key, text: Option<&str>| KeyEvent { alt: true, text: text.map(str::to_string), ..ev(key, false) };
+    assert_eq!(e.handle_key(&alt(Key::Character("d".into()), Some("d"))), EditOutcome::Ignored);
+    assert_eq!(e.handle_key(&alt(Key::Character("d".into()), None)), EditOutcome::Ignored);
+    assert_eq!(e.handle_key(&alt(Key::Named(NamedKey::Space), None)), EditOutcome::Ignored);
+    assert_eq!((e.text.as_str(), e.cursor), ("ab", 2));
+    assert_eq!(e.handle_key(&alt(Key::Named(NamedKey::ArrowLeft), None)), EditOutcome::Edited);
+    assert_eq!(e.cursor, 1);
+    assert!(!e.undo(), "nothing was typed to undo");
+}
+
 #[test]
 fn enter_and_escape_are_reported_not_swallowed() {
     let mut e = LineEdit::with_text("x");
