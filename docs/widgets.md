@@ -71,12 +71,26 @@ window coordinates. On a toplevel the runner hosts it in an `xdg_popup` (`docs/r
   `MARK_CHECK` (`"✓ "`), `MARK_ON` (`"● "`) or `MARK_OFF` (`"○ "`) draws `check`, `circle` or
   `circle-outline` at its left and the label without it. Slider rows: `set_row_slider`.
   `menu_marks_and_chevrons_are_glyphs` is the test.
+- **Rows the host owns** (no action of their own): the host keeps their meaning beside the
+  labels (a `Vec` of its actions and the `generation()` of its `show`). Running one — a press
+  routed through `mouse_input` (with the host's `UiContext` or `None`), Enter through
+  `activate_hovered`, a screen reader's Click — closes the menu and records `(generation,
+  row)`, which `take_picked()` hands over once; the host runs it when the generation is its
+  own. A reader's Click arrives between events, so a host takes the pick in `tick` too. The
+  English label fallback still runs on a target that takes it. `activate(row, ctx)` runs any row
+  by index, wherever it is drawn (a row scrolled out of a short menu included); `show` drops an
+  untaken pick. `a_row_the_host_owns_is_picked_by_a_press_enter_or_a_reader` is the test.
+- **Disabled rows** (`set_row_disabled(idx)`, or `set_rows_disabled(vec)` parallel to the
+  options, after `show` / `show_page`, which enable every row): drawn dim (`TEXT_DIM`, the mark
+  too) among the rows that run, never highlighted, stepped over by the keyboard, never run or
+  turned into; a press on one only closes the menu, as on a header. A reader reads it where it
+  stands, marked disabled, with no Click. `a_disabled_row_is_dim_and_runs_nothing` is the test.
 - **A short menu scrolls**: `ContextMenuState` keeps `content_h` (all rows) apart from `h` (shown)
   and a `scroll`; `row_at` / `row_y` / `hit_test` answer for rows as DRAWN.
 - **Keyboard walk**: `set_hovered_item(Some(i))` highlights a row; `step_hovered(dir)` moves to
-  the next runnable row (skipping headers and `-` separators, stopping at the ends) and scrolls to
-  it without re-hovering under the pointer. The menu reads no keys itself: a host routes Up/Down
-  to `step_hovered` and runs `hovered_item()` on Enter.
+  the next runnable row (skipping headers, disabled rows and `-` separators, stopping at the
+  ends) and scrolls to it without re-hovering under the pointer. The menu reads no keys itself:
+  a host routes Up/Down to `step_hovered` and Enter to `activate_hovered`.
   `the_keyboard_steps_the_highlight_over_what_cannot_run` is the test.
 - **Page rows** (`set_row_page(idx)` after `show`): the row wears `chevron-right`; a press on it,
   or a two-finger side swipe with the pointer on it, asks to TURN the menu. The menu recognises

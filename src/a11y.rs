@@ -22,8 +22,8 @@
 //! An open context menu (`widget::context_menu`, one per thread, whatever app shows it) is a
 //! [`Role::Menu`] under the window, its rows items: a `✓` row a checkable item, a `●` / `○`
 //! row a radio item (toggled as marked), a slider row a slider with its number, a header a
-//! label; `-` separators are left out. While it is open the keyboard is in it, so the focus
-//! is its highlighted row, else the menu.
+//! label, a disabled row disabled and with nothing to click; `-` separators are left out.
+//! While it is open the keyboard is in it, so the focus is its highlighted row, else the menu.
 //!
 //! An app that draws without a [`UiContext`] (the status bar, the terminal, the map…) says
 //! what it shows through [`Application::accessibility`](crate::backend::app::Application::accessibility),
@@ -573,7 +573,10 @@ fn push_context_menu(nodes: &mut Vec<(NodeId, Node)>) -> Option<NodeId> {
             row.set_max_numeric_value(slider.max as f64);
             row.set_numeric_value_step(slider.step as f64);
         }
-        if i >= headers {
+        // A disabled row is still read out where it stands, but offers nothing to press.
+        if cm::row_disabled(i) {
+            row.set_disabled();
+        } else if i >= headers {
             row.add_action(Action::Click);
         }
         rows.push(menu_row_id(i));
@@ -871,6 +874,24 @@ mod tests {
         cm::hide();
         let closed = tree_update(&ctx, "", 1.0);
         assert!(!node(&closed, WINDOW).children().contains(&MENU) && closed.focus == WINDOW);
+    }
+
+    /// A disabled menu row is read where it stands, as what it is, but marked disabled and
+    /// offering no Click; the rows around it still take one.
+    #[test]
+    fn a_disabled_menu_row_is_read_but_offers_no_click() {
+        use crate::widget::context_menu as cm;
+        let ctx = UiContext::new();
+        cm::show(40.0, 50.0, vec!["Back".to_string(), "✓ Pinned".to_string(), "Reload".to_string()], 0, WidgetId(7));
+        cm::set_rows_disabled(vec![true, true]);
+        let update = tree_update(&ctx, "", 1.0);
+        let row = |i| node(&update, menu_row_id(i));
+        assert_eq!((row(0).role(), row(0).label()), (Role::MenuItem, Some("Back")));
+        assert!(row(0).is_disabled() && !row(0).supports_action(Action::Click));
+        assert_eq!(row(1).role(), Role::MenuItemCheckBox, "a disabled check row is still a check row");
+        assert!(row(1).is_disabled() && !row(1).supports_action(Action::Click));
+        assert!(!row(2).is_disabled() && row(2).supports_action(Action::Click));
+        cm::hide();
     }
 
     #[test]

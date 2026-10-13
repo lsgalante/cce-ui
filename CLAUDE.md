@@ -294,7 +294,9 @@ covers everything behind it.
 **Context-menu actions are keyed by ID, never by label text.** Use
 `context_menu::set_row_actions` or `UiContext::show_context_menu_rows`. Matching the English
 label (`context_menu::legacy_action_for_label`) is a fallback for menus that set none; do not add
-code that matches displayed text.
+code that matches displayed text. A menu whose rows are the app's own (no action) routes presses
+through `context_menu::mouse_input` and runs what `take_picked()` hands back: a screen reader's
+Click lands there too, and a hand-rolled `row_at` dispatch never sees it.
 
 ## Rendering
 

@@ -26,7 +26,6 @@ pub const MARK_ON: &str = "● ";
 /// See [`MARK_CHECK`]: a switch or radio row that is off.
 pub const MARK_OFF: &str = "○ ";
 
-/// The glyph a label's leading mark names, and the label without it.
 /// A row's action read off its English label: the fallback for a menu built without
 /// [`set_row_actions`](super::set_row_actions). It breaks the moment a label
 /// is translated (`docs/rfc-accessibility-locale.md`), so the toolkit's own menus set
@@ -55,6 +54,7 @@ pub fn legacy_action_for_label(label: &str) -> Option<crate::widget::ContextActi
     })
 }
 
+/// The glyph a label's leading mark names, and the label without it.
 pub fn split_mark(label: &str) -> (Option<&'static str>, &str) {
     for (mark, glyph) in [(MARK_CHECK, "check"), (MARK_ON, "circle"), (MARK_OFF, "circle-outline")] {
         if let Some(rest) = label.strip_prefix(mark) {

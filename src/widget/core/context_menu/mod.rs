@@ -8,7 +8,7 @@
 //! | `api` | the free-function API apps call, each acting on the current window's menu |
 //! | `turn` | page rows and turns: `show_page`, `refill`, the turn animation, the back band |
 //! | `geometry` | placement in a window or a popup, scrolling a shortened menu, rows as drawn |
-//! | `input` | hover and keyboard stepping, presses, the wheel, slider rows |
+//! | `input` | hover and keyboard stepping, presses, running a row and the host's pick, the wheel, slider rows |
 //! | `paint` | the plate, rows, sliders, labels and glyphs |
 
 use crate::widget::*;
@@ -160,6 +160,9 @@ pub struct ContextMenuState {
     /// Rows that lead to a PAGE, parallel to `options` — see
     /// [`set_row_page`](Self::set_row_page). Emptied by every `show`.
     pub pages: Vec<bool>,
+    /// DISABLED rows, parallel to `options` — see
+    /// [`set_row_disabled`](Self::set_row_disabled). Emptied by every `show`.
+    pub disabled: Vec<bool>,
     /// What each row DOES, parallel to `options` — see
     /// [`set_row_actions`](Self::set_row_actions). A row's action is its identity; its
     /// label is only what is shown, so a translated label still runs the action.
@@ -189,6 +192,9 @@ pub struct ContextMenuState {
     wheel_accum: f32,
     /// The last value a slider was moved to, drained by the host.
     slider_change: Option<(usize, f32)>,
+    /// The last row of the host's own that was run — `(generation, row)` —
+    /// until the host takes it: see [`take_picked`](Self::take_picked).
+    picked: Option<(u64, usize)>,
     /// The point `show` opened the menu at — the anchor a placement
     /// flips and slides from. `x`/`y` are where the menu IS.
     pub anchor: (f32, f32),
@@ -236,6 +242,7 @@ impl ContextMenuState {
             header_count: 0,
             sliders: Vec::new(),
             pages: Vec::new(),
+            disabled: Vec::new(),
             actions: Vec::new(),
             back: None,
             back_hovered: false,
@@ -246,6 +253,7 @@ impl ContextMenuState {
             slider_drag: None,
             wheel_accum: 0.0,
             slider_change: None,
+            picked: None,
             anchor: (0.0, 0.0),
             content_h: 0.0,
             scroll: 0.0,
@@ -304,6 +312,7 @@ impl ContextMenuState {
         self.header_count = header_count;
         self.sliders = vec![None; self.options.len()];
         self.pages = vec![false; self.options.len()];
+        self.disabled = vec![false; self.options.len()];
         self.actions = vec![None; self.options.len()];
         self.back = None;
         self.back_hovered = false;
@@ -313,21 +322,23 @@ impl ContextMenuState {
         self.slider_drag = None;
         self.wheel_accum = 0.0;
         self.slider_change = None;
+        self.picked = None;
     }
 
-    /// Make row `idx` lead to a PAGE — see [`PageTurn`]. It wears
-    /// [`PAGE_MARK`] at its right end; the plate widens for it.
     /// Give the rows their actions, parallel to `options` (a header or a row the host
     /// handles itself is `None`); called after `show`, like `set_row_page`. A press on a
     /// row runs its action on the menu's target. Rows with none fall back to matching
     /// the label (`legacy_action_for_label`), which only works in English: build
-    /// menus with actions.
+    /// menus with actions. A row with no action of its own is the host's: running it
+    /// records it for [`take_picked`](Self::take_picked).
     pub fn set_row_actions(&mut self, actions: Vec<Option<crate::widget::ContextAction>>) {
         let n = self.options.len();
         self.actions = actions;
         self.actions.resize(n, None);
     }
 
+    /// Make row `idx` lead to a PAGE — see [`PageTurn`]. It wears
+    /// [`PAGE_MARK`] at its right end; the plate widens for it.
     pub fn set_row_page(&mut self, idx: usize) {
         if idx >= self.options.len() {
             return;
@@ -344,6 +355,38 @@ impl ContextMenuState {
     /// Whether row `idx` leads to a page.
     pub fn leads_to_page(&self, idx: usize) -> bool {
         self.pages.get(idx).copied().unwrap_or(false)
+    }
+
+    /// Make row `idx` DISABLED: shown dim among the rows that run, never
+    /// highlighted, stepped over by the keyboard, and run by nothing — a
+    /// press on it closes the menu as a press on a header does, and a
+    /// reader is offered no Click on it. Called after `show`, like
+    /// `set_row_page`. (Back while there is nowhere to go back to: shown,
+    /// so the menu keeps its shape, but not offered.)
+    pub fn set_row_disabled(&mut self, idx: usize) {
+        if let Some(d) = self.disabled.get_mut(idx) {
+            *d = true;
+        }
+        if self.hovered_item == Some(idx) {
+            self.hovered_item = None;
+        }
+    }
+
+    /// Every row's disabled state at once, parallel to `options` — see
+    /// [`set_row_disabled`](Self::set_row_disabled). Rows past the end of
+    /// `disabled` are enabled.
+    pub fn set_rows_disabled(&mut self, disabled: Vec<bool>) {
+        let n = self.options.len();
+        self.disabled = disabled;
+        self.disabled.resize(n, false);
+        if self.hovered_item.is_some_and(|i| self.row_disabled(i)) {
+            self.hovered_item = None;
+        }
+    }
+
+    /// Whether row `idx` is disabled.
+    pub fn row_disabled(&self, idx: usize) -> bool {
+        self.disabled.get(idx).copied().unwrap_or(false)
     }
 
     pub fn hide(&mut self) {

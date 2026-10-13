@@ -10,9 +10,6 @@ pub fn with_state<R>(f: impl FnOnce(&RefCell<ContextMenuState>) -> R) -> R {
     crate::window_state::with(|w| f(&w.context_menu))
 }
 
-/// Make row `idx` of the shown menu lead to a page — see [`PageTurn`].
-/// Call after [`show`] / [`show_page`], which clear every row back to an
-/// action.
 /// Give the open menu's rows their actions — see [`ContextMenuState::set_row_actions`].
 pub fn set_row_actions(actions: Vec<Option<crate::widget::ContextAction>>) {
     with_state(|m| m.borrow_mut().set_row_actions(actions));
@@ -28,8 +25,28 @@ pub fn header_count() -> usize {
     with_state(|m| m.borrow().header_count)
 }
 
+/// Make row `idx` of the shown menu lead to a page — see [`PageTurn`].
+/// Call after [`show`] / [`show_page`], which clear every row back to an
+/// action.
 pub fn set_row_page(idx: usize) {
     with_state(|m| m.borrow_mut().set_row_page(idx));
+}
+
+/// Disable row `idx` of the shown menu — see
+/// [`ContextMenuState::set_row_disabled`]. Call after [`show`] /
+/// [`show_page`], which enable every row.
+pub fn set_row_disabled(idx: usize) {
+    with_state(|m| m.borrow_mut().set_row_disabled(idx));
+}
+
+/// Every row's disabled state, parallel to the options — see
+/// [`ContextMenuState::set_rows_disabled`].
+pub fn set_rows_disabled(disabled: Vec<bool>) {
+    with_state(|m| m.borrow_mut().set_rows_disabled(disabled));
+}
+
+pub fn row_disabled(idx: usize) -> bool {
+    with_state(|m| m.borrow().row_disabled(idx))
 }
 
 pub fn leads_to_page(idx: usize) -> bool {
@@ -166,7 +183,8 @@ pub fn options() -> Vec<String> { with_state(|m| m.borrow().options.clone()) }
 /// Highlight a row from the keyboard — see
 /// [`ContextMenuState::set_hovered_item`]. A host that walks a menu
 /// with the arrow keys (a dropdown) sets the open row with this and
-/// moves with [`step_hovered`], and runs [`hovered_item`] on Enter.
+/// moves with [`step_hovered`], and runs the highlight on Enter
+/// ([`activate_hovered`], or [`hovered_item`] for rows it runs itself).
 pub fn set_hovered_item(idx: Option<usize>) {
     with_state(|m| m.borrow_mut().set_hovered_item(idx));
 }
@@ -237,6 +255,24 @@ pub fn take_slider_change() -> Option<(usize, f32)> {
 
 pub fn mouse_input(button: MouseButton, state: ElementState, px: f32, py: f32, ctx: Option<&mut crate::context::UiContext>) -> bool {
     with_state(|m| m.borrow_mut().mouse_input(button, state, px, py, ctx))
+}
+
+/// Run row `idx` as a press on it does, wherever it is drawn — see
+/// [`ContextMenuState::activate`].
+pub fn activate(idx: usize, ctx: Option<&mut crate::context::UiContext>) -> bool {
+    with_state(|m| m.borrow_mut().activate(idx, ctx))
+}
+
+/// Run the highlighted row: what a host routes Enter to — see
+/// [`ContextMenuState::activate_hovered`].
+pub fn activate_hovered(ctx: Option<&mut crate::context::UiContext>) -> bool {
+    with_state(|m| m.borrow_mut().activate_hovered(ctx))
+}
+
+/// `(generation, row)` of the last row of the host's own that was run, once —
+/// see [`ContextMenuState::take_picked`].
+pub fn take_picked() -> Option<(u64, usize)> {
+    with_state(|m| m.borrow_mut().take_picked())
 }
 
 /// Paint the menu as a lit plate — see [`ContextMenuState::paint`]. Hosts on

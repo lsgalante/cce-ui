@@ -1,5 +1,6 @@
 //! Input: hover and the keyboard's highlight, presses (a row's action, a page turn, the back
-//! band), the wheel, and the slider rows.
+//! band), running a row wherever it is drawn and the host's pick, the wheel, and the slider
+//! rows.
 
 use super::*;
 
@@ -23,9 +24,9 @@ impl ContextMenuState {
     }
 
     /// Whether a press on row `idx` could run it: not a header, not a
-    /// separator.
+    /// separator, not disabled.
     pub(super) fn actionable(&self, idx: usize) -> bool {
-        idx >= self.header_count && self.options.get(idx).is_some_and(|o| o != "-")
+        idx >= self.header_count && !self.row_disabled(idx) && self.options.get(idx).is_some_and(|o| o != "-")
     }
 
     /// Highlight row `idx` as the pointer would, scrolled into view —
@@ -38,7 +39,7 @@ impl ContextMenuState {
     }
 
     /// Move the highlight to the next row that can run, `dir` > 0 down
-    /// and < 0 up, skipping headers and separators; from no highlight,
+    /// and < 0 up, skipping headers, separators and disabled rows; from no highlight,
     /// the first (or last) such row. Stops at either end rather than
     /// wrapping. Returns the highlighted row.
     pub fn step_hovered(&mut self, dir: i32) -> Option<usize> {
@@ -98,7 +99,7 @@ impl ContextMenuState {
         if self.hit_test(px, py) && self.slider_drag.is_none() {
             let turn = match crate::widget::side_swipe::feed(delta) {
                 Some(crate::widget::SwipeDir::Forward) => {
-                    self.row_at(px, py).filter(|&i| self.leads_to_page(i)).map(PageTurn::Into)
+                    self.row_at(px, py).filter(|&i| self.leads_to_page(i) && !self.row_disabled(i)).map(PageTurn::Into)
                 }
                 Some(crate::widget::SwipeDir::Back) => self.back.is_some().then_some(PageTurn::Back),
                 None => None,
@@ -109,7 +110,7 @@ impl ContextMenuState {
             }
         }
         let Some(idx) = self.row_at(px, py) else { return false };
-        let Some(s) = self.slider(idx) else {
+        let Some(s) = self.slider(idx).filter(|_| !self.row_disabled(idx)) else {
             // Not a slider: a menu cut down to fit scrolls its rows.
             // Up shows the rows above, as every list in the DE does.
             if self.max_scroll() <= 0.0 {
@@ -130,13 +131,14 @@ impl ContextMenuState {
 
     /// A left press on a slider row: on the band it takes hold and jumps
     /// the value to the pointer; anywhere on the row it is the slider's
-    /// and the menu stays open. `false` for any other row.
+    /// and the menu stays open. `false` for any other row, and for a
+    /// disabled slider.
     pub fn slider_press(&mut self, px: f32, py: f32) -> bool {
         if !self.visible {
             return false;
         }
         let Some(idx) = self.row_at(px, py) else { return false };
-        if self.slider(idx).is_none() {
+        if self.slider(idx).is_none() || self.row_disabled(idx) {
             return false;
         }
         let band = self.slider_band(idx);
@@ -180,15 +182,10 @@ impl ContextMenuState {
 
     pub(super) fn rehover(&mut self, px: f32, py: f32) -> bool {
         let was_hovered = (self.hovered_item, self.back_hovered);
-        self.hovered_item = None;
         self.back_hovered = self.on_back_band(px, py);
-        if let Some(idx) = self.row_at(px, py) {
-            // A "-" row is a SEPARATOR (the dropdown's convention):
-            // engraved, never hovered, never an action.
-            if idx >= self.header_count && self.options[idx] != "-" {
-                self.hovered_item = Some(idx);
-            }
-        }
+        // A "-" row is a SEPARATOR (the dropdown's convention): engraved,
+        // never hovered, never an action — nor is a header or a disabled row.
+        self.hovered_item = self.row_at(px, py).filter(|&idx| self.actionable(idx));
         (self.hovered_item, self.back_hovered) != was_hovered
     }
 
@@ -212,25 +209,71 @@ impl ContextMenuState {
             self.turn = Some(turn);
             return true;
         }
-        if self.hit_test(px, py) {
-            if let Some(idx) = self.row_at(px, py) {
-                if idx >= self.header_count {
-                    let opt = self.options[idx].clone();
-                    if let (Some(target_id), Some(ctx)) = (self.target, ctx) {
-                        if let Some(target) = ctx.get_widget_mut(target_id) {
-                            let action = self.actions.get(idx).copied().flatten().or_else(|| legacy_action_for_label(&opt));
-                            if let Some(action) = action {
-                                let _ = target.context_action(action);
-                            }
-                        }
-                    }
-                }
-            }
-            self.hide();
-            true
-        } else {
-            self.hide();
-            true
+        // On a row that runs, the row; anywhere else — a header, a
+        // separator, a disabled row, the padding, off the plate — the press
+        // only closes the menu.
+        if self.row_at(px, py).is_some_and(|idx| self.activate(idx, ctx)) {
+            return true;
         }
+        self.hide();
+        true
+    }
+
+    /// Run row `idx` as a press on it does, wherever it is drawn — what
+    /// Enter on the highlight ([`activate_hovered`](Self::activate_hovered))
+    /// and a screen reader's Click do, a row scrolled out of a shortened
+    /// menu included:
+    ///
+    /// - a row with an action runs it on the menu's target (through `ctx`;
+    ///   with no context, or a target that is gone, it runs nothing), as
+    ///   does a row whose English label the fallback knows
+    ///   (`legacy_action_for_label`);
+    /// - a row with no action of its own is the HOST's: it is recorded for
+    ///   [`take_picked`](Self::take_picked) (the label fallback still runs
+    ///   on a target that takes it);
+    /// - either way the menu closes;
+    /// - a page row asks to turn into its page (`take_turn`), and stays up.
+    ///
+    /// `false`, and nothing done, for a row that cannot run — a header, a
+    /// separator, a disabled row, a slider (which is worked, not run) —
+    /// or a hidden menu.
+    pub fn activate(&mut self, idx: usize, ctx: Option<&mut crate::context::UiContext>) -> bool {
+        if !self.visible || !self.actionable(idx) || self.slider(idx).is_some() {
+            return false;
+        }
+        if self.leads_to_page(idx) {
+            self.turn = Some(PageTurn::Into(idx));
+            return true;
+        }
+        let own = self.actions.get(idx).copied().flatten();
+        if own.is_none() {
+            self.picked = Some((self.generation, idx));
+        }
+        if let (Some(target_id), Some(ctx)) = (self.target, ctx) {
+            let action = own.or_else(|| legacy_action_for_label(&self.options[idx]));
+            if let (Some(action), Some(target)) = (action, ctx.get_widget_mut(target_id)) {
+                let _ = target.context_action(action);
+            }
+        }
+        self.hide();
+        true
+    }
+
+    /// Run the highlighted row — see [`activate`](Self::activate). What a
+    /// host routes Enter to; `false` with nothing highlighted.
+    pub fn activate_hovered(&mut self, ctx: Option<&mut crate::context::UiContext>) -> bool {
+        self.hovered_item.is_some_and(|idx| self.activate(idx, ctx))
+    }
+
+    /// The last row of the host's own that was run — a press, Enter or a
+    /// screen reader's Click on a row with no action — as `(generation,
+    /// row)`, once. A host that keeps its own rows' meaning beside the
+    /// labels (a `Vec` of its actions, the [`generation`](Self::generation)
+    /// of the `show` it built them for) routes presses through
+    /// [`mouse_input`](Self::mouse_input), then takes the pick and runs it
+    /// when the generation is its own. A reader's Click arrives between
+    /// events, so a host takes the pick in `tick` too.
+    pub fn take_picked(&mut self) -> Option<(u64, usize)> {
+        self.picked.take()
     }
 }

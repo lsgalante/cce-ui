@@ -10,7 +10,7 @@ pub(crate) struct MenuGlyph {
     x: f32,
     y: f32,
     side: f32,
-    color: [f32; 4],
+    pub(crate) color: [f32; 4],
 }
 
 /// Draw `g` (shifted by `dx`, at `alpha`): the glyph tinted to the
@@ -350,8 +350,8 @@ impl ContextMenuState {
             // The toolkit's semantic colors rather than greys hand-mixed
             // against the old near-black fill: on the plate's mid-slate the
             // header's 0x70 was a step above its background and read as
-            // nothing.
-            let text_color = if idx < self.header_count {
+            // nothing. A disabled row is dim as a header is.
+            let text_color = if idx < self.header_count || self.row_disabled(idx) {
                 rgb8(crate::color::TEXT_DIM)
             } else if self.hovered_item == Some(idx) {
                 rgb8(crate::color::TEXT_HEADER)
@@ -412,7 +412,7 @@ impl ContextMenuState {
             if top + ROW_H < self.y || top > self.y + self.h {
                 continue;
             }
-            let color = if idx < self.header_count {
+            let color = if idx < self.header_count || self.row_disabled(idx) {
                 crate::color::TEXT_DIM
             } else if self.hovered_item == Some(idx) {
                 crate::color::TEXT_HEADER

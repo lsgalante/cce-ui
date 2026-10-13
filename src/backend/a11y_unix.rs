@@ -79,8 +79,9 @@ pub enum Acted {
 ///   input handlers sees it at the next input.
 /// - **Click** on a widget's item (a radio button, `a11y::A11yItem`) does what a press on it
 ///   does (`WidgetHost::a11y_select_item`) and puts the keyboard on its widget.
-/// - **Click** on an open context menu's row presses it where it is drawn, so the menu runs
-///   the row's action exactly as a pointer would.
+/// - **Click** on an open context menu's row runs it as a press on it would, wherever it is
+///   drawn ([`menu_click`]): the row's action, a page row's turn, or — a row the app owns —
+///   the pick the app takes with `context_menu::take_picked`.
 /// - Anything on one of the app's own nodes (`Application::accessibility`) is the app's:
 ///   `Application::accessibility_action`, in its own terms (`a11y::AppAction`) — a reader
 ///   setting a field the app draws (`AppNodes::text_field`) is `AppAction::SetText`.
@@ -90,17 +91,14 @@ pub enum Acted {
 /// an app that does not route keys to its focused widget answers a reader as it answers a
 /// keyboard.
 pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> Acted {
-    use crate::widget::context_menu as cm;
     if debug() {
         eprintln!("[a11y] action {:?} on {:?}", request.action, request.target_node);
     }
     if let Some(row) = crate::a11y::menu_row_of(request.target_node) {
-        if request.action != Action::Click || !cm::is_visible() || row >= cm::options().len() {
+        if request.action != Action::Click {
             return Acted::Nothing;
         }
-        let (x, y) = (cm::x() + cm::w() * 0.5, cm::row_y(row) + cm::ROW_H * 0.5);
-        cm::mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, x, y, app.ui_context_mut());
-        return Acted::Changed;
+        return menu_click(row, app.ui_context_mut());
     }
     if let Some((id, idx)) = crate::a11y::item_of(request.target_node) {
         // A click on a widget's item (a radio button): what a press on it does, and the
@@ -139,6 +137,14 @@ pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> Acted {
         app.focus_stepped();
     }
     key.map_or(Acted::Changed, Acted::Key)
+}
+
+/// A reader's Click on row `row` of the open context menu: run as a press on it would be
+/// (`context_menu::activate`), so a row the app owns lands in the pick the app takes
+/// (`context_menu::take_picked`) as a pointer's press on it does. Nothing for a row that
+/// cannot run (a header, a disabled row, a slider) or a closed menu.
+pub fn menu_click(row: usize, ctx: Option<&mut crate::context::UiContext>) -> Acted {
+    if crate::widget::context_menu::activate(row, ctx) { Acted::Changed } else { Acted::Nothing }
 }
 
 /// A request on one of the app's own nodes, in the app's terms (`Application::accessibility_action`).
@@ -299,6 +305,25 @@ mod tests {
         ctx[name].disabled = true;
         assert_eq!(set_value(&mut ctx, name.id(), Some(&text("Hopper"))), Acted::Nothing, "a disabled field");
         assert_eq!(set_value(&mut ctx, crate::widget::WidgetId(usize::MAX), Some(&text("x"))), Acted::Nothing, "nothing there");
+    }
+
+    /// A reader's Click on a context-menu row the app owns lands in the pick the app takes,
+    /// as a pointer's press on it does; one on a header or a disabled row does nothing, and
+    /// leaves the menu up.
+    #[test]
+    fn a_readers_click_on_an_apps_menu_row_is_the_apps_pick() {
+        use crate::widget::context_menu as cm;
+        let mut ctx = UiContext::new();
+        cm::show(40.0, 50.0, vec!["Title".to_string(), "Back".to_string(), "Open".to_string()], 1, crate::widget::WidgetId(0));
+        cm::set_row_disabled(1);
+        let generation = cm::generation();
+        assert_eq!(menu_click(0, Some(&mut ctx)), Acted::Nothing, "a header");
+        assert_eq!(menu_click(1, Some(&mut ctx)), Acted::Nothing, "a disabled row");
+        assert!(cm::is_visible() && cm::take_picked().is_none());
+        assert_eq!(menu_click(2, Some(&mut ctx)), Acted::Changed);
+        assert!(!cm::is_visible());
+        assert_eq!(cm::take_picked(), Some((generation, 2)));
+        assert_eq!(menu_click(2, Some(&mut ctx)), Acted::Nothing, "the menu is closed");
     }
 
     /// What a reader asks of an app's own node reaches the app in its own terms.

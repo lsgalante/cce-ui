@@ -60,11 +60,11 @@ impl ContextMenuState {
     }
 
     /// New labels and slider values for the rows that are showing, in
-    /// place — the hover, the scroll, the back band, the page rows and a
-    /// held slider are kept — which is how a host re-marks a row of a
-    /// menu that stays up after the row ran. `false`, and nothing
-    /// changed, when the number of rows differs: that is another menu,
-    /// to be shown afresh.
+    /// place — the hover, the scroll, the back band, the page rows, the
+    /// disabled rows and a held slider are kept — which is how a host
+    /// re-marks a row of a menu that stays up after the row ran. `false`,
+    /// and nothing changed, when the number of rows differs: that is
+    /// another menu, to be shown afresh.
     pub fn refill(&mut self, options: Vec<String>, sliders: &[Option<MenuSlider>]) -> bool {
         if options.len() != self.options.len() {
             return false;
@@ -90,6 +90,7 @@ impl ContextMenuState {
         from.options.clear();
         from.sliders.clear();
         from.pages.clear();
+        from.disabled.clear();
         from.back = None;
         from.hovered_item = None;
         from.w = w;
@@ -146,7 +147,7 @@ impl ContextMenuState {
     }
 
     /// The turn a press at `(px, py)` asks for: the back band goes back,
-    /// a page row goes into its page.
+    /// a page row goes into its page (unless it is disabled).
     pub fn turn_at(&self, px: f32, py: f32) -> Option<PageTurn> {
         if !self.visible {
             return None;
@@ -154,7 +155,7 @@ impl ContextMenuState {
         if self.on_back_band(px, py) {
             return Some(PageTurn::Back);
         }
-        self.row_at(px, py).filter(|&i| self.leads_to_page(i)).map(PageTurn::Into)
+        self.row_at(px, py).filter(|&i| self.leads_to_page(i) && !self.row_disabled(i)).map(PageTurn::Into)
     }
 
     /// The turn a side swipe asked for since the last call.
