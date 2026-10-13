@@ -10,6 +10,19 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-13
 
+- **A widget's own clips reach the frame.** `Adapted::paint_self` paints a widget into a
+  scratch list and replays it into the frame, and it restored only an item's circle clip: the
+  scissor and rounded clip a widget painted under were dropped, so TreeList's viewport clip and
+  Graph's wire clip never took effect (found during the RFC's round 4; see below). The replay now
+  pushes each item's scissor, circle and rounded clip around it, composing with the walk's clip
+  and translation as any push does (`PaintCtx::push_clip_rrect` re-pushes a recorded rounded
+  clip). The own-labels bridge still re-derives a non-subtree widget's text without these clips;
+  no such widget paints text under one. cce-designer's palette goes back through `paint_self`.
+  Checked: `a_widgets_own_clips_survive_the_paint_walk` (fails without the fix), lib tests with
+  every feature (711), every integration test, clippy, the wasm build; scale-2 shadow A/Bs of
+  cce-data-editor's tree (scrolled) and the designer's default view and palette (open, typed,
+  caret moved, closed): identical (the designer's start shot differs only where the pointer
+  sat).
 - **`hover_animation` keeps only the page scroll offset.** Its hover highlight glided toward a
   box `register_hovered` set, and nothing called `register_hovered`: `get_quad` never returned a
   box, `post_render_check` (cce-system-interface, until its Stage A) aimed an invisible one at

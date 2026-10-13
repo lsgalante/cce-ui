@@ -317,3 +317,56 @@ fn text_bounds_leave_the_detached_label_unclipped() {
     assert!(matches!(bounds_of("hi"), Some(Some(_))), "content text is clipped");
     assert_eq!(bounds_of("Name"), Some(None), "the label is not");
 }
+
+/// The clips a widget paints itself under reach the frame. `paint_self` replays what the
+/// widget painted, and until 2026-10-13 it restored only an item's circle clip: a widget's
+/// own scissor (TreeList's viewport, Graph's wire rect) and rounded clip were dropped, so a
+/// tree's half-scrolled rows and a graph's wires ran past their boxes.
+#[test]
+fn a_widgets_own_clips_survive_the_paint_walk() {
+    struct Clipped;
+    impl Layout for Clipped {}
+    impl Paint for Clipped {
+        fn color(&self) -> [f32; 4] {
+            [0.0; 4]
+        }
+        fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+            let inner = Rect { x: rect.x + 10.0, y: rect.y + 10.0, width: 20.0, height: 20.0 };
+            ctx.clip(inner, |ctx| ctx.quad(rect, [1.0, 0.0, 0.0, 1.0]));
+            ctx.clip_rounded(inner, 4.0, |ctx| ctx.quad(rect, [0.0, 1.0, 0.0, 1.0]));
+            ctx.clip_circle([rect.x + 20.0, rect.y + 20.0, 5.0], |ctx| ctx.quad(rect, [0.0, 0.0, 1.0, 1.0]));
+            ctx.quad(rect, [1.0, 1.0, 1.0, 1.0]);
+        }
+    }
+    impl Input for Clipped {}
+
+    let mut ctx = UiContext::new();
+    let w = ctx.insert(Adapted::new(Clipped));
+    ctx[w].set_rect(100.0, 200.0, 50.0, 50.0);
+    let inner = Rect { x: 110.0, y: 210.0, width: 20.0, height: 20.0 };
+    let quads = |list: &crate::scene::paint::DisplayList| -> Vec<crate::scene::paint::PaintItem> {
+        list.items.iter().filter(|it| matches!(it.prim, Prim::Quad { .. })).cloned().collect()
+    };
+
+    let list = paint_tree(&ctx, &ctx[w]);
+    let q = quads(&list);
+    assert_eq!(q.len(), 4);
+    assert_eq!(q[0].clip, Some(inner), "the widget's scissor");
+    assert_eq!(q[1].clip, Some(inner), "the rounded clip's scissor");
+    assert_eq!(q[1].clip_rrect, Some([120.0, 220.0, 6.0, 6.0, 4.0]), "the rounded clip itself");
+    assert_eq!(q[2].clip_circle, Some([120.0, 220.0, 5.0]), "the circle, as before");
+    assert_eq!((q[2].clip, q[3].clip), (None, None), "nothing clips what the widget left unclipped");
+
+    // Under a host's clip and translate, the widget's clips compose with the host's as a push
+    // does: intersected, and moved with the translation.
+    let mut pc = PaintCtx::new();
+    pc.push_clip(Rect { x: 0.0, y: 0.0, width: 1000.0, height: 215.0 });
+    pc.push_translate(5.0, 0.0);
+    WidgetHost::paint_self(&ctx[w], &ctx, &mut pc);
+    pc.pop_translate();
+    pc.pop_clip();
+    let q = quads(&pc.finish());
+    assert_eq!(q[0].clip, Some(Rect { x: 115.0, y: 210.0, width: 20.0, height: 5.0 }));
+    assert_eq!(q[1].clip_rrect, Some([125.0, 220.0, 6.0, 6.0, 4.0]));
+    assert_eq!(q[3].clip, Some(Rect { x: 0.0, y: 0.0, width: 1000.0, height: 215.0 }), "the host's clip alone");
+}

@@ -223,6 +223,18 @@ impl PaintCtx {
         self.pop_clip();
     }
 
+    /// Push a rounded clip as a [`PaintItem`] recorded it (`[cx, cy, half_w, half_h, r]`,
+    /// current local space), without the scissor [`push_clip_rounded`](Self::push_clip_rounded)
+    /// pairs with it — a replayed item carries its scissor separately. Pair with
+    /// [`pop_clip_rrect`](Self::pop_clip_rrect).
+    pub(crate) fn push_clip_rrect(&mut self, rr: [f32; 5]) {
+        self.clip_rrect_stack.push([rr[0] + self.offset.0, rr[1] + self.offset.1, rr[2], rr[3], rr[4]]);
+    }
+
+    pub(crate) fn pop_clip_rrect(&mut self) {
+        self.clip_rrect_stack.pop();
+    }
+
     /// Run `f` with `rect` (radius `radius`) pushed as a rounded clip, popping it afterward.
     pub fn clip_rounded<R>(&mut self, rect: Rect, radius: f32, f: impl FnOnce(&mut Self) -> R) -> R {
         self.push_clip_rounded(rect, radius);

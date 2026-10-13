@@ -170,12 +170,23 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         // bridge, so this pass's text is exactly what `Paint::paint` would emit.
         let mut painted_text: Vec<TextLabel> = Vec::new();
         for item in tmp.finish().items {
-            // Re-emitting through ctx re-records clip state, so restore the
-            // circular clip the widget authored the prim under (Ramp's
-            // foam-cell fills) — it would otherwise be dropped here.
-            let clip_circle = item.clip_circle;
+            // Re-emitting through ctx records ctx's clip state, so push the clips the
+            // widget authored the prim under first — its scissor (TreeList's viewport,
+            // Graph's wire rect), its circle (Ramp's foam cells) and its rounded clip —
+            // each composing with the walk's own as a push does. Until 2026-10-13 only
+            // the circle was restored: every rect a widget clipped itself to was lost
+            // here, so a tree's half-scrolled rows and a graph's wires ran past their
+            // boxes. (The own-labels bridge below re-derives a non-subtree widget's
+            // text and does not see these clips; no such widget paints text under one.)
+            let (clip, clip_circle, clip_rrect) = (item.clip, item.clip_circle, item.clip_rrect);
+            if let Some(r) = clip {
+                ctx.push_clip(r);
+            }
             if let Some(c) = clip_circle {
                 ctx.push_clip_circle(c);
+            }
+            if let Some(rr) = clip_rrect {
+                ctx.push_clip_rrect(rr);
             }
             // `replay` emits every prim but Text and hands Text back — the two
             // callers disagree about it. A subtree painter authored its own text
@@ -190,8 +201,14 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                     painted_text.push(TextLabel { text, x, y, font_size, color });
                 }
             }
+            if clip_rrect.is_some() {
+                ctx.pop_clip_rrect();
+            }
             if clip_circle.is_some() {
                 ctx.pop_clip_circle();
+            }
+            if clip.is_some() {
+                ctx.pop_clip();
             }
         }
         // The focus highlight a widget opts into (the TextBox): the primary tint over the
