@@ -10,6 +10,16 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-13
 
+- **A cancelled keybind recording keeps the committed binding.** `KeybindRecorder` tracked the
+  modifiers held while recording by writing them into `value`, so Escape (or focus leaving)
+  mid-recording left the field showing `ctrl` with no change raised: a value the document did
+  not have. The held chord now lives in a private `pending` field; `value` changes only on a
+  commit, which raises the change flag as before, and a modifier-only chord still commits when
+  its last modifier comes up. A modifier coming up during a recording it was not pressed in (held
+  when the field was armed) no longer re-commits the old value either. Checked:
+  `escape_keeps_the_committed_binding`, `focus_leaving_keeps_the_committed_binding`,
+  `a_modifier_only_chord_commits_on_release`, lib tests with every feature (704), clippy, the
+  wasm build, and cce-data-editor and cce-gallery (the recorder's users) checked.
 - **A lent widget's popover covers again once it is back.** `is_coordinate_covered` memoizes
   the set of popovers covering one point, built from the widgets the context can see, and a
   widget out on loan (`UiContext::lend` / `lend_h`) is one it cannot. A query made during a lend

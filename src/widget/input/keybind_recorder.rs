@@ -5,13 +5,19 @@ use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
 use crate::widget::*;
 
 /// Keybinding capture field (narrow-trait model, Phase 6as leaf sweep): click to arm,
-/// then the next chord/key commits into `value`. The detached control label rides the
+/// then the next chord/key commits into `value`. Escape, or focus leaving, cancels the
+/// recording and leaves `value` as it was. The detached control label rides the
 /// adapter's base-label machinery; the model paints only the field itself.
 #[derive(Debug, Clone)]
 pub struct KeybindRecorder {
+    /// The committed chord: changed only by a commit (which raises the change flag) or by
+    /// the app.
     pub value: String,
     pub recording: bool,
     pub just_changed: bool,
+    /// The modifier-only chord held so far while recording, committed when the last
+    /// modifier comes up with no key pressed; dropped when the recording ends otherwise.
+    pending: String,
     pressed: bool,
     hovered: bool,
     /// Recessed style, the TextBox's: the field is a well carved into the
@@ -36,6 +42,7 @@ impl KeybindRecorder {
             value,
             recording: false,
             just_changed: false,
+            pending: String::new(),
             pressed: false,
             hovered: false,
             recessed: None,
@@ -52,7 +59,20 @@ impl KeybindRecorder {
     fn commit(&mut self, parts: Vec<&str>) {
         self.value = parts.join("+");
         self.just_changed = true;
+        self.stop();
+    }
+
+    /// Start recording: nothing held yet.
+    fn arm(&mut self) {
+        self.recording = true;
+        self.pending.clear();
+    }
+
+    /// Stop recording. Whatever modifiers were held go with it; `value` is whatever was
+    /// last committed, so a cancelled recording shows the binding the document has.
+    fn stop(&mut self) {
         self.recording = false;
+        self.pending.clear();
     }
 }
 
@@ -158,7 +178,7 @@ impl Input for KeybindRecorder {
                         let inside = *x >= r.x && *x <= r.x + r.width && *y >= r.y && *y <= r.y + r.height;
                         if self.pressed && inside {
                             self.pressed = false;
-                            self.recording = true;
+                            self.arm();
                             ectx.request_focus();
                             return true;
                         }
@@ -176,7 +196,7 @@ impl Input for KeybindRecorder {
                 }
                 match key_event.logical_key {
                     Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
-                        self.recording = true;
+                        self.arm();
                         true
                     }
                     _ => false,
@@ -203,7 +223,7 @@ impl Input for KeybindRecorder {
                 match key_event.state {
                     ElementState::Pressed => match &key_event.logical_key {
                         Key::Named(NamedKey::Escape) => {
-                            self.recording = false;
+                            self.stop();
                             true
                         }
                         Key::Named(NamedKey::Control)
@@ -212,7 +232,7 @@ impl Input for KeybindRecorder {
                         | Key::Named(NamedKey::Super) => {
                             // Modifier pressed: track the active-modifier chord so far.
                             if !parts.is_empty() {
-                                self.value = parts.join("+");
+                                self.pending = parts.join("+");
                             }
                             true
                         }
@@ -253,14 +273,14 @@ impl Input for KeybindRecorder {
                         | Key::Named(NamedKey::Super) => {
                             // Modifier released with nothing else held: commit the
                             // recorded modifier-only binding.
-                            if !self.value.is_empty()
+                            if !self.pending.is_empty()
                                 && !ui.ctrl_pressed
                                 && !ui.shift_pressed
                                 && !ui.alt_pressed
                                 && !ui.logo_pressed
                             {
-                                self.just_changed = true;
-                                self.recording = false;
+                                let chord = std::mem::take(&mut self.pending);
+                                self.commit(vec![chord.as_str()]);
                             }
                             true
                         }
@@ -282,7 +302,7 @@ impl Input for KeybindRecorder {
             }
             Event::FocusOut => {
                 self.focused = false;
-                self.recording = false;
+                self.stop();
                 false
             }
             _ => false,
@@ -302,5 +322,62 @@ mod tests {
         k.inner_mut().commit(vec!["ctrl", "b"]);
         assert!(Adapted::take_change(&mut k));
         assert!(!Adapted::take_change(&mut k), "drained");
+    }
+
+    fn key(state: ElementState, logical_key: Key) -> KeyEvent {
+        KeyEvent { state, logical_key, text: None, repeat: false, ctrl: false, shift: false, alt: false }
+    }
+
+    /// A recorder holding `ctrl+a`, armed, with Ctrl pressed into it.
+    fn armed_with_ctrl_held() -> (crate::context::UiContext, Handle<Adapted<KeybindRecorder>>) {
+        let mut ctx = crate::context::UiContext::new();
+        let k = ctx.insert(KeybindRecorder::new("ctrl+a".to_string()));
+        ctx.focus_id(k.id());
+        let enter = key(ElementState::Pressed, Key::Named(NamedKey::Enter));
+        ctx.lend_h(k, |w, ctx| w.keyboard_input(&enter, ctx));
+        assert!(ctx[k].recording, "Enter arms the focused field");
+        ctx.ctrl_pressed = true;
+        let ctrl = key(ElementState::Pressed, Key::Named(NamedKey::Control));
+        ctx.lend_h(k, |w, ctx| w.keyboard_input(&ctrl, ctx));
+        (ctx, k)
+    }
+
+    /// Escape cancels: the field shows the committed binding again, not the modifier it
+    /// was holding, and raises no change (the document still has `ctrl+a`).
+    #[test]
+    fn escape_keeps_the_committed_binding() {
+        let (mut ctx, k) = armed_with_ctrl_held();
+        let esc = key(ElementState::Pressed, Key::Named(NamedKey::Escape));
+        ctx.lend_h(k, |w, ctx| w.keyboard_input(&esc, ctx));
+        assert!(!ctx[k].recording);
+        assert_eq!(ctx[k].value, "ctrl+a");
+        // Ctrl coming up after the cancel commits nothing either.
+        ctx.ctrl_pressed = false;
+        let up = key(ElementState::Released, Key::Named(NamedKey::Control));
+        ctx.lend_h(k, |w, ctx| w.keyboard_input(&up, ctx));
+        assert_eq!(ctx[k].value, "ctrl+a");
+        assert!(!ctx[k].take_change(), "a cancelled recording changes nothing");
+    }
+
+    /// Focus leaving mid-recording cancels the same way.
+    #[test]
+    fn focus_leaving_keeps_the_committed_binding() {
+        let (mut ctx, k) = armed_with_ctrl_held();
+        ctx.unfocus_id(k.id());
+        assert!(!ctx[k].recording);
+        assert_eq!(ctx[k].value, "ctrl+a");
+        assert!(!ctx[k].take_change());
+    }
+
+    /// A modifier-only chord still commits when its last modifier comes up.
+    #[test]
+    fn a_modifier_only_chord_commits_on_release() {
+        let (mut ctx, k) = armed_with_ctrl_held();
+        ctx.ctrl_pressed = false;
+        let up = key(ElementState::Released, Key::Named(NamedKey::Control));
+        ctx.lend_h(k, |w, ctx| w.keyboard_input(&up, ctx));
+        assert!(!ctx[k].recording);
+        assert_eq!(ctx[k].value, "ctrl");
+        assert!(ctx[k].take_change());
     }
 }
