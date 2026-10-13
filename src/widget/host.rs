@@ -204,7 +204,9 @@ pub trait WidgetHost {
         full_name.split("::").last().unwrap_or("Widget")
     }
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> { None }
-    fn render_popover(&self, _pc: &mut dyn crate::scene::paint::RenderTarget) {}
+    /// Paint this widget's open popover (a dropdown's list, a menu) into `pc`, in the
+    /// widget's own coordinates. A host calls it after everything the popover covers.
+    fn render_popover(&self, _pc: &mut crate::scene::paint::PaintCtx) {}
 
     fn focus(&mut self) {
         self.base_mut().focused = true;

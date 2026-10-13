@@ -1,5 +1,5 @@
 //! Placing a widget in a host's block ([`place`] / [`place_h`]), and replaying it onto a
-//! flat-host [`RenderTarget`] ([`render_widget`] / [`render_widget_h`], [`render_popovers`]).
+//! flat-host [`RenderTarget`] ([`render_widget`] / [`render_widget_h`]).
 //! The target and its carve types are `scene::paint`'s. Legacy: new code places with [`place`]
 //! and paints through `scene::paint::PaintCtx` (`widget::painter::paint_root_into`).
 
@@ -348,31 +348,6 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     }
     if let Some((frect, fradii, fill)) = pending_face.take() {
         emit_rounded(pc, frect, fradii, fill);
-    }
-}
-
-pub fn render_popovers(pc: &mut dyn RenderTarget, ctx: &UiContext) {
-    for &pop_id in &ctx.active_popovers {
-        if let Some(ptr) = ctx.tree.get_ptr(pop_id) {
-            unsafe {
-                (*ptr).render_popover(pc);
-            }
-        }
-    }
-    // Registry sweep for open popovers the app never registered (popover
-    // registration is optional and spotty) — the same fallback the coverage
-    // check and the engine's outside-press close use.
-    for (id, ptr) in ctx.tree.iter_registered() {
-        if ctx.active_popovers.contains(&id) {
-            continue;
-        }
-        unsafe {
-            if let Some(w) = ptr.as_ref() {
-                if w.visible() && w.popover_rect().is_some() {
-                    w.render_popover(pc);
-                }
-            }
-        }
     }
 }
 

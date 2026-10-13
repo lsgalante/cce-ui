@@ -127,8 +127,8 @@ window coordinates. On a toplevel the runner hosts it in an `xdg_popup` (`docs/r
 - The trigger's text and arrow name their font on the prim (`control_label_font_detached()`), the
   whole configured string (`Berkeley Mono 14`), so a dropdown painted as a stamp by another widget
   keeps its own font, and the menu's rows come out at the trigger's size.
-- A host drawing an open dropdown hands `render_popover` a real `PaintCtx`; a `PopoverCollector`
-  degrades the grown plate to a flat fill.
+- A host draws an open dropdown with `render_popover(&mut pc)` after everything the list covers;
+  the list is the trigger's flush plate grown over the revealed box, in the popover material.
 - A list honours the context menu's marks: a marked option draws its glyph in a column every row
   keeps, and the closed trigger shows its value without the mark.
   `a_marked_option_draws_its_glyph` is the test.

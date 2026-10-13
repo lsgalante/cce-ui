@@ -522,7 +522,7 @@ impl Application for DemoApp {
         // them to the plate AND exempts them from the occlusion clamp (text whose bounds
         // equal an overlay rect is treated as the overlay's own).
         if ui[self.theme_dropdown].popover_rect().is_some() {
-            // PaintCtx is a RenderTarget: the popover draws its real prims (the
+            // The popover paints into the frame's own PaintCtx: its real prims (the
             // dropdown's expanded inset-plate surface) with its own bounds.
             ui[self.theme_dropdown].render_popover(&mut pc);
         }

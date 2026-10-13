@@ -53,7 +53,7 @@ impl Paint for Dropdown {
         }
     }
 
-    fn draw_popover(&self, rect: Rect, pc: &mut dyn crate::scene::paint::RenderTarget) {
+    fn draw_popover(&self, rect: Rect, pc: &mut PaintCtx) {
         if !self.open {
             return;
         }
@@ -63,9 +63,8 @@ impl Paint for Dropdown {
         // shadows. The unified box spans the trigger and the revealed menu;
         // the trigger's display text is redrawn on top of its band. Rows sit
         // at their FINAL positions (from the full geometry) and slide into
-        // view as the traveling edge reveals them, clipped to the menu area by
-        // hand (RenderTarget carries no clip stack); text clips through its
-        // bounds.
+        // view as the traveling edge reveals them, cut to the revealed box by
+        // hand; text clips through its bounds.
         let (rx, _ry, rw, _rh) = self.popover_geom(rect);
         // The row strip inside the box — past the relief wall on an outer edge.
         let rows_y = self.rows_top(rect);
@@ -86,14 +85,12 @@ impl Paint for Dropdown {
         let (ux, uy, uw, uh) = self.unified_geom_drawn(rect);
 
         // The ACTUAL button surface, expanded: the raised trigger's flush
-        // inset plate grown over the unified box (real relief prims on a
-        // PaintCtx-backed target; collector hosts degrade to a rounded fill).
-        // The trigger's configured fill is usually transparent — the window
-        // plate IS its face — so the expansion substitutes the plate color,
-        // FROSTED: the popover material (`Material::popover`), the same the
-        // context menu wears (`ContextMenuState::paint`), so the menu shows
-        // the content beneath it blurred and tinted rather than covering it.
-        // Encoded here because the flat-path `RenderTarget` speaks colours.
+        // inset plate grown over the unified box. The trigger's configured
+        // fill is usually transparent — the window plate IS its face — so the
+        // expansion substitutes the plate color, FROSTED: the popover material
+        // (`Material::popover`), the same the context menu wears
+        // (`ContextMenuState::paint`), so the menu shows the content beneath it
+        // blurred and tinted rather than covering it.
         let radius = crate::layout::dropdown_corner_radius();
         let raw_bg = color::dropdown_background_color();
         let face = {
@@ -107,10 +104,12 @@ impl Paint for Dropdown {
                 (radius, radius, radius, radius),
                 depth,
             );
-            pc.inset_plate(face, t.x, t.y, t.width, t.height, tr.0, depth);
+            let r = tr.0;
+            pc.inset_plate(t, (r, r, r, r), crate::scene::Material::face(face).as_ref(), depth);
         } else {
-            pc.rect_with_radius(self.border_color(), ux, uy, uw, uh, radius);
-            pc.rect_with_radius(face, ux + 1.0, uy + 1.0, uw - 2.0, uh - 2.0, (radius - 1.0).max(0.0));
+            let all = (true, true, true, true);
+            pc.rounded_rect(Rect { x: ux, y: uy, width: uw, height: uh }, radius, all, self.border_color());
+            pc.rounded_rect(Rect { x: ux + 1.0, y: uy + 1.0, width: uw - 2.0, height: uh - 2.0 }, (radius - 1.0).max(0.0), all, face);
         }
 
         // Trigger content redrawn over its band (the box covers the widget-pass
@@ -122,13 +121,13 @@ impl Paint for Dropdown {
             let band_bounds = Some([ux, uy, ux + uw, uy + uh]);
             let font = crate::layout::control_label_font_detached();
             let text_y = crate::layout::align_text_y(ty, th, 12.0, 0.0);
-            pc.text_with_font_and_bounds(
-                &self.display_text(),
+            pc.text_with(
+                self.display_text(),
                 tx + 8.0,
                 text_y,
                 12.0,
-                [0.8, 0.8, 0.85, 1.0],
-                &font,
+                crate::scene::paint::text_rgb([0.8, 0.8, 0.85, 1.0]),
+                Some(font),
                 band_bounds,
             );
             pc.icon("chevron-down", self.arrow_rect(rect), ARROW_COLOR);
@@ -138,7 +137,7 @@ impl Paint for Dropdown {
             let iy = rows_y + h_idx as f32 * Self::ROW_H;
             // 4. Vibrantly colored translucent selection highlight
             if let Some((cx, cy, cw, ch)) = clip(rx + 2.0, iy + 2.0, rw - 4.0, 20.0) {
-                pc.rect(theme.primary_accent, cx, cy, cw, ch);
+                pc.quad(Rect { x: cx, y: cy, width: cw, height: ch }, theme.primary_accent);
             }
         }
 
@@ -149,7 +148,7 @@ impl Paint for Dropdown {
 
             if opt == "-" {
                 if let Some((cx, cy, cw, ch)) = clip(rx + 8.0, row_top + 11.5, rw - 16.0, 1.0) {
-                    pc.rect(theme.surface_border, cx, cy, cw, ch);
+                    pc.quad(Rect { x: cx, y: cy, width: cw, height: ch }, theme.surface_border);
                 }
                 continue;
             }
@@ -164,7 +163,7 @@ impl Paint for Dropdown {
                 [0xcc, 0xcc, 0xd4]
             };
 
-            let color_f32 = [
+            let mark_tint = [
                 text_color[0] as f32 / 255.0,
                 text_color[1] as f32 / 255.0,
                 text_color[2] as f32 / 255.0,
@@ -179,11 +178,9 @@ impl Paint for Dropdown {
             let (mark, label) = crate::widget::context_menu::split_mark(opt);
             if let Some(name) = mark {
                 let g = Rect { x: rx + 8.0, y: row_top + 0.5 * (Self::ROW_H - MARK_SIDE), width: MARK_SIDE, height: MARK_SIDE };
-                pc.push_clip_rect(ux, uy, uw, uh);
-                pc.icon(name, g, color_f32);
-                pc.pop_clip_rect();
+                pc.clip(Rect { x: ux, y: uy, width: uw, height: uh }, |pc| pc.icon(name, g, mark_tint));
             }
-            pc.text_with_font_and_bounds(label, rx + 8.0 + marks, iy, 12.0, color_f32, &font, bounds);
+            pc.text_with(label, rx + 8.0 + marks, iy, 12.0, text_color, Some(font), bounds);
         }
     }
 }
@@ -326,12 +323,12 @@ impl Dropdown {
         }
 
         if adjusted {
-            for (qx, qy, qw, qh, qr, qc, corners) in crate::scene::paint::partition_concentric_corners(
+            for (qx, qy, qw, qh, qr, qc, corners) in partition_concentric_corners(
                 x, y, w, visual_h, radius, outer_radii, border_color,
             ) {
                 ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
             }
-            for (qx, qy, qw, qh, qr, qc, corners) in crate::scene::paint::partition_concentric_corners(
+            for (qx, qy, qw, qh, qr, qc, corners) in partition_concentric_corners(
                 x + 1.0, y + 1.0, w - 2.0, visual_h - 2.0, inner_radius, inner_radii, bg_color,
             ) {
                 ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
@@ -460,4 +457,66 @@ impl Dropdown {
         let _ = (&font_family, font_size);
         ctx.icon("chevron-down", self.arrow_rect(content), ARROW_COLOR);
     }
+}
+
+/// A rounded box with a different radius at each corner, as plain quads and one-corner rounded
+/// quads: the centre and side blocks square, each corner its own rounded quad at its own
+/// radius. `(x, y, w, h, radius, color, corners)` per piece; empty pieces are left out. How the
+/// trigger draws a corner frame adjusted concentric to its host.
+fn partition_concentric_corners(
+    x: f32, y: f32, w: f32, h: f32,
+    _r_std: f32,
+    r_adjust: [f32; 4],
+    color: [f32; 4],
+) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+    let mut quads = Vec::new();
+
+    let r0 = r_adjust[0];
+    let r1 = r_adjust[1];
+    let r2 = r_adjust[2];
+    let r3 = r_adjust[3];
+
+    let max_left = r0.max(r3);
+    let max_right = r1.max(r2);
+
+    let mut push_valid_quad = |qx: f32, qy: f32, qw: f32, qh: f32, qr: f32, qcorners: (bool, bool, bool, bool)| {
+        if qw > 0.001 && qh > 0.001 {
+            quads.push((qx, qy, qw, qh, qr, color, qcorners));
+        }
+    };
+
+    // 1. Center vertical block
+    push_valid_quad(x + max_left, y, w - max_left - max_right, h, 0.0, (false, false, false, false));
+
+    // 2. Left block
+    push_valid_quad(x, y + r0, max_left, h - r0 - r3, 0.0, (false, false, false, false));
+
+    // 3. Top-left transition
+    push_valid_quad(x + r0, y, max_left - r0, r0, 0.0, (false, false, false, false));
+
+    // 4. Bottom-left transition
+    push_valid_quad(x + r3, y + h - r3, max_left - r3, r3, 0.0, (false, false, false, false));
+
+    // 5. Right block
+    push_valid_quad(x + w - max_right, y + r1, max_right, h - r1 - r2, 0.0, (false, false, false, false));
+
+    // 6. Top-right transition
+    push_valid_quad(x + w - max_right, y, max_right - r1, r1, 0.0, (false, false, false, false));
+
+    // 7. Bottom-right transition
+    push_valid_quad(x + w - max_right, y + h - r2, max_right - r2, r2, 0.0, (false, false, false, false));
+
+    // 8. Corner 0 (top-left)
+    push_valid_quad(x, y, r0, r0, r0, (true, false, false, false));
+
+    // 9. Corner 1 (top-right)
+    push_valid_quad(x + w - r1, y, r1, r1, r1, (false, true, false, false));
+
+    // 10. Corner 2 (bottom-right)
+    push_valid_quad(x + w - r2, y + h - r2, r2, r2, r2, (false, false, true, false));
+
+    // 11. Corner 3 (bottom-left)
+    push_valid_quad(x, y + h - r3, r3, r3, r3, (false, false, false, true));
+
+    quads
 }

@@ -14,9 +14,6 @@ pub use form::{lay_row, line_height as form_line_height, text_width as form_text
 pub use render::*;
 pub use section::*;
 
-/// A text colour given as `[r, g, b, a]` in 0..1 (what a page passes), as the paint vocabulary
-/// takes it: sRGB bytes.
-fn rgb(c: [f32; 4]) -> [u8; 3] {
-    let byte = |v: f32| (v * 255.0).clamp(0.0, 255.0) as u8;
-    [byte(c[0]), byte(c[1]), byte(c[2])]
-}
+// A text colour given as `[r, g, b, a]` in 0..1 (what a page passes) as the paint vocabulary
+// takes it: sRGB bytes.
+use crate::scene::paint::text_rgb as rgb;

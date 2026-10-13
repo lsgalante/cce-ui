@@ -10,6 +10,23 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-13
 
+- **Popovers paint onto a `PaintCtx`: `render_popover(&mut PaintCtx)`.**
+  `WidgetHost::render_popover` and `Paint::draw_popover` took `&mut dyn RenderTarget`, the flat
+  host's colour-typed surface; every host already handed them its frame's `PaintCtx`, which
+  implemented that trait. They take `&mut PaintCtx` now, and the five popovers (Dropdown, Menu,
+  TreeList's add-key box, Ramp and ParametersBg, which forward to their dropdowns) are written in
+  `PaintCtx` calls that emit the prims the trait's `PaintCtx` impl did: a `rect` is a `quad`, a
+  `rect_with_radius` a `rounded_rect` on all corners, an `inset_plate` an `inset_plate` with four
+  equal radii and `Material::face`, text a `text_with` in bytes truncated as before
+  (`scene::paint::text_rgb`, crate-private), the Dropdown's mark glyph a `clip` round an `icon`.
+  `compose::render_popovers` and `PopoverCollector`, which kept only rects and text, are gone
+  (no host called them), and `partition_concentric_corners` moved from `scene::paint` to the
+  Dropdown, its one user, as a private function. Checked: `a_marked_option_draws_its_glyph` (now
+  on a display list), lib tests with every feature (709), every integration test, clippy, the
+  wasm build with and without features, and a scale-2 shadow A/B (`CCE_UI_FULL_DAMAGE=1`) at 0
+  differing pixels in every state: cce-gallery idle, its Layout dropdown open, a row hovered,
+  its File menu open and its row hovered; cce-data-editor idle and its TreeList's Add Key box
+  open.
 - **Sections and forms paint onto a `PaintCtx`, not a flat `RenderTarget`.**
   `compose::{Form, FormGroup, SectionContext, PageLayoutBuilder}` take any
   `P: AsMut<PaintCtx>` (a `PaintCtx` is `AsMut` of itself; a host may wrap one) instead of

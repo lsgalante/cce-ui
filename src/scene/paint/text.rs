@@ -50,6 +50,14 @@ pub struct TextAttrs {
     pub stretch: Option<u16>,
 }
 
+/// A colour given as `[r, g, b, a]` in 0..1, as a text prim carries it: sRGB bytes, each
+/// channel clamped and truncated (the alpha is dropped; text has none). What a page passing
+/// `[f32; 4]` colours to [`PaintCtx::text_with`] converts with.
+pub(crate) fn text_rgb(c: [f32; 4]) -> [u8; 3] {
+    let byte = |v: f32| (v * 255.0).clamp(0.0, 255.0) as u8;
+    [byte(c[0]), byte(c[1]), byte(c[2])]
+}
+
 impl PaintCtx {
 
     pub fn text(&mut self, text: impl Into<String>, x: f32, y: f32, font_size: f32, color: [u8; 3]) {

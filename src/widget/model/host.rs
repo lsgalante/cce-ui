@@ -73,7 +73,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         Paint::popover(&self.inner, self.content_rect())
     }
 
-    fn render_popover(&self, pc: &mut dyn crate::scene::paint::RenderTarget) {
+    fn render_popover(&self, pc: &mut PaintCtx) {
         if !self.visible() {
             return;
         }

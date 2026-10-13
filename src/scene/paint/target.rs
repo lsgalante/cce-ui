@@ -73,7 +73,7 @@ pub trait RenderTarget {
     fn push_clip_rect(&mut self, _x: f32, _y: f32, _w: f32, _h: f32) {}
     fn pop_clip_rect(&mut self) {}
     /// A bundled cce-icons glyph — see `PaintCtx::icon`. A target that
-    /// cannot draw images (the legacy `PopoverCollector`) draws nothing.
+    /// cannot draw images draws nothing.
     fn icon(&mut self, _name: &str, _rect: crate::scene::layout::Rect, _color: [f32; 4]) {}
     /// A straight stroke — see `PaintCtx::vector`. What a graph's wires are
     /// made of; a target that draws none (the default) shows no wires.
@@ -106,96 +106,4 @@ pub trait RenderTarget {
     /// can't carve has nothing truthful to draw, and a solid box here would
     /// paint every text field a flat slab it never had.
     fn relief_carve(&mut self, _carve: &ReliefCarve) {}
-}
-
-pub struct PopoverCollector {
-    pub rects: Vec<([f32; 4], f32, f32, f32, f32)>,
-    pub texts: Vec<(String, f32, f32, f32, [f32; 4], Option<String>, Option<[f32; 4]>)>,
-}
-
-impl PopoverCollector {
-    pub fn new() -> Self {
-        Self { rects: Vec::new(), texts: Vec::new() }
-    }
-}
-
-impl RenderTarget for PopoverCollector {
-    fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
-        self.rects.push((color, x, y, w, h));
-    }
-
-    fn text(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4]) {
-        self.texts.push((content.to_string(), size, x, y, color, None, None));
-    }
-
-    fn text_with_font(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], font: &str) {
-        self.texts.push((content.to_string(), size, x, y, color, Some(font.to_string()), None));
-    }
-
-    fn text_with_bounds(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], bounds: Option<[f32; 4]>) {
-        self.texts.push((content.to_string(), size, x, y, color, None, bounds));
-    }
-
-    fn text_with_font_and_bounds(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], font: &str, bounds: Option<[f32; 4]>) {
-        self.texts.push((content.to_string(), size, x, y, color, Some(font.to_string()), bounds));
-    }
-}
-
-
-pub fn partition_concentric_corners(
-    x: f32, y: f32, w: f32, h: f32,
-    _r_std: f32,
-    r_adjust: [f32; 4],
-    color: [f32; 4],
-) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
-    let mut quads = Vec::new();
-
-    let r0 = r_adjust[0];
-    let r1 = r_adjust[1];
-    let r2 = r_adjust[2];
-    let r3 = r_adjust[3];
-
-    let max_left = r0.max(r3);
-    let max_right = r1.max(r2);
-
-    let mut push_valid_quad = |qx: f32, qy: f32, qw: f32, qh: f32, qr: f32, qcorners: (bool, bool, bool, bool)| {
-        if qw > 0.001 && qh > 0.001 {
-            quads.push((qx, qy, qw, qh, qr, color, qcorners));
-        }
-    };
-
-    // 1. Center vertical block
-    push_valid_quad(x + max_left, y, w - max_left - max_right, h, 0.0, (false, false, false, false));
-
-    // 2. Left block
-    push_valid_quad(x, y + r0, max_left, h - r0 - r3, 0.0, (false, false, false, false));
-
-    // 3. Top-left transition
-    push_valid_quad(x + r0, y, max_left - r0, r0, 0.0, (false, false, false, false));
-
-    // 4. Bottom-left transition
-    push_valid_quad(x + r3, y + h - r3, max_left - r3, r3, 0.0, (false, false, false, false));
-
-    // 5. Right block
-    push_valid_quad(x + w - max_right, y + r1, max_right, h - r1 - r2, 0.0, (false, false, false, false));
-
-    // 6. Top-right transition
-    push_valid_quad(x + w - max_right, y, max_right - r1, r1, 0.0, (false, false, false, false));
-
-    // 7. Bottom-right transition
-    push_valid_quad(x + w - max_right, y + h - r2, max_right - r2, r2, 0.0, (false, false, false, false));
-
-    // 8. Corner 0 (top-left)
-    push_valid_quad(x, y, r0, r0, r0, (true, false, false, false));
-
-    // 9. Corner 1 (top-right)
-    push_valid_quad(x + w - r1, y, r1, r1, r1, (false, true, false, false));
-
-    // 10. Corner 2 (bottom-right)
-    push_valid_quad(x + w - r2, y + h - r2, r2, r2, r2, (false, false, true, false));
-
-    // 11. Corner 3 (bottom-left)
-    push_valid_quad(x, y + h - r3, r3, r3, r3, (false, false, false, true));
-
-    quads
 }

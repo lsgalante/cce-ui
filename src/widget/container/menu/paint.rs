@@ -280,43 +280,40 @@ impl Paint for MenuBar {
         self.context_popover_rect(rect).or_else(|| self.menu_dropdown_rect())
     }
 
-    fn draw_popover(&self, rect: Rect, pc: &mut dyn crate::scene::paint::RenderTarget) {
-        let label_color = self.text_color();
-        let srgb = crate::color::to_srgb(label_color);
-        let color_f32 = [srgb[0], srgb[1], srgb[2], 1.0];
+    fn draw_popover(&self, rect: Rect, pc: &mut PaintCtx) {
         let font = Paint::widget_font(self);
+        let quad = |pc: &mut PaintCtx, x: f32, y: f32, width: f32, height: f32, color: [f32; 4]| {
+            pc.quad(Rect { x, y, width, height }, color);
+        };
 
         // Both dropdown flavors paint in the Dropdown widget's popover idiom
         // (layered soft shadows, surface border/bg, accent hover, blue
         // selected) so menubar menus read as the DE's normal dropdowns.
-        let draw_panel = |pc: &mut dyn crate::scene::paint::RenderTarget, dx: f32, dy: f32, dw: f32, dh: f32, hovered: Option<usize>| {
+        let draw_panel = |pc: &mut PaintCtx, dx: f32, dy: f32, dw: f32, dh: f32, hovered: Option<usize>| {
             let theme = color::active_theme();
-            pc.rect([0.02, 0.02, 0.05, 0.15], dx + 1.0, dy + 1.0, dw, dh);
-            pc.rect([0.02, 0.02, 0.05, 0.08], dx + 3.0, dy + 3.0, dw, dh);
-            pc.rect([0.02, 0.02, 0.05, 0.04], dx + 5.0, dy + 5.0, dw, dh);
-            pc.rect(theme.surface_border, dx, dy, dw, dh);
+            quad(pc, dx + 1.0, dy + 1.0, dw, dh, [0.02, 0.02, 0.05, 0.15]);
+            quad(pc, dx + 3.0, dy + 3.0, dw, dh, [0.02, 0.02, 0.05, 0.08]);
+            quad(pc, dx + 5.0, dy + 5.0, dw, dh, [0.02, 0.02, 0.05, 0.04]);
+            quad(pc, dx, dy, dw, dh, theme.surface_border);
             // Frosted, like the Dropdown popover and the context menu: the
-            // popover material (`Material::popover`), encoded for the
-            // colour-typed flat path — menus show what is beneath them
-            // blurred and tinted, not covered.
+            // popover material (`Material::popover`) as a quad's fill — menus
+            // show what is beneath them blurred and tinted, not covered.
             let bg = crate::scene::Material::popover(theme.surface_bg).fill(crate::scene::PlateRole::Nested);
-            pc.rect(bg, dx + 1.0, dy + 1.0, dw - 2.0, dh - 2.0);
+            quad(pc, dx + 1.0, dy + 1.0, dw - 2.0, dh - 2.0, bg);
             if let Some(di) = hovered {
                 let iy = dy + di as f32 * DROPDOWN_ITEM_H;
-                pc.rect(theme.primary_accent, dx + 2.0, iy + 2.0, dw - 4.0, DROPDOWN_ITEM_H - 4.0);
+                quad(pc, dx + 2.0, iy + 2.0, dw - 4.0, DROPDOWN_ITEM_H - 4.0, theme.primary_accent);
             }
         };
-        let item_color = |hovered: bool, selected: bool| -> [f32; 4] {
-            let c: [u8; 3] = if hovered {
+        let item_color = |hovered: bool, selected: bool| -> [u8; 3] {
+            if hovered {
                 [0xff, 0xff, 0xff]
             } else if selected {
                 [0x3a, 0x9a, 0xff]
             } else {
                 [0xcc, 0xcc, 0xd4]
-            };
-            [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0]
+            }
         };
-        let _ = color_f32;
 
         if self.context_dropdown_open {
             if let Some((dx, dy, dw, dh)) = self.context_popover_rect(rect) {
@@ -325,11 +322,7 @@ impl Paint for MenuBar {
                 for (i, option) in self.context_options.iter().enumerate() {
                     let color = item_color(self.context_hovered_item == Some(i), self.context_selected == i);
                     let iy = crate::layout::align_text_y(dy + i as f32 * DROPDOWN_ITEM_H, DROPDOWN_ITEM_H, 12.0, 0.0);
-                    if let Some(ref f) = font {
-                        pc.text_with_font_and_bounds(option, dx + 8.0, iy, 12.0, color, f, bounds);
-                    } else {
-                        pc.text_with_bounds(option, dx + 8.0, iy, 12.0, color, bounds);
-                    }
+                    pc.text_with(option.as_str(), dx + 8.0, iy, 12.0, color, font.clone(), bounds);
                 }
             }
         } else if let Some((dx, dy, dw, dh)) = self.menu_dropdown_rect() {
@@ -349,13 +342,10 @@ impl Paint for MenuBar {
                         let iy = crate::layout::align_text_y(dy + i as f32 * DROPDOWN_ITEM_H, DROPDOWN_ITEM_H, 12.0, 0.0);
                         if checked == Some(true) {
                             let my = dy + i as f32 * DROPDOWN_ITEM_H + 0.5 * (DROPDOWN_ITEM_H - MARK);
-                            pc.icon("check", Rect { x: dx + 8.0, y: my, width: MARK, height: MARK }, color);
+                            let tint = [color[0] as f32 / 255.0, color[1] as f32 / 255.0, color[2] as f32 / 255.0, 1.0];
+                            pc.icon("check", Rect { x: dx + 8.0, y: my, width: MARK, height: MARK }, tint);
                         }
-                        if let Some(ref f) = font {
-                            pc.text_with_font_and_bounds(option, dx + 8.0 + indent, iy, 12.0, color, f, bounds);
-                        } else {
-                            pc.text_with_bounds(option, dx + 8.0 + indent, iy, 12.0, color, bounds);
-                        }
+                        pc.text_with(option.as_str(), dx + 8.0 + indent, iy, 12.0, color, font.clone(), bounds);
                     }
                 }
             }

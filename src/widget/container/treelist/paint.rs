@@ -338,24 +338,26 @@ impl Paint for TreeList {
     
     }
 
-    fn draw_popover(&self, _rect: Rect, pc: &mut dyn crate::scene::paint::RenderTarget) {
+    fn draw_popover(&self, _rect: Rect, pc: &mut PaintCtx) {
         if !self.add_key_popover_open { return; }
-        
+
         let (rx, ry, rw, rh) = self.popover_rect_geom();
-        
+        let quad = |pc: &mut PaintCtx, x: f32, y: f32, width: f32, height: f32, color: [f32; 4]| {
+            pc.quad(Rect { x, y, width, height }, color);
+        };
+
         // 1. Soft layered drop shadows
-        pc.rect([0.02, 0.02, 0.05, 0.15], rx + 1.0, ry + 1.0, rw, rh);
-        pc.rect([0.02, 0.02, 0.05, 0.08], rx + 3.0, ry + 3.0, rw, rh);
-        pc.rect([0.02, 0.02, 0.05, 0.04], rx + 5.0, ry + 5.0, rw, rh);
+        quad(pc, rx + 1.0, ry + 1.0, rw, rh, [0.02, 0.02, 0.05, 0.15]);
+        quad(pc, rx + 3.0, ry + 3.0, rw, rh, [0.02, 0.02, 0.05, 0.08]);
+        quad(pc, rx + 5.0, ry + 5.0, rw, rh, [0.02, 0.02, 0.05, 0.04]);
 
         let theme = crate::color::active_theme();
 
         // 2. High-contrast premium outer border
-        pc.rect(theme.surface_border, rx, ry, rw, rh);
-        
+        quad(pc, rx, ry, rw, rh, theme.surface_border);
+
         // 3. Frosted glass background
-        pc.rect(theme.surface_bg, rx + 1.0, ry + 1.0, rw - 2.0, rh - 2.0); // bg
-    
+        quad(pc, rx + 1.0, ry + 1.0, rw - 2.0, rh - 2.0, theme.surface_bg);
     }
 }
 

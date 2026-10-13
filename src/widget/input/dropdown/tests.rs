@@ -254,23 +254,6 @@ fn a_marked_option_draws_its_glyph() {
         eprintln!("skipped: no icon set");
         return;
     }
-    #[derive(Default)]
-    struct Rec {
-        icons: Vec<(String, f32)>,
-        texts: Vec<(String, f32)>,
-    }
-    impl crate::scene::paint::RenderTarget for Rec {
-        fn rect(&mut self, _: [f32; 4], _: f32, _: f32, _: f32, _: f32) {}
-        fn text(&mut self, t: &str, x: f32, _: f32, _: f32, _: [f32; 4]) {
-            self.texts.push((t.to_string(), x));
-        }
-        fn text_with_font_and_bounds(&mut self, t: &str, x: f32, _: f32, _: f32, _: [f32; 4], _: &str, _: Option<[f32; 4]>) {
-            self.texts.push((t.to_string(), x));
-        }
-        fn icon(&mut self, name: &str, r: Rect, _: [f32; 4]) {
-            self.icons.push((name.to_string(), r.x));
-        }
-    }
     let opts = vec!["✓ Show Grid".to_string(), "Control Panel".to_string(), "○ Opacity 50%".to_string()];
     let mut dd = Dropdown::new(opts, 0).with_custom_display_text("View");
     let rect = Rect { x: 10.0, y: 10.0, width: 200.0, height: 24.0 };
@@ -279,17 +262,31 @@ fn a_marked_option_draws_its_glyph() {
         d.open = true;
         d.anim_snap = 1.0;
     }
-    let mut rec = Rec::default();
-    crate::widget::Paint::draw_popover(dd.inner(), rect, &mut rec);
+    let mut pc = crate::scene::paint::PaintCtx::new();
+    crate::widget::Paint::draw_popover(dd.inner(), rect, &mut pc);
+    let list = pc.finish();
+    // Each glyph by the name it was uploaded under, and each text run, with its x.
+    let mut icons: Vec<(String, f32)> = Vec::new();
+    let mut texts: Vec<(String, f32)> = Vec::new();
+    for item in &list.items {
+        match &item.prim {
+            crate::scene::paint::Prim::Image { image, rect, .. } => {
+                let (name, _, _) = crate::icon_source(*image).expect("a bundled glyph");
+                icons.push((name, rect.x));
+            }
+            crate::scene::paint::Prim::Text { text, x, .. } => texts.push((text.clone(), *x)),
+            _ => {}
+        }
+    }
     // The trigger band redrawn over the list keeps its arrow; the rest
     // are the rows' marks.
-    rec.icons.retain(|(n, _)| n != "chevron-down");
-    let names: Vec<&str> = rec.icons.iter().map(|(n, _)| n.as_str()).collect();
+    icons.retain(|(n, _)| n != "chevron-down");
+    let names: Vec<&str> = icons.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(names, ["check", "circle-outline"]);
-    let x_of = |t: &str| rec.texts.iter().find(|(s, _)| s == t).map(|(_, x)| *x).unwrap_or_else(|| panic!("{t:?} not drawn: {:?}", rec.texts));
+    let x_of = |t: &str| texts.iter().find(|(s, _)| s == t).map(|(_, x)| *x).unwrap_or_else(|| panic!("{t:?} not drawn: {texts:?}"));
     assert_eq!(x_of("Show Grid"), x_of("Control Panel"), "an unmarked row keeps the mark column");
-    assert!(x_of("Show Grid") > rec.icons[0].1, "the label stands after its mark");
-    assert!(rec.texts.iter().all(|(t, _)| !t.contains(['✓', '○', '●'])), "no mark drawn as text: {:?}", rec.texts);
+    assert!(x_of("Show Grid") > icons[0].1, "the label stands after its mark");
+    assert!(texts.iter().all(|(t, _)| !t.contains(['✓', '○', '●'])), "no mark drawn as text: {texts:?}");
     let plain = Dropdown::new(vec!["✓ On".to_string(), "Off".to_string()], 0);
     assert_eq!(plain.inner().display_text(), "On", "the trigger shows the value without its mark");
 }

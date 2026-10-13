@@ -3,10 +3,8 @@
 
 use super::*;
 
-/// `PaintCtx` as a popover render target: display-list hosts pass their frame
-/// ctx straight into `render_popover`, so popovers draw REAL prims — relief
-/// plates, rounded rects, bounded text — instead of the flattened
-/// `PopoverCollector` view (which stays for legacy tuple hosts).
+/// `PaintCtx` as a flat host's target: what `compose::render_widget` replays a
+/// widget onto when the host hands it a frame's ctx.
 impl crate::scene::paint::RenderTarget for PaintCtx {
     fn icon(&mut self, name: &str, rect: Rect, color: [f32; 4]) {
         PaintCtx::icon(self, name, rect, color);

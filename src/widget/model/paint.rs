@@ -47,14 +47,15 @@ pub trait Paint {
     }
 
     /// This widget's OWN popover (dropdown) rect, if one is open — hosts float it above
-    /// z-ordered siblings (`register_popover` + `render_popovers`). Containers combine this
-    /// with their children's popovers in the adapter. Default: none.
+    /// z-ordered siblings (`register_popover_id`, then `render_popover` after what it covers).
+    /// Containers combine this with their children's popovers in the adapter. Default: none.
     fn popover(&self, _rect: Rect) -> Option<(f32, f32, f32, f32)> {
         None
     }
 
-    /// Draw this widget's own popover (legacy `WidgetHost::render_popover`).
-    fn draw_popover(&self, _rect: Rect, _pc: &mut dyn crate::scene::paint::RenderTarget) {}
+    /// Paint this widget's own popover into `pc` (what `WidgetHost::render_popover` runs, when
+    /// the widget is visible). Default: none.
+    fn draw_popover(&self, _rect: Rect, _pc: &mut PaintCtx) {}
 
     /// Solid border `(color, thickness)` of the widget's background quad. **Transitional**, like
     /// [`corner_style`](Paint::corner_style): `render_widget` gives a widget's background quad a
