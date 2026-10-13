@@ -16,7 +16,7 @@
 //! | `text` | text colours outside a control: links, tags, the quote bar, the highlight and the code wash, and the colours derived from them |
 //! | `load` | reading the config into the slots, retired surface keys, reloads |
 //! | `math` | sRGB / linear, OKLab, the perceptual fade |
-//! | `materials` | named materials and the rung bindings |
+//! | `materials` | named materials and the rung bindings, and their config types (`MaterialDef`, `FrostDef`, `PlateRung`) |
 //! | `chords` | the tree and list search chords |
 
 mod load;
@@ -89,7 +89,7 @@ pub const SLIDER_TRACK: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
 // This module's part of the one style snapshot (`crate::style`): every slot below,
 // with its default. Each slot's `static` handle stands where its lock did.
 crate::style::style_slots! {
-    NAMED_MATERIALS: Vec<(String, crate::scene::material::MaterialDef)> = Vec::new();
+    NAMED_MATERIALS: Vec<(String, MaterialDef)> = Vec::new();
     MATERIAL_BINDINGS: [Option<String>; 3] = [None, None, None];
     PAGE_LOW_COLOR: [f32; 4] = [0.0600316, 0.0600316, 0.080219, 1.0];
     COLOR_BORDERS_COLOR: [f32; 4] = [0.2039, 0.2039, 0.2530, 1.0];
@@ -192,7 +192,7 @@ crate::style::style_slots! {
     FINISH_SPEC: f32 = FINISH_SPEC_DEFAULT;
     FINISH_SHININESS: f32 = FINISH_SHININESS_DEFAULT;
     FINISH_CURVATURE: f32 = FINISH_CURVATURE_DEFAULT;
-    PLATE_FROST_RADIUS: f32 = crate::scene::material::Frost::DEFAULT_RADIUS;
+    PLATE_FROST_RADIUS: f32 = FROST_RADIUS_DEFAULT;
 }
 
 /// Read a style slot.
@@ -298,6 +298,11 @@ pub(crate) const FINISH_SPEC_DEFAULT: f32 = 0.4;
 pub(crate) const FINISH_SHININESS_DEFAULT: f32 = 24.0;
 
 pub(crate) const FINISH_CURVATURE_DEFAULT: f32 = 0.2;
+
+/// The frost kernel a config without `style.surface.plate.frost.radius` gets, as a sigma in
+/// logical px: `scene::Frost::DEFAULT_RADIUS` is this, and says why it is 5.5. Here so the
+/// slot's default names nothing above this module.
+pub(crate) const FROST_RADIUS_DEFAULT: f32 = 5.5;
 
 #[cfg(test)]
 mod color_tests;

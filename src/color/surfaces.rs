@@ -121,17 +121,6 @@ pub fn set_param_bg_color(color: [f32; 4]) {
     style_write(&PARAM_BG_COLOR, color);
 }
 
-/// The params plate's final fill as the renderer consumes it: the pane rung's
-/// material ([`crate::scene::Material::pane`] — the tint at the global plate
-/// opacity, frosted under plate blur) encoded for a nested plate. The single
-/// source both `ParametersBg`'s own plate and any surface that wants to match
-/// it (the designer's node bodies) draw from, so they track a live retint /
-/// opacity / blur toggle together.
-pub fn param_plate_fill() -> [f32; 4] {
-    use crate::scene::material::{Material, PlateRole};
-    Material::pane().fill(PlateRole::Nested)
-}
-
 /// The frame a flat well is drawn in — the one hairline every well (text,
 /// keybind, colour and font fields, the canvases) wears when relief is off:
 /// neutral greys idle and hovered, the highlight accent while the well is

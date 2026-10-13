@@ -13,10 +13,10 @@
 //!
 //! | module | holds |
 //! |---|---|
-//! | `mod.rs` | `Material` and `PlateRole`: construction, the rung defaults, fills and the sentinel |
+//! | `mod.rs` | `Material` and `PlateRole`: construction, the rung defaults, fills and the sentinel; `param_plate_fill` |
 //! | `finish` | `Finish`, how a surface answers light |
 //! | `frost` | `Frost`, whether and how a surface shows what is behind it, and its packing |
-//! | `def` | a named material as config spells it (`MaterialDef`, `FrostDef`) and the rungs it binds to |
+//! | `def` | resolving a named material as config spells it (`MaterialDef`, `FrostDef`, `PlateRung`: defined in `color`, re-exported here) |
 
 mod def;
 mod finish;
@@ -27,6 +27,16 @@ mod tests;
 pub use def::*;
 pub use finish::*;
 pub use frost::*;
+
+/// The params plate's final fill as the renderer consumes it: the pane rung's
+/// material ([`Material::pane`] — the tint at the global plate opacity,
+/// frosted under plate blur) encoded for a nested plate. The single source
+/// both `ParametersBg`'s own plate and any surface that wants to match it
+/// (the designer's node bodies) draw from, so they track a live retint /
+/// opacity / blur toggle together.
+pub fn param_plate_fill() -> [f32; 4] {
+    Material::pane().fill(PlateRole::Nested)
+}
 
 /// Which frost regime a plate is under: a root plate's frost is the
 /// compositor's blur-behind (its fill stays positive-alpha whatever its
@@ -87,8 +97,8 @@ impl Material {
     /// The pane rung: `plate material="…"` when bound, else the params
     /// plate's tint (`style.surface.param.color`) at the global plate
     /// opacity, frosted when `style.surface.plate.blur` says so — exactly
-    /// what `color::param_plate_fill` resolved before this type existed (it
-    /// now resolves through here).
+    /// what the params plate's fill resolved before this type existed (it
+    /// now resolves through here, [`param_plate_fill`]).
     pub fn pane() -> Self {
         Self::bound(PlateRung::Pane).unwrap_or_else(Self::pane_legacy)
     }

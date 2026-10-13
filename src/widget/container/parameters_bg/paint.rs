@@ -199,7 +199,7 @@ impl Paint for ParametersBg {
         if !self.visible {
             return [0.0, 0.0, 0.0, 0.0];
         }
-        color::param_plate_fill()
+        crate::scene::param_plate_fill()
     }
 
     /// The shared plate corner radius (rounded on all four corners when non-zero).

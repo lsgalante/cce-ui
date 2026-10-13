@@ -441,7 +441,9 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   `RenderTarget`, and the carve types it takes are `scene::paint`'s (`target.rs`).
 - `color/` — the palette constants and the style slots (`mod.rs`, with the table), the getters
   and setters by topic (`surfaces.rs`, `controls.rs`, `lists.rs`, `graph.rs`), `load.rs` (config →
-  colours, `retired_surface_keys`), `math.rs` (sRGB/linear, OKLab), `materials.rs`, `chords.rs`.
+  colours, `retired_surface_keys`), `math.rs` (sRGB/linear, OKLab), `materials.rs` (named
+  materials and their config types `MaterialDef` / `FrostDef` / `PlateRung`, which
+  `scene::material` re-exports and resolves), `chords.rs`.
 - `text/` — shaping, the shaped-buffer cache, fonts, bidi (`backend::text` re-exports it).
 - `style.rs` (the snapshot), `geom.rs` (`Rect`, at the bottom so the style getters can answer
   in rects; `scene::layout::Rect` is the path apps use), `window_state.rs`, `ime.rs`

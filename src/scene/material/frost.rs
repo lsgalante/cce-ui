@@ -45,7 +45,10 @@ impl Frost {
     /// value that reproduces the panel exactly: 5.5 logical = 11 physical at
     /// scale 2. A scale-1 display now gets the same logical blur instead of
     /// twice it.
-    pub const DEFAULT_RADIUS: f32 = 5.5;
+    ///
+    /// The number is defined in `color`, beside the style slot it defaults,
+    /// so that module names nothing above it.
+    pub const DEFAULT_RADIUS: f32 = crate::color::FROST_RADIUS_DEFAULT;
 
     /// Fixed-point width of `compression` and `refraction` inside one push
     /// float: `c·4095·4096 + r·4095` is an integer below 2²⁴, exact in f32.

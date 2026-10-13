@@ -57,7 +57,6 @@ fn layer(name: &str) -> Option<u8> {
 /// when its edge is gone (the test says which); never add one.
 const ALLOWED_UPWARD: &[(&str, &str)] = &[
     ("color", "layout"),
-    ("color", "scene"),
     ("style", "layout"),
 ];
 

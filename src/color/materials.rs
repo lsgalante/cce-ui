@@ -1,7 +1,56 @@
-//! The named materials config defines and the rung bindings (`docs/rfc-material.md` § 5).
+//! The named materials config defines and the rung bindings (`docs/rfc-material.md` § 5), and
+//! the config types they are held as (`MaterialDef`, `FrostDef`, `PlateRung`). `scene::material`
+//! re-exports the types at their old paths and resolves a definition into a `Material`
+//! (`MaterialDef::resolve`).
 
 use super::*;
-use crate::scene::material::MaterialDef;
+
+/// The three rungs of the plate ladder a material can be bound to in
+/// config (`docs/rfc-material.md` § 5): `plate { root material="…" }`,
+/// `plate material="…"` and `control material="…"`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PlateRung {
+    Root,
+    Pane,
+    Control,
+}
+
+/// A named material as config spells it — every field optional, resolved
+/// against the rung's legacy material by [`MaterialDef::resolve`]:
+///
+/// ```kdl
+/// style { surface { material {
+///     glass {
+///         color (rgba)"#05050840"
+///         frost backdrop_compression=(f64)0.6 refraction=(f64)0.3 radius=(f64)5.5
+///         finish light=(f64)0.15 spec=(f64)0.4 shininess=(f64)24.0 curvature=(f64)0.2
+///     }
+/// } } }
+/// ```
+///
+/// A node with no `frost` child is opaque — not "frosted at zero", none. A
+/// missing `color` keeps the rung's tint; a missing `finish` key keeps the
+/// DE's. `light` is the finish strength in the units `style.surface.relief.
+/// depth` uses (0.15 = the default strength of 1).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MaterialDef {
+    pub tint: Option<[f32; 4]>,
+    pub frost: Option<FrostDef>,
+    pub light: Option<f32>,
+    pub spec: Option<f32>,
+    pub shininess: Option<f32>,
+    pub curvature: Option<f32>,
+}
+
+/// The `frost` child of a material node: present means frosted, each knob
+/// defaulting (0, 0, [`crate::scene::Frost::DEFAULT_RADIUS`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrostDef {
+    pub compression: Option<f32>,
+    pub refraction: Option<f32>,
+    pub radius: Option<f32>,
+}
+
 
 /// The named materials config defines (`style.surface.material { <name> {…} }`)
 /// and the rung bindings (`plate material=`, `plate { root material= }`,
@@ -47,11 +96,11 @@ fn put_material(list: &mut Vec<(String, MaterialDef)>, name: &str, def: Option<M
     }
 }
 
-fn rung_index(rung: crate::scene::material::PlateRung) -> usize {
+fn rung_index(rung: PlateRung) -> usize {
     match rung {
-        crate::scene::material::PlateRung::Root => 0,
-        crate::scene::material::PlateRung::Pane => 1,
-        crate::scene::material::PlateRung::Control => 2,
+        PlateRung::Root => 0,
+        PlateRung::Pane => 1,
+        PlateRung::Control => 2,
     }
 }
 
@@ -72,12 +121,12 @@ pub fn set_named_material(name: &str, def: Option<MaterialDef>) {
     style_update(&NAMED_MATERIALS, |list| put_material(list, name, def));
 }
 
-pub fn material_binding(rung: crate::scene::material::PlateRung) -> Option<String> {
+pub fn material_binding(rung: PlateRung) -> Option<String> {
     load_colors_once();
     style_read(&MATERIAL_BINDINGS)[rung_index(rung)].clone()
 }
 
-pub fn set_material_binding(rung: crate::scene::material::PlateRung, name: Option<String>) {
+pub fn set_material_binding(rung: PlateRung, name: Option<String>) {
     style_update(&MATERIAL_BINDINGS, |b| b[rung_index(rung)] = name);
 }
 

@@ -35,7 +35,7 @@ fn pane_resolves_like_param_plate_fill_did() {
     for blur in [false, true] {
         crate::color::set_plate_blur(blur);
         assert_eq!(Material::pane().fill(PlateRole::Nested), old(blur), "blur={blur}");
-        assert_eq!(crate::color::param_plate_fill(), old(blur), "blur={blur}");
+        assert_eq!(param_plate_fill(), old(blur), "blur={blur}");
         assert_eq!(Material::pane().frost.is_frosted(), blur);
     }
     crate::color::set_plate_blur(false);

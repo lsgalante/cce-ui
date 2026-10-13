@@ -13,4 +13,4 @@ pub mod paint;
 pub mod relief_shade;
 
 pub use arena::{Arena, Node, NodeId};
-pub use material::{Finish, Frost, FrostDef, Material, MaterialDef, PlateRole, PlateRung};
+pub use material::{param_plate_fill, Finish, Frost, FrostDef, Material, MaterialDef, PlateRole, PlateRung};

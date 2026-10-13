@@ -486,7 +486,6 @@ fn parse_and_set_colors_in_batch(content: &str) {
     // Named materials and the rung bindings (RFC material § 5), replaced
     // wholesale so a reload forgets what config no longer says.
     {
-        use crate::scene::material::{FrostDef, MaterialDef};
         let num = |v: Option<&serde_json::Value>| v.and_then(|v| v.as_f64()).map(|v| v as f32);
         let mut map: Vec<(String, MaterialDef)> = Vec::new();
         if let Some(obj) = val.pointer("/style/surface/material").and_then(|v| v.as_object()) {

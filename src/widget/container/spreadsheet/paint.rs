@@ -10,7 +10,7 @@ impl Paint for Spreadsheet {
     /// bevels like the params plate and tracks a live retint / opacity / blur
     /// toggle with it.
     fn color(&self) -> [f32; 4] {
-        color::param_plate_fill()
+        crate::scene::param_plate_fill()
     }
 
     /// The shared plate corner radius (rounded on all four corners when non-zero),
