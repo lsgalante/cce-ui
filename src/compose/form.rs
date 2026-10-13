@@ -17,11 +17,18 @@ use crate::scene::arena::{Arena, NodeId};
 use crate::scene::layout::{arrange, measure, CrossAlign, LayoutBox, Length, Rect, Size, Style};
 use crate::widget::{UiContext, WidgetHost, WidgetHostExt};
 
-use super::render_widget;
-use crate::scene::paint::RenderTarget;
+use super::{place, rgb};
+use crate::scene::paint::PaintCtx;
+use crate::widget::painter::paint_root_into;
 
-/// What a piece paints once it is placed: the target, its rect, the widget context.
+/// What a piece paints once it is placed: the page it paints on, its rect, the widget context.
 pub type Draw<'w, P> = Box<dyn FnOnce(&mut P, Rect, &mut UiContext) + 'w>;
+
+/// Place `w` in the block `r` and paint it where it was placed.
+fn place_and_paint<T: WidgetHost + 'static>(pc: &mut PaintCtx, w: &mut T, r: Rect, ctx: &mut UiContext) {
+    place(w, r.x, r.y, r.width, r.height, ctx);
+    paint_root_into(ctx, w, pc);
+}
 
 /// The tree a page declares a section's contents into. See the module docs.
 pub struct Form<'w, P> {
@@ -39,7 +46,7 @@ pub struct Form<'w, P> {
     pieces: Vec<(NodeId, Draw<'w, P>)>,
 }
 
-impl<'w, P: RenderTarget + 'w> Form<'w, P> {
+impl<'w, P: AsMut<PaintCtx> + 'w> Form<'w, P> {
     /// A form across a content box at `(x, y)`, `width` wide; widgets light `row_span`.
     pub fn new(x: f32, y: f32, width: f32, row_span: (f32, f32)) -> Self {
         let mut arena = Arena::new();
@@ -101,7 +108,7 @@ pub struct Group<'f, 'w, P> {
     axis_row: bool,
 }
 
-impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
+impl<'f, 'w, P: AsMut<PaintCtx> + 'w> Group<'f, 'w, P> {
     /// The leaf style for a piece of this group: across a column it stretches to the width;
     /// along a row it takes its own width and grows only when asked.
     fn leaf_style(&self, grow: bool) -> Style {
@@ -123,7 +130,7 @@ impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
         let draw: Draw<'w, P> = Box::new(move |pc, r, ctx| {
             let (x, width) = span.unwrap_or((r.x, r.width));
             w.set_row_rect(x, width);
-            render_widget(pc, w, r.x, r.y, r.width, r.height, ctx);
+            place_and_paint(pc.as_mut(), w, r, ctx);
         });
         self.form.add(self.node, style, Size::new(0.0, h), Some(draw));
         self
@@ -140,7 +147,7 @@ impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
             ctx.lend_h(h, |w, ctx| {
                 let (x, width) = span.unwrap_or((r.x, r.width));
                 w.set_row_rect(x, width);
-                render_widget(pc, w, r.x, r.y, r.width, r.height, ctx);
+                place_and_paint(pc.as_mut(), w, r, ctx);
             });
         });
         self.form.add(self.node, style, Size::new(0.0, h_px), Some(draw));
@@ -155,7 +162,7 @@ impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
         let draw: Draw<'w, P> = Box::new(move |pc, r, ctx| {
             let (x, width) = span.unwrap_or((r.x, r.width));
             w.set_row_rect(x, width);
-            render_widget(pc, w, r.x, r.y, r.width, r.height, ctx);
+            place_and_paint(pc.as_mut(), w, r, ctx);
         });
         self.form.add(self.node, Style::default(), Size::new(width, h), Some(draw));
         self
@@ -170,7 +177,7 @@ impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
             ctx.lend_h(h, |w, ctx| {
                 let (x, width) = span.unwrap_or((r.x, r.width));
                 w.set_row_rect(x, width);
-                render_widget(pc, w, r.x, r.y, r.width, r.height, ctx);
+                place_and_paint(pc.as_mut(), w, r, ctx);
             });
         });
         self.form.add(self.node, Style::default(), Size::new(width, h_px), Some(draw));
@@ -198,7 +205,7 @@ impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
         let text = text.into();
         let w = text_width(&text, size);
         self.draw(w, line_height(size), false, move |pc, r, _| {
-            pc.text_with_bounds(&text, r.x, r.y, size, color, Some([r.x, r.y - size, r.x + r.width, r.y + 2.0 * size]));
+            pc.as_mut().text_with(text, r.x, r.y, size, rgb(color), None, Some([r.x, r.y - size, r.x + r.width, r.y + 2.0 * size]));
         })
     }
 
@@ -207,7 +214,7 @@ impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
     pub fn text_fill(&mut self, text: impl Into<String>, size: f32, color: [f32; 4]) -> &mut Self {
         let text = text.into();
         self.draw(0.0, line_height(size), true, move |pc, r, _| {
-            pc.text_with_bounds(&text, r.x, r.y, size, color, Some([r.x, r.y - size, r.x + r.width, r.y + 2.0 * size]));
+            pc.as_mut().text_with(text, r.x, r.y, size, rgb(color), None, Some([r.x, r.y - size, r.x + r.width, r.y + 2.0 * size]));
         })
     }
 
@@ -216,16 +223,16 @@ impl<'f, 'w, P: RenderTarget + 'w> Group<'f, 'w, P> {
         let w = lines.iter().map(|l| text_width(l, size)).fold(0.0, f32::max);
         let h = line_height(size) * lines.len() as f32;
         self.draw(w, h, false, move |pc, r, _| {
-            for (i, line) in lines.iter().enumerate() {
+            for (i, line) in lines.into_iter().enumerate() {
                 let y = r.y + i as f32 * line_height(size);
-                pc.text_with_bounds(line, r.x, y, size, color, Some([r.x, y - size, r.x + r.width, y + 2.0 * size]));
+                pc.as_mut().text_with(line, r.x, y, size, rgb(color), None, Some([r.x, y - size, r.x + r.width, y + 2.0 * size]));
             }
         })
     }
 
     /// A one-pixel rule across the group, parting its zones.
     pub fn rule(&mut self, color: [f32; 4]) -> &mut Self {
-        self.draw(0.0, 1.0, false, move |pc, r, _| pc.rect(color, r.x, r.y, r.width, 1.0))
+        self.draw(0.0, 1.0, false, move |pc, r, _| pc.as_mut().quad(Rect { height: 1.0, ..r }, color))
     }
 
     /// Empty room of the given extent (along a row, a width; down a column, a height),
@@ -333,25 +340,10 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    /// A target that keeps the bounds every text was given.
-    #[derive(Default)]
-    struct Texts {
-        bounds: Vec<(String, Option<[f32; 4]>)>,
-    }
-    impl RenderTarget for Texts {
-        fn rect(&mut self, _: [f32; 4], _: f32, _: f32, _: f32, _: f32) {}
-        fn text(&mut self, content: &str, _: f32, _: f32, _: f32, _: [f32; 4]) {
-            self.bounds.push((content.to_string(), None));
-        }
-        fn text_with_bounds(&mut self, content: &str, _: f32, _: f32, _: f32, _: [f32; 4], bounds: Option<[f32; 4]>) {
-            self.bounds.push((content.to_string(), bounds));
-        }
-    }
-
     type Seen = Rc<RefCell<Vec<Rect>>>;
 
     /// A piece of the given size that records where it was put.
-    fn piece<'w>(g: &mut Group<'_, 'w, Texts>, seen: &Seen, w: f32, h: f32, grow: bool) {
+    fn piece<'w>(g: &mut Group<'_, 'w, PaintCtx>, seen: &Seen, w: f32, h: f32, grow: bool) {
         let seen = seen.clone();
         g.draw(w, h, grow, move |_, r, _| seen.borrow_mut().push(r));
     }
@@ -362,13 +354,13 @@ mod tests {
     fn a_form_stacks_its_pieces_a_control_gap_apart_across_the_box() {
         let gap = crate::layout::control_gap();
         let seen: Seen = Rc::default();
-        let mut form: Form<'_, Texts> = Form::new(10.0, 20.0, 300.0, (0.0, 320.0));
+        let mut form: Form<'_, PaintCtx> = Form::new(10.0, 20.0, 300.0, (0.0, 320.0));
         {
             let mut col = form.column();
             piece(&mut col, &seen, 0.0, 30.0, false);
             piece(&mut col, &seen, 0.0, 12.0, false);
         }
-        let bottom = form.paint(&mut Texts::default(), &mut UiContext::new());
+        let bottom = form.paint(&mut PaintCtx::new(), &mut UiContext::new());
         let r = seen.borrow();
         assert_eq!((r[0].x, r[0].y, r[0].width, r[0].height), (10.0, 20.0, 300.0, 30.0));
         assert_eq!((r[1].x, r[1].y, r[1].width), (10.0, 20.0 + 30.0 + gap, 300.0));
@@ -381,12 +373,12 @@ mod tests {
     fn a_rows_growing_cells_share_its_slack() {
         let gap = crate::layout::control_gap();
         let seen: Seen = Rc::default();
-        let mut form: Form<'_, Texts> = Form::new(0.0, 0.0, 400.0, (0.0, 400.0));
+        let mut form: Form<'_, PaintCtx> = Form::new(0.0, 0.0, 400.0, (0.0, 400.0));
         form.column().row(|r| {
             piece(r, &seen, 50.0, 20.0, true);
             piece(r, &seen, 100.0, 20.0, true);
         });
-        form.paint(&mut Texts::default(), &mut UiContext::new());
+        form.paint(&mut PaintCtx::new(), &mut UiContext::new());
         let r = seen.borrow();
         let extra = (400.0 - gap - 150.0) / 2.0;
         assert!((r[0].width - (50.0 + extra)).abs() < 1e-3, "{r:?}");
@@ -399,7 +391,7 @@ mod tests {
     fn a_fill_piece_takes_the_rest_of_the_height() {
         let gap = crate::layout::control_gap();
         let seen: Seen = Rc::default();
-        let mut form: Form<'_, Texts> = Form::new(0.0, 0.0, 200.0, (0.0, 200.0));
+        let mut form: Form<'_, PaintCtx> = Form::new(0.0, 0.0, 200.0, (0.0, 200.0));
         form.fill_height(300.0);
         {
             let mut col = form.column();
@@ -407,7 +399,7 @@ mod tests {
             let s = seen.clone();
             col.fill(10.0, move |_, r, _| s.borrow_mut().push(r));
         }
-        let bottom = form.paint(&mut Texts::default(), &mut UiContext::new());
+        let bottom = form.paint(&mut PaintCtx::new(), &mut UiContext::new());
         let r = seen.borrow();
         assert!((r[1].height - (300.0 - 40.0 - gap)).abs() < 1e-3, "{r:?}");
         assert_eq!(bottom, 300.0);
@@ -432,7 +424,7 @@ mod tests {
     /// at its cell's.
     #[test]
     fn text_is_cut_at_the_edge_of_its_piece() {
-        let mut form: Form<'_, Texts> = Form::new(10.0, 0.0, 200.0, (0.0, 200.0));
+        let mut form: Form<'_, PaintCtx> = Form::new(10.0, 0.0, 200.0, (0.0, 200.0));
         {
             let mut col = form.column();
             col.text("a line far wider than the box it was put in", 12.0, [1.0; 4]);
@@ -441,11 +433,44 @@ mod tests {
                 r.text_fill("a value", 12.0, [1.0; 4]);
             });
         }
-        let mut out = Texts::default();
+        let mut out = PaintCtx::new();
         form.paint(&mut out, &mut UiContext::new());
-        for (text, bounds) in &out.bounds {
+        let texts: Vec<_> = out
+            .finish()
+            .items
+            .into_iter()
+            .filter_map(|i| match i.prim {
+                crate::scene::paint::Prim::Text { text, bounds, .. } => Some((text, bounds)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        for (text, bounds) in &texts {
             let right = bounds.expect("bounded")[2];
             assert!((right - 210.0).abs() < 1e-3, "{text}: {bounds:?}");
         }
+    }
+
+    /// A widget piece places the widget in its block and paints it there: the prims a host
+    /// would get placing it (`place`) and walking it (`paint_root_into`) itself.
+    #[test]
+    fn a_widget_piece_paints_the_widget_where_it_was_placed() {
+        use crate::widget::Button;
+        let mut ctx = UiContext::new();
+        let in_form = ctx.insert(Button::new(0.0, 0.0, 0.0, 0.0).with_label("OK"));
+        let by_hand = ctx.insert(Button::new(0.0, 0.0, 0.0, 0.0).with_label("OK"));
+        let mut form: Form<'_, PaintCtx> = Form::new(10.0, 20.0, 200.0, (0.0, 220.0));
+        form.column().widget_h(&ctx, in_form, 28.0);
+        let mut pc = PaintCtx::new();
+        form.paint(&mut pc, &mut ctx);
+        let placed = ctx[in_form].rect();
+        assert_eq!((placed.0, placed.1, placed.2), (10.0, 20.0, 200.0));
+
+        crate::compose::place_h(by_hand, placed.0, placed.1, placed.2, placed.3, &mut ctx);
+        let mut expected = PaintCtx::new();
+        paint_root_into(&ctx, &ctx[by_hand], &mut expected);
+        let (got, expected) = (pc.finish(), expected.finish());
+        assert!(got.items.iter().any(|i| matches!(i.prim, crate::scene::paint::Prim::Text { .. })), "{got:?}");
+        assert_eq!(got, expected);
     }
 }

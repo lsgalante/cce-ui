@@ -119,6 +119,14 @@ impl Default for PaintCtx {
     }
 }
 
+/// A `PaintCtx` is the context a page composes onto (`compose::Form`, `compose::SectionContext`
+/// take any `P: AsMut<PaintCtx>`): a host with nothing else to carry passes its frame's own.
+impl AsMut<PaintCtx> for PaintCtx {
+    fn as_mut(&mut self) -> &mut PaintCtx {
+        self
+    }
+}
+
 impl PaintCtx {
     pub fn new() -> Self {
         PaintCtx {
@@ -129,6 +137,17 @@ impl PaintCtx {
             offset_stack: Vec::new(),
             offset: (0.0, 0.0),
         }
+    }
+
+    /// How many items have been emitted so far — where the next one lands, for a host that
+    /// splices another walk's items in at a point of this one's.
+    pub fn len(&self) -> usize {
+        self.list.items.len()
+    }
+
+    /// Whether nothing has been emitted yet.
+    pub fn is_empty(&self) -> bool {
+        self.list.items.is_empty()
     }
 
     /// The scissor rect primitives are currently recorded under.

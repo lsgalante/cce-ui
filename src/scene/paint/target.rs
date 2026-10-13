@@ -1,5 +1,5 @@
 //! The flat-host target: [`RenderTarget`], what a host that does not build a display list
-//! paints into, and the carve and section-frame types a widget hands it. `PaintCtx`
+//! paints into, and the carve types a widget hands it. `PaintCtx`
 //! implements it (`render_target.rs`), so a widget's flat-path drawing lands as real prims.
 //! The walk that replays a widget onto one is `compose::render_widget`. Legacy: new code
 //! paints through `PaintCtx` directly.
@@ -106,33 +106,6 @@ pub trait RenderTarget {
     /// can't carve has nothing truthful to draw, and a solid box here would
     /// paint every text field a flat slab it never had.
     fn relief_carve(&mut self, _carve: &ReliefCarve) {}
-    /// Whether this host renders sections as sunken wells (the designer idiom).
-    /// `SectionContext` then lays the title out left-aligned over its tab box
-    /// instead of centered on the top border.
-    fn section_relief_style(&self) -> bool {
-        false
-    }
-    /// The section frame hatch: `SectionContext::finish` offers the frame here
-    /// before falling back to the legacy 1px outline. A relief-capable host
-    /// returns true and carves the section into its plate instead (the
-    /// designer sunken-well idiom); the tuple hosts keep the default.
-    fn section_relief(&mut self, _frame: &SectionFrame) -> bool {
-        false
-    }
-}
-
-/// A section frame offered to [`RenderTarget::section_relief`]: the content
-/// body box plus, under [`RenderTarget::section_relief_style`], the title tab
-/// box the label was laid out in — the tab sits flush on the body's top edge
-/// (the designer union-carve shape).
-pub struct SectionFrame {
-    pub x: f32,
-    pub y: f32,
-    pub w: f32,
-    pub h: f32,
-    pub tab: Option<(f32, f32, f32, f32)>,
-    pub focused: bool,
-    pub is_child: bool,
 }
 
 pub struct PopoverCollector {

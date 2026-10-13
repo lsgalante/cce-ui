@@ -14,7 +14,8 @@
 
 use crate::context::UiContext;
 use crate::layout::*;
-use crate::scene::paint::{RenderTarget, SectionFrame};
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
 
 fn estimate_label_width_helper(label: &str, font_size: f32, font_fam: &str) -> f32 {
     let fam_lower = font_fam.to_lowercase();
@@ -220,6 +221,16 @@ impl PageFlow {
 /// than keeping it in. Deliberately far larger than any section.
 const SECTION_CLIP_SLACK: f32 = 100_000.0;
 
+/// A section's content clip: its content box across, [`SECTION_CLIP_SLACK`] up and down, its
+/// sides snapped OUT to whole logical pixels. The scissor a clip becomes truncates its left
+/// edge and its width separately (`backend::tessellate`), so a fractional clip lost the last
+/// physical column of whatever runs the full width of the box — a control's right rim, a framed
+/// list's border. Whole logical pixels are whole physical ones at scale 1 and 2.
+fn section_clip(content_left: f32, content_width: f32, y: f32) -> Rect {
+    let (x0, x1) = (content_left.floor(), (content_left + content_width).ceil());
+    Rect { x: x0, y: y - SECTION_CLIP_SLACK, width: x1 - x0, height: 2.0 * SECTION_CLIP_SLACK }
+}
+
 /// A page's sections, placed by a [`PageFlow`] and drawn once each.
 pub struct PageLayoutBuilder<'a, P> {
     pub flow: &'a mut PageFlow,
@@ -232,7 +243,7 @@ pub struct PageLayoutBuilder<'a, P> {
     _phantom: std::marker::PhantomData<P>,
 }
 
-impl<'a, P: RenderTarget> PageLayoutBuilder<'a, P> {
+impl<'a, P: AsMut<PaintCtx>> PageLayoutBuilder<'a, P> {
     /// Lay `flow` over the page's content rect. `section_width` is a section's width when the
     /// flow has none to offer (it always does once laid over a page).
     pub fn new(flow: &'a mut PageFlow, cx: f32, cy: f32, cw: f32, ch: f32, section_width: f32) -> Self {
@@ -263,10 +274,10 @@ impl<'a, P: RenderTarget> PageLayoutBuilder<'a, P> {
     {
         let slot = self.flow.place(width);
         let mut sec = SectionContext::new(final_pc, slot.x, slot.y, slot.w, label, focused, false);
-        let (clip_x, clip_w) = (sec.content_left(), sec.content_width());
-        sec.pc.push_clip_rect(clip_x, slot.y - SECTION_CLIP_SLACK, clip_w, 2.0 * SECTION_CLIP_SLACK);
+        let clip = section_clip(sec.content_left(), sec.content_width(), slot.y);
+        sec.pc.as_mut().push_clip(clip);
         render_fn(&mut sec);
-        sec.pc.pop_clip_rect();
+        sec.pc.as_mut().pop_clip();
         let bottom = sec.finish();
         self.flow.commit(slot, bottom - slot.y);
         self.idx += 1;
@@ -293,12 +304,13 @@ pub struct SectionContext<'a, P> {
     pub cw: f32,
     pub label_width: f32,
     pub label_x: f32,
-    /// Whether the host renders sections as sunken wells (`section_relief_style`).
+    /// Whether sections are sunken wells: the DE's relief styling
+    /// (`layout::control_relief`). Off, a section is the legacy 1px outline.
     pub relief_style: bool,
-    /// The title tab box (x, y, w, h) when the host's relief styling laid the
-    /// label out left-aligned — `finish` offers it with the section carve.
-    /// None under relief styling means a label-less section: the well carves
-    /// tabless, flush with the allocation top.
+    /// The title tab box (x, y, w, h) when relief styling laid the label out
+    /// left-aligned — `finish` carves it with the well. None under relief
+    /// styling means a label-less section: the well carves tabless, flush with
+    /// the allocation top.
     pub relief_tab: Option<(f32, f32, f32, f32)>,
     pub focused: bool,
     pub is_child: bool,
@@ -306,7 +318,7 @@ pub struct SectionContext<'a, P> {
     pub content_start_y: f32,
 }
 
-impl<'a, P: RenderTarget> SectionContext<'a, P> {
+impl<'a, P: AsMut<PaintCtx>> SectionContext<'a, P> {
     pub const DEFAULT_MARGIN_X: f32 = 12.0;
 
     fn estimate_label_width(label: &str, font_size: f32, font_fam: &str) -> f32 {
@@ -327,7 +339,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let font_size = font_size_opt.unwrap_or(if is_child { 12.0 } else { 14.0 });
         let font_color = if is_child { [0.53, 0.53, 0.60, 1.0] } else { [0.83, 0.83, 0.83, 1.0] };
         let label_width = Self::estimate_label_width(label, font_size, &font_fam);
-        let relief_style = pc.section_relief_style();
+        let relief_style = control_relief();
         let label_x = if is_child {
             let base_x = match nested_section_label_alignment() {
                 0 => left + 12.0,
@@ -347,7 +359,9 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         // page's gaps and margins are the visual gaps) — the tab tops the
         // allocation and the label centers inside it.
         let label_y = if relief_style { top + 4.0 } else { top };
-        pc.text_with_font(label, label_x, label_y, font_size, font_color, &font_fam);
+        if !label.is_empty() {
+            pc.as_mut().text_with(label, label_x, label_y, font_size, super::rgb(font_color), Some(font_fam.clone()), None);
+        }
 
         // The tab wraps the label, flush on the well's top-left corner; clamped
         // so off-default child alignments can't push it outside the well.
@@ -472,47 +486,61 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let extra_bottom = if self.relief_style { self.content_margin() } else { pad + 12.0 };
         let bottom = y + h + extra_bottom;
 
-        if self.relief_style {
+        // A focused section keeps the outline under relief styling too: it is
+        // the section walk's feedback (the host's ctrl-nav).
+        if self.relief_style && !self.focused {
             // Sunken style: the well spans the full allocated rect — body top
             // edge at the tab's bottom (the tab is flush ON the body, the
             // designer union shape; label-less sections carve tabless from the
             // allocation top), walls on the allocation's edges, and no
-            // trailing slack so the layout gap IS the visual gap.
+            // trailing slack so the layout gap IS the visual gap. Carved after
+            // the content, so its walls shade the fills they cross; sections
+            // never overlap, so that is all it is drawn over. Radius 20, as
+            // deep as the bevel, never more than a fifth of the well.
             let body_y = self.relief_tab.map(|t| t.1 + t.3).unwrap_or(self.top);
-            let frame = SectionFrame {
-                x: self.left,
-                y: body_y,
-                w: self.cw,
-                h: bottom - body_y,
-                tab: self.relief_tab,
-                focused: self.focused,
-                is_child: self.is_child,
-            };
-            if self.pc.section_relief(&frame) {
-                return self.content_y + extra_bottom;
+            let body = Rect { x: self.left, y: body_y, width: self.cw, height: bottom - body_y };
+            let tab = self.relief_tab.map(|(x, y, width, height)| Rect { x, y, width, height });
+            let depth = bevel_width().min(body.height * 0.2);
+            let pc = self.pc.as_mut();
+            // A tabless well shades OVER what it holds, whatever that is. Its
+            // one full ring is a carve the tessellator makes a CSG feature of
+            // the window plate when no flat geometry was drawn since that
+            // plate, and the feature shades differently from the overlay
+            // (`backend::tessellate`, `CCE_PLATE_DEBUG`) — while what a section
+            // holds changes from frame to frame: a list row's hover wash
+            // switched the well between the two looks as the pointer crossed
+            // the row. An empty, clear quad is flat geometry that draws
+            // nothing; after it, the well is always the overlay. (A tabbed
+            // well is cut into partial rings, which never group.)
+            if tab.is_none() {
+                pc.quad(Rect { x: body.x, y: body.y, width: 0.0, height: 0.0 }, [0.0; 4]);
             }
+            pc.section_well(body, tab, (20.0, 20.0, 20.0, 20.0), depth);
+            return self.content_y + extra_bottom;
         }
 
         let left_edge = x;
         let right_edge = x + w;
+        let pc = self.pc.as_mut();
+        let mut line = |x: f32, y: f32, width: f32, height: f32| pc.quad(Rect { x, y, width, height }, border);
         if self.label_width > 0.0 {
             let label_x = self.label_x;
             let gap_margin = 6.0;
             let gap_start = label_x - gap_margin;
             let gap_end = label_x + self.label_width + gap_margin;
             if gap_start > left_edge {
-                self.pc.rect(border, left_edge, y, gap_start - left_edge, 1.0);
+                line(left_edge, y, gap_start - left_edge, 1.0);
             }
             if right_edge > gap_end {
-                self.pc.rect(border, gap_end, y, right_edge - gap_end, 1.0);
+                line(gap_end, y, right_edge - gap_end, 1.0);
             }
         } else {
-            self.pc.rect(border, left_edge, y, w, 1.0);
+            line(left_edge, y, w, 1.0);
         }
 
-        self.pc.rect(border, x, y + h + extra_bottom, w, 1.0);
-        self.pc.rect(border, x, y, 1.0, h + extra_bottom);
-        self.pc.rect(border, x + w - 1.0, y, 1.0, h + extra_bottom);
+        line(x, y + h + extra_bottom, w, 1.0);
+        line(x, y, 1.0, h + extra_bottom);
+        line(x + w - 1.0, y, 1.0, h + extra_bottom);
         self.content_y + extra_bottom + 8.0
     }
 }
@@ -520,7 +548,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::paint::PopoverCollector;
+    use crate::scene::paint::Prim;
 
     /// Where a section goes depends on the sections before it and never on its own height:
     /// one column wide it takes the shortest column, as wide as the page it goes below
@@ -572,7 +600,7 @@ mod tests {
     #[test]
     fn each_section_is_drawn_once() {
         let mut flow = PageFlow::new();
-        let mut pc = PopoverCollector::new();
+        let mut pc = PaintCtx::new();
         let mut builder = PageLayoutBuilder::new(&mut flow, 0.0, 0.0, 600.0, 400.0, 300.0).with_section_count(1);
         let mut tops = Vec::new();
         for _ in 0..2 {
@@ -585,5 +613,56 @@ mod tests {
         }
         assert_eq!(tops.len(), 2, "one call per section");
         assert!(tops[1] > tops[0] + 40.0, "{tops:?}");
+    }
+
+    /// One section on its own, titled or not, `focused` or not, painted: what its finish carved.
+    fn one_section(label: &str, focused: bool) -> Vec<Prim> {
+        let mut flow = PageFlow::new();
+        let mut pc = PaintCtx::new();
+        let mut builder = PageLayoutBuilder::new(&mut flow, 0.0, 0.0, 600.0, 400.0, 300.0).with_section_count(1);
+        builder.add_section(&mut pc, label, focused, |sec| {
+            let mut form = sec.form();
+            form.column().text("content", 12.0, [1.0; 4]);
+            sec.place(form, &mut UiContext::new());
+        });
+        pc.finish().items.into_iter().map(|i| i.prim).collect()
+    }
+
+    /// Under relief styling a section is a well its `finish` carves after the content (the
+    /// title and the content first, then the walls, always shaded as an overlay); a focused
+    /// one keeps the outline, the section walk's feedback, and carves nothing.
+    #[test]
+    fn finish_carves_the_well_after_the_content() {
+        assert!(control_relief(), "the default style carves wells");
+        let prims = one_section("Section", false);
+        let first_wall = prims.iter().position(|p| matches!(p, Prim::Recess { .. })).expect("a well");
+        let texts: Vec<usize> =
+            prims.iter().enumerate().filter(|(_, p)| matches!(p, Prim::Text { .. })).map(|(i, _)| i).collect();
+        assert_eq!(texts.len(), 2, "the title and the content: {prims:?}");
+        assert!(texts.iter().all(|&i| i < first_wall), "{prims:?}");
+        assert!(!prims.iter().any(|p| matches!(p, Prim::Quad { .. })), "no outline: {prims:?}");
+
+        // A tabless well's single ring: right before it, a quad that draws nothing (see
+        // `finish`), so it is always the overlay.
+        let tabless = one_section("", false);
+        let ring = tabless.iter().position(|p| matches!(p, Prim::Recess { edges: (true, true, true, true), .. })).expect("a ring");
+        assert!(
+            matches!(tabless[ring - 1], Prim::Quad { rect, color } if rect.width == 0.0 && rect.height == 0.0 && color[3] == 0.0),
+            "{tabless:?}"
+        );
+
+        let focused = one_section("Section", true);
+        assert!(!focused.iter().any(|p| matches!(p, Prim::Recess { .. })), "{focused:?}");
+        assert!(focused.iter().filter(|p| matches!(p, Prim::Quad { .. })).count() >= 4, "{focused:?}");
+    }
+
+    /// The content clip is the content box snapped out to whole pixels: a fractional box
+    /// would lose its last physical column to the scissor's truncation.
+    #[test]
+    fn the_content_clip_is_snapped_out_to_whole_pixels() {
+        let c = section_clip(10.25, 100.5, 0.0);
+        assert_eq!((c.x, c.x + c.width), (10.0, 111.0));
+        let c = section_clip(10.0, 100.0, 0.0);
+        assert_eq!((c.x, c.x + c.width), (10.0, 110.0), "a whole box stays as it is");
     }
 }

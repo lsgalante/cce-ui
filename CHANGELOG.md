@@ -10,6 +10,31 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-13
 
+- **Sections and forms paint onto a `PaintCtx`, not a flat `RenderTarget`.**
+  `compose::{Form, FormGroup, SectionContext, PageLayoutBuilder}` take any
+  `P: AsMut<PaintCtx>` (a `PaintCtx` is `AsMut` of itself; a host may wrap one) instead of
+  `P: RenderTarget`. A widget piece is placed (`compose::place`) and painted with
+  `paint_root_into`, so the page gets the prims the widget paints — a spinbox's seams, a
+  field's one outline, a trough's per-corner radii, the widget's own clips — where the flat-host
+  replay (`render_widget`) handed it an approximation. A group's text, lines and rule and a
+  section's title are `PaintCtx` calls, colours truncated to bytes as before. Under relief
+  styling a section's `finish` carves its own well after its content (`PaintCtx::section_well`,
+  radius 20, as deep as the bevel and at most a fifth of the well: what the one host drew from
+  the hook), so `RenderTarget::section_relief_style` / `section_relief` and `SectionFrame` are
+  gone; a focused section keeps the 1px outline, as that host chose. A tabless well follows an
+  empty clear quad so it always shades as an overlay: as the first carve after the window plate
+  it became a CSG feature of the plate instead, and switched look as a list row's hover wash
+  above it came and went. The content clip `PageLayoutBuilder` pushes is a `push_clip` snapped
+  out to whole logical pixels, because the scissor truncates a fractional left edge and width
+  separately and shaved the last physical column off a control's right rim running the full
+  content width. `PaintCtx::len` / `is_empty` are new, for a host that splices another walk's
+  items into its list at a recorded point. cce-system-interface, the one user, moved with it
+  (its Stage B; the visible differences are listed in its commit). Checked:
+  `a_widget_piece_paints_the_widget_where_it_was_placed`, `finish_carves_the_well_after_the_content`,
+  `the_content_clip_is_snapped_out_to_whole_pixels`, `text_is_cut_at_the_edge_of_its_piece` (now
+  on a display list), lib tests with every feature (709), every integration test, clippy on the
+  crate (`--no-deps`: cce-core's own `single_match` in `desktop_entry.rs` stops the dependency
+  pass), and the wasm build with and without features.
 - **A line of text inside an app's own popover keeps its text: `LineLook::bounds`.** The
   engine clamps display-list text away from every open popover rect it runs under, and knows a
   popover's own text by bounds equal to its rect. It read those bounds after merging in the

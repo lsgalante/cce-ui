@@ -487,13 +487,13 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry).
-- `compose/` — pages composed from widgets on a flat host: `render.rs` (`place` / `place_h`,
-  `render_widget_h`, `render_popovers`, the walk onto a `scene::paint::RenderTarget`),
-  `section.rs` (settings-page sections: `PageFlow`, `SectionContext`), `form.rs` (`Form`,
-  `lay_row`). `place` is `render_widget`'s layout half — the label strip, `layout` at exactly
-  the block, `prepare_text`, the open popover's registration — and `render_widget` calls it, so
-  a host leaving the bridge drops the target argument and paints with `paint_root_into`. The
-  target itself, `RenderTarget`, and the carve types it takes are `scene::paint`'s (`target.rs`).
+- `compose/` — pages composed from widgets: `render.rs` (`place` / `place_h`, and the legacy
+  `render_widget_h` / `render_popovers` walk onto a flat `scene::paint::RenderTarget`),
+  `section.rs` (settings-page sections: `PageFlow`, `SectionContext`, each carving its own
+  well), `form.rs` (`Form`, `lay_row`). Sections and forms paint onto any `P: AsMut<PaintCtx>`:
+  a widget piece is `place`d — the label strip, `layout` at exactly the block, `prepare_text`,
+  the open popover's registration — and painted with `paint_root_into`. The flat target,
+  `RenderTarget`, and the carve types it takes are `scene::paint`'s (`target.rs`).
 - `color/` — the palette constants and the style slots (`mod.rs`, with the table), the getters
   and setters by topic (`surfaces.rs`, `controls.rs`, `lists.rs`, `graph.rs`), `load.rs` (config →
   colours, `retired_surface_keys`), `math.rs` (sRGB/linear, OKLab), `materials.rs` (named

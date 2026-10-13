@@ -371,7 +371,12 @@ the host implements it. `a_widget_glyph_reaches_a_flat_host` and
   a section's contents are a `Form` on `scene::layout` (widgets, text, rows, `block`s, `rule`s,
   `space`, `draw`, `fill`), placed by `SectionContext::place` in declaration order with the
   ladder's spacing. `lay_row(rect, &[Cell])` lays one list row's cells `list_gap()` apart.
-  cce-system-interface is the user.
+  They paint onto any `P: AsMut<PaintCtx>` (a `PaintCtx`, or a host's page buffer around one):
+  a widget piece is `place`d in its block and painted there with `paint_root_into`, and a
+  section's `finish` carves its own well under relief styling (`PaintCtx::section_well`, radius
+  20, after the content; a focused section keeps the 1px outline, the section walk's
+  feedback). A section's content clip is its content box snapped out to whole logical pixels,
+  since the scissor truncates a fractional edge. cce-system-interface is the user.
 - **Laying out a set of widgets** is the box model, `scene::layout` (measure → arrange), or a
   `Form` on it (above). A widget's block is its content plus its label strip
   (`WidgetHost::label_strip`).
