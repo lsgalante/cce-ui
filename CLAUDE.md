@@ -12,7 +12,7 @@ coherent. The depth lives in topic docs, read when you work in that area:
 |---|---|
 | `docs/runtime.md` | the run loop and shells: pacing, damage, reconnects and `renderer_init`, lost surfaces, layer surfaces, input methods and text input, touch, scrolling semantics |
 | `docs/surfaces.md` | the surface model in full: plates, wells, fields, carves, materials and frost, the `style.surface` config and its retired keys, relief geometry, units and the height field |
-| `docs/widgets.md` | per-widget behaviour: the context menu and page turns, params pane, slider, float3 trackball, dropdown, checkbox/toggle, spreadsheet, scrollbars, graph, Markdown and `DocEditor`, glyphs |
+| `docs/widgets.md` | per-widget behaviour: widget events (`take_events`), the context menu and page turns, params pane, slider, float3 trackball, dropdown, checkbox/toggle, spreadsheet, scrollbars, graph, Markdown and `DocEditor`, glyphs |
 | `docs/platforms.md` | the browser shell and WebGPU renderer, the macOS shell, compute jobs, 3D scenes (`Stage3D`, lit meshes, instancing), the path tracer, and the probes that hold renderers to each other |
 | `CHANGELOG.md` | what changed and when, with the reasoning and measurements. **History goes there, not here.** |
 | `docs/rfc-*.md` | design records; see "RFCs" below for which are live |
@@ -225,7 +225,7 @@ Rules of the contract:
 
 ## The widget model
 
-**Traits.** `WidgetHost` (`src/widget/host.rs`, 31 methods) is what the machinery — routing, paint
+**Traits.** `WidgetHost` (`src/widget/host.rs`, 32 methods) is what the machinery — routing, paint
 walk, render loop — sees. Its one production implementor is `Adapted<W>`. A widget's behaviour
 lives on the narrow traits in `src/widget/model/`: `Layout`, `Paint`, `Input`. The host hands
 those out (`layout_model()`, `paint_model()`, `input_model[_mut]()`), and `WidgetHostExt`
@@ -233,8 +233,26 @@ those out (`layout_model()`, `paint_model()`, `input_model[_mut]()`), and `Widge
 `corner_radii`, `painted_prims`, `preferred_height`, `z_index`, … — so import
 `cce_ui::widget::WidgetHostExt`. A method stays on `WidgetHost` only when the host adds something
 the model cannot (visibility gating, the content rect, child recursion, registry state). Events
-route through `handle_event`; apps drain widget state through `Adapted<W>`'s inherent methods
-(`take_click`, `take_change`, …).
+route through `handle_event`.
+
+**What widgets tell the app** comes out of one sweep: `UiContext::take_events()` returns
+`(WidgetId, WidgetEvent)` pairs — `Clicked`, `Changed` — and an app matches them against its
+handles' ids (`h.id()`). A widget raises one with `EventCtx::emit`; the adapter also reports
+every widget's `Input::take_click` / `take_change` flags as `Clicked` / `Changed`, so built-in
+widgets need no emit. Rules (`docs/widgets.md` has the detail):
+
+- **Sweep after every dispatch path** (pointer, key, tick), or a keyboard or assistive-tool
+  activation waits for the next pointer event.
+- **One drain per widget.** The sweep and the per-handle polls (`ctx[h].take_click()`,
+  `take_change()`, still supported) drain the same flags; whichever runs first has the event.
+  Use one or the other for a given widget.
+- `set_value_string` and `TextBox::set_value` raise the change flag as a hand edit does (the
+  typed setters, `Slider::set_value` and kin, do not); drain the echo right after setting if
+  the next sweep must not report it.
+- A widget with a drain of its own named `take_click` / `take_change` forwards it from its
+  `Input` impl, or neither the poll nor the sweep sees it. A composite reads an embedded
+  child's flag in the call that raised it, or compares values: the sweep reaches embedded
+  children too.
 
 **The registry owns its widgets** (`UiContext`, `src/context/`; tree in `widget::tree`):
 

@@ -69,8 +69,14 @@ impl Input for TreeList {
                 changed = true;
             }
         }
-        if self.search_box.get_mut(ui).take_change() {
-            self.query = self.search_box.get(ui).text.clone();
+        // The query follows the search box's text, compared rather than read off its change
+        // flag: the app's `UiContext::take_events` sweeps this embedded child too, and may
+        // drain the flag before this tick. (The drain here still runs: it brings the
+        // update-on-type box's text up to its buffer.)
+        let search = self.search_box.get_mut(ui);
+        search.take_change();
+        if search.text != self.query {
+            self.query = search.text.clone();
             self.rebuild_tree();
             changed = true;
         }

@@ -221,6 +221,12 @@ pub trait WidgetHost {
     fn visible(&self) -> bool { true }
     fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool { false }
 
+    /// Move what the widget has to tell the app into `out`, oldest first, leaving none
+    /// behind: what `UiContext::take_events` sweeps each widget with. The adapter reports
+    /// what the widget emitted (`EventCtx::emit`), then its click and change flags as
+    /// `WidgetEvent::Clicked` / `Changed`. Default: nothing (a host with no widget model).
+    fn drain_events(&mut self, _out: &mut Vec<WidgetEvent>) {}
+
     /// Put the widget's embedded children (`widget::Embedded`) into `ctx`: what
     /// `UiContext::insert` calls once the widget is in. The adapter forwards to
     /// `Layout::register_embedded_children`, which also runs on every layout and tick.

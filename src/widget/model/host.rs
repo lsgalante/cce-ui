@@ -273,19 +273,22 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         let mut changed = Input::tick(&mut self.inner, dt, rect);
         let mut ectx = EventCtx::new(rect, host_id, Some(ctx));
         changed |= Input::tick_ctx(&mut self.inner, dt, &mut ectx);
-        ectx.open_requested_menu(&*self);
+        let emitted = ectx.finish(&*self);
+        self.events.extend(emitted);
         changed
     }
     /// Focus set/cleared directly (hosts call `w.focus()`/`w.unfocus()`): keep the base flag
     /// (unless the widget opts out — [`Input::tracks_base_focus`], TextBox's legacy `focus`
     /// never set it) and tell the widget via the same `FocusIn`/`FocusOut` events the router
-    /// would send.
+    /// would send. What it emits there waits for the sweep like a routed event's.
     fn focus(&mut self) {
         if Input::tracks_base_focus(&self.inner) {
             self.base.focused = true;
         }
         let mut ectx = EventCtx::new(self.content_rect(), self.base.id(), None);
         Input::on_event(&mut self.inner, &Event::FocusIn, &mut ectx);
+        let emitted = ectx.finish(&*self);
+        self.events.extend(emitted);
     }
     fn unfocus(&mut self) {
         if Input::tracks_base_focus(&self.inner) {
@@ -293,6 +296,23 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         }
         let mut ectx = EventCtx::new(self.content_rect(), self.base.id(), None);
         Input::on_event(&mut self.inner, &Event::FocusOut, &mut ectx);
+        let emitted = ectx.finish(&*self);
+        self.events.extend(emitted);
+    }
+
+    /// What the widget has to tell the app, oldest first: what it emitted, then its one-shot
+    /// flags as `Clicked` and `Changed`, each drained as `take_click` / `take_change` would.
+    /// The change flag is read first: Dropdown and Toggle keep one flag behind both polls,
+    /// and theirs is a change.
+    fn drain_events(&mut self, out: &mut Vec<WidgetEvent>) {
+        out.append(&mut self.events);
+        let changed = Input::take_change(&mut self.inner);
+        if Input::take_click(&mut self.inner) {
+            out.push(WidgetEvent::Clicked);
+        }
+        if changed {
+            out.push(WidgetEvent::Changed);
+        }
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {

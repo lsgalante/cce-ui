@@ -136,7 +136,7 @@ impl Input for KeybindRecorder {
     }
 
     /// The inherent drain, forwarded: the trait's default answers `false`, and with it
-    /// `ctx[h].take_change()` never sees a recorded chord.
+    /// neither `ctx[h].take_change()` nor `UiContext::take_events` sees a recorded chord.
     fn take_change(&mut self) -> bool {
         self.take_change()
     }

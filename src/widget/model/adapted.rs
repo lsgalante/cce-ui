@@ -6,7 +6,7 @@ use super::*;
 impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// Wrap `inner` with a fresh [`Widget`] base.
     pub fn new(inner: W) -> Self {
-        Adapted { base: Widget::new(), visible: true, inner }
+        Adapted { base: Widget::new(), visible: true, events: Vec::new(), inner }
     }
 
     /// The wrapped widget.
@@ -68,10 +68,10 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         self.base.accessible_name = name.map(str::to_string);
     }
 
-    // --- The value/polling drains (off `WidgetHost` in the 6bd value shrink): apps read
-    // widget state through these concrete methods; each forwards to the narrow `Input`
-    // hook. The last dyn readers went concrete-slot instead (TI roster, cloud JsonControl,
-    // designer pane-focus sync).
+    // --- The value reads and the per-handle polls; each forwards to the narrow `Input`
+    // hook. Apps collect clicks and changes with `UiContext::take_events` (the sweep drains
+    // the same two flags, through `WidgetHost::drain_events`); `take_click` / `take_change`
+    // poll one widget's, and whichever drains a flag first has it.
 
     /// Drain the one-shot click flag (Button-class widgets).
     pub fn take_click(&mut self) -> bool {
@@ -167,7 +167,8 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     pub(super) fn offer(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
         let mut ectx = EventCtx::new(self.content_rect(), self.base.id(), Some(ctx));
         let consumed = Input::on_event(&mut self.inner, event, &mut ectx);
-        ectx.open_requested_menu(&*self);
+        let emitted = ectx.finish(&*self);
+        self.events.extend(emitted);
         consumed
     }
 

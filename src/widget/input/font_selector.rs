@@ -233,7 +233,7 @@ impl Input for FontSelector {
     }
 
     /// The inherent drain, forwarded: the trait's default answers `false`, and with it
-    /// `ctx[h].take_change()` never sees a picked family.
+    /// neither `ctx[h].take_change()` nor `UiContext::take_events` sees a picked family.
     fn take_change(&mut self) -> bool {
         self.take_change()
     }
@@ -334,13 +334,18 @@ impl Input for FontSelector {
 mod tests {
     use super::*;
 
-    /// A picked family reaches the host's `take_change`: the `Input` impl forwards the
-    /// inherent drain. (The pick itself arrives from the picker process, on `tick`.)
+    /// A picked family reaches the per-handle poll and the sweep: the `Input` impl forwards
+    /// the inherent drain. (The pick itself arrives from the picker process, on `tick`.)
     #[test]
-    fn a_picked_family_reaches_the_hosts_poll() {
+    fn a_picked_family_reaches_the_poll_and_the_sweep() {
         let mut fs = FontSelector::new("Sans".to_string());
         fs.inner_mut().just_changed = true;
         assert!(Adapted::take_change(&mut fs));
         assert!(!Adapted::take_change(&mut fs), "drained");
+
+        let mut ctx = crate::context::UiContext::new();
+        let h = ctx.insert(fs);
+        ctx[h].inner_mut().just_changed = true;
+        assert_eq!(ctx.take_events(), vec![(h.id(), crate::widget::WidgetEvent::Changed)]);
     }
 }

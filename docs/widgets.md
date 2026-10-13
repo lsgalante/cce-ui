@@ -3,6 +3,64 @@
 Per-widget behaviour that is not obvious from the code's signatures. Present tense; history in
 `CHANGELOG.md`. Surface details (fields, stances) are in `docs/surfaces.md`.
 
+## Widget events (`WidgetEvent`, `UiContext::take_events`)
+
+How a widget tells the app something happened to it. `widget::WidgetEvent` is the vocabulary:
+`Clicked` (pressed and released on it, Enter / Space on a focused plate, an assistive tool's
+click) and `Changed` (its value changed: typed, dragged, picked, toggled, set by an assistive
+tool). It is `#[non_exhaustive]`; the payloads the widgets' own drains carry (a `ButtonStrip`'s
+segment, a `TreeList`'s row, the `GraphController` drains) are not in it yet.
+
+- **Raising one.** A widget calls `EventCtx::emit(ev)` from any handler the adapter gives an
+  `EventCtx`: `on_event` (routed, or the `FocusIn` / `FocusOut` of a direct `focus()` /
+  `unfocus()`, which has no routing context) and `tick_ctx`. The adapter keeps what it emitted
+  on the widget (`Adapted`), in order, until a sweep. Built-in widgets emit nothing: the sweep
+  turns the one-shot flags behind `Input::take_click` / `take_change` into `Clicked` /
+  `Changed` (`WidgetHost::drain_events`), so every widget reports without one. A widget
+  reports a thing by emitting it or by its flag, never both, or it arrives twice.
+- **Collecting them.** `UiContext::take_events()` sweeps every widget the context holds,
+  embedded children under their own ids, in id order. A widget's events come as it raised
+  them: everything it emitted, then `Clicked` if its click flag was up, then `Changed` if its
+  change flag was. A widget with nothing to say contributes nothing; a window nobody touched
+  returns an empty list. The app matches ids against its handles:
+
+  ```rust
+  for (id, ev) in self.ui.take_events() {
+      match ev {
+          WidgetEvent::Clicked if id == self.save.id() => return Some(Message::Save),
+          WidgetEvent::Changed if id == self.volume.id() => self.set_volume(self.ui[self.volume].value()),
+          _ => {}
+      }
+  }
+  ```
+- **When.** After every dispatch path the app runs — `handle_mouse_input`, `handle_key_input`,
+  `tick` — or a keyboard activation or an assistive tool's change waits for the next pointer
+  event. A widget that is not in the context (a composite's by-value child) is not swept; its
+  composite drains it.
+- **One drain per widget.** The sweep drains the flags `take_click` / `take_change` read, so an
+  app uses either the sweep or the per-handle polls (`ctx[h].take_click()`, which stay) for a
+  given widget; whichever runs first has the event.
+- **Echoes of programmatic sets.** `set_value_string` raises the change flag on every widget
+  that takes a value (it is also how a context-menu Paste and a config binding set one), and so
+  does `TextBox::set_value`, so the next sweep reports `Changed`. The typed setters
+  (`Slider::set_value`, `Checkbox::set_checked`, `Toggle::set_toggled`, a Dropdown's
+  `selected`) raise nothing. An app that does not want the echo drains it (`take_change`)
+  right after setting.
+- **One flag, one event.** Dropdown and Toggle keep one flag behind both polls; the sweep reads
+  the change first and reports it as `Changed`. A Checkbox press raises both: `Clicked`, then
+  `Changed`.
+- **Composites and their embedded children.** The sweep reaches an embedded child, so a
+  composite reads its child's flag in the same call that raised it (a `Paginator`'s strip, a
+  `TreeList`'s add-key button), or compares the child's value with its own (the `TreeList`
+  query follows its search box's text). A flag left for a later tick may already be swept.
+- **Forward your drain.** A widget with an inherent `take_change` / `take_click` (TextBox,
+  Dropdown, FontSelector, KeybindRecorder) forwards it from its `Input` impl; without the
+  forward, `Adapted::take_change` and the sweep answer the trait's default, `false`.
+  `ButtonStrip::take_click` returns the segment (`Option<usize>`) and is not forwarded.
+
+`emitted_events_arrive_in_order_before_the_flags`, `a_commit_from_a_direct_unfocus_is_swept`
+and `an_embedded_childs_change_is_swept_and_its_composite_still_sees_it` are the tests.
+
 ## Context menu (`widget::context_menu`)
 
 One global menu per window that every app shows, paints into its display list and dispatches by

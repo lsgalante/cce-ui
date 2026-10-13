@@ -187,7 +187,7 @@ pub use self::side_swipe::{SideSwipe, SwipeDir};
 
 pub use self::scroll_motion::{Bounds, ScrollAxis, ScrollMotion, ScrollPhase, ScrollSettings, LINE_PX};
 
-pub use self::model::{Adapted, EventCtx, Input, Layout, Paint};
+pub use self::model::{Adapted, EventCtx, Input, Layout, Paint, WidgetEvent};
 
 pub use self::handle::Handle;
 

@@ -1,10 +1,47 @@
 //! Event propagation: an event dispatched into a widget tree by its root's id, the scroll-gesture
-//! bookkeeping every routed wheel passes through (a pause starts a new gesture), and finding the
-//! scrollable under the pointer.
+//! bookkeeping every routed wheel passes through (a pause starts a new gesture), finding the
+//! scrollable under the pointer, and the sweep that hands the app what its widgets reported
+//! (`take_events`).
 
 use super::*;
+use crate::widget::WidgetEvent;
 
 impl UiContext {
+    /// Everything the widgets have reported since the last sweep, each beside its widget's id:
+    /// the app's one place to hear of clicks and changes, in place of polling each handle.
+    /// Every widget the context holds is swept — embedded children too, under their own ids —
+    /// in id order (ids are drawn as widgets are made), and each widget's events come in the
+    /// order it raised them: what it [`emit`](crate::widget::EventCtx::emit)ted, then its click
+    /// and change flags as [`WidgetEvent::Clicked`] / [`WidgetEvent::Changed`]. A widget that
+    /// reported nothing contributes nothing; an idle window returns an empty list.
+    ///
+    /// - **One drain per widget.** The sweep drains the same one-shot flags `take_click` /
+    ///   `take_change` read, so for a given widget an app uses either this or the per-handle
+    ///   polls: whichever runs first has the event.
+    /// - **Sweep after every dispatch path** — pointer, key and tick, wherever the app hands
+    ///   the context an event or ticks it — or a keyboard activation (Enter / Space on a
+    ///   focused plate) or an assistive tool's change waits for the next pointer event.
+    /// - **Programmatic sets can report.** `set_value_string` (on every widget that takes a
+    ///   value) and `TextBox::set_value` raise the change flag as a hand edit does, so the
+    ///   next sweep reports `Changed`; the typed setters (`Slider::set_value`,
+    ///   `Checkbox::set_checked`, …) do not. An app that does not want the echo drains it
+    ///   (`take_change`) right after setting.
+    /// - Dropdown and Toggle keep one flag behind both polls; the sweep reports it as
+    ///   `Changed`.
+    pub fn take_events(&mut self) -> Vec<(WidgetId, WidgetEvent)> {
+        let mut ids = self.tree.registered_ids();
+        ids.sort_unstable();
+        let mut out = Vec::new();
+        let mut one = Vec::new();
+        for id in ids {
+            if let Some(w) = self.get_widget_mut(id) {
+                w.drain_events(&mut one);
+            }
+            out.extend(one.drain(..).map(|ev| (id, ev)));
+        }
+        out
+    }
+
     /// The scroll-gesture bookkeeping every wheel dispatch must pass
     /// through: a gap over 250ms since the last wheel starts a NEW gesture
     /// (`scroll_gesture_new`, and the initiator is cleared), a shorter gap

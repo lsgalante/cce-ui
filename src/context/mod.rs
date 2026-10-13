@@ -6,7 +6,7 @@
 //! |---|---|
 //! | `mod.rs` | the struct, the registry (insert, get, remove, lend), delivery, dirty state, ticks, the hierarchy, `ctx[h]` |
 //! | `spatial` | `SpatialGrid`: widget ids bucketed by cell, for hit tests |
-//! | `events` | dispatching an event into a tree, the scroll-gesture bookkeeping |
+//! | `events` | dispatching an event into a tree, the scroll-gesture bookkeeping, the widget-event sweep (`take_events`) |
 //! | `focus` | focus by id, modals, the Tab walk (`focus_step`, `focus_clusters`) |
 //! | `popovers` | popovers, coverage, the cursor, and the hit tests that ask them (`drag_allowed_at`, `is_widget_at`) |
 //! | `menu` | showing, routing and drawing the context menu |
@@ -20,6 +20,8 @@ mod spatial;
 mod focus_step_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod widget_event_tests;
 
 pub use spatial::SpatialGrid;
 

@@ -17,7 +17,7 @@
 //! | `mod.rs` | `Adapted`: the struct, `Drop`, `Default`, `Deref` to the widget |
 //! | `layout` | the [`Layout`] trait |
 //! | `paint` | the [`Paint`] trait |
-//! | `input` | the [`Input`] trait, [`FocusRole`], and [`EventCtx`] |
+//! | `input` | the [`Input`] trait, [`FocusRole`], [`EventCtx`], and [`WidgetEvent`] |
 //! | `adapted` | `Adapted`'s inherent API: construction, labels, values, direct event entry points |
 //! | `host` | `impl WidgetHost for Adapted` |
 
@@ -29,7 +29,7 @@ mod paint;
 #[cfg(test)]
 mod tests;
 
-pub use input::{EventCtx, FocusRole, Input};
+pub use input::{EventCtx, FocusRole, Input, WidgetEvent};
 pub use layout::Layout;
 pub use paint::Paint;
 
@@ -52,6 +52,10 @@ pub struct Adapted<W: Layout + Paint + Input + 'static> {
     /// flag. The adapter owns it once for all migrated widgets: hosts toggle panes through
     /// `WidgetHost::set_visible` (the designer), and the hit-test/render bridges gate on it.
     visible: bool,
+    /// What the widget emitted ([`EventCtx::emit`]) that the app has not swept yet
+    /// (`UiContext::take_events`), oldest first. Every call the adapter makes with an
+    /// `EventCtx` appends to it, routed or not.
+    events: Vec<WidgetEvent>,
     inner: W,
 }
 

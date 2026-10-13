@@ -1,14 +1,32 @@
 //! The input concern: [`Input`] (hit, events, focus role, values, drags, ticks), [`FocusRole`],
-//! and [`EventCtx`], what a widget handles an event with.
+//! [`EventCtx`], what a widget handles an event with, and [`WidgetEvent`], what it tells the app.
 
 use super::*;
 
+/// What a widget tells the app happened to it. The app collects them, each beside its
+/// widget's id, with [`UiContext::take_events`]. A widget raises one with [`EventCtx::emit`];
+/// the adapter also reports the one-shot flags behind [`Input::take_click`] and
+/// [`Input::take_change`] as `Clicked` and `Changed` when the context sweeps, so every widget
+/// reports through this channel without emitting anything. Non-exhaustive: the payloads the
+/// widgets' own drains carry (a strip's segment, a tree's row) join it as variants.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum WidgetEvent {
+    /// Pressed and released on it, or activated from the keyboard (Enter / Space on a focused
+    /// plate) or by an assistive tool: what [`Input::take_click`] reports.
+    Clicked,
+    /// Its value changed — typed, dragged, picked, toggled, or set by an assistive tool: what
+    /// [`Input::take_change`] reports. Some programmatic setters raise it too (see
+    /// [`UiContext::take_events`]).
+    Changed,
+}
+
 /// What an event handler may reach beyond its own state — the RFC §3.5 `EventCtx`, grown as
 /// migrated widgets need capabilities: the laid-out content rect, the widget's id (scroll-gesture
-/// gating keys on it), focus acquisition, and — transitionally — the raw [`UiContext`] for the
-/// legacy shared state some widgets consult (`scroll_gesture_new`, …). `ui` is `None` when the
-/// event was synthesized outside a routed path (the `FocusIn`/`FocusOut` from direct
-/// `focus()`/`unfocus()` calls).
+/// gating keys on it), focus acquisition, events for the app ([`emit`](EventCtx::emit)), and —
+/// transitionally — the raw [`UiContext`] for the legacy shared state some widgets consult
+/// (`scroll_gesture_new`, …). `ui` is `None` when the event was synthesized outside a routed
+/// path (the `FocusIn`/`FocusOut` from direct `focus()`/`unfocus()` calls).
 pub struct EventCtx<'a> {
     /// The widget's content rect (detached-label region excluded).
     pub rect: Rect,
@@ -20,19 +38,24 @@ pub struct EventCtx<'a> {
     /// Where [`open_context_menu`](EventCtx::open_context_menu) asked for the menu: the
     /// adapter opens it once the widget has handled the event, handing itself over.
     menu_at: Option<(f32, f32)>,
+    /// What the widget [`emit`](EventCtx::emit)ted during this call, oldest first: the
+    /// adapter keeps them on the widget ([`finish`](EventCtx::finish)) for the app's sweep.
+    emitted: Vec<WidgetEvent>,
 }
 
 impl<'a> EventCtx<'a> {
     pub(crate) fn new(rect: Rect, id: WidgetId, ui: Option<&'a mut UiContext>) -> Self {
-        EventCtx { rect, id, ui, menu_at: None }
+        EventCtx { rect, id, ui, menu_at: None, emitted: Vec::new() }
     }
 
-    /// Open the context menu a widget asked for while it handled the event, on `host` (the
-    /// widget's adapter, done handling it).
-    pub(crate) fn open_requested_menu(self, host: &dyn WidgetHost) {
+    /// Close out the call the adapter made with this context: open the context menu the
+    /// widget asked for, if any, on `host` (the widget's adapter, done handling the call),
+    /// and hand back what the widget emitted, in order, for the adapter to keep.
+    pub(crate) fn finish(self, host: &dyn WidgetHost) -> Vec<WidgetEvent> {
         if let (Some((px, py)), Some(ui)) = (self.menu_at, self.ui) {
             ui.handle_right_click(host, px, py);
         }
+        self.emitted
     }
 }
 
@@ -74,6 +97,16 @@ impl EventCtx<'_> {
         if self.ui.is_some() {
             self.menu_at = Some((px, py));
         }
+    }
+
+    /// Tell the app `event` happened to this widget. It waits on the widget, after anything
+    /// it emitted before, until the app sweeps the context ([`UiContext::take_events`]), which
+    /// reports it ahead of the widget's flag-derived `Clicked` / `Changed`. It works with or
+    /// without a routing context: a `FocusOut` from a direct `unfocus()` emits too. Report a
+    /// thing by emitting it or by the `take_click` / `take_change` flag, not both, or the
+    /// sweep reports it twice.
+    pub fn emit(&mut self, event: WidgetEvent) {
+        self.emitted.push(event);
     }
 }
 
@@ -151,17 +184,20 @@ pub trait Input {
         true
     }
 
-    // --- The legacy polling/value-binding surface (`take_click`, `take_change`,
-    // `get_value_string`/`set_value_string`, `value`) apps read widget state through. Kept on
-    // `Input` to avoid a fourth trait bound; replaced by typed messages when RFC §3.5's EventCtx
-    // lands. All default to the inert legacy defaults.
+    // --- The polling/value-binding surface (`take_click`, `take_change`,
+    // `get_value_string`/`set_value_string`, `value`). Kept on `Input` to avoid a fourth trait
+    // bound. Apps collect clicks and changes with `UiContext::take_events`, which drains these
+    // two flags into `WidgetEvent`s through the adapter; polling them per handle
+    // (`Adapted::take_click` / `take_change`) still works. All default to the inert defaults.
 
-    /// Consume the "was clicked since last asked" flag.
+    /// Consume the "was clicked since last asked" flag ([`WidgetEvent::Clicked`] in a sweep).
     fn take_click(&mut self) -> bool {
         false
     }
 
-    /// Consume the "value changed since last asked" flag.
+    /// Consume the "value changed since last asked" flag ([`WidgetEvent::Changed`] in a
+    /// sweep). A widget with a drain of its own by this name forwards it here, or neither the
+    /// per-handle poll nor the sweep ever sees its changes.
     fn take_change(&mut self) -> bool {
         false
     }
