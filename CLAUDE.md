@@ -474,8 +474,8 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
 - `widget/` — `host.rs` (`WidgetHost`), `tree.rs` (`WidgetTree`, on `scene::Arena`), `painter.rs` (the paint walk over widgets), `events.rs` (the input vocabulary), `controllers.rs` (the host controller traits), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
   `embedded.rs`, `container/` (params pane, tree list, spreadsheet, menus, scroll boxes…),
   `input/` (button, slider, text box, dropdown, ramp…), `display/` (label, graph behind `graph`, svg…),
-  `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit/` (`LineEdit`, a field an app
-  draws itself), `context_menu`, `doc_editor/`, `markdown`.
+  `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit/` (`LineEdit`, a line of text
+  an app draws itself, with `LineMarks` / `paint_line` to measure and draw it), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
   concern (its `mod.rs` has the table). The largest files are now the accessibility tree,
   `src/a11y.rs` (largest file, ~940 lines); everything else is under 800.

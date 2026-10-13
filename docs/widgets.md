@@ -340,9 +340,21 @@ the host implements it. `a_widget_glyph_reaches_a_flat_host` and
 
 ## Other widget notes
 
-- **`LineEdit`** (`widget/line_edit/`): the text, caret, selection and keymap of a one-line
-  field an app draws itself (cce-browser's URL bar and dialogs). The app reports the caret and
-  composition (`docs/runtime.md`).
+- **`LineEdit`** (`widget/line_edit/`): the text, caret, selection and keymap of one line of
+  text an app draws itself (cce-browser's URL bar and dialogs, cce-sheets' cell editor,
+  cce-documents' fields). An Alt or Ctrl chord types nothing: it is left to the host as
+  `Ignored` (AltGr is not Alt). `an_alt_chord_types_nothing` is the test.
+  - **Measuring and drawing it** (`line_edit/marks.rs`): `LineMarks::of(fs, &edit, size,
+    family)` reads what it shows off the run shaped as the renderer draws it — the caret's x,
+    the selection's and the composition's spans, `x_of` / `byte_at` (into the shown text),
+    `index_at` (back into the edit's text, across a mask or a composition), `width` — right in
+    either direction. `keep_caret(shift, avail)` is the scroll that keeps the caret in a text
+    area too narrow for the line. `paint_line(pc, area, origin_x, &marks, &LineLook, placeholder,
+    caret)` draws the selection, the text (or the placeholder), the composition's underline and
+    the caret inside `area` and returns the caret's rect, which the edit with the keyboard
+    claims (`text_input::claim`). The well around it is the app's.
+    `marks_stand_on_char_boundaries_in_multibyte_text` is the test.
+  - The app reports the caret and composition (`docs/runtime.md`).
 - **Clipboard** (`widget::clipboard`): one synchronous text pair, `copy_to_clipboard` /
   `read_from_clipboard`, behind every widget's copy, cut and paste — `wl-copy` / `wl-paste`
   (`xclip`) on Wayland, `NSPasteboard` on macOS, the page's clipboard events in a browser

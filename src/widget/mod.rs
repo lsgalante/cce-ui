@@ -179,7 +179,7 @@ pub mod side_swipe;
 // Re-exports
 pub use self::editor::TextEditorState;
 
-pub use self::line_edit::{EditOutcome, LineEdit};
+pub use self::line_edit::{EditOutcome, LineEdit, LineLook, LineMarks};
 
 pub use self::scroll_region::{ScrollRegion, ScrollbarActivity};
 

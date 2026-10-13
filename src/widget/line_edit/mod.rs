@@ -6,10 +6,13 @@
 //! draws [`LineEdit::display`] with the caret and selection wherever its
 //! own layout puts them. Enter and Escape come back as [`EditOutcome`]s for
 //! the caller to act on, as does any chord the field does not own, so the
-//! app's own shortcuts still reach it. The pointer selects by dragging:
-//! the app hit-tests a press and each motion to a byte offset and calls
-//! [`LineEdit::press`] / [`LineEdit::drag_to`] / [`LineEdit::release`]. cce-browser's URL bar and its dialog
-//! fields (HTTP auth, JS prompts) are built on it.
+//! app's own shortcuts still reach it (an Alt or Ctrl chord types nothing).
+//! The pointer selects by dragging: the app hit-tests a press and each
+//! motion to a byte offset ([`LineMarks::index_at`]) and calls
+//! [`LineEdit::press`] / [`LineEdit::drag_to`] / [`LineEdit::release`].
+//! [`LineMarks`] measures what the edit shows as the renderer draws it, and
+//! [`paint_line`] draws it. cce-browser's URL bar and its dialog fields
+//! (HTTP auth, JS prompts) are built on it.
 //!
 //! **An input method's composition** (see `crate::ime`) is SHOWN, never
 //! held: `text` keeps what was typed, and [`LineEdit::display`] splices the
@@ -39,9 +42,11 @@
 //! | `composition` | the composition: taking it up, dropping it, and the index maps across it and a mask |
 //! | `pointer` | presses, drags and multi-clicks, and the word boundaries they and Ctrl+arrows use |
 //! | `keys` | the keymap, undo and redo with their runs, and the text as a reader sees it |
+//! | `marks` | measuring what it shows as drawn (`LineMarks`, `keep_caret`) and painting it (`paint_line`) |
 
 mod composition;
 mod keys;
+mod marks;
 mod pointer;
 #[cfg(test)]
 mod tests;
@@ -52,6 +57,8 @@ use web_time::Instant;
 use crate::history::History;
 use crate::ime::{self, Preedit};
 use crate::widget::{ElementState, Key, KeyEvent, NamedKey};
+
+pub use marks::{keep_caret, paint_line, LineLook, LineMarks, CARET_W};
 
 
 /// How close two presses at the same offset must be to count as one double
