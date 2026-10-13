@@ -289,7 +289,8 @@ impl<A: Application> MacShell<A> {
 
     pub(super) fn update_cursor(&mut self) {
         let (x, y) = self.driver.cursor_pos;
-        let icon = self.driver.cursor_icon_at(&self.app, x, y, self.size());
+        let size = self.size();
+        let icon = self.driver.cursor_icon_at(&mut self.app, x, y, size);
         if icon != self.cursor {
             self.cursor = icon;
             ns_cursor(icon).set();
@@ -363,7 +364,8 @@ impl<A: Application> Shell for MacShell<A> {
         if (e.width, e.height) != (pw, ph) {
             self.renderer.resize(pw, ph);
         }
-        if self.app.stage_renderer(&mut self.renderer, size, self.scale) {
+        #[cfg(feature = "3d")]
+        if self.app.app_3d().is_some_and(|a| a.stage_renderer(&mut self.renderer, size, self.scale)) {
             self.redraw = true;
         }
         if self.renderer.draw_frame_2d(frame.frame2d()) {

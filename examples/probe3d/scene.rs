@@ -1,5 +1,5 @@
 //! The 3D probe's scene: one app whose frame is a 3D pane under a strip of
-//! UI, staged through the portable `Application::init_3d` / `stage_3d`, so
+//! UI, staged through the portable `App3D::init_3d` / `stage_3d`, so
 //! the same code runs on the Vulkan renderer (`probe3d_native`) and the
 //! WebGPU one (`probe3d_web`) and the two can be compared pixel for pixel.
 //!
@@ -16,7 +16,7 @@
 //! z = 9.99) tore into spikes across the pane.
 
 use cce_ui::engine::{
-    AppSender, Application, LogicalPosition, LogicalSize, MeshId, RtCamera, RtImage, RtMaterial, RtTriangle, SceneDraw,
+    App3D, AppSender, Application, LogicalPosition, LogicalSize, MeshId, RtCamera, RtImage, RtMaterial, RtTriangle, SceneDraw,
     SceneImage, Stage3D, Vertex3D, WindowSettings,
 };
 use cce_ui::scene::layout::Rect;
@@ -217,6 +217,44 @@ impl<const TRACE: bool> Application for Probe3d<TRACE> {
         true
     }
 
+    fn app_3d(&mut self) -> Option<&mut dyn App3D> {
+        Some(self)
+    }
+
+    fn update(&mut self, _: (), _: &mut bool, _: &mut bool) {}
+    fn tick(&mut self, _: f32, _: &mut bool) {}
+
+    fn display_list(&mut self, size: LogicalSize, _scale: f64) -> Option<DisplayList> {
+        let (_, h) = (size.width, size.height);
+        let mut pc = PaintCtx::new();
+        // The strip: a pane plate the UI stands on. The 3D pane is left
+        // unpainted, so the backdrop shows there.
+        pc.plate_spec(&PlateSpec {
+            rect: r(0.0, 0.0, STRIP, h),
+            material: Material::pane(),
+            window_corners: (true, false, false, true),
+            depth: cce_ui::layout::bevel_width(),
+        });
+        pc.text_with("3D probe".to_string(), 24.0, 24.0, 20.0, [230, 230, 236], Some("DejaVu Sans".into()), None);
+        // A frosted plate over the pane: its blur samples the backdrop.
+        let m = Material::opaque([0.0015, 0.0015, 0.0024, 0.25])
+            .with_frost(Frost::Frosted { compression: 0.6, refraction: 0.0, radius: Frost::DEFAULT_RADIUS });
+        pc.plate_spec(&PlateSpec { rect: r(STRIP + 40.0, h - 170.0, 420.0, 130.0), material: m, window_corners: (false, false, false, false), depth: 8.0 });
+        pc.text_with("frosted over the scene".to_string(), STRIP + 64.0, h - 120.0, 16.0, [240, 240, 246], Some("DejaVu Sans".into()), None);
+        Some(pc.finish())
+    }
+
+    fn handle_pointer_move(&mut self, _: LogicalPosition, _: &mut bool) {}
+    fn handle_mouse_input(&mut self, _: MouseButton, _: ElementState, _: LogicalPosition, _: &mut bool) -> Option<()> {
+        None
+    }
+    fn handle_mouse_wheel(&mut self, _: &MouseScrollDelta, _: LogicalPosition, _: &mut bool) {}
+    fn handle_key_input(&mut self, _: &KeyEvent, _: &mut bool) -> Option<()> {
+        None
+    }
+}
+
+impl<const TRACE: bool> App3D for Probe3d<TRACE> {
     fn init_3d(&mut self, stage: &mut dyn Stage3D) {
         // NDC corners: the draw is `screen_space`, so z is ignored.
         let bg = |x: f32, y: f32, c: [f32; 3]| Vertex3D { position: [x, y, 0.0], color: c };
@@ -314,37 +352,5 @@ impl<const TRACE: bool> Application for Probe3d<TRACE> {
             before: 7,
         }]);
         false
-    }
-
-    fn update(&mut self, _: (), _: &mut bool, _: &mut bool) {}
-    fn tick(&mut self, _: f32, _: &mut bool) {}
-
-    fn display_list(&mut self, size: LogicalSize, _scale: f64) -> Option<DisplayList> {
-        let (_, h) = (size.width, size.height);
-        let mut pc = PaintCtx::new();
-        // The strip: a pane plate the UI stands on. The 3D pane is left
-        // unpainted, so the backdrop shows there.
-        pc.plate_spec(&PlateSpec {
-            rect: r(0.0, 0.0, STRIP, h),
-            material: Material::pane(),
-            window_corners: (true, false, false, true),
-            depth: cce_ui::layout::bevel_width(),
-        });
-        pc.text_with("3D probe".to_string(), 24.0, 24.0, 20.0, [230, 230, 236], Some("DejaVu Sans".into()), None);
-        // A frosted plate over the pane: its blur samples the backdrop.
-        let m = Material::opaque([0.0015, 0.0015, 0.0024, 0.25])
-            .with_frost(Frost::Frosted { compression: 0.6, refraction: 0.0, radius: Frost::DEFAULT_RADIUS });
-        pc.plate_spec(&PlateSpec { rect: r(STRIP + 40.0, h - 170.0, 420.0, 130.0), material: m, window_corners: (false, false, false, false), depth: 8.0 });
-        pc.text_with("frosted over the scene".to_string(), STRIP + 64.0, h - 120.0, 16.0, [240, 240, 246], Some("DejaVu Sans".into()), None);
-        Some(pc.finish())
-    }
-
-    fn handle_pointer_move(&mut self, _: LogicalPosition, _: &mut bool) {}
-    fn handle_mouse_input(&mut self, _: MouseButton, _: ElementState, _: LogicalPosition, _: &mut bool) -> Option<()> {
-        None
-    }
-    fn handle_mouse_wheel(&mut self, _: &MouseScrollDelta, _: LogicalPosition, _: &mut bool) {}
-    fn handle_key_input(&mut self, _: &KeyEvent, _: &mut bool) -> Option<()> {
-        None
     }
 }

@@ -119,8 +119,8 @@ Wayland protocol bindings (`protocol/*.xml`) are generated inline by `wayland-sc
 the 313 crates a client builds with it on), `graph` (`widget::Graph`, the node-graph editor, and
 `GraphController`; no extra dependencies — the grid lattice in `layout::graph` / `color::graph`
 stays in the core), `3d` (the 3D scene pass, lit meshes and the path tracer on both
-renderers, `Stage3D`, `init_3d` / `stage_3d`, and glam; without it a renderer keeps only the 1×1
-backdrop the 2D frost samples — `vk/scene_off.rs`).
+renderers, `Stage3D`, the `App3D` extension with `init_3d` / `stage_3d`, and glam; without it
+a renderer keeps only the 1×1 backdrop the 2D frost samples — `vk/scene_off.rs`).
 
 ## Verify on screen, not just in tests
 
@@ -157,12 +157,12 @@ Every client implements `Application` (`src/backend/app.rs`, re-exported from `e
 - **Construction**: `create(sender: AppSender<Self::Message>)` is required. `AppSender` is
   cce-ui's handle (`send`, `Clone`, `Send`, `From` both ways with calloop's `Sender`), so the
   constructor names no window system. `register_sources` is a Wayland-only calloop hook.
-- **Window**: `settings()` → `WindowSettings`; `layer()` → `LayerSettings` for layer-shell
-  surfaces; `desired_size`, `adjust_size`, `clear_color`.
+- **Window**: `settings()` → `WindowSettings`; `desired_size`, `clear_color`, `utility`,
+  `overflow_margin`, `input_regions`.
 - **State**: `update(msg, needs_rebuild, exit)`, `tick(dt, needs_rebuild)`.
 - **Draw**: `display_list(size, scale)` returns the frame — the ONE paint path. `display_list_text`
   opts its `Prim::Text` into the glyph pass. Side channels: `overlay_quads`, `custom_vertices`
-  (a final unclipped batch), `take_damage` (only cce-grid reports its own).
+  (a final unclipped batch).
 - **Input**: `handle_pointer_move`, `handle_mouse_input`, `handle_mouse_wheel`, `handle_pinch`,
   `handle_key_input`. `needs_rebuild: &mut bool` requests a redraw.
 - **Widgets**: `ui_context()` / `ui_context_mut()` expose the app's `UiContext`; exposing it is
@@ -170,13 +170,35 @@ Every client implements `Application` (`src/backend/app.rs`, re-exported from `e
 - **Undo/redo**: the runner routes the `undo`/`redo` chords (input.kdl; `ctrl+z` /
   `ctrl+shift+z`) to the focused widget first, then the app's `undo` / `redo` hooks, and only
   then to `handle_key_input`. Apps keep document history on `history::History<T>`.
-- **3D** (the `3d` feature): `init_3d(stage)` / `stage_3d(stage, size, scale)` through
-  `&mut dyn Stage3D` — portable. The native `renderer_init` / `stage_renderer` take the
-  `VkRenderer` and forward to them by default (without the feature they do nothing).
-- **Behaviour hooks** (all defaulted): `standard_csd`, `csd_resize_borders`, `csd_titlebar_move`,
-  `plate_navigation` (Tab walk, default on), `outlives_compositor`, `wants_surface`,
-  `idle_poll_interval`, `load_system_fonts`, `is_movable_root_plate_at`, `take_window_action`,
-  `focus_stepped`, `handle_focus_change`, `on_exit`.
+- **Renderer**: `renderer_init(renderer)` (native) runs once per renderer, before its first
+  frame; a lifecycle hook that does nothing by default.
+- **Behaviour hooks** (all defaulted): `plate_navigation` (Tab walk, default on),
+  `outlives_compositor`, `idle_poll_interval`, `load_system_fonts`, `is_movable_root_plate_at`,
+  `cursor_icon`, `focus_stepped`, `handle_focus_change`, `on_exit`.
+
+**Extensions.** Hooks only a few apps need live on their own traits (also in `backend/app.rs`,
+re-exported from `engine` under the same cfgs), each reached through ONE accessor on
+`Application` that answers `None` by default. An app opts in by implementing the trait and
+returning itself: `impl Csd for MyApp { .. }` plus, in its `Application` impl,
+`fn csd(&mut self) -> Option<&mut dyn Csd> { Some(self) }`.
+
+| extension | accessor | hooks | users |
+|---|---|---|---|
+| `LayerApp` (Wayland shell only) | `layer_app` | `layer()` → `LayerSettings` (required; `None` is a plain window after all), `wants_surface` | gallery, keyboard, notifier, the status bar's OSD |
+| `GridSurface` | `grid_surface` | `grid_patch` (required), `take_damage` (the one app that reports its own damage) | cce-grid |
+| `App3D` (`3d` feature) | `app_3d` | `init_3d(stage)` / `stage_3d(stage, size, scale)` through `&mut dyn Stage3D` — portable; the native `stage_renderer` takes the `VkRenderer` and defaults to `stage_3d` | cce-model, cce-designer, `examples/probe3d` |
+| `Csd` | `csd` | `standard_csd` (default on), `csd_resize_borders`, `csd_titlebar_move`, `take_window_action` | cce-designer, the status bar and its OSD |
+
+- **The accessor IS the opt-in.** An extension implemented without overriding its accessor
+  compiles and is never called: the app runs as a plain window, keeps the standard CSD, draws no
+  3D. Each extension is dyn-compatible; the runner reaches it only through the accessor.
+- `grid_surface()` is asked once, when a session starts (`EngineState::is_grid`): the zcce grid
+  role, the pinned buffer scale 1 and patch-only sizing all follow that one answer.
+- Every native shell hands a new renderer to `renderer_init` and then to `App3D::init_3d`
+  (`backend::app::renderer_ready`); the browser shell, which has no `renderer_init`, calls
+  `init_3d` alone.
+- A hook only a few apps override goes on an extension (a new one gets its own accessor), not on
+  `Application`; a hook most apps implement stays in the core.
 
 Rules of the contract:
 
@@ -188,9 +210,10 @@ Rules of the contract:
   cadence by reporting change.
 - **Don't put per-frame I/O on the render path.**
 - **The toolkit names no app.** Nothing in cce-ui branches on the app id. When an app needs the
-  runner to behave differently, add a defaulted `Application` hook. (Two widgets LAUNCH DE apps
-  by name — the colour selector `cce-color-editor`, the font selector `cce-fonts` — which is the
-  DE using itself, not a branch.)
+  runner to behave differently, add a defaulted hook (on an extension when only a few apps
+  need it, see above). (Two widgets LAUNCH DE apps by name — the colour selector
+  `cce-color-editor`, the font selector `cce-fonts` — which is the DE using itself, not a
+  branch.)
 - **GPU handles do not survive a reconnect.** A broken connection opens a new session around the
   same app with a NEW `VkRenderer`; `renderer_init` runs once per renderer. An image id cached
   across frames silently stops drawing after a reconnect (`Frame2D` skips unknown ids without
@@ -414,7 +437,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
 ## Module map
 
 - `backend/` — the runner, split so other shells share everything but Wayland:
-  `app.rs` (the `Application` trait, `AppSender`), `driver/` (input state and routing:
+  `app.rs` (the `Application` trait, its extensions, `AppSender`), `driver/` (input state and routing:
   modifiers, key repeat, undo/redo and Tab chords, CSD hit zones, popover close, scroll phase,
   touch — unit-tested with no compositor), `frame.rs` (`build_frame`, damage), `shell.rs` (the
   `Shell` trait and `Pacer`: one turn of the loop over any shell), `tessellate/` (its `mod.rs` has the table),

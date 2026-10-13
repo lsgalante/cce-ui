@@ -20,7 +20,7 @@ impl<A: Application> CompositorHandler for EngineState<A> {
             // not clobber the override.
             return;
         }
-        if self.inner.as_ref().is_some_and(|a| a.grid()) {
+        if self.is_grid {
             // Grid surfaces stay at scale 1 — patch.scale is the sole
             // resolution authority (see the pin at surface creation).
             return;
@@ -163,7 +163,7 @@ impl<A: Application> WindowHandler for EngineState<A> {
             self.frame_logical = (width as f32 / f, height as f32 / f);
             self.applied_margin = m;
             self.resize(width as f32 / f + m, height as f32 / f + m);
-        } else if self.inner.as_ref().unwrap().grid() && self.logical_width > 1.0 {
+        } else if self.is_grid && self.logical_width > 1.0 {
             // A grid app's size belongs to its PATCHES: the compositor's
             // "you choose" 0x0 must not bounce the surface back to the
             // settings size — that thrash recreated multi-hundred-MB

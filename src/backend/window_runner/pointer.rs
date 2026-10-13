@@ -116,7 +116,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
 
         // App-driven window move/resize (non-standard CSD; see WindowAction):
         // executed with the serial of the most recent pointer press.
-        if let Some(action) = self.inner.as_mut().unwrap().take_window_action() {
+        if let Some(action) = self.inner.as_mut().unwrap().csd().and_then(|c| c.take_window_action()) {
             if let (Some(ref window), Some(serial)) = (&self.window, self.last_press_serial) {
                 let seat_owned = self.seats.first().cloned().or_else(|| self.seat_state.seats().next());
                 if let Some(ref seat) = seat_owned {

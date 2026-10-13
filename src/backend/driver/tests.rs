@@ -1,7 +1,7 @@
 //! The routing, driven with no window system: a mock app records what
 //! reaches it.
 use super::*;
-use crate::backend::app::{AppSender, WindowSettings};
+use crate::backend::app::{AppSender, Csd, WindowSettings};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Seen {
@@ -71,14 +71,20 @@ impl Application for Mock {
         self.seen.push(Seen::Undo);
         self.takes_undo
     }
+    fn csd(&mut self) -> Option<&mut dyn Csd> {
+        Some(self)
+    }
+    fn ui_context_mut(&mut self) -> Option<&mut crate::context::UiContext> {
+        self.ctx.as_mut()
+    }
+}
+
+impl Csd for Mock {
     fn csd_resize_borders(&self) -> bool {
         self.csd
     }
     fn csd_titlebar_move(&self) -> bool {
         self.csd
-    }
-    fn ui_context_mut(&mut self) -> Option<&mut crate::context::UiContext> {
-        self.ctx.as_mut()
     }
 }
 

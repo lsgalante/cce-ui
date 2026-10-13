@@ -147,7 +147,9 @@ pub async fn run<A: Application>(canvas: HtmlCanvasElement, fonts: Fonts, sizing
     // The app's persistent GPU resources, as the Wayland shell's
     // `renderer_init` makes them: once, before the first frame.
     #[cfg(feature = "3d")]
-    app.init_3d(&mut renderer);
+    if let Some(app_3d) = app.app_3d() {
+        app_3d.init_3d(&mut renderer);
+    }
     let settings = app.settings();
     crate::scale::set_app_id(settings.app_id.clone());
     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {

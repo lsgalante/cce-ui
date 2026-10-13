@@ -1,4 +1,4 @@
-//! A layer surface while the app wants none (`Application::wants_surface`): the renderer
+//! A layer surface while the app wants none (`LayerApp::wants_surface`): the renderer
 //! detached and the surface dropped, then a fresh surface with the same renderer.
 
 use super::*;
@@ -29,14 +29,14 @@ impl<A: Application> EngineState<A> {
         self.layer_surface = Some(layer_surface);
     }
 
-    /// Follow [`Application::wants_surface`]: tear the layer surface down
+    /// Follow [`LayerApp::wants_surface`]: tear the layer surface down
     /// when the app has nothing to show, build it again when it does. Once a
     /// loop turn, before the present decision.
     pub(super) fn sync_surface_wanted(&mut self) {
         if !self.is_layer_app {
             return;
         }
-        let want = self.inner.as_ref().unwrap().wants_surface();
+        let want = self.inner.as_mut().unwrap().layer_app().is_none_or(|l| l.wants_surface());
         if !want && !self.layer_hidden {
             self.hide_layer_surface();
         } else if want && self.layer_hidden {
@@ -72,9 +72,9 @@ impl<A: Application> EngineState<A> {
     /// where there is none (an attach that failed before) is one made, and
     /// that one is announced. A surface nothing can draw to stays hidden.
     pub(super) fn show_layer_surface(&mut self) {
-        let app = self.inner.as_ref().unwrap();
+        let app = self.inner.as_mut().unwrap();
         let settings = app.settings();
-        let Some(ls) = app.layer() else { return };
+        let Some(ls) = app.layer_app().and_then(|l| l.layer()) else { return };
         let surface = self.compositor_state.create_surface(&self.qh);
         let buffer_scale = if crate::scale::forced_scale().is_some() { 1 } else { self.scale_factor as i32 };
         surface.set_buffer_scale(buffer_scale);
@@ -115,7 +115,7 @@ impl<A: Application> EngineState<A> {
             if made { "a new renderer" } else { "the renderer moved onto it" }
         );
         if made {
-            self.inner.as_mut().unwrap().renderer_init(self.renderer.as_mut().unwrap());
+            crate::backend::app::renderer_ready(self.inner.as_mut().unwrap(), self.renderer.as_mut().unwrap());
         }
     }
 

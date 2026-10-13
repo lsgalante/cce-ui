@@ -103,10 +103,15 @@ pub struct EngineState<A: Application> {
 
     pub window: Option<XdgWindow>,
     pub layer_surface: Option<LayerSurface>,
-    /// This session's surface is a layer surface ([`Application::layer`]),
-    /// which is what makes [`Application::wants_surface`] apply.
+    /// This session's surface is a layer surface ([`LayerApp::layer`]),
+    /// which is what makes [`LayerApp::wants_surface`] apply.
     pub is_layer_app: bool,
-    /// The app said [`Application::wants_surface`] = false and the layer
+    /// This session's window is the desktop-grid layer: the app had a
+    /// [`GridSurface`] ([`Application::grid_surface`]) when the session
+    /// started. Asked once, so the role, the pinned scale and the patch
+    /// sizing never disagree within a session.
+    pub is_grid: bool,
+    /// The app said [`LayerApp::wants_surface`] = false and the layer
     /// surface is gone until it says true (the renderer is kept, detached).
     pub layer_hidden: bool,
     pub surface: Option<wl_surface::WlSurface>,
@@ -168,7 +173,7 @@ pub struct EngineState<A: Application> {
 
     pub exit: bool,
     pub redraw: bool,
-    /// A frame took the app's damage (`Application::take_damage`) and was
+    /// A frame took the app's damage (`GridSurface::take_damage`) and was
     /// not presented: the next presented frame is a full one.
     pub damage_owed: bool,
     /// The last built frame, for the damage the runner derives
@@ -210,7 +215,7 @@ pub struct EngineState<A: Application> {
     /// event supersedes an unconsumed older one, per protocol.
     pub pending_grid_patch: Option<(u32, f64, f64, f64, f64, f64)>,
     /// Serial of the most recent pointer press, kept for
-    /// [`Application::take_window_action`] move/resize grabs.
+    /// [`Csd::take_window_action`] move/resize grabs.
     pub last_press_serial: Option<u32>,
     /// The touchscreen, once the seat offers one; see `backend/touch.rs`.
     pub touch: Option<wl_touch::WlTouch>,
@@ -271,7 +276,7 @@ impl<A: Application> EngineState<A> {
         let load_system_fonts = self.inner.as_ref().is_some_and(|a| a.load_system_fonts());
         // Corner radius 0: runner apps tessellate their own rounded corners.
         let mut renderer = unsafe { VkRenderer::try_new(display_ptr, surface_ptr, pw, ph, 0.0) }?;
-        if self.inner.as_ref().is_some_and(|a| a.grid()) {
+        if self.is_grid {
             // Redrawn only per patch, and a patch is several screens of pixels.
             renderer.set_minimal_swapchain();
         }
@@ -309,7 +314,6 @@ impl<A: Application> EngineState<A> {
     }
 
     pub fn resize(&mut self, w: f32, h: f32) {
-        let (w, h) = self.inner.as_ref().unwrap().adjust_size(w, h);
         if w > 0.0 && h > 0.0 {
             self.logical_width = w;
             self.logical_height = h;
@@ -440,8 +444,9 @@ impl<A: Application> EngineState<A> {
     }
 
     /// The cursor for the pointer at (lx, ly) — see [`Driver::cursor_icon_at`].
-    fn cursor_icon_at(&self, lx: f32, ly: f32) -> CursorIcon {
-        self.driver.cursor_icon_at(self.inner.as_ref().unwrap(), lx, ly, self.logical_size())
+    fn cursor_icon_at(&mut self, lx: f32, ly: f32) -> CursorIcon {
+        let size = self.logical_size();
+        self.driver.cursor_icon_at(self.inner.as_mut().unwrap(), lx, ly, size)
     }
 }
 

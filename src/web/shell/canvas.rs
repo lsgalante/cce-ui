@@ -136,7 +136,8 @@ impl<A: Application> WebShell<A> {
 
     pub(super) fn update_cursor(&mut self) {
         let (x, y) = self.driver.cursor_pos;
-        let icon = self.driver.cursor_icon_at(&self.app, x, y, self.size());
+        let size = self.size();
+        let icon = self.driver.cursor_icon_at(&mut self.app, x, y, size);
         if icon != self.cursor {
             self.cursor = icon;
             let _ = self.canvas.style().set_property("cursor", icon.name());
@@ -216,9 +217,9 @@ impl<A: Application> Shell for WebShell<A> {
             self.renderer.prepare_text(&mut self.fs, &mut self.swash, &spans);
         }
         // The app's 3D scene, staged last, as the Wayland shell's
-        // `stage_renderer`; true asks for another frame.
+        // `App3D::stage_renderer`; true asks for another frame.
         #[cfg(feature = "3d")]
-        if self.app.stage_3d(&mut self.renderer, size, self.scale) {
+        if self.app.app_3d().is_some_and(|a| a.stage_3d(&mut self.renderer, size, self.scale)) {
             self.redraw = true;
         }
         let waiting = CAPTURES.with(|c| std::mem::take(&mut *c.borrow_mut()));

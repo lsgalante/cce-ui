@@ -275,6 +275,7 @@ pub(super) fn run_session<'l, A: Application>(
         window: None,
         layer_surface: None,
         is_layer_app: false,
+        is_grid: false,
         layer_hidden: false,
         surface: None,
         inner: None,
@@ -349,6 +350,7 @@ pub(super) fn run_session<'l, A: Application>(
     engine_state.logical_width = settings.width as f32;
     engine_state.logical_height = settings.height as f32;
     engine_state.inner = Some(inner);
+    engine_state.is_grid = engine_state.inner.as_mut().unwrap().grid_surface().is_some();
 
     let surface = engine_state.compositor_state.create_surface(&qh);
     // A grid app's surface is pinned to scale 1: the patch's `scale` is
@@ -356,13 +358,11 @@ pub(super) fn run_session<'l, A: Application>(
     // patch manager folds it in), so adopting the output scale here would
     // square it — the client renders a doubled buffer and the compositor
     // downsamples it straight back into blur.
-    if engine_state.inner.as_ref().unwrap().grid() {
+    if engine_state.is_grid {
         engine_state.scale_factor = 1.0;
     }
     // Forced-scale mode renders scaled-up into a buffer_scale-1 surface.
-    let buffer_scale = if crate::scale::forced_scale().is_some()
-        || engine_state.inner.as_ref().unwrap().grid()
-    {
+    let buffer_scale = if crate::scale::forced_scale().is_some() || engine_state.is_grid {
         1
     } else {
         scale as i32
@@ -370,7 +370,7 @@ pub(super) fn run_session<'l, A: Application>(
     surface.set_buffer_scale(buffer_scale);
     engine_state.committed_buffer_scale = buffer_scale;
 
-    let layer_settings = engine_state.inner.as_ref().unwrap().layer();
+    let layer_settings = engine_state.inner.as_mut().unwrap().layer_app().and_then(|l| l.layer());
     if let Some(ls) = layer_settings {
         engine_state.is_layer_app = true;
         engine_state.attach_layer_role(&surface, &ls, settings.width, settings.height);
@@ -385,7 +385,7 @@ pub(super) fn run_session<'l, A: Application>(
             window.set_min_size(Some((min_w, min_h)));
         }
         let wants_utility = engine_state.inner.as_ref().unwrap().utility();
-        let wants_grid = engine_state.inner.as_ref().unwrap().grid();
+        let wants_grid = engine_state.is_grid;
         {
             // Bound for EVERY app now, not just utility/grid ones: the
             // toplevel also carries the popover-region hint (manager v7),
@@ -427,11 +427,7 @@ pub(super) fn run_session<'l, A: Application>(
         log::error!("[window_runner] cannot create the renderer, ending session: {lost}");
         return (engine_state.inner.take(), SessionEnd::ConnectionLost);
     }
-    engine_state
-        .inner
-        .as_mut()
-        .unwrap()
-        .renderer_init(engine_state.renderer.as_mut().unwrap());
+    crate::backend::app::renderer_ready(engine_state.inner.as_mut().unwrap(), engine_state.renderer.as_mut().unwrap());
 
     let loop_handle = event_loop.handle();
     let wayland_token = match WaylandSource::new(conn.clone(), event_queue).insert(loop_handle.clone())

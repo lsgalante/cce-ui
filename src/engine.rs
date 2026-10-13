@@ -3,10 +3,11 @@
 //! native shell's entry point and Wayland-typed items after it.
 
 pub use crate::backend::app::{
-    accessibility_tree, Application, AppSender, LogicalPosition, LogicalSize, RenderContext, WindowAction, WindowSettings,
+    accessibility_tree, Application, AppSender, Csd, GridSurface, LogicalPosition, LogicalSize, RenderContext, WindowAction,
+    WindowSettings,
 };
 #[cfg(feature = "3d")]
-pub use crate::backend::app::Stage3D;
+pub use crate::backend::app::{App3D, Stage3D};
 #[cfg(feature = "3d")]
 pub use crate::draw::lit::{LitDraw, LitLight, LitMaterial, LitMeshId, LitStage3D, LitVertex};
 #[cfg(feature = "3d")]
@@ -25,7 +26,7 @@ pub use crate::text::{get_text_buffer_laid_out, shaped_cluster_offsets, shaping_
 pub use cursor_icon::CursorIcon;
 
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
-pub use crate::backend::app::{LayerAnchor, LayerKeyboardInteractivity, LayerKind, LayerSettings};
+pub use crate::backend::app::{LayerAnchor, LayerApp, LayerKeyboardInteractivity, LayerKind, LayerSettings};
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub use crate::backend::window_runner::{run, xdg_toplevel, EngineState};
 #[cfg(target_os = "macos")]

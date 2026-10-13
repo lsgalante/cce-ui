@@ -4,7 +4,7 @@
 use super::*;
 
 /// The 3D half of the renderer, as an app stages it through
-/// `Application::init_3d` / `stage_3d` — each method is the inherent one.
+/// `App3D::init_3d` / `stage_3d` — each method is the inherent one.
 impl crate::draw::scene::Stage3D for VkRenderer {
     fn create_mesh(&mut self, verts: &[Vertex3D]) -> MeshId {
         VkRenderer::create_mesh(self, verts)

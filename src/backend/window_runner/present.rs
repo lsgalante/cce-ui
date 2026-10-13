@@ -10,7 +10,9 @@ impl<A: Application> EngineState<A> {
         // produces is the one the compositor latches at the new anchor.
         if let Some((serial, px, py, pw, ph, pscale)) = self.pending_grid_patch.take() {
             self.resize((pw * pscale) as f32, (ph * pscale) as f32);
-            self.inner.as_mut().unwrap().grid_patch(px, py, pw, ph, pscale);
+            if let Some(grid) = self.inner.as_mut().unwrap().grid_surface() {
+                grid.grid_patch(px, py, pw, ph, pscale);
+            }
             if let Some(tl) = &self.cce_toplevel {
                 tl.ack_grid_patch(serial);
             }
@@ -118,11 +120,14 @@ impl<A: Application> EngineState<A> {
         }
 
         // Direct renderer staging (3D scenes, RT panes, app-shaped text).
-        if self.inner.as_mut().unwrap().stage_renderer(
-            renderer,
-            LogicalSize::new(logical_w, logical_h),
-            scale_factor,
-        ) {
+        #[cfg(feature = "3d")]
+        if self
+            .inner
+            .as_mut()
+            .unwrap()
+            .app_3d()
+            .is_some_and(|a| a.stage_renderer(renderer, LogicalSize::new(logical_w, logical_h), scale_factor))
+        {
             self.redraw = true;
         }
 

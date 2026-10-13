@@ -25,9 +25,10 @@
 //!   the pacer said. A turn superseded by an earlier one is dropped by its
 //!   generation.
 //! - **Frames out.** [`build_frame`] at the view's size in points and the
-//!   window's backing scale, drawn by the [`VkRenderer`]; `stage_renderer`
-//!   (and so the portable `stage_3d`) runs before each draw, `renderer_init`
-//!   once.
+//!   window's backing scale, drawn by the [`VkRenderer`]; with the `3d`
+//!   feature an app's `App3D::stage_renderer` (and so the portable
+//!   `stage_3d`) runs before each draw; `renderer_init`, then
+//!   `App3D::init_3d`, once.
 //!
 //! The menu is a minimal one (Quit, ⌘Q), whose quit — like the close
 //! button — asks the app to exit the way a compositor's close does.
@@ -175,7 +176,7 @@ pub fn run<A: Application>() {
             return;
         }
     };
-    app.renderer_init(&mut renderer);
+    crate::backend::app::renderer_ready(&mut app, &mut renderer);
 
     let shell = MacShell {
         renderer,

@@ -1,7 +1,8 @@
-//! The client contract: the `Application` trait and the plain types it
-//! speaks in (`WindowSettings`, `LayerSettings`, `LogicalPosition`, …).
-//! Moved out of `window_runner` unchanged; still re-exported from there
-//! (and from `engine`) at the old paths.
+//! The client contract: the `Application` trait, its extension traits for
+//! hooks only a few apps need (`LayerApp`, `GridSurface`, `App3D`, `Csd`,
+//! each reached through an accessor on `Application`), and the plain types
+//! they speak in (`WindowSettings`, `LayerSettings`, `LogicalPosition`, …).
+//! Re-exported from `window_runner` and from `engine`.
 
 use cosmic_text::FontSystem;
 use crate::widget::{MouseButton, ElementState, MouseScrollDelta, KeyEvent};
@@ -32,8 +33,8 @@ pub use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_to
 pub use super::driver::ResizeEdge as WindowEdge;
 
 /// A compositor-side window operation requested by the app: an interactive
-/// move or resize grab. Returned from [`Application::take_window_action`];
-/// the runner executes it with the serial of the most recent pointer press.
+/// move or resize grab. Returned from [`Csd::take_window_action`]; the
+/// runner executes it with the serial of the most recent pointer press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowAction {
     Move,
@@ -41,7 +42,7 @@ pub enum WindowAction {
 }
 
 // Re-export the wlr-layer-shell types apps need to describe a layer surface.
-// Layer surfaces are a Wayland (wlr) notion: native only, like `layer()`.
+// Layer surfaces are a Wayland (wlr) notion: native only, like `LayerApp`.
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 pub use smithay_client_toolkit::shell::wlr_layer::{
     Anchor as LayerAnchor, KeyboardInteractivity as LayerKeyboardInteractivity, Layer as LayerKind,
@@ -49,7 +50,7 @@ pub use smithay_client_toolkit::shell::wlr_layer::{
 
 /// Opt-in configuration for running an [`Application`] on a wlr-layer-shell
 /// surface (panels, overlays, notifications) instead of an xdg toplevel.
-/// Return one from [`Application::layer`] to select layer-shell.
+/// Return one from [`LayerApp::layer`] to select layer-shell.
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 #[derive(Debug, Clone)]
 pub struct LayerSettings {
@@ -202,6 +203,18 @@ impl<M> From<AppSender<M>> for calloop::channel::Sender<M> {
     }
 }
 
+/// The client contract: what every app implements and every shell (Wayland,
+/// AppKit, the browser) runs.
+///
+/// Hooks only a few apps need live on EXTENSION traits, each reached through
+/// one defaulted accessor here that answers `None`: `LayerApp` through
+/// `layer_app` (the Wayland shell), [`GridSurface`] through
+/// [`grid_surface`](Self::grid_surface), `App3D` through `app_3d` (the `3d`
+/// feature) and [`Csd`] through [`csd`](Self::csd). An app opts in by
+/// implementing the extension and returning itself from the accessor —
+/// `impl Csd for MyApp { .. }` and, in `impl Application for MyApp`,
+/// `fn csd(&mut self) -> Option<&mut dyn Csd> { Some(self) }`. The accessor
+/// IS the opt-in: an extension implemented without it is never called.
 pub trait Application: Sized + 'static {
     type Message: Send + Clone + 'static;
 
@@ -215,25 +228,34 @@ pub trait Application: Sized + 'static {
     /// so an app without a constructor is a compile error rather than a crash at startup.
     fn create(sender: AppSender<Self::Message>) -> Self;
     fn settings(&self) -> WindowSettings;
-    /// Return `Some(..)` to run on a wlr-layer-shell surface (overlay/panel)
-    /// instead of an xdg toplevel. Defaults to `None` (a normal window).
+
+    /// The app's [`LayerApp`] half, for one that may run on a wlr-layer-shell
+    /// surface: `Some(self)` from an app that implements it. `None` (the
+    /// default) is a normal xdg window.
     #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
-    fn layer(&self) -> Option<LayerSettings> {
+    fn layer_app(&mut self) -> Option<&mut dyn LayerApp> {
         None
     }
-    /// For a [`layer`](Self::layer) app that is usually empty — a
-    /// notification stack — whether there is anything to show right now.
-    /// While this is `false` the Wayland runner destroys the layer surface,
-    /// keeping its renderer detached, and on the turn it turns `true` builds a
-    /// new surface and moves the same renderer onto it — so image ids stay
-    /// good and [`renderer_init`](Self::renderer_init) does not run. An always-mapped transparent overlay is not free: the
-    /// compositor blurs behind it whenever anything under it changes, and it
-    /// keeps a fullscreen client off direct scanout. Asked once a loop turn;
-    /// ignored for xdg windows. Default `true`: always mapped.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
-    fn wants_surface(&self) -> bool {
-        true
+    /// The app's [`GridSurface`] half: `Some(self)` declares the window the
+    /// desktop-grid layer. Whether it is `Some` is read once, when a session
+    /// starts, and fixes the role for that session; the hooks are reached
+    /// through it per frame. `None` (the default) is an ordinary window.
+    fn grid_surface(&mut self) -> Option<&mut dyn GridSurface> {
+        None
     }
+    /// The app's [`App3D`] half, staged on every renderer: `Some(self)` from
+    /// an app that implements it. `None` (the default) draws no 3D scene.
+    #[cfg(feature = "3d")]
+    fn app_3d(&mut self) -> Option<&mut dyn App3D> {
+        None
+    }
+    /// The app's [`Csd`] half, for a window whose decorations are not the
+    /// runner's standard ones: `Some(self)` from an app that implements it.
+    /// `None` (the default) is the standard CSD, every [`Csd`] default.
+    fn csd(&mut self) -> Option<&mut dyn Csd> {
+        None
+    }
+
     /// Declare the window a UTILITY window: a tool whose shape is decided by
     /// its contents. The compositor then never dictates a size to it (every
     /// configure is the "you choose" 0x0 — [`WindowSettings::width`]/`height`
@@ -246,22 +268,6 @@ pub trait Application: Sized + 'static {
     fn utility(&self) -> bool {
         false
     }
-    /// Declare the window the DESKTOP-GRID layer (zcce set_grid): the
-    /// compositor world-anchors the surface to the virtual desktop and
-    /// pans/zooms it per frame like window content; the app renders only
-    /// when handed a patch (see [`Application::grid_patch`]). The surface
-    /// becomes input-transparent and lives behind all windows. Needs
-    /// manager v6; on an older compositor the declaration is skipped.
-    /// Defaults to `false`.
-    fn grid(&self) -> bool {
-        false
-    }
-    /// A grid patch to render (grid apps only): virtual origin (`x`, `y`),
-    /// virtual size (`w`, `h`), and `scale` surface px per virtual unit.
-    /// Called right before the frame that must show it; the runner has
-    /// already resized the surface to `(w*scale, h*scale)` and acks the
-    /// patch so the coming commit is latched at the new anchor.
-    fn grid_patch(&mut self, _x: f64, _y: f64, _w: f64, _h: f64, _scale: f64) {}
     fn update(&mut self, msg: Self::Message, needs_rebuild: &mut bool, exit: &mut bool);
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool);
     /// How long the runner may sleep between `tick`s while the window is
@@ -279,19 +285,6 @@ pub trait Application: Sized + 'static {
     /// On-top overlay quads drawn after the display list and its text (e.g. the status bar's
     /// tray-hover highlights). Deliberately separate from the single paint path.
     fn overlay_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
-    /// The part of the surface that changed since the last frame this app
-    /// painted, as (x, y, w, h) in logical px, taken (and reset) once per
-    /// rendered frame right after `display_list`. `None` — the default —
-    /// means all of it. Returning a rect makes the frame a partial one: only
-    /// that rect is repainted and only it is reported to the compositor as
-    /// damage, which is what keeps a small change on a very large surface
-    /// (an image dragged across the desktop grid) from costing a full
-    /// repaint on both sides. The app vouches for the rect: anything that
-    /// changed outside it keeps its old pixels. A frame that was skipped is
-    /// the runner's to make up — the next one is painted in full.
-    fn take_damage(&mut self, _size: LogicalSize, _scale: f64) -> Option<(f32, f32, f32, f32)> {
-        None
-    }
     fn input_regions(&self) -> Option<Vec<(i32, i32, i32, i32)>> {
         None
     }
@@ -391,10 +384,6 @@ pub trait Application: Sized + 'static {
     #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
     fn register_sources(&mut self, _handle: &calloop::LoopHandle<'_, EngineState<Self>>) {}
 
-    fn adjust_size(&self, width: f32, height: f32) -> (f32, f32) {
-        (width, height)
-    }
-    
     /// Mime types this app accepts from a drag, in the app's own preference
     /// order (the source's order is ignored — a browser lists `text/html`
     /// before `text/uri-list` and which is more useful is the app's call).
@@ -528,70 +517,151 @@ pub trait Application: Sized + 'static {
 
     /// Called once per renderer, right after it is created and before its
     /// first frame (a reconnect's replacement too — see "`renderer_init`"
-    /// in CLAUDE.md): create persistent renderer resources here (3D meshes
-    /// via [`VkRenderer::create_mesh`]). Most 2D apps never need this. The
-    /// default hands the renderer to the portable [`init_3d`](Self::init_3d),
-    /// so an app written against that runs here unchanged.
+    /// in CLAUDE.md): create persistent renderer resources here, or note
+    /// that the renderer was replaced (image ids die with it). Most 2D apps
+    /// never need this. Default: nothing. An app's `App3D` half is handed
+    /// the same renderer right after, through `App3D::init_3d`.
     #[cfg(not(target_arch = "wasm32"))]
-    fn renderer_init(&mut self, renderer: &mut VkRenderer) {
-        #[cfg(feature = "3d")]
-        self.init_3d(renderer);
-        #[cfg(not(feature = "3d"))]
-        let _ = renderer;
-    }
-
-    /// Direct renderer staging, called every frame after the engine's own text
-    /// prep and immediately before the frame is drawn: stage 3D scene panes
-    /// (`stage_scene`), path-traced panes (`stage_rt`), flush mesh updates, or
-    /// prepare app-shaped text (`prepare_text` — an app that returns `false`
-    /// from [`display_list_text`](Application::display_list_text) fully owns
-    /// the renderer's text state, the engine never touches it). Return `true`
-    /// to request another frame immediately (e.g. while a path tracer is still
-    /// accumulating samples). The default is the portable
-    /// [`stage_3d`](Self::stage_3d).
-    #[cfg(not(target_arch = "wasm32"))]
-    fn stage_renderer(&mut self, renderer: &mut VkRenderer, size: LogicalSize, scale: f64) -> bool {
-        #[cfg(feature = "3d")]
-        {
-            self.stage_3d(renderer, size, scale)
-        }
-        #[cfg(not(feature = "3d"))]
-        {
-            let _ = (renderer, size, scale);
-            false
-        }
-    }
-
-    /// The portable [`renderer_init`](Self::renderer_init): once per
-    /// renderer, before its first frame, through [`Stage3D`] — the 3D half
-    /// every renderer has, the Vulkan one natively and the WebGPU one in a
-    /// browser. Make the app's meshes here. Called by the browser shell, and
-    /// natively by `renderer_init`'s default. With the `3d` feature.
-    #[cfg(feature = "3d")]
-    fn init_3d(&mut self, _stage: &mut dyn Stage3D) {}
-
-    /// The portable [`stage_renderer`](Self::stage_renderer): every frame,
-    /// just before it is drawn, stage the scene through [`Stage3D`]. `size`
-    /// is the window's logical size and `scale` its pixel ratio; a scissor is
-    /// physical px. Return `true` to ask for another frame at once. With the
-    /// `3d` feature.
-    #[cfg(feature = "3d")]
-    fn stage_3d(&mut self, _stage: &mut dyn Stage3D, _size: LogicalSize, _scale: f64) -> bool {
-        false
-    }
+    fn renderer_init(&mut self, _renderer: &mut VkRenderer) {}
 
     /// The surface was resized (or the scale factor changed): `width`/`height`
     /// are the new logical size. The renderer has already been resized; use
     /// this for stateful relayout that can't wait for the next paint callback.
     fn handle_resize(&mut self, _width: f32, _height: f32, _scale: f64) {}
 
+    /// Override the pointer cursor at (x, y). `None` falls back to the
+    /// runner's standard CSD edge cursors (or `Default` when
+    /// [`Csd::standard_csd`] is off).
+    fn cursor_icon(&self, _x: f32, _y: f32) -> Option<CursorIcon> {
+        None
+    }
+
+    /// Called once when the event loop ends (window closed, app-requested
+    /// exit): last-chance work like autosave. The surface is still alive.
+    fn on_exit(&mut self) {}
+}
+
+/// A wlr-layer-shell app (a panel, an overlay, a notification stack): what
+/// the Wayland runner asks of an app that runs on a layer surface instead of
+/// an xdg toplevel. Native Wayland only, like [`LayerSettings`].
+///
+/// Reached ONLY through [`Application::layer_app`]: implement this trait and
+/// return `Some(self)` there. Implementing it without overriding the
+/// accessor does nothing — the runner never sees the impl, and the app runs
+/// as a normal window.
+#[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
+pub trait LayerApp {
+    /// `Some(..)` runs the app on a wlr-layer-shell surface (overlay/panel)
+    /// instead of an xdg toplevel; `None` is a normal window after all (an
+    /// app that decides at startup, as the gallery does).
+    fn layer(&self) -> Option<LayerSettings>;
+
+    /// For a layer app that is usually empty — a notification stack —
+    /// whether there is anything to show right now. While this is `false` the
+    /// Wayland runner destroys the layer surface, keeping its renderer
+    /// detached, and on the turn it turns `true` builds a new surface and
+    /// moves the same renderer onto it — so image ids stay good and
+    /// [`Application::renderer_init`] does not run. An always-mapped
+    /// transparent overlay is not free: the compositor blurs behind it
+    /// whenever anything under it changes, and it keeps a fullscreen client
+    /// off direct scanout. Asked once a loop turn; ignored for xdg windows.
+    /// Default `true`: always mapped.
+    fn wants_surface(&self) -> bool {
+        true
+    }
+}
+
+/// The DESKTOP-GRID layer (zcce `set_grid`): the compositor world-anchors
+/// the surface to the virtual desktop and pans/zooms it per frame like
+/// window content; the app renders only when handed a patch
+/// ([`grid_patch`](Self::grid_patch)). The surface is input-transparent and
+/// lives behind all windows. Needs manager v6; on an older compositor the
+/// declaration is skipped. cce-grid is the one.
+///
+/// Reached ONLY through [`Application::grid_surface`], whose `Some` is what
+/// declares the role (asked once, when a session starts). Implementing this
+/// trait without overriding the accessor does nothing — the window is an
+/// ordinary one and neither hook is called.
+pub trait GridSurface {
+    /// A grid patch to render: virtual origin (`x`, `y`), virtual size (`w`,
+    /// `h`), and `scale` surface px per virtual unit. Called right before the
+    /// frame that must show it; the runner has already resized the surface
+    /// to `(w*scale, h*scale)` and acks the patch so the coming commit is
+    /// latched at the new anchor.
+    fn grid_patch(&mut self, x: f64, y: f64, w: f64, h: f64, scale: f64);
+
+    /// The part of the surface that changed since the last frame this app
+    /// painted, as (x, y, w, h) in logical px, taken (and reset) once per
+    /// rendered frame right after `display_list`. `None` — the default —
+    /// means all of it. Returning a rect makes the frame a partial one: only
+    /// that rect is repainted and only it is reported to the compositor as
+    /// damage, which is what keeps a small change on a very large surface
+    /// (an image dragged across the desktop grid) from costing a full
+    /// repaint on both sides. The app vouches for the rect: anything that
+    /// changed outside it keeps its old pixels. A frame that was skipped is
+    /// the runner's to make up — the next one is painted in full.
+    fn take_damage(&mut self, _size: LogicalSize, _scale: f64) -> Option<(f32, f32, f32, f32)> {
+        None
+    }
+}
+
+/// An app's 3D half (the `3d` feature): meshes made once per renderer and a
+/// scene staged every frame, through [`Stage3D`] — the 3D half every
+/// renderer has, the Vulkan one natively and the WebGPU one in a browser —
+/// so the same code runs on both.
+///
+/// Reached ONLY through [`Application::app_3d`]: implement this trait and
+/// return `Some(self)` there. Implementing it without overriding the
+/// accessor does nothing — no shell ever calls it, and the pane stays empty.
+#[cfg(feature = "3d")]
+pub trait App3D {
+    /// Once per renderer, before its first frame (a reconnect's replacement
+    /// too): make the app's meshes here. The native shells call it right
+    /// after [`Application::renderer_init`]; the browser shell, which has no
+    /// `renderer_init`, calls it alone.
+    fn init_3d(&mut self, _stage: &mut dyn Stage3D) {}
+
+    /// Every frame, just before it is drawn, stage the scene. `size` is the
+    /// window's logical size and `scale` its pixel ratio; a scissor is
+    /// physical px. Return `true` to ask for another frame at once (a path
+    /// tracer still accumulating samples). The browser shell calls this; the
+    /// native ones call [`stage_renderer`](Self::stage_renderer), whose
+    /// default is this.
+    fn stage_3d(&mut self, _stage: &mut dyn Stage3D, _size: LogicalSize, _scale: f64) -> bool {
+        false
+    }
+
+    /// Native direct renderer staging, called every frame after the engine's
+    /// own text prep and immediately before the frame is drawn: stage 3D
+    /// scene panes (`stage_scene`), path-traced panes (`stage_rt`), flush mesh
+    /// updates, or prepare app-shaped text (`prepare_text` — an app that
+    /// returns `false` from
+    /// [`display_list_text`](Application::display_list_text) fully owns the
+    /// renderer's text state, the engine never touches it). Return `true` to
+    /// request another frame immediately. The default is the portable
+    /// [`stage_3d`](Self::stage_3d).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn stage_renderer(&mut self, renderer: &mut VkRenderer, size: LogicalSize, scale: f64) -> bool {
+        self.stage_3d(renderer, size, scale)
+    }
+}
+
+/// The runner's client-side decorations, for a window whose chrome is not
+/// the standard: one that moves or resizes itself
+/// ([`take_window_action`](Self::take_window_action)), claims its own edges
+/// or a title-bar band, or turns the standard CSD off.
+///
+/// Reached ONLY through [`Application::csd`]; an app that answers `None`
+/// there gets every default below. Implementing this trait without
+/// overriding the accessor does nothing — the defaults stay in force.
+pub trait Csd {
     /// Whether the runner's built-in client-side decorations apply: the
     /// titlebar move band, the movable-root plate drag regions, and — when
-    /// [`csd_resize_borders`](Application::csd_resize_borders) is also on —
-    /// the rect-edge resize grabs and their edge cursors. Return `false` for a
+    /// [`csd_resize_borders`](Self::csd_resize_borders) is also on — the
+    /// rect-edge resize grabs and their edge cursors. Return `false` for a
     /// window whose chrome doesn't follow its rect (e.g. a circular pane) and
     /// drive moves/resizes yourself via
-    /// [`take_window_action`](Application::take_window_action).
+    /// [`take_window_action`](Self::take_window_action).
     fn standard_csd(&self) -> bool {
         true
     }
@@ -606,7 +676,7 @@ pub trait Application: Sized + 'static {
     ///
     /// Turn it on for a window that must be resizable by its own edges under a
     /// compositor that provides no such affordance. Only consulted when
-    /// [`standard_csd`](Application::standard_csd) is on.
+    /// [`standard_csd`](Self::standard_csd) is on.
     fn csd_resize_borders(&self) -> bool {
         false
     }
@@ -616,17 +686,10 @@ pub trait Application: Sized + 'static {
     /// through the compositor (or via explicitly-declared handles —
     /// [`is_movable_root_plate_at`](Application::is_movable_root_plate_at)); nothing is
     /// implicitly draggable. An app with an actual title bar returns `true`. Separate from
-    /// [`standard_csd`](Application::standard_csd), which also gates the resize borders, and
+    /// [`standard_csd`](Self::standard_csd), which also gates the resize borders, and
     /// only consulted when `standard_csd()` is on.
     fn csd_titlebar_move(&self) -> bool {
         false
-    }
-
-    /// Override the pointer cursor at (x, y). `None` falls back to the
-    /// runner's standard CSD edge cursors (or `Default` when
-    /// [`standard_csd`](Application::standard_csd) is off).
-    fn cursor_icon(&self, _x: f32, _y: f32) -> Option<CursorIcon> {
-        None
     }
 
     /// Polled after each pointer frame is dispatched: return a
@@ -636,10 +699,19 @@ pub trait Application: Sized + 'static {
     fn take_window_action(&mut self) -> Option<WindowAction> {
         None
     }
+}
 
-    /// Called once when the event loop ends (window closed, app-requested
-    /// exit): last-chance work like autosave. The surface is still alive.
-    fn on_exit(&mut self) {}
+/// Hand a new renderer to the app: [`Application::renderer_init`], then the
+/// app's `App3D::init_3d` with the `3d` feature. The one way a native shell
+/// announces a renderer (a session's, a reconnect's, a layer surface's
+/// rebuilt one, the AppKit window's).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn renderer_ready<A: Application>(app: &mut A, renderer: &mut VkRenderer) {
+    app.renderer_init(renderer);
+    #[cfg(feature = "3d")]
+    if let Some(app_3d) = app.app_3d() {
+        app_3d.init_3d(renderer);
+    }
 }
 
 

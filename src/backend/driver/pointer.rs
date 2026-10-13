@@ -3,12 +3,27 @@
 //! outside-press popover close) and releasing.
 
 use super::*;
+use crate::backend::app::Csd;
+
+/// The decorations of an app with no [`Csd`] of its own: every default.
+struct StandardCsd;
+
+impl Csd for StandardCsd {}
+
+/// `f` over the app's [`Csd`], or over the standard one's defaults for an app
+/// that has none ([`Application::csd`] answering `None`).
+fn with_csd<A: Application, R>(app: &mut A, f: impl FnOnce(&mut dyn Csd) -> R) -> R {
+    match app.csd() {
+        Some(csd) => f(csd),
+        None => f(&mut StandardCsd),
+    }
+}
 
 impl Driver {
     /// The cursor for the pointer at (lx, ly): the app's
     /// [`Application::cursor_icon`] override, else the standard-CSD edge
     /// cursors (status bars and non-standard-CSD apps fall back to Default).
-    pub fn cursor_icon_at<A: Application>(&self, app: &A, lx: f32, ly: f32, size: LogicalSize) -> CursorIcon {
+    pub fn cursor_icon_at<A: Application>(&self, app: &mut A, lx: f32, ly: f32, size: LogicalSize) -> CursorIcon {
         // Over the context menu the pointer is the menu's,
         // whatever of the app lies at that place under it (a splitter, a
         // resize border) — and in their popups that place may be outside
@@ -19,9 +34,7 @@ impl Driver {
         if let Some(icon) = app.cursor_icon(lx, ly) {
             return icon;
         }
-        if !app.standard_csd()
-            || !app.csd_resize_borders()
-        {
+        if !with_csd(app, |csd| csd.standard_csd() && csd.csd_resize_borders()) {
             return CursorIcon::Default;
         }
         match csd_edge(lx, ly, size) {
@@ -101,15 +114,17 @@ impl Driver {
         // Client-side decorations: drag and resize. Never on the menu popup:
         // its presses are the menu's, and its coordinates, translated into the
         // window's, would otherwise read as a resize border or a movable plate.
+        let (standard, resize_borders, titlebar_move) =
+            with_csd(t.app, |csd| (csd.standard_csd(), csd.csd_resize_borders(), csd.csd_titlebar_move()));
         if site.can_grab
             && btn == MouseButton::Left
             && !site.on_popup
-            && t.app.standard_csd()
+            && standard
         {
             // Resize borders off: the compositor's own band outside the
             // window handles it; the move checks still run, so drag-to-move
             // still works.
-            if t.app.csd_resize_borders() && !site.own_edges {
+            if resize_borders && !site.own_edges {
                 if let Some(edge) = csd_edge(lx, ly, site.size) {
                     return Press::Resize(edge);
                 }
@@ -117,7 +132,7 @@ impl Driver {
             // The titlebar band: y in [8, 32), clear of the top-right buttons.
             let is_widget = t.app.ui_context().is_some_and(|ctx| ctx.is_widget_at(lx, ly));
             if (!is_widget
-                && t.app.csd_titlebar_move()
+                && titlebar_move
                 && (CSD_BORDER..32.0).contains(&ly)
                 && lx < site.size.width - 70.0)
                 || t.app.is_movable_root_plate_at(lx, ly)

@@ -164,8 +164,8 @@ use super::rt::{PreparedRtScene, RtCamera, RtEnvironment, RtImage, RtMaterial, R
 
 /// What an app stages a 3D scene through: the renderer's half of the
 /// pass, the same on every renderer (`vk::VkRenderer`, `web::WebRenderer`).
-/// An app takes one in `Application::init_3d` (make its meshes) and
-/// `Application::stage_3d` (stage this frame's scene).
+/// An app takes one in `App3D::init_3d` (make its meshes) and
+/// `App3D::stage_3d` (stage this frame's scene).
 pub trait Stage3D {
     /// Upload a mesh: a triangle list for a fill draw, vertex PAIRS for a
     /// wireframe one.
@@ -201,7 +201,7 @@ pub trait Stage3D {
     /// and the BVH when [`rt_needs_bvh`](Self::rt_needs_bvh) — was done
     /// ahead, on any thread: this only uploads it. Restarts the
     /// accumulation. The scene is not consumed; keep it to upload again
-    /// after a reconnect (`Application::init_3d` runs again then).
+    /// after a reconnect (`App3D::init_3d` runs again then).
     fn set_rt_scene_prepared(&mut self, scene: &PreparedRtScene);
     /// Whether this renderer's tracer traverses a CPU-built BVH — the
     /// `with_bvh` to prepare its scenes with. False on the Vulkan

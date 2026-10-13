@@ -131,17 +131,19 @@ reads its `@workgroup_size`). `vk::compute` re-exports them.
 ## 3D scenes (`Stage3D`)
 
 All of this section and the path tracer below are behind the `3d` feature (cce-designer and
-cce-model turn it on). Without it, `draw::{scene, lit, rt}`, their `vk` / `web` stages and
-shaders, `Stage3D` and `Application::init_3d` / `stage_3d` are not compiled, the device never
-enables the ray-query stack, and a renderer keeps only the scene's 1×1 backdrop
-(`vk/scene_off.rs`; the WebGPU renderer's empty one), which the 2D frost samples.
+cce-model turn it on). Without it, `draw::{scene, lit, rt}`, their `vk` / `web` stages and shaders,
+`Stage3D` and the `App3D` extension (`init_3d` / `stage_3d`) are not compiled, the device never
+enables the ray-query stack, and a renderer keeps only the scene's 1×1 backdrop (`vk/scene_off.rs`;
+the WebGPU renderer's empty one), which the 2D frost samples.
 
 An app stages a scene through the trait `draw::scene::Stage3D` (`create_mesh`, `update_mesh`,
 `stage_scene`, `stage_scene_images`, `set_scene_light`), implemented by `VkRenderer` and
 `WebRenderer`. Types: `Vertex3D`, `MeshId`, `SceneDraw`, `SceneImage`, `scene_uniforms`,
-`wire_base_bias`; shaders `scene3d.wgsl` / `scene3d_image.wgsl` in `draw/`. The hooks are
-`Application::init_3d` (once per renderer: make meshes) and `stage_3d` (every frame before the
-draw; true asks for another frame).
+`wire_base_bias`; shaders `scene3d.wgsl` / `scene3d_image.wgsl` in `draw/`. The hooks are on
+the `App3D` extension, which an app returns from `Application::app_3d`: `init_3d` (once per
+renderer: make meshes) and `stage_3d` (every frame before the draw; true asks for another
+frame). The native shells call `App3D::stage_renderer`, which takes the `VkRenderer` and
+defaults to `stage_3d`.
 
 - **The backdrop**: a full-size pass in the canvas's sRGB format with a depth32 buffer, copied
   under a UI pass that loads it and samples it for blur, and kept until the next staged scene. On

@@ -125,7 +125,7 @@ pub fn build_frame<A: Application>(
     // Taken with the display list it describes. A frame that took the
     // app's damage and then was not presented owes those pixels, so the
     // next one that is presented repaints everything.
-    let app_damage = app.take_damage(size, scale);
+    let app_damage = app.grid_surface().and_then(|g| g.take_damage(size, scale));
     let damage = match (app_damage, *damage_owed) {
         (Some((x, y, w, h)), false) => {
             // Outward to whole physical pixels, plus one for an
@@ -422,7 +422,7 @@ fn diff_runs<T>(old: &[T], new: &[T], key: impl Fn(&T) -> u64, bx: impl Fn(&T) -
 }
 
 /// Damage the runner works out for itself, for an app that does not report
-/// its own (`Application::take_damage`): what this frame drew that the last
+/// its own (`GridSurface::take_damage`): what this frame drew that the last
 /// presented one did not, by diffing the tessellated batches, the text and
 /// the images. The renderer repaints only that (growing it around frosted
 /// plates) and reports only it to the compositor. Until 2026-10-06 every such
@@ -478,7 +478,7 @@ mod tests {
     //! The builder with no window and no GPU: a mock app, an empty font
     //! database, and the frame's data read back.
     use super::*;
-    use crate::backend::app::{AppSender, LogicalPosition, WindowSettings};
+    use crate::backend::app::{AppSender, GridSurface, LogicalPosition, WindowSettings};
     use crate::widget::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 
     #[derive(Default)]
@@ -506,8 +506,8 @@ mod tests {
         fn handle_key_input(&mut self, _: &KeyEvent, _: &mut bool) -> Option<()> {
             None
         }
-        fn take_damage(&mut self, _: LogicalSize, _: f64) -> Option<(f32, f32, f32, f32)> {
-            self.damage
+        fn grid_surface(&mut self) -> Option<&mut dyn GridSurface> {
+            Some(self)
         }
         fn custom_vertices(&mut self, verts: &mut Vec<Vertex>, size: LogicalSize, _: f64) {
             for _ in 0..self.custom {
@@ -521,6 +521,13 @@ mod tests {
         }
         fn clear_color(&self) -> [f32; 4] {
             [0.5, 0.0, 1.0, 0.25]
+        }
+    }
+
+    impl GridSurface for Mock {
+        fn grid_patch(&mut self, _: f64, _: f64, _: f64, _: f64, _: f64) {}
+        fn take_damage(&mut self, _: LogicalSize, _: f64) -> Option<(f32, f32, f32, f32)> {
+            self.damage
         }
     }
 

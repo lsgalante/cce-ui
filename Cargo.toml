@@ -47,8 +47,9 @@ graph = []
 # The 3D half of the renderers: the mesh scene pass (`draw::scene`, `Stage3D`),
 # lit meshes (`draw::lit`) and the path tracer (`draw::rt`), on Vulkan and
 # WebGPU, with their shaders and glam. Without it a renderer keeps only the
-# scene's 1×1 backdrop, which the 2D frost samples, and `init_3d` / `stage_3d`
-# are gone from `Application`. cce-designer and cce-model turn it on.
+# scene's 1×1 backdrop, which the 2D frost samples, and the `App3D` extension
+# (`init_3d` / `stage_3d`, `Application::app_3d`) is gone. cce-designer and
+# cce-model turn it on.
 3d = ["dep:glam"]
 
 [dependencies]

@@ -84,7 +84,7 @@ impl Driver {
             }
             t.deliver(msg, rebuild);
         }
-        let _ = t.app.take_window_action();
+        let _ = t.app.csd().and_then(|c| c.take_window_action());
     }
 
     /// Finger travel as a trackpad pixel scroll. A finger is always

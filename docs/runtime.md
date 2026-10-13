@@ -23,15 +23,15 @@ pointer-and-key. Present-tense reference; history is in `CHANGELOG.md`.
 `backend::frame::build_frame` turns the app's display list, custom vertices, overlays, widget
 shaping, text and popover-occlusion rects into a `BuiltFrame`. The Wayland shell presents it: grid
 patch, input region, glyph upload, extent gate and buffer scale, frame callback,
-`stage_renderer`, draw.
+`App3D::stage_renderer` (the `3d` feature), draw.
 
 **Damage** (`backend::frame::derive_damage`): for an app that does not report its own
-(`take_damage`), the shell diffs the tessellated batches (vertex bytes, scissor, clip, plate push,
-blur flag), the display-list text (text, position, colour, size, clips) and the image quads
-against the previous frame, and damages what changed — where it was and where it is — over the
-common prefix and suffix. Ids whose pixels `update_pixels` / `update_pixel_regions` replaced are
-damaged where drawn. It falls back to a full frame on a new size, scale or clear colour, changed
-plate carves, a frame owed after a skipped present, an app staging its own text
+(`GridSurface::take_damage`), the shell diffs the tessellated batches (vertex bytes, scissor, clip,
+plate push, blur flag), the display-list text (text, position, colour, size, clips) and the image
+quads against the previous frame, and damages what changed — where it was and where it is — over
+the common prefix and suffix. Ids whose pixels `update_pixels` / `update_pixel_regions` replaced
+are damaged where drawn. It falls back to a full frame on a new size, scale or clear colour,
+changed plate carves, a frame owed after a skipped present, an app staging its own text
 (`display_list_text` false), and a 3D backdrop.
 
 **Frost and partial frames.** A frosted plate that the region touches is repainted whole plus
@@ -46,7 +46,8 @@ disables derivation; `CCE_PRESENT_DEBUG=1` logs each rect.
 A connection is one **session**. A broken Wayland transport cannot be repaired, so `run` opens a
 new session around the same live `Application`: same app state, calloop loop and channel; a new
 surface, swapchain and **`VkRenderer`**. `renderer_init(&mut self, renderer)` runs once per
-renderer — the first is the process's own, every later one a replacement.
+renderer — the first is the process's own, every later one a replacement — and an app's
+`App3D::init_3d` right after it, with the same renderer (`backend::app::renderer_ready`).
 
 An id from `vk::upload_rgba` names an entry in one renderer's image table, and `Frame2D` skips an
 unknown id without logging. So an image id cached across frames — in a field, an LRU, a static —
@@ -93,7 +94,7 @@ restore (a systemd user service: the status bar, the notifier) returns true from
 `outlives_compositor`; the runner then waits for the successor's socket
 (`await_compositor_socket`, 250 ms poll) and rejoins with the same `Application`.
 
-**A layer app can drop its surface while empty** (`Application::wants_surface`). On a false turn
+**A layer app can drop its surface while empty** (`LayerApp::wants_surface`). On a false turn
 the runner detaches the renderer (`VkRenderer::detach_surface`: swapchain and `VkSurfaceKHR` go;
 device, pipelines, atlases and image table stay) and drops the layer surface; on a true turn it
 builds a fresh `wl_surface`, re-attaches the layer role and moves the same renderer onto it
@@ -193,7 +194,7 @@ at the down point, then `FingerEnd` at the lift so a flick coasts); a finger **h
 first motion past the slop. Other fingers are ignored until the first lifts. `TouchTracker` is the
 pure state machine; `Driver::touch` routes. A finger is always natural (dispatch runs inside
 `input::with_natural_scroll(true, …)`) and 1:1. Not by finger: CSD moves/resizes and
-`take_window_action` (their serials must match a pointer grab). Drive it in a shadow with
+`Csd::take_window_action` (their serials must match a pointer grab). Drive it in a shadow with
 `ccectl touch down|motion|up`.
 
 ## Scrolling semantics
