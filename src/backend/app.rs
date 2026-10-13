@@ -11,7 +11,6 @@ use crate::vk::VkRenderer;
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 use super::window_runner::EngineState;
 use cursor_icon::CursorIcon;
-use super::tessellate::Vertex;
 #[cfg(feature = "3d")]
 pub use crate::draw::scene::Stage3D;
 
@@ -476,12 +475,10 @@ pub trait Application: Sized + 'static {
     /// e.g. for focus-dependent chrome). Default: ignore.
     fn handle_focus_change(&mut self, _focused: bool, _needs_rebuild: &mut bool) {}
 
-    fn custom_vertices(&mut self, _verts: &mut Vec<Vertex>, _size: LogicalSize, _scale: f64) {}
-
     /// The frame's geometry, drawn via one batched, GPU-scissor-clipped pass (the single
     /// paint path). Every rendering app implements this — the legacy `view*` sinks are gone;
     /// `None` yields an empty frame. Overlays ([`overlay_quads`](Application::overlay_quads))
-    /// and [`custom_vertices`](Application::custom_vertices) still go through their own paths;
+    /// still go through their own path;
     /// text renders from the list when [`display_list_text`](Application::display_list_text)
     /// opts in. Receives the frame's logical size and HiDPI scale. Typically implemented as
     /// `Some(cce_ui::widget::painter::paint_tree(&self.ui_context, &self.root))`.

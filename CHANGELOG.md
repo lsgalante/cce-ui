@@ -10,6 +10,16 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-13
 
+- **`Application::custom_vertices` is gone.** The hook appended raw `Vertex`es as a final
+  unclipped batch after the display list's. Its one user, cce-display-manager, draws its login
+  card's blob as the last geometry of its display list (cce-display-manager 78e2f3a), which
+  tessellates to the same six vertices in the same unclipped last batch
+  (`card_blob_tessellates_to_the_old_custom_vertices` there, which uses the tessellator and not
+  the hook). `build_frame` loses the plumbing; the frame test that covered it becomes
+  `overlay_quads_are_their_own_vertex_list`, keeping its overlay half. `overlay_quads` is the one
+  side channel left. The trait goes from 44 methods to 43. Checked: lib tests with every feature
+  (699), every integration test, clippy, the wasm build with and without features, the display
+  manager's tests (22), and `cargo check --workspace --all-targets`.
 - **`ContainerLayout` and its seven strategies are gone.** `widget::ContainerLayout`,
   `OverlayLayout`, `VerticalLayout`, `GridLayout`, `AdaptiveGridLayout`, `ColumnsLayout`,
   `MosaicLayout` and `ReverseMosaicLayout` (`widget/container/container_layout.rs`: 581 lines, 13

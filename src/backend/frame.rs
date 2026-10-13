@@ -15,7 +15,7 @@
 use cosmic_text::FontSystem;
 
 use super::app::{Application, LogicalSize};
-use super::tessellate::{quad_vertices, tessellate_display_list, DlBatch, Vertex};
+use super::tessellate::{quad_vertices, tessellate_display_list, Vertex};
 use super::text::{collect_dl_text, dl_text_spans, TextBounds};
 use crate::draw::{Batch2D, Frame2D, ImageQuad, TextSpan};
 use super::text::DlText;
@@ -150,7 +150,7 @@ pub fn build_frame<A: Application>(
         collect_dl_text(fs, &dl, text_items);
     }
 
-    let (mut verts, mut dl_batches, dl_images, plate_features) =
+    let (verts, dl_batches, dl_images, plate_features) =
         tessellate_display_list(&dl, logical_w, logical_h, scale as f32);
     // A pending height-field export (`CCE_HEIGHTMAP`, or an app's
     // `scene::heightfield::request`): the plates of THIS frame, sampled
@@ -167,19 +167,6 @@ pub fn build_frame<A: Application>(
             ),
             Err(e) => log::warn!("[heightfield] export to {} failed: {e}", req.path.display()),
         }
-    }
-    // custom_vertices (e.g. graph geometry) is appended as a final unclipped batch drawn on top.
-    let pre_custom = verts.len() as u32;
-    app.custom_vertices(&mut verts, size, scale);
-    if (verts.len() as u32) > pre_custom {
-        dl_batches.push(DlBatch {
-            scissor: None,
-            clip_rrect: None,
-            start: pre_custom,
-            end: verts.len() as u32,
-            plate: None,
-            blur_behind: false,
-        });
     }
 
     // 1b. Overlay quads (drawn after the text pass).
@@ -484,7 +471,6 @@ mod tests {
     #[derive(Default)]
     struct Mock {
         damage: Option<(f32, f32, f32, f32)>,
-        custom: usize,
         overlay: bool,
     }
 
@@ -508,11 +494,6 @@ mod tests {
         }
         fn grid_surface(&mut self) -> Option<&mut dyn GridSurface> {
             Some(self)
-        }
-        fn custom_vertices(&mut self, verts: &mut Vec<Vertex>, size: LogicalSize, _: f64) {
-            for _ in 0..self.custom {
-                verts.extend(quad_vertices(0.0, 0.0, 1.0, 1.0, size.width, size.height, [1.0; 4]));
-            }
         }
         fn overlay_quads(&mut self, quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _: LogicalSize, _: f64) {
             if self.overlay {
@@ -554,19 +535,16 @@ mod tests {
     }
 
     #[test]
-    fn custom_vertices_are_a_last_unclipped_batch_and_overlays_their_own() {
-        let mut app = Mock { custom: 2, overlay: true, ..Mock::default() };
+    fn overlay_quads_are_their_own_vertex_list() {
+        let mut app = Mock { overlay: true, ..Mock::default() };
         let (mut fs, mut items, mut owed) = (fonts(), Vec::new(), false);
         let f = build_frame(&mut app, &mut fs, SIZE, 1.0, &mut owed, &mut items);
-        // An empty display list: the custom quads are the whole vertex list,
-        // in one batch on top with no scissor.
-        assert_eq!(f.verts.len(), 12);
-        let last = f.batches.last().expect("a batch for the custom vertices");
-        assert_eq!((last.start, last.end, last.scissor), (0, 12, None));
+        // An empty display list: no page geometry, the overlay quad apart.
+        assert!(f.verts.is_empty() && f.batches.is_empty());
         assert_eq!(f.overlay_verts.len(), 6);
 
         let none = build_frame(&mut Mock::default(), &mut fs, SIZE, 1.0, &mut owed, &mut items);
-        assert!(none.verts.is_empty() && none.batches.is_empty());
+        assert!(none.verts.is_empty() && none.batches.is_empty() && none.overlay_verts.is_empty());
     }
 
     #[test]

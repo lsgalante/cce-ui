@@ -161,8 +161,8 @@ Every client implements `Application` (`src/backend/app.rs`, re-exported from `e
   `overflow_margin`, `input_regions`.
 - **State**: `update(msg, needs_rebuild, exit)`, `tick(dt, needs_rebuild)`.
 - **Draw**: `display_list(size, scale)` returns the frame — the ONE paint path. `display_list_text`
-  opts its `Prim::Text` into the glyph pass. Side channels: `overlay_quads`, `custom_vertices`
-  (a final unclipped batch).
+  opts its `Prim::Text` into the glyph pass. The one side channel is `overlay_quads` (flat quads
+  drawn after the text). Geometry that must lie over every plate is emitted last in the list.
 - **Input**: `handle_pointer_move`, `handle_mouse_input`, `handle_mouse_wheel`, `handle_pinch`,
   `handle_key_input`. `needs_rebuild: &mut bool` requests a redraw.
 - **Widgets**: `ui_context()` / `ui_context_mut()` expose the app's `UiContext`; exposing it is
