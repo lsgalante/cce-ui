@@ -151,9 +151,7 @@ impl UiContext {
         cache.covering.clear();
     }
 
-    // The hover highlight is `widget::hover_animation`'s (one store; the context's
-    // write-only copy went with the global-state RFC's phase 1). The cursor is the
-    // context's: the scroll box reads it.
+    // The cursor is the context's: the scroll box reads it.
     pub fn set_cursor_pos(&mut self, x: f32, y: f32) {
         self.cursor_pos = (x, y);
     }

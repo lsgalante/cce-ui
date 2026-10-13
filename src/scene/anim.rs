@@ -3,9 +3,8 @@
 //!
 //! It is pure time-based math over an [`Animatable`] value, fully unit-testable without a clock,
 //! GPU, or event loop: drive it with [`Animated::tick`] and read [`Animated::value`]. No widget
-//! in the toolkit holds one yet (hover runs through `widget::hover_animation`); one that does
-//! reports "still animating" from its `tick` while it moves, which keeps the frame loop's
-//! cadence up.
+//! in the toolkit holds one yet; one that does reports "still animating" from its `tick` while
+//! it moves, which keeps the frame loop's cadence up.
 
 /// A value that can be interpolated and integrated for animation (scalars, colors, points).
 pub trait Animatable: Copy {

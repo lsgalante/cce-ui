@@ -10,6 +10,17 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-13
 
+- **`hover_animation` keeps only the page scroll offset.** Its hover highlight glided toward a
+  box `register_hovered` set, and nothing called `register_hovered`: `get_quad` never returned a
+  box, `post_render_check` (cce-system-interface, until its Stage A) aimed an invisible one at
+  the cursor, and `tick` (cce-gallery, cce-designer) reported no change. `register_hovered`,
+  `post_render_check`, `get_quad`, `reset_frame_registration`, `set_cursor_pos`, `tick` and
+  `HoverState` are gone, with the window's cursor copy only `post_render_check` read;
+  `WindowState` holds the offset as a `Cell<f32>`. `set_scroll_offset` / `get_scroll_offset`
+  stay: the popover hit tests (the context's, the context menu's, TreeList's add-key box)
+  subtract the offset a scrolling host sets. The three apps dropped their calls first. Checked:
+  `the_scroll_offset_reads_back_as_set`, lib tests with every feature (710), every integration
+  test, clippy, the wasm build with and without features, `cargo check --workspace --all-targets`.
 - **The flat-host bridge is gone: `render_widget`, `RenderTarget` and the carve types.** Every
   app paints its widgets with `paint_root_into` into a `PaintCtx` now (cce-system-interface was
   the last to replay them, until its Stage B), so the walk that replayed a widget onto a

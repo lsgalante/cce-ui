@@ -2,7 +2,7 @@
 //! the widgets themselves (`docs/rfc-global-state.md`, phase 2).
 //!
 //! - the open context menu (`widget::context_menu`),
-//! - the hover highlight and the cursor it follows (`widget::hover_animation`),
+//! - the page scroll offset popover hit tests subtract (`widget::hover_animation`),
 //! - the side swipe being recognized (`widget::side_swipe`),
 //! - the input method's composition and the caret it is drawn at (`ime`),
 //! - the phase of the wheel event being dispatched (`widget::scroll_motion`),
@@ -13,7 +13,7 @@
 //! A window OWNS a [`WindowState`], and its shell makes it the current one ([`enter`]) for
 //! as long as it
 //! runs that window's code; the modules' free functions — `context_menu::show`,
-//! `hover_animation::tick`, `ime::caret`, … — act on the current one, so the many apps
+//! `hover_animation::get_scroll_offset`, `ime::caret`, … — act on the current one, so the many apps
 //! and widgets that call them (an app need not have a `UiContext` to show a menu) need not
 //! know which window they serve. With none entered — a test, a tool that draws no window —
 //! each thread has a default one.
@@ -29,14 +29,13 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::widget::context_menu::ContextMenuState;
-use crate::widget::hover_animation::HoverState;
 use crate::widget::side_swipe::SideSwipe;
 
 /// One window's interaction state (see the module docs).
 pub struct WindowState {
     pub(crate) context_menu: RefCell<ContextMenuState>,
-    pub(crate) hover: RefCell<HoverState>,
-    pub(crate) cursor: RefCell<(f32, f32)>,
+    /// The page scroll offset (`widget::hover_animation`).
+    pub(crate) scroll_offset: Cell<f32>,
     pub(crate) swipe: RefCell<SideSwipe>,
     pub(crate) ime: RefCell<crate::ime::State>,
     pub(crate) scroll_phase: Cell<crate::widget::ScrollPhase>,
@@ -47,12 +46,11 @@ pub struct WindowState {
 pub use crate::scale::Props;
 
 impl WindowState {
-    /// A window's state with nothing open, hovered, swiped or composed.
+    /// A window's state with nothing open, swiped or composed, and its page unscrolled.
     pub fn new() -> Rc<WindowState> {
         Rc::new(WindowState {
             context_menu: RefCell::new(ContextMenuState::new()),
-            hover: RefCell::new(HoverState::new()),
-            cursor: RefCell::new((0.0, 0.0)),
+            scroll_offset: Cell::new(0.0),
             swipe: RefCell::new(SideSwipe::new()),
             ime: RefCell::new(crate::ime::State::default()),
             scroll_phase: Cell::new(crate::widget::ScrollPhase::Wheel),

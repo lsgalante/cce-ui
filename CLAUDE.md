@@ -434,7 +434,7 @@ any off-standard row), and `src/main.rs` is the reference.
 ## Global state
 
 Style is the snapshot above. **A window's interaction and properties live in its
-`window_state::WindowState`** — the context menu, hover highlight, side swipe, input-method
+`window_state::WindowState`** — the context menu, page scroll offset, side swipe, input-method
 composition, scale, display metric, app id, scroll phase — which the shell makes current
 (`window_state::enter`) while it runs that window's code. The modules' free functions act on the
 current one; a thread with no window (a custom shell, a tool, a test) gets its own default. The
@@ -476,7 +476,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   (the box model), `paint/` (`DisplayList`, `Prim`, `PaintCtx`, `Field`, `ControlPlate`,
   `PlateSpec`), `anim.rs` (`Animated<T>`), `material/`,
   `heightfield/`.
-- `widget/` — `host.rs` (`WidgetHost`), `tree.rs` (`WidgetTree`, on `scene::Arena`), `painter.rs` (the paint walk over widgets), `events.rs` (the input vocabulary), `controllers.rs` (the host controller traits), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, hover animation), `handle.rs`,
+- `widget/` — `host.rs` (`WidgetHost`), `tree.rs` (`WidgetTree`, on `scene::Arena`), `painter.rs` (the paint walk over widgets), `events.rs` (the input vocabulary), `controllers.rs` (the host controller traits), `model/` (the narrow traits and `Adapted`), `core/` (the `Widget` base, the context menu, the clipboard, the page scroll offset in `hover_animation`), `handle.rs`,
   `embedded.rs`, `container/` (params pane, tree list, spreadsheet, menus, scroll boxes…),
   `input/` (button, slider, text box, dropdown, ramp…), `display/` (label, graph behind `graph`, svg…),
   `editor.rs` (`TextEditorState`, behind `TextBox`), `line_edit/` (`LineEdit`, a line of text
