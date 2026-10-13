@@ -8,8 +8,8 @@
 //!
 //! 0. the base: crate-root helpers, the re-exported cce-core modules, and
 //!    `geom` (the `Rect` every layer passes around)
-//! 1. `style`, `color`, `scale`
-//! 2. `draw`, `layout`, `icon`
+//! 1. the style snapshot and its getters: `style`, `color`, `layout`, `scale`
+//! 2. `draw`, `icon`
 //! 3. `scene`
 //! 4. `context`, `widget`, `text`, `compose`, `ime`, `text_input`, `window_state`, `a11y`
 //! 5. the shells and the renderer: `backend`, `vk`, `wayland`, `web`, `mac`,
@@ -17,10 +17,12 @@
 //! 6. `engine`, the facade apps import
 //!
 //! A module may name its own layer and anything below it. Every `crate::X`
-//! path in a module's non-test code is an edge; one that points UP fails
-//! unless it is in [`ALLOWED_UPWARD`], the edges that existed when the test
-//! was written. That list only shrinks: an allowance whose edge is gone
-//! fails too, so the fix that removes an edge also deletes its line.
+//! path in a module's non-test code is an edge; one that points UP fails.
+//! [`ALLOWED_UPWARD`] held the upward edges that existed when the test was
+//! written, and it is empty now: keep it so. An item a lower layer needs
+//! moves DOWN and the higher module re-exports it at its old path
+//! (`pub use crate::lower::X` is a downward edge); moving an item up breaks
+//! its path.
 //!
 //! Test code is not scanned: a trailing `#[cfg(test)] mod tests`, and test
 //! modules in their own files (`tests.rs`, `*_tests.rs`, `tests/`).
@@ -41,9 +43,11 @@ fn layer(name: &str) -> Option<u8> {
         | "create_font_system" | "create_font_system_with_system_fonts" | "geometry_font_system"
         | "icon_pixels" | "icon_source" | "icon_tint" | "icons_dir" | "rasterize_svg" | "upload_icon"
         | "upload_icon_tinted" | "page_fonts" | "scroll_debug" | "impl_widget_base" | "geom" => 0,
-        "style" | "color" | "colors" | "scale" => 1,
+        // The style snapshot and the modules whose slots it holds: `color` and
+        // `layout` each own a part of `Style`, and their getters read it.
+        "style" | "color" | "layout" | "scale" => 1,
         // `icon` uploads what it resolves, through `draw`.
-        "draw" | "layout" | "icon" => 2,
+        "draw" | "icon" => 2,
         "scene" => 3,
         // `text` shapes with `scene::paint` and widget types: it sits with them.
         "context" | "ime" | "text_input" | "window_state" | "a11y" | "widget" | "text" | "compose" => 4,
@@ -53,12 +57,9 @@ fn layer(name: &str) -> Option<u8> {
     })
 }
 
-/// Upward edges that existed on 2026-10-10, `from -> to`. Delete a line
-/// when its edge is gone (the test says which); never add one.
-const ALLOWED_UPWARD: &[(&str, &str)] = &[
-    ("color", "layout"),
-    ("style", "layout"),
-];
+/// Upward edges allowed, `from -> to`. The four that existed on 2026-10-10
+/// are gone; never add one.
+const ALLOWED_UPWARD: &[(&str, &str)] = &[];
 
 /// The code a module ships: everything before a trailing `#[cfg(test)] mod
 /// tests`, with line comments dropped (doc links name modules too).

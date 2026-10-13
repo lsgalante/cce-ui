@@ -67,9 +67,13 @@ The `Makefile` wraps `cargo build --release` and `ccebuild install --no-build cc
 **Tests.** Headless `#[cfg(test)]` modules beside the code, densest in `src/scene/*`,
 `src/color/`, `src/layout/` and the larger widgets; integration tests in `tests/`
 (`plate_golden.rs` is the pixel-neutrality gate for plate changes; `doc_claims.rs` checks the docs;
-`layering.rs` holds the module layering: a top-level module may name its own layer or lower,
-and its `ALLOWED_UPWARD` list of older upward edges only shrinks — delete a line when its edge
-is gone, never add one).
+`layering.rs` holds the module layering: a top-level module may name its own layer or lower —
+the base (`geom`, the crate-root helpers, cce-core's modules), then the style snapshot and its
+getters (`style`, `color`, `layout`, `scale`), `draw` and `icon`, `scene`, the widget layer,
+the shells and renderers, `engine`. Its `ALLOWED_UPWARD` list is empty; keep it so. When a lower
+layer needs an item, move the item DOWN and re-export it at its old path from the higher
+module (`scene::layout::Rect` is `geom::Rect`, `scene::MaterialDef` is `color`'s); never add
+an allowance).
 - **Tests never read the machine's config.** Under `cfg(test)` the config home is a per-process
   directory nobody creates (cce-ui's dev-dependency turns on cce-core's `test-isolation`), so
   every getter answers its default. A test needing a setting loads it from a string
