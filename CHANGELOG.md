@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-13
 
+- **`ScrollRegion`'s frame and bars paint onto a `PaintCtx`.** `push_prims`,
+  `push_scrollbar_fore`, `push_scrollbar_prims` and `push_scrollbar_prims_alpha` took `&mut dyn
+  RenderTarget`; every caller (cce-fonts, cce-mail, cce-cloud, cce-system-interface) passes a
+  `PaintCtx`, so they take `&mut PaintCtx` and emit the same rounded fills directly. Checked:
+  `the_fore_copy_is_drawn_after_the_rows` (now reading the fills' alphas off a display list),
+  lib tests with every feature (709), clippy, the wasm build with and without features,
+  `cargo check --workspace --all-targets`.
 - **Popovers paint onto a `PaintCtx`: `render_popover(&mut PaintCtx)`.**
   `WidgetHost::render_popover` and `Paint::draw_popover` took `&mut dyn RenderTarget`, the flat
   host's colour-typed surface; every host already handed them its frame's `PaintCtx`, which

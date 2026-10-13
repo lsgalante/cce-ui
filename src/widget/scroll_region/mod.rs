@@ -15,7 +15,7 @@
 //!
 //! The frame/scrollbar can be emitted two ways, matching the two app styles:
 //! [`ScrollRegion::push_prims`] draws the bordered frame + pill scrollbars onto
-//! a [`crate::scene::paint::RenderTarget`]; [`ScrollRegion::push_quads`] /
+//! a [`crate::scene::paint::PaintCtx`]; [`ScrollRegion::push_quads`] /
 //! [`ScrollRegion::push_scrollbar_quads`] emit flat quads for hosts on the
 //! tuple pipeline (split so the scrollbar can draw AFTER the rows — drawn
 //! together, rows paint over the thumb and it peeks through the inter-row gaps
@@ -27,7 +27,7 @@
 //! | `activity` | `ScrollbarActivity`, the raise/sink hysteresis of a bar behind a plate, and its timings |
 //! | `scrollbar` | the bars' geometry and hit tests, and raising them |
 //! | `input` | presses, drags, the pointer, the wheel, keys, and the tick |
-//! | `emit` | drawing the frame and the bars: prims on a `RenderTarget`, or flat quads |
+//! | `emit` | drawing the frame and the bars: prims on a `PaintCtx`, or flat quads |
 
 mod activity;
 mod emit;

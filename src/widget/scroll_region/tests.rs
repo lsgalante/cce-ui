@@ -290,14 +290,18 @@ fn sink_behind_bars_cross_at_the_centre() {
     assert_eq!(sb_x + sb_w, 10.0 + 200.0 - 4.0);
 }
 
-/// Records the alpha of every rect a paint emits.
-#[derive(Default)]
-struct Alphas(Vec<f32>);
-impl crate::scene::paint::RenderTarget for Alphas {
-    fn rect(&mut self, color: [f32; 4], _x: f32, _y: f32, _w: f32, _h: f32) {
-        self.0.push(color[3]);
-    }
-    fn text(&mut self, _: &str, _: f32, _: f32, _: f32, _: [f32; 4]) {}
+/// The alpha of every fill `paint` emits, in order.
+fn alphas(paint: impl FnOnce(&mut crate::scene::paint::PaintCtx)) -> Vec<f32> {
+    let mut pc = crate::scene::paint::PaintCtx::new();
+    paint(&mut pc);
+    pc.finish()
+        .items
+        .into_iter()
+        .map(|item| match item.prim {
+            crate::scene::paint::Prim::RoundedRect { color, .. } => color[3],
+            other => panic!("only rounded fills: {other:?}"),
+        })
+        .collect()
 }
 
 /// A sink-behind region's `push_prims` draws the frame and the idle copy
@@ -309,32 +313,21 @@ impl crate::scene::paint::RenderTarget for Alphas {
 fn the_fore_copy_is_drawn_after_the_rows() {
     let mut r = region().with_sink_behind(true);
     r.update_bounds(10, 20.0, 100.0);
-    let mut prims = Alphas::default();
-    r.push_prims(&mut prims);
     // border, idle track + thumb, bg — and no fore copy.
-    assert_eq!(prims.0.len(), 4);
-    let mut fore = Alphas::default();
-    r.push_scrollbar_fore(&mut fore);
-    assert!(fore.0.is_empty(), "sunk: no fore copy");
+    assert_eq!(alphas(|pc| r.push_prims(pc)).len(), 4);
+    assert!(alphas(|pc| r.push_scrollbar_fore(pc)).is_empty(), "sunk: no fore copy");
     r.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
     r.tick(SCROLL_FADE_SECS * 0.5);
-    let mut prims = Alphas::default();
-    r.push_prims(&mut prims);
-    assert_eq!(prims.0.len(), 4, "raised, the idle copy still lies under the bg");
-    let mut fore = Alphas::default();
-    r.push_scrollbar_fore(&mut fore);
-    assert_eq!(fore.0.len(), 2);
+    assert_eq!(alphas(|pc| r.push_prims(pc)).len(), 4, "raised, the idle copy still lies under the bg");
+    let fore = alphas(|pc| r.push_scrollbar_fore(pc));
+    assert_eq!(fore.len(), 2);
     let track = crate::color::scrollbar_track_color()[3];
-    assert!(fore.0[0] < track, "half faded in: {} of {}", fore.0[0], track);
+    assert!(fore[0] < track, "half faded in: {} of {}", fore[0], track);
 
     let mut plain = region();
     plain.update_bounds(10, 20.0, 100.0);
-    let mut prims = Alphas::default();
-    plain.push_prims(&mut prims);
-    assert_eq!(prims.0.len(), 4, "border, bg, track, thumb");
-    let mut fore = Alphas::default();
-    plain.push_scrollbar_fore(&mut fore);
-    assert!(fore.0.is_empty());
+    assert_eq!(alphas(|pc| plain.push_prims(pc)).len(), 4, "border, bg, track, thumb");
+    assert!(alphas(|pc| plain.push_scrollbar_fore(pc)).is_empty());
 }
 
 #[test]

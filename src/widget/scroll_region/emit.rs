@@ -1,7 +1,14 @@
-//! Drawing the region's frame and scrollbars: as prims on a `RenderTarget` (the frame, the idle and
+//! Drawing the region's frame and scrollbars: as prims on a `PaintCtx` (the frame, the idle and
 //! fore copies of the bars), or as flat quads for a host on the tuple pipeline.
 
 use super::*;
+use crate::scene::paint::PaintCtx;
+
+/// A rounded fill at `(x, y, w, h)` on every corner.
+fn rounded(pc: &mut PaintCtx, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32) {
+    let rect = crate::scene::layout::Rect { x, y, width: w, height: h };
+    pc.rounded_rect(rect, radius, (true, true, true, true), color);
+}
 
 impl ScrollRegion {
     /// The legacy frame, single-drawn: 1px rounded border (focus/hover tinted, from
@@ -12,7 +19,7 @@ impl ScrollRegion {
     /// under them. Call [`Self::push_scrollbar_fore`] once the rows are down.
     /// A framed sink region draws its behind copy here, under the bg fill; a
     /// frameless one leaves it to the host, under the host's plate.
-    pub fn push_prims(&self, pc: &mut dyn crate::scene::paint::RenderTarget) {
+    pub fn push_prims(&self, pc: &mut PaintCtx) {
         if self.draw_frame {
             let radius = crate::layout::list_corner_radius();
             let border_color = if self.focused {
@@ -22,8 +29,7 @@ impl ScrollRegion {
             } else {
                 [0.18, 0.18, 0.24, 1.0]
             };
-            let all = (true, true, true, true);
-            pc.rect_with_radius_corners(border_color, self.x, self.y, self.w, self.h, radius, all);
+            rounded(pc, border_color, self.x, self.y, self.w, self.h, radius);
             // A sink-behind bar's idle copy draws here, UNDER the translucent
             // bg fill (list_bg_color's alpha is 0.3): it shows through dimly,
             // sunk into the list plate — the designer parameter-pane look,
@@ -33,14 +39,14 @@ impl ScrollRegion {
             if self.sink_behind {
                 self.push_scrollbar_prims(pc);
             }
-            pc.rect_with_radius_corners(
+            rounded(
+                pc,
                 crate::color::list_bg_color(),
                 self.x + 1.0,
                 self.y + 1.0,
                 self.w - 2.0,
                 self.h - 2.0,
                 (radius - 1.0).max(0.0),
-                all,
             );
         }
         // A plain region's bar rides on top, always. A sink-behind region's
@@ -57,7 +63,7 @@ impl ScrollRegion {
     /// after the rows. It fades rather than flips and keeps drawing all the
     /// way out — gating it on `scrollbar_raised` would cut the fade off at
     /// the latch. Nothing for a plain region, whose bar `push_prims` drew.
-    pub fn push_scrollbar_fore(&self, pc: &mut dyn crate::scene::paint::RenderTarget) {
+    pub fn push_scrollbar_fore(&self, pc: &mut PaintCtx) {
         if self.sink_behind {
             self.push_scrollbar_prims_alpha(pc, self.activity.fade());
         }
@@ -66,7 +72,7 @@ impl ScrollRegion {
     /// The pill scrollbars alone (track + thumb, both axes), drawn wherever the
     /// host calls it — a frameless sink-behind host draws its idle copy with
     /// this, every frame, BEFORE its plate.
-    pub fn push_scrollbar_prims(&self, pc: &mut dyn crate::scene::paint::RenderTarget) {
+    pub fn push_scrollbar_prims(&self, pc: &mut PaintCtx) {
         self.push_scrollbar_prims_alpha(pc, 1.0);
     }
 
@@ -74,7 +80,7 @@ impl ScrollRegion {
     /// `alpha` — what a host draws the FORE copy with while it fades in and
     /// out. The copy that idles behind the plate is drawn at full alpha; the
     /// plate over it is what dims and frosts it.
-    pub fn push_scrollbar_prims_alpha(&self, pc: &mut dyn crate::scene::paint::RenderTarget, alpha: f32) {
+    pub fn push_scrollbar_prims_alpha(&self, pc: &mut PaintCtx, alpha: f32) {
         let a = alpha.clamp(0.0, 1.0);
         if a <= 0.001 {
             return;
@@ -86,22 +92,21 @@ impl ScrollRegion {
         // Track and thumb are pills — half-width radius (the designer look).
         // Both tracks before either thumb, so where centred bars cross the
         // horizontal track does not cover the vertical thumb.
-        let all = (true, true, true, true);
         let track = dim(crate::color::scrollbar_track_color());
         let thumb = dim(crate::color::scrollbar_thumb_color());
         let v = (self.content_h > self.viewport_h).then(|| self.scrollbar_geom());
         let h = self.h_scroll_active().then(|| self.h_scrollbar_geom());
         if let Some((sb_x, track_y, sb_w, track_h, _, _)) = v {
-            pc.rect_with_radius_corners(track, sb_x, track_y, sb_w, track_h, sb_w.min(track_h) * 0.5, all);
+            rounded(pc, track, sb_x, track_y, sb_w, track_h, sb_w.min(track_h) * 0.5);
         }
         if let Some((track_x, sb_y, track_w, sb_h, _, _)) = h {
-            pc.rect_with_radius_corners(track, track_x, sb_y, track_w, sb_h, sb_h.min(track_w) * 0.5, all);
+            rounded(pc, track, track_x, sb_y, track_w, sb_h, sb_h.min(track_w) * 0.5);
         }
         if let Some((sb_x, _, sb_w, _, thumb_y, thumb_h)) = v {
-            pc.rect_with_radius_corners(thumb, sb_x, thumb_y, sb_w, thumb_h, sb_w.min(thumb_h) * 0.5, all);
+            rounded(pc, thumb, sb_x, thumb_y, sb_w, thumb_h, sb_w.min(thumb_h) * 0.5);
         }
         if let Some((_, sb_y, _, sb_h, thumb_x, thumb_w)) = h {
-            pc.rect_with_radius_corners(thumb, thumb_x, sb_y, thumb_w, sb_h, sb_h.min(thumb_w) * 0.5, all);
+            rounded(pc, thumb, thumb_x, sb_y, thumb_w, sb_h, sb_h.min(thumb_w) * 0.5);
         }
     }
 
