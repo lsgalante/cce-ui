@@ -233,7 +233,8 @@ pub struct ContextMenuState {
     /// padding stays). 1 for every menu but one a host opened with
     /// [`show_scaled`](Self::show_scaled); every `show` sets it again, so
     /// a scale never outlives its menu into the next — a text box's Cut /
-    /// Copy / Paste, or a page turned to.
+    /// Copy / Paste. A page turned to wears the scale of the plate it
+    /// turns from ([`show_page`](Self::show_page)).
     scale: f32,
 }
 

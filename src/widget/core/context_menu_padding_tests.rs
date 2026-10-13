@@ -139,8 +139,10 @@ fn a_fallback_glyph_widens_the_plate_as_drawn() {
 
 /// A menu shown scaled is larger throughout — its rows step by the
 /// scaled pitch in the sizing, both hit tests and the label run, and its
-/// labels are drawn at the scaled size — while the padding stays. The
-/// next `show` is the DE's size again: a scale does not outlive its menu.
+/// labels are drawn at the scaled size — while the padding stays. A page
+/// turned to from it, and the plate turned back to, keep the scale. The
+/// next `show`, or a page with no plate to turn from, is the DE's size
+/// again: a scale does not outlive its menu.
 #[test]
 fn a_scaled_menu_is_measured_hit_and_drawn_at_its_scale() {
     let mut m = ContextMenuState::new();
@@ -157,6 +159,17 @@ fn a_scaled_menu_is_measured_hit_and_drawn_at_its_scale() {
     assert_eq!(labels[0].font_size, plain_size * 1.5);
     assert_eq!(labels[1].y, m.row_y(1) + (row_h - labels[1].font_size) / 2.0, "centred in the scaled row");
     assert!(m.w >= plain_w, "the plate is at least as wide as the unscaled one");
+    m.show_page(100.0, 200.0, Some("Mail"), vec!["Archive".into()], 0, WidgetId(1));
+    assert_eq!(m.row_h(), row_h, "a page wears the scale of the plate it turned from");
+    assert_eq!(m.labels()[0].font_size, plain_size * 1.5, "its back band too");
+    m.show_page(100.0, 200.0, None, vec!["Reply".into(), "Delete".into()], 0, WidgetId(1));
+    assert_eq!(m.row_h(), row_h, "and so does the plate turned back to");
     m.show(100.0, 200.0, vec!["Copy".into()], 0, WidgetId(1));
     assert_eq!((m.row_h(), m.labels()[0].font_size), (ROW_H, plain_size), "the next menu is the DE's size");
+    m.show_scaled(100.0, 200.0, vec!["Reply".into()], 0, WidgetId(1), 1.5);
+    m.hide();
+    // Past the hand-off a page shown in the moment of a hide turns from.
+    std::thread::sleep(std::time::Duration::from_millis(140));
+    m.show_page(0.0, 0.0, None, vec!["Wireframe".into()], 0, WidgetId(2));
+    assert_eq!(m.row_h(), ROW_H, "a page with nothing to turn from is the DE's size");
 }

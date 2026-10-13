@@ -33,6 +33,12 @@ impl ContextMenuState {
     /// The turn is ANIMATED from the plate that stood there — up, or
     /// hidden in the same moment (`TURN_HANDOFF`) — forward for a page
     /// with a back band, back for one without (a menu returned to).
+    ///
+    /// A page wears the scale of the plate it turns from
+    /// ([`show_scaled`](Self::show_scaled)), so a larger menu's page and
+    /// the plate turned back to stay larger; one with no plate to turn
+    /// from is the DE's size, as a `show` is — a scale left on a menu
+    /// hidden long ago is not the next host's.
     pub fn show_page(&mut self, x: f32, y: f32, back: Option<&str>, options: Vec<String>, header_count: usize, target: WidgetId) {
         const TURN_HANDOFF: std::time::Duration = std::time::Duration::from_millis(100);
         let from = (self.visible || self.hidden_at.is_some_and(|t| t.elapsed() < TURN_HANDOFF)).then(|| {
@@ -42,7 +48,8 @@ impl ContextMenuState {
             from.back_hovered = false;
             Box::new(from)
         });
-        self.show(x, y, options, header_count, target);
+        let scale = from.as_ref().map_or(1.0, |from| from.scale);
+        self.show_scaled(x, y, options, header_count, target, scale);
         self.turned = true;
         self.turning = from.map(|from| Turning {
             from,
