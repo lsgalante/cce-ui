@@ -10,12 +10,25 @@ impl ContextMenuState {
     /// placement that leaves no room still shows something to scroll.
     /// Where the popup's configure lands the menu, and the in-window
     /// fallback's [`constrain_to`](Self::constrain_to).
+    ///
+    /// A placement that MOVES the rows re-hovers whatever row the pointer
+    /// now sits on, as [`Self::scroll_by`] does: a page the compositor
+    /// slid from the corner it asked for has another row under a pointer
+    /// that has not moved. One that moves nothing leaves the hover alone,
+    /// so the keyboard's highlight survives the in-window fallback, which
+    /// places every frame.
     pub fn place(&mut self, x: f32, y: f32, max_h: f32) {
+        let was = (self.x, self.y, self.h, self.scroll);
         self.x = x;
         self.y = y;
         let floor = self.content_h.min(self.row_h() + 2.0 * PAD);
         self.h = self.content_h.min(max_h).max(floor);
         self.scroll = self.scroll.clamp(0.0, self.max_scroll());
+        if (self.x, self.y, self.h, self.scroll) != was {
+            if let Some((px, py)) = self.last_cursor {
+                self.rehover(px, py);
+            }
+        }
     }
 
     /// Keep the menu inside `(bx, by, bw, bh)` the way an xdg positioner

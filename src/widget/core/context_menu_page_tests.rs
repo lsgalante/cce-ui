@@ -140,3 +140,41 @@ fn a_page_stands_in_the_menus_place_with_a_way_back() {
     assert!(context_menu::y() >= 0.0);
     context_menu::hide();
 }
+
+/// A turn happens under a pointer that does not move — a swipe, or a
+/// press — so the row that lands under it is hovered at once, there and
+/// back, and not only at the pointer's next motion. A placement that
+/// slides the page re-hovers too; one that moves nothing leaves the
+/// keyboard's highlight alone.
+#[test]
+fn a_turn_hovers_the_row_under_a_still_pointer() {
+    open();
+    let (mx, my) = (context_menu::x(), context_menu::y());
+    let (x, y) = over(1);
+    context_menu::cursor_moved(x, y);
+    assert_eq!(context_menu::hovered_item(), Some(1));
+    let page = || vec!["Inbox".to_string(), "Archive".to_string(), "Spam".to_string()];
+    context_menu::show_page(mx, my, Some("View"), page(), 0, WidgetId(1));
+    assert_eq!(context_menu::hovered_item(), Some(0), "the band pushed the rows down a row: row 0 is under it now");
+
+    let menu = vec!["Frame".to_string(), "Style".to_string(), "Markers".to_string(), "Exit".to_string()];
+    context_menu::show_page(mx, my, None, menu.clone(), 0, WidgetId(1));
+    assert_eq!(context_menu::hovered_item(), Some(1), "turned back, under the same pointer");
+
+    // A menu opened at the pointer that a swipe turns before any motion:
+    // the wheel says where the pointer is.
+    open();
+    assert!(swipe(-80.0, x, y));
+    assert_eq!(context_menu::take_turn(), Some(PageTurn::Into(1)));
+    context_menu::show_page(mx, my, Some("View"), page(), 0, WidgetId(1));
+    assert_eq!(context_menu::hovered_item(), Some(0));
+
+    // Slid up a row by its placement: the next row is under the pointer.
+    let tall = context_menu::h() + 100.0;
+    context_menu::place(mx, my - ROW_H, tall);
+    assert_eq!(context_menu::hovered_item(), Some(1));
+    context_menu::set_hovered_item(Some(2));
+    context_menu::place(mx, my - ROW_H, tall);
+    assert_eq!(context_menu::hovered_item(), Some(2), "a placement that moves nothing keeps the keyboard's row");
+    context_menu::hide();
+}

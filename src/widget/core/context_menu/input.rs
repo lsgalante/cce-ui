@@ -94,6 +94,10 @@ impl ContextMenuState {
         if !self.visible {
             return false;
         }
+        // The wheel says where the pointer is too: a page this swipe
+        // turns to hovers the row under it from here (`show_page`), even
+        // when no motion came between the menu opening and the swipe.
+        self.last_cursor = Some((px, py));
         // A side swipe turns a page: forward with the pointer on a page
         // row, back from anywhere on a page that has somewhere to go.
         if self.hit_test(px, py) && self.slider_drag.is_none() {

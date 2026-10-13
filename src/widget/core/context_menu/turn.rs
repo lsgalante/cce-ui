@@ -39,8 +39,14 @@ impl ContextMenuState {
     /// the plate turned back to stay larger; one with no plate to turn
     /// from is the DE's size, as a `show` is — a scale left on a menu
     /// hidden long ago is not the next host's.
+    ///
+    /// The pointer is where it was: the row now under it is hovered at
+    /// once, as a scroll re-hovers. A swipe turns the plate under a still
+    /// pointer, and left to the next motion the row under it sat dark
+    /// until the pointer moved.
     pub fn show_page(&mut self, x: f32, y: f32, back: Option<&str>, options: Vec<String>, header_count: usize, target: WidgetId) {
         const TURN_HANDOFF: std::time::Duration = std::time::Duration::from_millis(100);
+        let cursor = self.last_cursor;
         let from = (self.visible || self.hidden_at.is_some_and(|t| t.elapsed() < TURN_HANDOFF)).then(|| {
             let mut from = self.clone();
             from.turning = None;
@@ -63,6 +69,10 @@ impl ContextMenuState {
             self.back = Some(title.to_string());
             self.content_h += self.row_h();
             self.h = self.content_h;
+        }
+        self.last_cursor = cursor;
+        if let Some((px, py)) = cursor {
+            self.rehover(px, py);
         }
     }
 
