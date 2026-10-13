@@ -13,7 +13,7 @@ impl ContextMenuState {
     pub fn place(&mut self, x: f32, y: f32, max_h: f32) {
         self.x = x;
         self.y = y;
-        let floor = self.content_h.min(ROW_H + 2.0 * PAD);
+        let floor = self.content_h.min(self.row_h() + 2.0 * PAD);
         self.h = self.content_h.min(max_h).max(floor);
         self.scroll = self.scroll.clamp(0.0, self.max_scroll());
     }
@@ -49,8 +49,8 @@ impl ContextMenuState {
     /// [`Self::scroll_by`] this does not re-hover the row under the
     /// pointer: the keyboard put the highlight where it is.
     pub(super) fn scroll_into_view(&mut self, idx: usize) {
-        let top = self.band_h() + idx as f32 * ROW_H;
-        let bottom = top + ROW_H + 2.0 * PAD;
+        let top = self.band_h() + idx as f32 * self.row_h();
+        let bottom = top + self.row_h() + 2.0 * PAD;
         if top < self.scroll {
             self.scroll = top;
         } else if bottom > self.scroll + self.h {
@@ -82,7 +82,7 @@ impl ContextMenuState {
     /// The top of row `idx`, where it is drawn: scrolled, so a row above
     /// the view lies above `y`.
     pub fn row_y(&self, idx: usize) -> f32 {
-        self.y + PAD + self.band_h() + idx as f32 * ROW_H - self.scroll
+        self.y + PAD + self.band_h() + idx as f32 * self.row_h() - self.scroll
     }
 
     /// The row under `(px, py)`, or `None` outside the plate or in its
@@ -96,7 +96,7 @@ impl ContextMenuState {
         if rel < 0.0 {
             return None;
         }
-        let idx = (rel / ROW_H) as usize;
+        let idx = (rel / self.row_h()) as usize;
         (idx < self.options.len()).then_some(idx)
     }
 }

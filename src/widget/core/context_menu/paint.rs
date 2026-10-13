@@ -158,14 +158,14 @@ impl ContextMenuState {
             if self.back_hovered {
                 let inset = (depth * 0.5).max(2.0).max(PAD * 0.5);
                 ctx.rounded_rect(
-                    crate::scene::layout::Rect { x: self.x + inset, y: top + 2.0, width: self.w - 2.0 * inset, height: ROW_H - 4.0 },
+                    crate::scene::layout::Rect { x: self.x + inset, y: top + 2.0, width: self.w - 2.0 * inset, height: self.row_h() - 4.0 },
                     (r - inset).max(0.0),
                     (true, true, true, true),
                     [0.20, 0.40, 0.65, 0.6],
                 );
             }
             let inset = (depth * 0.5).max(PAD);
-            let cy = top + ROW_H;
+            let cy = top + self.row_h();
             ctx.groove((self.x + inset, cy), (self.x + self.w - inset, cy), 0.75, depth, rect);
         }
         if let Some(h_idx) = self.hovered_item {
@@ -184,7 +184,7 @@ impl ContextMenuState {
                     x: self.x + inset,
                     y: iy + 2.0,
                     width: self.w - 2.0 * inset,
-                    height: ROW_H - 4.0,
+                    height: self.row_h() - 4.0,
                 },
                 (r - inset).max(0.0),
                 (true, true, true, true),
@@ -197,7 +197,7 @@ impl ContextMenuState {
         // into the menu plate instead of a printed dash.
         for (idx, opt) in self.options.iter().enumerate() {
             if opt == "-" {
-                let cy = self.row_y(idx) + ROW_H * 0.5;
+                let cy = self.row_y(idx) + self.row_h() * 0.5;
                 let inset = (depth * 0.5).max(PAD);
                 ctx.groove(
                     (self.x + inset, cy),
@@ -241,14 +241,14 @@ impl ContextMenuState {
 
         if let Some(h_idx) = self.hovered_item {
             let iy = self.row_y(h_idx);
-            quads.push((self.x + PAD * 0.5, iy + 2.0, self.w - PAD, ROW_H - 4.0, [0.20, 0.40, 0.65, 0.6]));
+            quads.push((self.x + PAD * 0.5, iy + 2.0, self.w - PAD, self.row_h() - 4.0, [0.20, 0.40, 0.65, 0.6]));
         }
 
         // Separator rows ("-"): a hairline in place of the engraved
         // groove the plate path cuts.
         for (idx, opt) in self.options.iter().enumerate() {
             if opt == "-" {
-                let cy = self.row_y(idx) + ROW_H * 0.5;
+                let cy = self.row_y(idx) + self.row_h() * 0.5;
                 quads.push((self.x + PAD, cy, self.w - 2.0 * PAD, 1.0, [0.22, 0.22, 0.28, 1.0]));
             }
         }
@@ -269,7 +269,7 @@ impl ContextMenuState {
         if !self.visible || self.hosted {
             return;
         }
-        let (family, _) = label_font();
+        let (family, _) = self.font();
         if let (Some(e), Some(t)) = (self.turn_progress(), self.turning.as_ref()) {
             // The labels of both, cut at the plate as it is drawn: the
             // ones it turned from sliding away and fading, the page's
@@ -325,11 +325,11 @@ impl ContextMenuState {
         let mut labels = Vec::new();
 
         if let Some(title) = &self.back {
-            let (_, label_size) = label_font();
+            let (_, label_size) = self.font();
             labels.push(TextLabel {
                 text: title.clone(),
                 x: self.x + PAD + chevron_size(label_size) + MARK_GAP,
-                y: self.back_band_y() + (ROW_H - label_size) / 2.0,
+                y: self.back_band_y() + (self.row_h() - label_size) / 2.0,
                 font_size: label_size,
                 color: rgb8(if self.back_hovered { crate::color::TEXT_HEADER } else { crate::color::TEXT_DIM }),
             });
@@ -342,11 +342,11 @@ impl ContextMenuState {
             // A row partly in view is drawn and cut at the plate by the
             // label's bounds.
             let top = self.row_y(idx);
-            if top + ROW_H < self.y || top > self.y + self.h {
+            if top + self.row_h() < self.y || top > self.y + self.h {
                 continue;
             }
-            let (_, label_size) = label_font();
-            let iy = self.row_y(idx) + (ROW_H - label_size) / 2.0;
+            let (_, label_size) = self.font();
+            let iy = self.row_y(idx) + (self.row_h() - label_size) / 2.0;
             // The toolkit's semantic colors rather than greys hand-mixed
             // against the old near-black fill: on the plate's mid-slate the
             // header's 0x70 was a step above its background and read as
@@ -372,7 +372,7 @@ impl ContextMenuState {
             });
             // A slider row's readout, right-aligned against its band.
             if let Some(s) = self.slider(idx) {
-                let (family, _) = label_font();
+                let (family, _) = self.font();
                 let text = s.readout();
                 let tw = crate::widget::display::measure_text_width(&text, &family, label_size);
                 labels.push(TextLabel {
@@ -393,13 +393,13 @@ impl ContextMenuState {
     /// row's text colour.
     pub(crate) fn glyphs(&self) -> Vec<MenuGlyph> {
         let mut glyphs = Vec::new();
-        let (_, size) = label_font();
+        let (_, size) = self.font();
         let (ms, cs) = (mark_size(size), chevron_size(size));
         if self.back.is_some() {
             glyphs.push(MenuGlyph {
                 name: "chevron-left",
                 x: self.x + PAD,
-                y: self.back_band_y() + (ROW_H - cs) / 2.0,
+                y: self.back_band_y() + (self.row_h() - cs) / 2.0,
                 side: cs,
                 color: if self.back_hovered { crate::color::TEXT_HEADER } else { crate::color::TEXT_DIM },
             });
@@ -409,7 +409,7 @@ impl ContextMenuState {
                 continue;
             }
             let top = self.row_y(idx);
-            if top + ROW_H < self.y || top > self.y + self.h {
+            if top + self.row_h() < self.y || top > self.y + self.h {
                 continue;
             }
             let color = if idx < self.header_count || self.row_disabled(idx) {
@@ -420,13 +420,13 @@ impl ContextMenuState {
                 crate::color::TEXT_FG
             };
             if let (Some(name), _) = split_mark(opt) {
-                glyphs.push(MenuGlyph { name, x: self.x + PAD, y: top + (ROW_H - ms) / 2.0, side: ms, color });
+                glyphs.push(MenuGlyph { name, x: self.x + PAD, y: top + (self.row_h() - ms) / 2.0, side: ms, color });
             }
             if self.leads_to_page(idx) {
                 glyphs.push(MenuGlyph {
                     name: "chevron-right",
                     x: self.x + self.w - PAD - cs,
-                    y: top + (ROW_H - cs) / 2.0,
+                    y: top + (self.row_h() - cs) / 2.0,
                     side: cs,
                     color,
                 });

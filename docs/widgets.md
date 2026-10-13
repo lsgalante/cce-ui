@@ -85,6 +85,11 @@ window coordinates. On a toplevel the runner hosts it in an `xdg_popup` (`docs/r
   too) among the rows that run, never highlighted, stepped over by the keyboard, never run or
   turned into; a press on one only closes the menu, as on a header. A reader reads it where it
   stands, marked disabled, with no Click. `a_disabled_row_is_dim_and_runs_nothing` is the test.
+- **A scaled menu** (`show_scaled(.., scale)` in place of `show`): labels, rows, marks and
+  chevrons `scale` times the DE's menu font and `ROW_H`, the padding unchanged. Sizing, hit tests
+  and paint all read `row_h()` / `font()`; a host hit-testing rows itself asks `row_at` or
+  `row_h()`, never `ROW_H`. Every `show` sets the scale again, so it never outlives its menu.
+  `a_scaled_menu_is_measured_hit_and_drawn_at_its_scale` is the test.
 - **A short menu scrolls**: `ContextMenuState` keeps `content_h` (all rows) apart from `h` (shown)
   and a `scroll`; `row_at` / `row_y` / `hit_test` answer for rows as DRAWN.
 - **Keyboard walk**: `set_hovered_item(Some(i))` highlights a row; `step_hovered(dir)` moves to

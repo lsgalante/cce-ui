@@ -26,10 +26,12 @@ pub use marks::*;
 pub use paint::paint_menu_plate;
 use turn::*;
 
-/// Height of one menu row. Sizing, both hit tests, the label run and the
-/// plate's hover fill all step by this — they were five copies of a bare
-/// `24.0`, and a menu whose rows are measured differently from where they
-/// are drawn selects the entry above the one under the cursor.
+/// Height of one menu row at scale 1. Sizing, both hit tests, the label
+/// run and the plate's hover fill all step by the shown menu's
+/// [`row_h`](ContextMenuState::row_h) — this times its scale — and never
+/// by a bare number: they were five copies of `24.0`, and a menu whose
+/// rows are measured differently from where they are drawn selects the
+/// entry above the one under the cursor.
 pub const ROW_H: f32 = 24.0;
 
 /// The plate's padding, the same on every side: the rows start this far
@@ -226,6 +228,13 @@ pub struct ContextMenuState {
     /// popup's own frame is empty behind the plate, and the in-app frost
     /// of nothing is a flat opaque grey.
     in_popup: bool,
+    /// How much larger than the DE's menu the shown one is drawn: its
+    /// label size and row height, marks and chevrons with them (the
+    /// padding stays). 1 for every menu but one a host opened with
+    /// [`show_scaled`](Self::show_scaled); every `show` sets it again, so
+    /// a scale never outlives its menu into the next — a text box's Cut /
+    /// Copy / Paste, or a page turned to.
+    scale: f32,
 }
 
 impl ContextMenuState {
@@ -261,15 +270,37 @@ impl ContextMenuState {
             hosted: false,
             last_cursor: None,
             in_popup: false,
+            scale: 1.0,
         }
     }
 
+    /// Height of one row of this menu: [`ROW_H`] at its scale.
+    pub fn row_h(&self) -> f32 {
+        ROW_H * self.scale
+    }
+
+    /// The face this menu's labels are drawn in: [`label_font`] at its
+    /// scale.
+    pub fn font(&self) -> (String, f32) {
+        let (family, size) = label_font();
+        (family, size * self.scale)
+    }
+
     pub fn show(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: WidgetId) {
+        self.show_scaled(x, y, options, header_count, target, 1.0);
+    }
+
+    /// [`show`](Self::show), the labels and rows `scale` times the DE's
+    /// menu — for a host whose menu reads too small over what it opened
+    /// from. Everything that measures or hit-tests a row reads the scale
+    /// through [`row_h`](Self::row_h) and [`font`](Self::font).
+    pub fn show_scaled(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: WidgetId, scale: f32) {
+        self.scale = scale;
         self.x = x;
         self.y = y;
         self.anchor = (x, y);
         self.options = options;
-        self.content_h = self.options.len() as f32 * ROW_H + 2.0 * PAD;
+        self.content_h = self.options.len() as f32 * self.row_h() + 2.0 * PAD;
         self.h = self.content_h;
         self.scroll = 0.0;
         self.last_cursor = None;
@@ -285,7 +316,7 @@ impl ContextMenuState {
         // edge (2026-09-21). The inked measure is kept as a floor, so a
         // host whose font system has no bundled faces never measures
         // narrower than before.
-        let (family, size) = label_font();
+        let (family, size) = self.font();
         let widest = self
             .options
             .iter()
@@ -343,7 +374,7 @@ impl ContextMenuState {
         if idx >= self.options.len() {
             return;
         }
-        let (family, size) = label_font();
+        let (family, size) = self.font();
         let measure = |t: &str| crate::widget::display::measure_text_width(t, &family, size);
         let (mark, label) = split_mark(&self.options[idx]);
         let mark_w = if mark.is_some() { mark_size(size) + MARK_GAP } else { 0.0 };

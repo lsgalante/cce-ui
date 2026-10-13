@@ -91,6 +91,16 @@ pub fn show(x: f32, y: f32, options: Vec<String>, header_count: usize, target: W
     with_state(|m| m.borrow_mut().show(x, y, options, header_count, target));
 }
 
+/// See [`ContextMenuState::show_scaled`].
+pub fn show_scaled(x: f32, y: f32, options: Vec<String>, header_count: usize, target: WidgetId, scale: f32) {
+    with_state(|m| m.borrow_mut().show_scaled(x, y, options, header_count, target, scale));
+}
+
+/// Height of one row of the shown menu — see [`ContextMenuState::row_h`].
+pub fn row_h() -> f32 {
+    with_state(|m| m.borrow().row_h())
+}
+
 pub fn hide() {
     with_state(|m| m.borrow_mut().hide());
 }

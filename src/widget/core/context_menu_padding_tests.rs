@@ -136,3 +136,27 @@ fn a_fallback_glyph_widens_the_plate_as_drawn() {
     assert!(drawn > 0.0);
     assert!(m.w >= drawn + 2.0 * PAD, "plate {} narrower than the drawn label {} plus pads", m.w, drawn);
 }
+
+/// A menu shown scaled is larger throughout — its rows step by the
+/// scaled pitch in the sizing, both hit tests and the label run, and its
+/// labels are drawn at the scaled size — while the padding stays. The
+/// next `show` is the DE's size again: a scale does not outlive its menu.
+#[test]
+fn a_scaled_menu_is_measured_hit_and_drawn_at_its_scale() {
+    let mut m = ContextMenuState::new();
+    m.show(100.0, 200.0, vec!["Reply".into(), "Delete".into()], 0, WidgetId(1));
+    let (plain_w, plain_size) = (m.w, m.labels()[0].font_size);
+    m.show_scaled(100.0, 200.0, vec!["Reply".into(), "Delete".into()], 0, WidgetId(1), 1.5);
+    let row_h = ROW_H * 1.5;
+    assert_eq!(m.row_h(), row_h);
+    assert_eq!(m.content_h, 2.0 * row_h + 2.0 * PAD);
+    assert_eq!(m.row_y(1), 200.0 + PAD + row_h);
+    assert_eq!(m.row_at(110.0, 200.0 + PAD + row_h * 1.5), Some(1));
+    assert_eq!(m.row_at(110.0, 200.0 + PAD + row_h * 0.9), Some(0), "the unscaled pitch would name row 1 here");
+    let labels = m.labels();
+    assert_eq!(labels[0].font_size, plain_size * 1.5);
+    assert_eq!(labels[1].y, m.row_y(1) + (row_h - labels[1].font_size) / 2.0, "centred in the scaled row");
+    assert!(m.w >= plain_w, "the plate is at least as wide as the unscaled one");
+    m.show(100.0, 200.0, vec!["Copy".into()], 0, WidgetId(1));
+    assert_eq!((m.row_h(), m.labels()[0].font_size), (ROW_H, plain_size), "the next menu is the DE's size");
+}

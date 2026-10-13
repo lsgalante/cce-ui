@@ -50,11 +50,11 @@ impl ContextMenuState {
             dir: if back.is_some() { 1.0 } else { -1.0 },
         });
         if let Some(title) = back {
-            let (family, size) = label_font();
+            let (family, size) = self.font();
             let need = PAD + chevron_size(size) + MARK_GAP + crate::widget::display::measure_text_width(title, &family, size) + PAD;
             self.w = self.w.max(need);
             self.back = Some(title.to_string());
-            self.content_h += ROW_H;
+            self.content_h += self.row_h();
             self.h = self.content_h;
         }
     }
@@ -129,7 +129,7 @@ impl ContextMenuState {
     /// The band's height above the rows: one row on a page that goes
     /// back somewhere, none otherwise.
     pub(super) fn band_h(&self) -> f32 {
-        if self.back.is_some() { ROW_H } else { 0.0 }
+        if self.back.is_some() { self.row_h() } else { 0.0 }
     }
 
     /// The top of the back band, where it is drawn.
@@ -143,7 +143,7 @@ impl ContextMenuState {
             return false;
         }
         let top = self.back_band_y();
-        py >= top && py < top + ROW_H
+        py >= top && py < top + self.row_h()
     }
 
     /// The turn a press at `(px, py)` asks for: the back band goes back,

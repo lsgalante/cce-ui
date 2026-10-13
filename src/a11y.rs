@@ -561,7 +561,7 @@ fn push_context_menu(nodes: &mut Vec<(NodeId, Node)>) -> Option<NodeId> {
         let mut row = Node::new(role);
         row.set_label(text.trim());
         let y = cm::row_y(i) as f64;
-        row.set_bounds(Rect::new(mx, y, mx + mw, y + cm::ROW_H as f64));
+        row.set_bounds(Rect::new(mx, y, mx + mw, y + cm::row_h() as f64));
         match (role, mark) {
             (Role::MenuItemCheckBox, _) => row.set_toggled(Toggled::True),
             (Role::MenuItemRadio, Some(glyph)) => row.set_toggled(Toggled::from(glyph == "circle")),

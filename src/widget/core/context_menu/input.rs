@@ -13,7 +13,7 @@ impl ContextMenuState {
             return;
         }
         self.sliders[idx] = Some(slider);
-        let (family, size) = label_font();
+        let (family, size) = self.font();
         let measure = |t: &str| crate::widget::display::measure_text_width(t, &family, size);
         let readout_w = [slider.min, slider.max]
             .iter()
@@ -73,7 +73,7 @@ impl ContextMenuState {
             x: self.x + self.w - PAD - SLIDER_W,
             y: self.row_y(idx) + 3.0,
             width: SLIDER_W,
-            height: ROW_H - 6.0,
+            height: self.row_h() - 6.0,
         }
     }
 
@@ -116,7 +116,7 @@ impl ContextMenuState {
             if self.max_scroll() <= 0.0 {
                 return false;
             }
-            self.scroll_by(-delta.notches_y() * ROW_H);
+            self.scroll_by(-delta.notches_y() * self.row_h());
             return true;
         };
         self.wheel_accum += delta.value_notches_y();
