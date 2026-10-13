@@ -134,6 +134,12 @@ impl Input for KeybindRecorder {
     fn focus_role(&self) -> crate::widget::FocusRole {
         crate::widget::FocusRole::Well
     }
+
+    /// The inherent drain, forwarded: the trait's default answers `false`, and with it
+    /// `ctx[h].take_change()` never sees a recorded chord.
+    fn take_change(&mut self) -> bool {
+        self.take_change()
+    }
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
             Event::MouseButton { button, state, x, y, .. } => {
@@ -281,5 +287,20 @@ impl Input for KeybindRecorder {
             }
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A recorded chord reaches the host's `take_change`: the `Input` impl forwards the
+    /// inherent drain.
+    #[test]
+    fn a_recorded_chord_reaches_the_hosts_poll() {
+        let mut k = KeybindRecorder::new("ctrl+a".to_string());
+        k.inner_mut().commit(vec!["ctrl", "b"]);
+        assert!(Adapted::take_change(&mut k));
+        assert!(!Adapted::take_change(&mut k), "drained");
     }
 }

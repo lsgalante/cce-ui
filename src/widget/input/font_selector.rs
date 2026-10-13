@@ -232,6 +232,12 @@ impl Input for FontSelector {
         crate::widget::FocusRole::Plate
     }
 
+    /// The inherent drain, forwarded: the trait's default answers `false`, and with it
+    /// `ctx[h].take_change()` never sees a picked family.
+    fn take_change(&mut self) -> bool {
+        self.take_change()
+    }
+
     fn wants_tick(&self) -> bool {
         true
     }
@@ -321,5 +327,20 @@ impl Input for FontSelector {
             }
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A picked family reaches the host's `take_change`: the `Input` impl forwards the
+    /// inherent drain. (The pick itself arrives from the picker process, on `tick`.)
+    #[test]
+    fn a_picked_family_reaches_the_hosts_poll() {
+        let mut fs = FontSelector::new("Sans".to_string());
+        fs.inner_mut().just_changed = true;
+        assert!(Adapted::take_change(&mut fs));
+        assert!(!Adapted::take_change(&mut fs), "drained");
     }
 }
