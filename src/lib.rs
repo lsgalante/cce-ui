@@ -7,6 +7,7 @@
 pub mod a11y;
 pub mod color;
 pub mod compute;
+pub mod geom;
 pub mod widget;
 pub use cce_core::config;
 pub use cce_core::input;

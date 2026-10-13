@@ -6,7 +6,8 @@
 //! into `engine` — so no part could be understood, tested or moved out
 //! alone. This test fixes a direction, lowest layer first:
 //!
-//! 0. the base: crate-root helpers and the re-exported cce-core modules
+//! 0. the base: crate-root helpers, the re-exported cce-core modules, and
+//!    `geom` (the `Rect` every layer passes around)
 //! 1. `style`, `color`, `scale`
 //! 2. `draw`, `layout`, `icon`
 //! 3. `scene`
@@ -39,7 +40,7 @@ fn layer(name: &str) -> Option<u8> {
         | "desktop_entry" | "relief_spec" | "l10n" | "history" | "compute"
         | "create_font_system" | "create_font_system_with_system_fonts" | "geometry_font_system"
         | "icon_pixels" | "icon_source" | "icon_tint" | "icons_dir" | "rasterize_svg" | "upload_icon"
-        | "upload_icon_tinted" | "page_fonts" | "scroll_debug" | "impl_widget_base" => 0,
+        | "upload_icon_tinted" | "page_fonts" | "scroll_debug" | "impl_widget_base" | "geom" => 0,
         "style" | "color" | "colors" | "scale" => 1,
         // `icon` uploads what it resolves, through `draw`.
         "draw" | "layout" | "icon" => 2,
@@ -57,7 +58,6 @@ fn layer(name: &str) -> Option<u8> {
 const ALLOWED_UPWARD: &[(&str, &str)] = &[
     ("color", "layout"),
     ("color", "scene"),
-    ("layout", "scene"),
     ("style", "layout"),
 ];
 

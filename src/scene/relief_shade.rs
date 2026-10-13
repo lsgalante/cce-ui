@@ -30,8 +30,9 @@ pub use crate::scene::material::Finish as Material;
 /// Ambient floor of the plate lighting model. Mirrors `PLATE_AMBIENT`.
 pub const PLATE_AMBIENT: f32 = 0.55;
 /// A carve's drop as a fraction of its wall width when the material pins no
-/// height (`layout::bevel_height`). Mirrors `RECESS_DEPTH`.
-pub const RECESS_DEPTH: f32 = 0.6;
+/// height (`layout::bevel_height`). Mirrors `RECESS_DEPTH`. Defined in
+/// `layout`, beside the carve depth it sets (`layout::carve_depth_px`).
+pub use crate::layout::RECESS_DEPTH;
 
 /// Amplitude of the bright crest hugging a raised plate's silhouette.
 /// Mirrors `PLATE_CREST`.

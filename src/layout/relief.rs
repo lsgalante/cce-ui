@@ -154,7 +154,7 @@ pub fn bevel_width() -> f32 {
 /// A carve's geometric drop when the material pins one
 /// (`style.surface.relief.wall.height`, a length — `(mm)0.3` resolves through
 /// the display metric), in logical px. `None` = follow the wall width at the
-/// analytic ratio ([`crate::scene::relief_shade::RECESS_DEPTH`]), the look
+/// analytic ratio ([`RECESS_DEPTH`]), the look
 /// every config had before heights existed. A configured 0 reads as unset,
 /// which is how an editor puts a material back on "follow".
 pub fn bevel_height() -> Option<f32> {
@@ -177,6 +177,11 @@ pub fn roll_height() -> Option<f32> {
         .filter(|h| h.is_finite() && *h > 0.0)
 }
 
+/// A carve's drop as a fraction of its wall width when the material pins no
+/// height ([`bevel_height`]). Mirrors the shader's `RECESS_DEPTH`
+/// (`scene::relief_shade`, which re-exports it, holds the test that says so).
+pub const RECESS_DEPTH: f32 = 0.6;
+
 /// The drop of a carve whose wall runs `wall` logical px: the pinned height
 /// when there is one, else the analytic ratio of the wall — saturating at the
 /// DE's roll width, so a wall wider than the plate's own perimeter roll
@@ -186,7 +191,7 @@ pub fn roll_height() -> Option<f32> {
 pub fn carve_depth_px(wall: f32) -> f32 {
     match bevel_height() {
         Some(h) => h,
-        None => crate::scene::relief_shade::RECESS_DEPTH * wall.min(bevel_width()),
+        None => RECESS_DEPTH * wall.min(bevel_width()),
     }
 }
 

@@ -71,11 +71,13 @@ pub const CONTROL_TEXT_INSET: f32 = 8.0;
 /// Every widget carves the rect this returns instead: inset by half the depth, the
 /// radii reduced by the same so the OUTER silhouette keeps the configured radius.
 /// The widget's footprint is then its rect, and the gap is the gap.
-pub fn carve_inside(rect: crate::scene::layout::Rect, radii: crate::scene::paint::Radii, depth: f32) -> (crate::scene::layout::Rect, crate::scene::paint::Radii) {
+/// The radii are the `(tl, tr, br, bl)` of `scene::paint::Radii`, spelled out so this module
+/// names nothing above it.
+pub fn carve_inside(rect: crate::geom::Rect, radii: (f32, f32, f32, f32), depth: f32) -> (crate::geom::Rect, (f32, f32, f32, f32)) {
     let g = depth * 0.5;
     let r = |r: f32| if r > 0.0 { (r - g).max(0.0) } else { 0.0 };
     (
-        crate::scene::layout::Rect { x: rect.x + g, y: rect.y + g, width: (rect.width - depth).max(0.0), height: (rect.height - depth).max(0.0) },
+        crate::geom::Rect { x: rect.x + g, y: rect.y + g, width: (rect.width - depth).max(0.0), height: (rect.height - depth).max(0.0) },
         (r(radii.0), r(radii.1), r(radii.2), r(radii.3)),
     )
 }

@@ -443,9 +443,11 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   and setters by topic (`surfaces.rs`, `controls.rs`, `lists.rs`, `graph.rs`), `load.rs` (config →
   colours, `retired_surface_keys`), `math.rs` (sRGB/linear, OKLab), `materials.rs`, `chords.rs`.
 - `text/` — shaping, the shaped-buffer cache, fonts, bidi (`backend::text` re-exports it).
-- `style.rs` (the snapshot), `window_state.rs`, `ime.rs` (composition shared by widgets and
-  shells), `text_input.rs` (the per-frame field claim), `history.rs` (`History<T>`), `a11y.rs`,
-  `l10n.rs`, `compute.rs` (what a compute job is, device-free).
+- `style.rs` (the snapshot), `geom.rs` (`Rect`, at the bottom so the style getters can answer
+  in rects; `scene::layout::Rect` is the path apps use), `window_state.rs`, `ime.rs`
+  (composition shared by widgets and shells), `text_input.rs` (the per-frame field claim),
+  `history.rs` (`History<T>`), `a11y.rs`, `l10n.rs`, `compute.rs` (what a compute job is,
+  device-free).
 - `draw/` — renderer-free drawing (above); `draw::scene` and `draw::rt` for 3D and the tracer.
 - `vk/` — the Vulkan renderer (`renderer/`, `rt/`, `scene/` and `image/`, each `mod.rs` with its table; `compute.rs`,
   `plate_probe.rs`); `web/` — wasm32 only: `WebRenderer`, the browser shell, its 3D, tracer and

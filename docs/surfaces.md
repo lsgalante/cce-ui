@@ -249,9 +249,9 @@ shaded as a translucent light-and-shadow overlay. An **edge** is a plate's perim
 as a multiply on the plate's fill plus a specular crest. Each has `height` (a length: the wall's
 drop, the edge's rise) and `profile` (a ramp spec; absent or the identity sentinel = the analytic
 curve — smoothstep for a wall, the superellipse quadrant for an edge). Unset, a carve drops
-`relief_shade::RECESS_DEPTH` (0.6) of its wall and the roll is a quarter-round of radius `width`.
-`layout::carve_depth_px` states the drop rule once (for the tessellator's CSG features and,
-through `WindowInfo.relief_meta`, the shader's free carves); `carve_depth_ratio` /
+`layout::RECESS_DEPTH` (0.6; `relief_shade` re-exports it) of its wall and the roll is a
+quarter-round of radius `width`. `layout::carve_depth_px` states the drop rule once (for the
+tessellator's CSG features and, through `WindowInfo.relief_meta`, the shader's free carves); `carve_depth_ratio` /
 `roll_height_ratio` feed `Finish.carve_depth` / `roll_height`. A `(relief)` value carries the drop
 as `h=` beside `w=` and `d=` (light; `l=` is an alias). Registry keys: `bevel_depth`,
 `bevel_width`, `bevel_shader`, `bevel_height` / `roll_height`, `bevel_profile_spec` /

@@ -17,7 +17,7 @@
 //!
 //! | module | holds |
 //! |---|---|
-//! | `mod.rs` | the geometry values: `Size`, `Rect`, `Edges`, and fitting an image into a rect |
+//! | `mod.rs` | the geometry values: `Size`, `Rect` (re-exported from `crate::geom`), `Edges`, and fitting an image into a rect |
 //! | `style` | what a node asks for: axes, modes, lengths, alignment, `Style` and the spacing-ladder presets, `LayoutBox` |
 //! | `solve` | `compute_layout`, `measure` and `arrange`, per mode, and the axis helpers they share |
 
@@ -45,29 +45,9 @@ impl Size {
     }
 }
 
-/// A positioned box in logical pixels (absolute coordinates after arrange).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-}
-
-impl Rect {
-    pub const ZERO: Rect = Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 };
-
-    /// Whether the point `(x, y)` lies in the rect: the left and top edges
-    /// are inside, the right and bottom edges are not.
-    ///
-    /// Half-open on purpose, so rects that share an edge — a row of tabs, a
-    /// list's rows — partition the space between them: a point on the
-    /// shared edge belongs to exactly one, whichever order they are tested
-    /// in. A rect with no width or height contains nothing.
-    pub fn contains(&self, x: f32, y: f32) -> bool {
-        x >= self.x && x < self.x + self.width && y >= self.y && y < self.y + self.height
-    }
-}
+/// A positioned box in logical pixels — defined in `crate::geom`, at the bottom
+/// of the crate, so the style getters can answer in rects; this is its path.
+pub use crate::geom::Rect;
 
 /// How an image maps into a bounding box — see [`fit_rect`].
 #[derive(Debug, Clone, Copy, PartialEq)]
