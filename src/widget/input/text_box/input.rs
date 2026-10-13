@@ -35,6 +35,14 @@ impl Input for TextBox {
         false
     }
 
+    /// `WidgetHost::focused` answers from the base flag, which this box opts out of
+    /// (`tracks_base_focus`), so it was always false: an app asking whether the box had
+    /// the keyboard before acting on Enter never acted. Editing is that state — the box
+    /// takes keys exactly while it edits, and stops on Enter, Escape or focus loss.
+    fn is_focused(&self, _base_focused: bool) -> bool {
+        self.editing
+    }
+
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         // A press moves the caret: a composition in progress is left where
         // it was, cancelled.

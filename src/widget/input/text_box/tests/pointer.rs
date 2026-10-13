@@ -278,3 +278,36 @@ fn test_textbox_multiline_selection_highlight() {
     });
     assert!(has_highlight, "Should have a highlight quad!");
 }
+
+/// `focused()` must say whether the box has the keyboard. It read the base flag, which
+/// a TextBox never sets, so it was false even mid-typing — and an app gating Enter on it
+/// (the polkit dialog's submit) never fired. The base flag itself stays unset: that is
+/// what keeps the detached label from coloring as focused.
+#[test]
+fn focused_reports_a_box_that_has_the_keyboard() {
+    use crate::widget::Event;
+    let mut ctx = crate::context::UiContext::new();
+    let h = ctx.insert(TextBox::new(String::new()));
+    ctx.lend_h(h, |w, _| WidgetHost::set_rect(w, 10.0, 10.0, 200.0, 30.0));
+    assert!(!ctx[h].focused(&ctx), "an untouched box is not focused");
+
+    let press = Event::MouseButton {
+        button: MouseButton::Left, state: ElementState::Pressed,
+        x: 20.0, y: 20.0, local_x: 20.0, local_y: 20.0,
+    };
+    ctx.propagate_event(&press, h.id());
+    assert!(ctx[h].focused(&ctx), "a click into the box gives it the keyboard");
+    assert!(!ctx[h].base().focused, "the label rule: the base flag stays unset");
+
+    let enter = Event::KeyInput(KeyEvent {
+        state: ElementState::Pressed,
+        logical_key: Key::Named(NamedKey::Enter),
+        text: None,
+        repeat: false,
+        ctrl: false,
+        shift: false,
+        alt: false,
+    });
+    ctx.propagate_event(&enter, h.id());
+    assert!(!ctx[h].focused(&ctx), "Enter commits a one-line box and it stops taking keys");
+}
