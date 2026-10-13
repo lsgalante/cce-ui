@@ -24,7 +24,11 @@ pub struct DlText {
     pub(crate) x: f32,
     pub(crate) y: f32,
     pub(crate) color: cosmic_text::Color,
+    /// Where the glyphs may draw: the paint walk's clip ∩ the prim's own bounds.
     pub(crate) bounds: Option<[f32; 4]>,
+    /// The prim's own bounds, before the clip is merged in: what says a text belongs to a
+    /// popover ([`popover_occlusion_clamp`]).
+    pub(crate) own_bounds: Option<[f32; 4]>,
     pub(crate) clip_circle: Option<[f32; 3]>,
     pub(crate) clip_rrect: Option<[f32; 5]>,
 }
@@ -62,6 +66,7 @@ pub(crate) fn collect_dl_text(fs: &mut FontSystem, dl: &crate::scene::paint::Dis
                     (alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
                 ),
                 bounds: merged,
+                own_bounds: *bounds,
                 clip_circle: item.clip_circle,
                 clip_rrect: item.clip_rrect,
             });
@@ -141,20 +146,27 @@ pub(crate) fn dl_text_spans<'a>(
 /// alone and clamped against every other, so a context menu opened over a
 /// modal dialog had its labels clipped by the dialog it was drawn on top
 /// of, and showed as a plate with no legible entries.
+///
+/// The prim's OWN bounds say whose text it is, before a clip narrows them:
+/// a line of text inside a popover, clipped to its own well (`paint_line`
+/// with `LineLook::bounds`), still belongs to the popover. Text with no
+/// bounds of its own that a clip of exactly the popover's rect bounds
+/// belongs to it as well.
 pub(super) fn popover_occlusion_clamp(
     overlay_rects: &[(f32, f32, f32, f32)],
     ti: &DlText,
     scale_f32: f32,
     item_bounds: &mut TextBounds,
 ) {
-    let owner = ti.bounds.and_then(|[l, t, r, b]| {
+    let popover_of = |[l, t, r, b]: [f32; 4]| {
         overlay_rects.iter().position(|&(ox, oy, ow, oh)| {
             (l - ox).abs() < 1.0
                 && (t - oy).abs() < 1.0
                 && (r - (ox + ow)).abs() < 1.0
                 && (b - (oy + oh)).abs() < 1.0
         })
-    });
+    };
+    let owner = ti.own_bounds.and_then(popover_of).or_else(|| ti.bounds.and_then(popover_of));
     let first_above = owner.map_or(0, |k| k + 1);
     for &(ox, oy, ow, oh) in &overlay_rects[first_above..] {
         let ol = (ox * scale_f32).round() as i32;
@@ -189,5 +201,67 @@ pub(super) fn popover_occlusion_clamp(
                 item_bounds.left = item_bounds.left.max(or);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scene::layout::Rect;
+    use crate::scene::paint::{DisplayList, PaintCtx};
+    use crate::widget::line_edit::paint_line;
+    use crate::widget::{LineEdit, LineLook, LineMarks};
+
+    const SURFACE: TextBounds = TextBounds { left: 0, top: 0, right: 400, bottom: 300 };
+    /// An app's own occluding popover (a dialog), and the well of a line inside it.
+    const POPOVER: (f32, f32, f32, f32) = (100.0, 50.0, 200.0, 120.0);
+    const AREA: Rect = Rect { x: 120.0, y: 80.0, width: 100.0, height: 24.0 };
+
+    /// The glyph pass's bounds for each text of `dl`, at scale 1, with `POPOVER` open.
+    fn span_bounds(dl: &DisplayList) -> Vec<[i32; 4]> {
+        let mut fs = crate::geometry_font_system().lock().unwrap();
+        let mut items = Vec::new();
+        collect_dl_text(&mut fs, dl, &mut items);
+        dl_text_spans(&items, 1.0, SURFACE, &[POPOVER]).iter().map(|s| s.bounds.unwrap()).collect()
+    }
+
+    fn line(bounds: Option<[f32; 4]>) -> DisplayList {
+        let marks = {
+            let mut fs = crate::geometry_font_system().lock().unwrap();
+            LineMarks::of(&mut fs, &LineEdit::with_text("query"), 14.0, None)
+        };
+        let look = LineLook { bounds, ..LineLook::new(14.0, None) };
+        let mut pc = PaintCtx::new();
+        paint_line(&mut pc, AREA, AREA.x, &marks, &look, "", true);
+        pc.finish()
+    }
+
+    /// A line inside a popover, clipped to its own well, keeps its text when it carries the
+    /// popover's rect as `LineLook::bounds`: the clamp reads the prim's own bounds, before
+    /// the clip narrows them to the well, and the glyphs stay cut at the well. Without them
+    /// it is page text, which the popover covers.
+    #[test]
+    fn a_line_inside_its_popover_keeps_its_text_when_it_says_so() {
+        let (x, y, w, h) = POPOVER;
+        let own = line(Some([x, y, x + w, y + h]));
+        let well = [AREA.x as i32, AREA.y as i32, (AREA.x + AREA.width) as i32, (AREA.y + AREA.height) as i32];
+        assert_eq!(span_bounds(&own), vec![well], "the popover's own text, cut at its well");
+
+        let page = span_bounds(&line(None));
+        assert_eq!(page.len(), 1);
+        assert!(page[0][0] >= page[0][2], "page text under the popover is clamped away: {:?}", page[0]);
+    }
+
+    /// A label whose bounds are the popover's rect and that no clip narrows is the popover's,
+    /// as before; so is one with no bounds that a clip of exactly the rect bounds.
+    #[test]
+    fn a_popovers_label_is_known_by_its_bounds_or_an_exact_clip() {
+        let (x, y, w, h) = POPOVER;
+        let rect = Rect { x, y, width: w, height: h };
+        let mut pc = PaintCtx::new();
+        pc.text_with("Open".to_string(), 120.0, 60.0, 14.0, [255; 3], None, Some([x, y, x + w, y + h]));
+        pc.clip(rect, |pc| pc.text_with("Save".to_string(), 120.0, 90.0, 14.0, [255; 3], None, None));
+        let all = [x as i32, y as i32, (x + w) as i32, (y + h) as i32];
+        assert_eq!(span_bounds(&pc.finish()), vec![all, all]);
     }
 }

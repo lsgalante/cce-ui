@@ -313,6 +313,11 @@ Click lands there too, and a hand-rolled `row_at` dispatch never sees it.
   `shader2d.wgsl` / `glyph.wgsl` / the 3D ones) is shared by Vulkan and WebGPU; `vk` re-exports
   it at its old paths. Portable code reaches it through `crate::draw`, never `crate::vk`.
 - **Never key behaviour off vertex values.** Say it in the draw (e.g. `SceneDraw::screen_space`).
+- **A popover's text says so by its bounds.** Display-list text under an open popover's rect is
+  clamped away from it (`text::display`'s `popover_occlusion_clamp`), except text whose own
+  `bounds` ARE that rect (or that has none and a clip of exactly the rect), which is clamped
+  only by popovers above it. Own bounds are read before the clip is merged in, so a label may
+  also be clipped narrower (`LineLook::bounds` for a `paint_line` in a dialog).
 - **A text measurement reads the scale once.** Shape with `shared_text_buffer_at(.., scale)` and
   divide by that same, unclamped `scale`. Two reads can disagree, and then the offsets come out
   multiplied by their ratio.

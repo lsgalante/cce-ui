@@ -10,6 +10,29 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-13
 
+- **A line of text inside an app's own popover keeps its text: `LineLook::bounds`.** The
+  engine clamps display-list text away from every open popover rect it runs under, and knows a
+  popover's own text by bounds equal to its rect. It read those bounds after merging in the
+  item's clip, so a label clipped narrower than its popover — `paint_line`'s text, cut at its
+  well inside a dialog that registers its plate as a popover — no longer matched and was
+  clamped to nothing. cce-designer's palette worked round it by re-emitting the query's text
+  under the dialog's bounds, cut by hand to the characters wholly inside the line
+  (`visible_span`). Now `DlText` keeps the prim's own bounds beside the merged ones and
+  `popover_occlusion_clamp` asks them first (then the merged ones, so unbounded text under a
+  clip of exactly the rect still counts), and `LineLook` gains `bounds: Option<[f32; 4]>` (`None`
+  from `LineLook::new`), which `paint_line` gives its text. The designer's query line is one
+  `paint_line` again; an overflowing query now shows the glyph cut at the line's edge, as a
+  TextBox does, instead of stopping at the last whole character. Checked:
+  `a_line_inside_its_popover_keeps_its_text_when_it_says_so` (fails with the merged-bounds
+  check), `a_popovers_label_is_known_by_its_bounds_or_an_exact_clip`, lib tests with every
+  feature (706), every integration test, clippy, the wasm build with and without features, and
+  a scale-2 shadow A/B of the designer's palette (typed query, Left ×4, Home, a query
+  overflowing the line, End and Home): identical but for the cut glyph at the line's edge and a
+  one-pixel sliver of the next row's glyph tops below the list, which the dialog's list clip
+  now cuts. Found on the way: `Adapted::paint_self` replays a widget's prims under the host's
+  clip and drops the rect clips the widget painted them under (it restores only a circle
+  clip), so TreeList's viewport clip and Graph's wire clip never take effect; the designer
+  paints its dialog through `Paint::paint_ui` to keep them. Not changed here.
 - **A cancelled keybind recording keeps the committed binding.** `KeybindRecorder` tracked the
   modifiers held while recording by writing them into `value`, so Escape (or focus leaving)
   mid-recording left the field showing `ctrl` with no change raised: a value the document did

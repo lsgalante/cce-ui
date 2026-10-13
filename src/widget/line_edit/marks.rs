@@ -116,11 +116,17 @@ pub struct LineLook {
     pub selection: [f32; 4],
     /// The caret, and the composition's underline.
     pub caret: [f32; 4],
+    /// The bounds the text carries (`[left, top, right, bottom]`), besides the area's clip.
+    /// A line painted inside an app's own occluding popover or dialog sets them to that
+    /// popover's rect: the engine's text clamp keeps page text out from under an open
+    /// popover, and it is the text's own bounds that say it belongs to this one. `None` (the
+    /// default) is page text.
+    pub bounds: Option<[f32; 4]>,
 }
 
 impl LineLook {
     /// A `TextBox`'s look at `size` in `family`: its text and placeholder colours, its
-    /// selection fill and its caret.
+    /// selection fill and its caret; no bounds of its own.
     pub fn new(size: f32, family: Option<String>) -> LineLook {
         LineLook {
             size,
@@ -129,6 +135,7 @@ impl LineLook {
             placeholder: crate::icon_tint(crate::color::TEXT_DIM),
             selection: [0.20, 0.50, 0.85, 0.3],
             caret: crate::color::TEXT_FG,
+            bounds: None,
         }
     }
 }
@@ -138,7 +145,8 @@ impl LineLook {
 /// ([`LineMarks::keep_caret`]): the selection under the text, `placeholder` in its dim
 /// colour in place of empty text, an input method's composition underlined, and the caret
 /// when `caret` is set. The text is centred in the area's height, the selection and the
-/// caret a little taller than it, as a `TextBox`'s are.
+/// caret a little taller than it, as a `TextBox`'s are. The text carries `look.bounds`
+/// (see [`LineLook::bounds`]) as well as the area's clip.
 ///
 /// Returns the caret's rect, kept inside the area, whether or not it was drawn: the edit
 /// with the keyboard claims it (`text_input::claim`), which is what places an input
@@ -155,9 +163,9 @@ pub fn paint_line(pc: &mut PaintCtx, area: Rect, origin_x: f32, marks: &LineMark
             pc.quad(Rect { x: origin_x + a, y: mark_y, width: b - a, height: mark_h }, look.selection);
         }
         if !marks.shown.is_empty() {
-            pc.text_with(marks.shown.clone(), origin_x, ty, size, look.text, look.family.clone(), None);
+            pc.text_with(marks.shown.clone(), origin_x, ty, size, look.text, look.family.clone(), look.bounds);
         } else if !placeholder.is_empty() {
-            pc.text_with(placeholder.to_string(), origin_x, ty, size, look.placeholder, look.family.clone(), None);
+            pc.text_with(placeholder.to_string(), origin_x, ty, size, look.placeholder, look.family.clone(), look.bounds);
         }
         for &(a, b) in &marks.composition {
             pc.quad(Rect { x: origin_x + a, y: ty + size + 1.0, width: b - a, height: 1.5 }, look.caret);

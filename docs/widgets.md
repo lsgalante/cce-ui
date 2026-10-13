@@ -354,6 +354,11 @@ the host implements it. `a_widget_glyph_reaches_a_flat_host` and
     the caret inside `area` and returns the caret's rect, which the edit with the keyboard
     claims (`text_input::claim`). The well around it is the app's.
     `marks_stand_on_char_boundaries_in_multibyte_text` is the test.
+  - **A line inside the app's own popover** (a dialog that registers its plate as a popover)
+    sets `LineLook::bounds` to that popover's rect: the engine's text clamp keeps page text out
+    from under an open popover and knows the popover's own text by its bounds, read before the
+    area's clip narrows them. Without them the line's text is clamped away.
+    `a_line_inside_its_popover_keeps_its_text_when_it_says_so` is the test.
   - The app reports the caret and composition (`docs/runtime.md`).
 - **Clipboard** (`widget::clipboard`): one synchronous text pair, `copy_to_clipboard` /
   `read_from_clipboard`, behind every widget's copy, cut and paste — `wl-copy` / `wl-paste`
