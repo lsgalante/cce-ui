@@ -199,6 +199,22 @@ at 20, capped at the range) — so −1000..1000 moves 0.4 near zero and 40 from
 maps the pointer to the whole range; the readout is where an exact value is typed. Value controls
 read the wheel as "up is more" (`docs/runtime.md`).
 
+## SliderSpinbox
+
+`SliderSpinbox::new_int(value, min, max, step)` / `new_float(value, min, max, step, decimals)`: a
+standard `Slider` with a standard `Spinbox` (`SPINBOX_W` wide, `GAP` after the band) at its right
+end, holding one number. The value is kept as the spinbox keeps it, whole units of
+`10^-decimals`, so an int is the zero-decimal case and a float does not drift; `float_value`,
+`int_value` (also the adapter's `value()`), `value_text` / `value_string` read it, `set_value`
+and `set_value_string` set it clamped and on the step grid. The two are `Embedded` children,
+linked under the composite: the router hands each its own presses, drags, wheel and keys, and
+each is its own focus stop. `register_embedded_children` (every layout and tick) places them and
+syncs: a value set on the box (typed, stepped, scrolled) moves the band to it exactly; the band
+moved by hand puts its value on the step grid in the box — the band itself is not snapped, so a
+wheel notch (a fraction of the range, `notch_step`) adds up to a step over several. The
+composite reports `Changed` when the number moves; the children report their own changes too,
+under their ids (`child_ids`).
+
 ## Float3 trackball
 
 `Float3::set_trackball` stands a ball left of the three rows. The vector is drawn from the centre

@@ -196,7 +196,7 @@ pub use self::embedded::Embedded;
 pub use self::core::{Widget, hover_animation, clipboard, context_menu, clear_widget_references};
 
 pub use self::input::{
-    Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, RadioGroup, Slider, RangeSlider,
+    Button, TextBox, Spinbox, SliderSpinbox, Dropdown, Checkbox, Toggle, RadioGroup, Slider, RangeSlider,
     ColorSelector, Finger, Trackpad, get_font_db, ActiveThumb, FontSelector,
     BevelPreview, bevel_ease, parse_bevel_knobs, RampPreview,
     ButtonStrip, KeybindRecorder, Ramp, RampKey, ColorRamp, ColorRampKey,

@@ -10,6 +10,18 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-14
 
+- **`SliderSpinbox`: a slider with a spinbox at its right end, for an int or a float.**
+  `new_int(value, min, max, step)` and `new_float(value, min, max, step, decimals)` build a
+  standard `Slider` and `Spinbox` as `Embedded` children holding one number, kept as the spinbox
+  keeps it (units of `10^-decimals`), so neither widget changed. The box follows the band on the
+  step grid, the band follows the box exactly, and the composite reports `Changed` when the
+  number moves (`docs/widgets.md`, "SliderSpinbox"). A slider's readout types a value but has
+  no step of the host's choosing and no integer form, and a spinbox alone has no coarse handle.
+  Checked: seven unit tests (the start values, the side-by-side placement and linking, the box
+  following the band on the grid, a routed press on + moving the band, a routed drag on the
+  band, a value string, a set value reaching children held and attached); the cce-gallery
+  exhibits (an int and a float) in a shadow session: + stepped, a drag moved the box, a typed
+  value moved the band.
 - **Images honour `clip_rounded`.** The paint walk recorded the rounded clip on every item, but
   tessellation queued an image with only its scissor, so an image inside `clip_rounded` kept
   square corners (cce-mail's HTML view drew its page under three scissors to dodge it).
