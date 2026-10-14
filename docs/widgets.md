@@ -176,6 +176,15 @@ The designer's and cce-files' row-based parameter editor. Row types are strings
   (`control_chrome`: a slider's 60 px readout and gap, a float3's axis column and trackball). The
   flip is a relabel and re-layout (`apply_label_layout` / `relabel_rows`, `Adapted::clear_label`),
   not a flag.
+- **Slider-spinbox rows** (`sliderspinbox:min:max:step[:decimals]`, `slider_spinboxes`): one held
+  `SliderSpinbox`, an integer without decimals and a float to as many as given. The pane draws
+  and routes its two parts as it does a slider row's and a spinbox row's (the band's drag and
+  halo wheel, the box's presses, keys, field and groove) and writes the number back as the box
+  shows it (`sync_slider_spinbox`). Its chrome is the box and gap (108 px), so the label column
+  needs a wider pane than a slider row's 68 px readout before it goes inline. Slider rows are
+  `is_slider_row`, which excludes this type though it begins the same way.
+  `a_slider_spinbox_row_is_a_band_with_a_box_at_its_end` and
+  `a_slider_spinbox_row_writes_back_from_both_parts` are the tests.
 - **Separator rows** (`parameters_bg::SEPARATOR`): a one-pixel hairline in `surface_border` with
   the row gap either side; never hovered, focused or written back.
   `a_separator_row_is_a_rule_between_rows` is the test.
@@ -218,7 +227,9 @@ syncs: a value set on the box (typed, stepped, scrolled) moves the band to it ex
 moved by hand puts its value on the step grid in the box — the band itself is not snapped, so a
 wheel notch (a fraction of the range, `notch_step`) adds up to a step over several. The
 composite reports `Changed` when the number moves; the children report their own changes too,
-under their ids (`child_ids`).
+under their ids (`child_ids`). A host that owns its controls by value and routes their input
+itself (the parameter pane, below) keeps it HELD — never inserted: `set_rect` places the parts,
+`parts` / `parts_mut` reach them, and `sync_parts` does the sync after each event.
 
 ## Float3 trackball
 

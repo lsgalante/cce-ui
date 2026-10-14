@@ -524,3 +524,34 @@ fn a_hosted_controls_text_keeps_its_own_bounds() {
         .expect("paint draws the value, bounded");
     assert_eq!(painted[2], field[2], "paint cuts it at the field too: {painted:?}");
 }
+
+/// A `sliderspinbox` row is one `SliderSpinbox`: its band at the left of the control rect and
+/// its box at the right end, the box showing the row's value — an integer with no decimals in
+/// the type, a float to as many as it gives — and the row's name, inline or stacked. Neither a
+/// slider row nor a spinbox row is built for it, though its type begins like a slider's.
+#[test]
+fn a_slider_spinbox_row_is_a_band_with_a_box_at_its_end() {
+    for width in [300.0, 600.0] {
+        let mut p = panel_with(&[("Count", "4", "sliderspinbox:0:10:2"), ("Amount", "0.25", "sliderspinbox:0:1:0.05:2")]);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, width, 400.0);
+        assert!(p.sliders.iter().all(Option::is_none) && p.spinboxes.iter().all(Option::is_none));
+        let lw = p.label_col_w();
+        let rects = p.get_param_rects();
+        for (i, (int, text)) in [(true, "4"), (false, "0.25")].into_iter().enumerate() {
+            let c = p.slider_spinboxes[i].as_ref().expect("a slider-spinbox row");
+            assert_eq!(c.decimals() == 0, int, "row {i}");
+            assert_eq!(c.value_text(), text);
+            let (s, sb) = c.parts().expect("held by value");
+            let control = p.control_rect(rects[i], i, lw);
+            let (sx, _, sw, _) = s.rect();
+            let (bx, _, bw, _) = sb.rect();
+            assert!((sx - control.0).abs() < 0.5, "{width}: the band starts the control");
+            assert!((bx + bw - (control.0 + control.2)).abs() < 0.5, "{width}: the box ends it");
+            assert!(sx + sw < bx, "{width}: band, then box");
+        }
+        let labels: Vec<String> = p.own_text_labels().into_iter().map(|l| l.text).collect();
+        for want in ["Count", "Amount", "4", "0.25"] {
+            assert!(labels.iter().any(|t| t == want), "{width}: {want} in {labels:?}");
+        }
+    }
+}

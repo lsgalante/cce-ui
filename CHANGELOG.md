@@ -10,6 +10,18 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-14
 
+- **The parameter pane has a slider-with-spinbox row** (`sliderspinbox:min:max:step[:decimals]`),
+  hosting a `SliderSpinbox` held by value as it hosts a `Float3`: the pane draws and routes the
+  composite's two parts with its slider and spinbox code and writes the number back as the box
+  shows it. `SliderSpinbox` gained the held surface for it (`parts`, `parts_mut`, `sync_parts`;
+  its number moved into a `Number` so a sync holds the parts and the state at once). Slider rows
+  are now `is_slider_row`, since `starts_with("slider")` also matched the new type. Asked for so
+  cce-designer can declare such parameters (its `sliderspinbox` kind). Checked: the pane tests
+  `a_slider_spinbox_row_is_a_band_with_a_box_at_its_end` and
+  `a_slider_spinbox_row_writes_back_from_both_parts` (a press on +, a drag, the wheel on the box,
+  a host write), `a_held_composite_syncs_its_parts`, the full suite; a shadow cce-designer with
+  two such parameters on a sphere: + stepped 4 to 6 and a band drag set 1, both read back
+  through its MCP `get_state`.
 - **A grid app's context menu stands on a layer surface of its own** (`backend/menu_layer.rs`).
   cce-grid is to draw the desktop's background menu in process (it was a `cce-cloud --json`
   popup from a shell script), and a popup cannot ride its surface: the compositor scales that

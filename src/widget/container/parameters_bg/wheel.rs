@@ -43,6 +43,10 @@ impl ParametersBg {
             self.spinboxes[i].as_ref().is_some_and(|sb| latched_to(sb.base().id()))
                 || self.sliders[i].as_ref().is_some_and(|sl| latched_to(sl.base().id()))
                 || self.float3s[i].as_ref().is_some_and(|f| f.wheel_latched(ui))
+                || self.slider_spinboxes[i]
+                    .as_ref()
+                    .and_then(|c| c.parts())
+                    .is_some_and(|(s, sb)| latched_to(s.base().id()) || latched_to(sb.base().id()))
         });
         // Under the pointer: the NEAREST control whose zone
         // holds it, by the distance to the band's (or the
@@ -63,6 +67,16 @@ impl ParametersBg {
                     if self.spinboxes[i].is_some() {
                         let r = rects[i];
                         return in_row(r).then(|| (i, (py - (r.1 + r.3 * 0.5)).abs()));
+                    }
+                    if let Some((s, sb)) = self.slider_spinboxes[i].as_ref().and_then(|c| c.parts()) {
+                        // The box by its rect, the band by its halo, as each is alone.
+                        let (bx, by, bw, bh) = sb.rect();
+                        if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
+                            return Some((i, (py - (by + bh * 0.5)).abs()));
+                        }
+                        let (sx, sy, sw, sh) = s.rect();
+                        let band = Rect { x: sx, y: sy, width: sw, height: sh };
+                        return s.inner().scroll_hit(band, px, py).then(|| (i, (py - (band.y + band.height * 0.5)).abs()));
                     }
                     if let Some(sl) = self.sliders[i].as_ref() {
                         let (sx, sy, sw, sh) = sl.rect();
@@ -88,8 +102,11 @@ impl ParametersBg {
     /// throughout: the owner test already placed the pointer, and a latched gesture may have
     /// drifted off the control's rect.
     pub(super) fn wheel_control(&mut self, i: usize, delta: &MouseScrollDelta, px: f32, py: f32, ui: &mut UiContext) -> bool {
+        if is_slider_spinbox_row(&self.display_params[i].2) {
+            return self.wheel_slider_spinbox(i, delta, px, py, ui);
+        }
         let p = &mut self.display_params[i];
-        if p.2.starts_with("slider") {
+        if is_slider_row(&p.2) {
             let Some(s) = &mut self.sliders[i] else { return false };
             let was_scroll = s.scroll_enabled;
             s.set_scroll(true);
@@ -127,6 +144,30 @@ impl ParametersBg {
         } else {
             false
         }
+    }
+
+    /// A slider-spinbox row's wheel: the box's (one step a notch) when the gesture is the box's
+    /// or begins over it, else the band's; the other part follows (`sync_slider_spinbox`).
+    fn wheel_slider_spinbox(&mut self, i: usize, delta: &MouseScrollDelta, px: f32, py: f32, ui: &mut UiContext) -> bool {
+        let Some((s, sb)) = self.slider_spinboxes[i].as_mut().and_then(|c| c.parts_mut()) else { return false };
+        let latched_to = |id| !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(id);
+        let (bx, by, bw, bh) = sb.rect();
+        let over_box = px >= bx && px <= bx + bw && py >= by && py <= by + bh;
+        let taken = if latched_to(sb.base().id()) || (!latched_to(s.base().id()) && over_box) {
+            ui.scroll_initiate_widget_id = Some(sb.base().id());
+            sb.mouse_wheel_ungated(delta, px, py, ui);
+            true
+        } else {
+            let was_scroll = s.scroll_enabled;
+            s.set_scroll(true);
+            let taken = s.mouse_wheel_ungated(delta, px, py, ui);
+            s.set_scroll(was_scroll);
+            taken
+        };
+        if taken {
+            self.sync_slider_spinbox(i);
+        }
+        taken
     }
 
     /// The pane's own scroll, for a wheel event no control `taken`: over the pane (or its

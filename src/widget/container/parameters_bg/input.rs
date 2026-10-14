@@ -19,7 +19,8 @@ impl ParametersBg {
             || at(&self.spinboxes, i).is_some_and(|t| t.editing)
             || at(&self.sliders, i).is_some_and(|t| t.editing)
             || at(&self.colors, i).is_some_and(|t| t.editing)
-            || at(&self.float3s, i).is_some_and(|t| t.editing_idx().is_some());
+            || at(&self.float3s, i).is_some_and(|t| t.editing_idx().is_some())
+            || at(&self.slider_spinboxes, i).and_then(|c| c.parts()).is_some_and(|(_, sb)| sb.editing);
         typing.then_some(i)
     }
 
@@ -64,6 +65,14 @@ impl ParametersBg {
         for f in self.float3s.iter_mut().flatten() {
             if f.on_cursor_moved(px, py, ui) {
                 changed = true;
+            }
+        }
+        for c in self.slider_spinboxes.iter_mut().flatten() {
+            if let Some((s, sb)) = c.parts_mut() {
+                // Both parts: each tests the pointer against its own rect.
+                let a = s.on_cursor_moved(px, py, ui);
+                let b = sb.on_cursor_moved(px, py, ui);
+                changed |= a || b;
             }
         }
         for b in self.buttons.iter_mut().flatten() {
@@ -141,13 +150,20 @@ impl ParametersBg {
     pub(super) fn commit_and_unfocus(&mut self) {
         if let Some(idx) = self.focused_param {
             if idx < self.display_params.len() {
+                if is_slider_spinbox_row(&self.display_params[idx].2) {
+                    if let Some((s, sb)) = self.slider_spinboxes[idx].as_mut().and_then(|c| c.parts_mut()) {
+                        s.unfocus();
+                        sb.unfocus();
+                    }
+                    self.sync_slider_spinbox(idx);
+                }
                 let p = &mut self.display_params[idx];
                 if p.2.starts_with("spinbox") {
                     if let Some(sb) = &mut self.spinboxes[idx] {
                         sb.unfocus();
                         p.1 = sb.value.to_string();
                     }
-                } else if p.2.starts_with("slider") {
+                } else if is_slider_row(&p.2) {
                     if let Some(s) = &mut self.sliders[idx] {
                         s.unfocus();
                         let new_val = s.get_scaled_value();
@@ -190,6 +206,18 @@ impl ParametersBg {
             }
         }
         self.focused_param = None;
+    }
+
+    /// Bring slider-spinbox row `i`'s parts to one value after an event reached one of them
+    /// (`SliderSpinbox::sync_parts`), and write the number into the row as its box shows it.
+    /// Returns whether the row's string changed.
+    pub(super) fn sync_slider_spinbox(&mut self, i: usize) -> bool {
+        let Some(c) = &mut self.slider_spinboxes[i] else { return false };
+        c.sync_parts();
+        let text = c.value_text();
+        let changed = self.display_params[i].1 != text;
+        self.display_params[i].1 = text;
+        changed
     }
 
     /// The pointer moved: the scrollbar's hover and thumb drag, and the rows' hover.
@@ -273,7 +301,17 @@ impl Input for ParametersBg {
         }
         let rects = self.get_param_rects();
         for (i, p) in self.display_params.iter().enumerate() {
-            if p.2.starts_with("slider") {
+            if is_slider_spinbox_row(&p.2) {
+                // Its band only: a drag that begins on the box is not a slider drag.
+                if let Some((s, _)) = self.slider_spinboxes[i].as_mut().and_then(|c| c.parts_mut()) {
+                    let (sx, sy, sw, sh) = s.rect();
+                    if px >= sx && px <= sx + sw && py >= sy && py <= sy + sh {
+                        s.drag_begin(px, py);
+                        self.dragging_param = Some(i);
+                        break;
+                    }
+                }
+            } else if is_slider_row(&p.2) {
                 let r = rects[i];
                 if let Some(s) = &mut self.sliders[i] {
                     let top = s.label_strip();
@@ -322,6 +360,10 @@ impl Input for ParametersBg {
                         return true;
                     }
                 }
+            } else if let Some((s, _)) = self.slider_spinboxes[i].as_mut().and_then(|c| c.parts_mut()) {
+                if s.drag_update(px, py) {
+                    return self.sync_slider_spinbox(i);
+                }
             }
         }
         false
@@ -338,6 +380,8 @@ impl Input for ParametersBg {
                 s.drag_end();
             } else if let Some(f) = &mut self.float3s[i] {
                 f.drag_end();
+            } else if let Some((s, _)) = self.slider_spinboxes[i].as_mut().and_then(|c| c.parts_mut()) {
+                s.drag_end();
             }
         }
     }
@@ -391,6 +435,15 @@ impl Input for ParametersBg {
                     if self.display_params[i].1 != new_val_str {
                         self.display_params[i].1 = new_val_str;
                     }
+                    changed = true;
+                }
+            }
+        }
+        // A slider-spinbox row's band glides as a slider row's does; the box follows it.
+        for i in 0..self.slider_spinboxes.len() {
+            if let Some((s, _)) = self.slider_spinboxes[i].as_mut().and_then(|c| c.parts_mut()) {
+                if s.tick(dt, &mut dummy) {
+                    self.sync_slider_spinbox(i);
                     changed = true;
                 }
             }

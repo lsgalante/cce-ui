@@ -30,7 +30,7 @@ impl ParamController for ParametersBg {
             self.inline_labels = self.decide_inline();
             let inline = self.inline_labels;
             self.sliders = self.display_params.iter().map(|p| {
-                if p.2.starts_with("slider") {
+                if is_slider_row(&p.2) {
                     let val = p.1.parse::<f32>().unwrap_or(0.0);
                     let (min, max) = parse_slider_range(&p.2);
                     let t = if max - min != 0.0 {
@@ -63,6 +63,17 @@ impl ParamController for ParametersBg {
                     let val = p.1.parse::<i32>().unwrap_or(min);
                     let sb = Spinbox::new(val, min, max, step);
                     Some(if inline { sb } else { sb.with_label(&p.0) })
+                } else {
+                    None
+                }
+            }).collect();
+            self.slider_spinboxes = self.display_params.iter().map(|p| {
+                if is_slider_spinbox_row(&p.2) {
+                    // A float to `decimals` places; with none, an integer.
+                    let (min, max, step, decimals) = parse_slider_spinbox(&p.2);
+                    let val = p.1.parse::<f32>().unwrap_or(min);
+                    let c = SliderSpinbox::new_float(val, min, max, step, decimals);
+                    Some(if inline { c } else { c.with_label(&p.0) })
                 } else {
                     None
                 }
@@ -186,6 +197,15 @@ impl ParamController for ParametersBg {
                             let (min, _max, _step) = parse_spinbox_range(&p_new.2);
                             let val = p_new.1.parse::<i32>().unwrap_or(min);
                             sb.value = val;
+                        }
+                    } else if let Some(ref mut c) = self.slider_spinboxes[i] {
+                        // The row's string as the box shows it: re-set only on a
+                        // different number, and never under a typing hand.
+                        let editing = c.parts().is_some_and(|(_, sb)| sb.editing);
+                        if !editing && c.value_text() != p_new.1 {
+                            if let Ok(v) = p_new.1.parse::<f32>() {
+                                c.set_value(v);
+                            }
                         }
                     } else if let Some(ref mut d) = self.choices[i] {
                         if !d.open {

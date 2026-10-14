@@ -27,6 +27,13 @@ pub struct SliderSpinbox {
     spinbox: Embedded<Adapted<Spinbox>>,
     /// The content rect the children are placed from.
     rect: Rect,
+    /// The number, apart from the children, so a sync can hold both at once.
+    n: Number,
+}
+
+/// The number a [`SliderSpinbox`] holds, and what it knows about its children's last state.
+#[derive(Debug, Clone, Copy)]
+struct Number {
     /// The value, in units of `10^-decimals` (the spinbox's representation).
     units: i32,
     min: i32,
@@ -40,6 +47,48 @@ pub struct SliderSpinbox {
     /// hand them.
     push: bool,
     just_changed: bool,
+}
+
+impl Number {
+    fn scale(&self) -> f32 {
+        10f32.powi(self.decimals as i32)
+    }
+
+    fn real(&self) -> f32 {
+        self.units as f32 / self.scale()
+    }
+
+    /// `units` on the step grid from the range's start, within the range.
+    fn snap(&self, units: i32) -> i32 {
+        let k = ((units - self.min) as f32 / self.step as f32).round() as i32;
+        (self.min + k * self.step).clamp(self.min, self.max)
+    }
+
+    /// Bring the two children to one value: the one a host set, else the box's if it moved,
+    /// else the band's if it did. Returns whether the number moved.
+    fn sync(&mut self, slider: &mut Slider, spinbox: &mut Spinbox) -> bool {
+        let scale = self.scale();
+        let before = self.units;
+        if std::mem::take(&mut self.push) {
+            slider.set_scaled_value(self.units as f32 / scale);
+            spinbox.value = self.units;
+        } else if spinbox.value != self.units {
+            // Typed or stepped: the band goes to it exactly.
+            self.units = spinbox.value;
+            slider.set_scaled_value(self.units as f32 / scale);
+        } else if (slider.get_scaled_value() - self.slider_seen).abs() > f32::EPSILON {
+            // Dragged or scrolled: the box shows it on the step grid.
+            let units = self.snap((slider.get_scaled_value() * scale).round() as i32);
+            if units != self.units {
+                self.units = units;
+                spinbox.value = units;
+            }
+        }
+        self.slider_seen = slider.get_scaled_value();
+        let moved = self.units != before;
+        self.just_changed |= moved;
+        moved
+    }
 }
 
 impl SliderSpinbox {
@@ -75,25 +124,14 @@ impl SliderSpinbox {
             slider: Embedded::new(slider),
             spinbox: Embedded::new(spinbox),
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
-            units,
-            min,
-            max,
-            step,
-            decimals,
-            slider_seen,
-            push: false,
-            just_changed: false,
+            n: Number { units, min, max, step, decimals, slider_seen, push: false, just_changed: false },
         })
-    }
-
-    fn scale(&self) -> f32 {
-        10f32.powi(self.decimals as i32)
     }
 
     /// The value. (`value()` is the adapter's integer read, as on every widget: here
     /// [`Self::int_value`].)
     pub fn float_value(&self) -> f32 {
-        self.units as f32 / self.scale()
+        self.n.real()
     }
 
     /// The value rounded to a whole number — exact for an integer control.
@@ -103,16 +141,16 @@ impl SliderSpinbox {
 
     /// The value as the box shows it, to the control's decimals.
     pub fn value_text(&self) -> String {
-        format!("{:.*}", self.decimals as usize, self.float_value())
+        format!("{:.*}", self.n.decimals as usize, self.float_value())
     }
 
     /// The range, as given (rounded to the decimals).
     pub fn range(&self) -> (f32, f32) {
-        (self.min as f32 / self.scale(), self.max as f32 / self.scale())
+        (self.n.min as f32 / self.n.scale(), self.n.max as f32 / self.n.scale())
     }
 
     pub fn decimals(&self) -> u32 {
-        self.decimals
+        self.n.decimals
     }
 
     /// The slider and the spinbox's ids, for a host that tells them apart in the event sweep.
@@ -123,23 +161,41 @@ impl SliderSpinbox {
     /// Set the value, clamped to the range and snapped to the step grid. Like
     /// `Slider::set_value`, a typed setter: no change is reported for it.
     pub fn set_value(&mut self, value: f32) {
-        self.units = self.snap((value * self.scale()).round() as i32);
-        let real = self.float_value();
+        self.n.units = self.n.snap((value * self.n.scale()).round() as i32);
+        let real = self.n.real();
         match (self.slider.here_mut(), self.spinbox.here_mut()) {
             (Some(slider), Some(spinbox)) => {
                 slider.set_scaled_value(real);
-                spinbox.value = self.units;
-                self.slider_seen = slider.get_scaled_value();
+                spinbox.value = self.n.units;
+                self.n.slider_seen = slider.get_scaled_value();
             }
             // The children are the context's: the next sync hands them the value.
-            _ => self.push = true,
+            _ => self.n.push = true,
         }
     }
 
-    /// `units` on the step grid from the range's start, within the range.
-    fn snap(&self, units: i32) -> i32 {
-        let k = ((units - self.min) as f32 / self.step as f32).round() as i32;
-        (self.min + k * self.step).clamp(self.min, self.max)
+    /// The two parts, while the composite is HELD — never inserted into a context, as a host
+    /// that owns its controls by value and draws and routes them itself keeps it
+    /// (`ParametersBg`'s `sliderspin` rows, as it keeps a `Float3`). Such a host places the
+    /// composite (`set_rect` places the parts), routes each event to the part it is for, and
+    /// calls [`Self::sync_parts`] after. `None` once the parts are the context's.
+    pub fn parts(&self) -> Option<(&Adapted<Slider>, &Adapted<Spinbox>)> {
+        Some((self.slider.here()?, self.spinbox.here()?))
+    }
+
+    /// [`Self::parts`], mutably.
+    pub fn parts_mut(&mut self) -> Option<(&mut Adapted<Slider>, &mut Adapted<Spinbox>)> {
+        Some((self.slider.here_mut()?, self.spinbox.here_mut()?))
+    }
+
+    /// For a held composite, what `register_embedded_children` does for an inserted one: bring
+    /// the parts to one value after input reached them. Returns whether the number moved (also
+    /// reported as a change); nothing while the parts are the context's.
+    pub fn sync_parts(&mut self) -> bool {
+        match (self.slider.here_mut(), self.spinbox.here_mut()) {
+            (Some(slider), Some(spinbox)) => self.n.sync(slider.inner_mut(), spinbox.inner_mut()),
+            _ => false,
+        }
     }
 
     /// The children's rects in the content rect `r`: the band left, the box right, each at
@@ -154,30 +210,6 @@ impl SliderSpinbox {
             Rect { x: r.x, y: centred(sh), width: slider_w, height: sh },
             Rect { x: r.x + r.width - spin_w, y: centred(bh), width: spin_w, height: bh },
         )
-    }
-
-    /// Bring the two children to one value: the one a host set, else the box's if it moved,
-    /// else the band's if it did.
-    fn sync(&mut self, slider: &mut Slider, spinbox: &mut Spinbox) {
-        let scale = self.scale();
-        if std::mem::take(&mut self.push) {
-            slider.set_scaled_value(self.units as f32 / scale);
-            spinbox.value = self.units;
-        } else if spinbox.value != self.units {
-            // Typed or stepped: the band goes to it exactly.
-            self.units = spinbox.value;
-            slider.set_scaled_value(self.units as f32 / scale);
-            self.just_changed = true;
-        } else if (slider.get_scaled_value() - self.slider_seen).abs() > f32::EPSILON {
-            // Dragged or scrolled: the box shows it on the step grid.
-            let units = self.snap((slider.get_scaled_value() * scale).round() as i32);
-            if units != self.units {
-                self.units = units;
-                spinbox.value = units;
-                self.just_changed = true;
-            }
-        }
-        self.slider_seen = slider.get_scaled_value();
     }
 }
 
@@ -224,8 +256,9 @@ impl Layout for SliderSpinbox {
         ctx[sh].set_rect(sr.x, sr.y, sr.width, sr.height);
         ctx[bh].set_rect(br.x, br.y, br.width, br.height);
         // Both out on loan at once for the sync.
+        let n = &mut self.n;
         ctx.lend_h(sh, |slider, ctx| {
-            ctx.lend_h(bh, |spinbox, _| self.sync(slider.inner_mut(), spinbox.inner_mut()));
+            ctx.lend_h(bh, |spinbox, _| n.sync(slider.inner_mut(), spinbox.inner_mut()));
         });
         ctx.link_ids(host_id, self.slider.id());
         ctx.link_ids(host_id, self.spinbox.id());
@@ -242,8 +275,8 @@ impl Paint for SliderSpinbox {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    /// Nothing of its own: the children are painted by the walk, through the link (and, held
-    /// here, the composite is never on screen).
+    /// Nothing of its own: inserted, the children are painted by the walk, through the link;
+    /// held, by the host that holds it ([`SliderSpinbox::parts`]).
     fn paint(&self, _rect: Rect, _ctx: &mut PaintCtx) {}
 }
 
@@ -260,7 +293,7 @@ impl Input for SliderSpinbox {
     }
 
     fn take_change(&mut self) -> bool {
-        std::mem::take(&mut self.just_changed)
+        std::mem::take(&mut self.n.just_changed)
     }
 
     fn value(&self) -> i32 {
@@ -275,20 +308,18 @@ impl Input for SliderSpinbox {
     /// change when it moves the value.
     fn set_value_string(&mut self, val: &str) -> bool {
         let Ok(v) = val.trim().parse::<f32>() else { return false };
-        let before = self.units;
+        let before = self.n.units;
         self.set_value(v);
-        let changed = self.units != before;
-        self.just_changed |= changed;
+        let changed = self.n.units != before;
+        self.n.just_changed |= changed;
         changed
     }
 }
 
-/// Unused by the composite itself, which reads its children through the context: a held
-/// child is reached through its cell. Kept so a test can see both before insertion.
 #[cfg(test)]
 impl SliderSpinbox {
     fn held(&self) -> (&Adapted<Slider>, &Adapted<Spinbox>) {
-        (self.slider.here().expect("held"), self.spinbox.here().expect("held"))
+        self.parts().expect("held")
     }
 }
 
@@ -422,6 +453,25 @@ mod tests {
         assert_eq!(ctx[spinbox].value, 60);
         assert!(ctx[h].take_change());
         assert!(!ctx[h].set_value_string("lots"));
+    }
+
+    /// Held by value (a host that owns and routes its controls), the parts are reached
+    /// through `parts_mut` and brought together by `sync_parts`, which reports the move.
+    #[test]
+    fn a_held_composite_syncs_its_parts() {
+        let mut c = SliderSpinbox::new_int(2, 0, 10, 2);
+        WidgetHost::set_rect(&mut c, 0.0, 0.0, 300.0, 30.0);
+        let (slider, spinbox) = c.parts().unwrap();
+        assert_eq!(slider.rect().0, 0.0, "placed by set_rect");
+        assert_eq!(spinbox.rect().0 + spinbox.rect().2, 300.0);
+        c.parts_mut().unwrap().0.set_scaled_value(7.2);
+        assert!(c.sync_parts());
+        assert_eq!((c.int_value(), c.parts().unwrap().1.value), (8, 8), "7.2 on the grid of 2");
+        assert!(c.take_change());
+        c.parts_mut().unwrap().1.value = 4;
+        assert!(c.sync_parts());
+        assert!((c.parts().unwrap().0.get_scaled_value() - 4.0).abs() < 1e-4);
+        assert!(!c.sync_parts(), "nothing moved");
     }
 
     /// A value the host sets reaches both children — at once while they are held here, at

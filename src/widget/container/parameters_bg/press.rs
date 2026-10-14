@@ -201,6 +201,17 @@ impl ParametersBg {
             p.1 = sb.value.to_string();
             hold_focus(&mut self.focused_param, i, sb.editing);
             true
+        } else if is_slider_spinbox_row(&p.2) {
+            // The box takes its presses here (a step, or typing); the band's are the drag
+            // surface's (`focus_on_press`, `drag_begin`).
+            let Some((_, sb)) = self.slider_spinboxes[i].as_mut().and_then(|c| c.parts_mut()) else { return false };
+            if !sb.mouse_input(button, state, px, py, ui) {
+                return false;
+            }
+            let editing = sb.editing;
+            self.sync_slider_spinbox(i);
+            hold_focus(&mut self.focused_param, i, editing);
+            true
         } else if p.2 == "toggle" || p.2 == "checkbox" {
             let Some(cb) = &mut self.toggles[i] else { return false };
             if !cb.mouse_input(button, state, px, py, ui) {
@@ -287,7 +298,13 @@ impl ParametersBg {
                     clicked_any_focusable = true;
                     break;
                 }
-            } else if kind.starts_with("slider") && in_row_band {
+            } else if is_slider_spinbox_row(kind) && in_row_band {
+                if let Some((s, _)) = self.slider_spinboxes[i].as_mut().and_then(|c| c.parts_mut()) {
+                    if s.mouse_input(button, state, px, py, ui) {
+                        break;
+                    }
+                }
+            } else if is_slider_row(kind) && in_row_band {
                 if let Some(s) = &mut self.sliders[i] {
                     if s.mouse_input(button, state, px, py, ui) {
                         if s.editing {

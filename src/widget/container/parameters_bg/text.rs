@@ -44,7 +44,16 @@ impl ParametersBg {
                     color: if self.hover_row == Some(i) { Self::LABEL_HOVER } else { Self::LABEL },
                 }));
             }
-            if ptype.starts_with("slider") {
+            if is_slider_spinbox_row(ptype) {
+                // The composite's own label (stacked), then its parts' text: the box's value.
+                if let Some(c) = &self.slider_spinboxes[i] {
+                    labels.extend(c.own_text_labels_with_bounds());
+                    if let Some((s, sb)) = c.parts() {
+                        labels.extend(s.own_text_labels_with_bounds());
+                        labels.extend(sb.own_text_labels_with_bounds());
+                    }
+                }
+            } else if is_slider_row(ptype) {
                 if let Some(s) = &self.sliders[i] {
                     labels.extend(s.own_text_labels_with_bounds());
                 }
@@ -185,7 +194,12 @@ impl ParametersBg {
             if hidden[i] {
                 continue;
             }
-            if ptype.starts_with("slider") {
+            if is_slider_spinbox_row(ptype) {
+                if let Some((s, sb)) = self.slider_spinboxes[i].as_ref().and_then(|c| c.parts()) {
+                    glyphs.extend(s.own_glyphs());
+                    glyphs.extend(sb.own_glyphs());
+                }
+            } else if is_slider_row(ptype) {
                 if let Some(s) = &self.sliders[i] {
                     glyphs.extend(s.own_glyphs());
                 }

@@ -175,6 +175,11 @@ impl Paint for ParametersBg {
         for sb in self.spinboxes.iter_mut().flatten() {
             sb.prepare_text(fs);
         }
+        for c in self.slider_spinboxes.iter_mut().flatten() {
+            if let Some((_, sb)) = c.parts_mut() {
+                sb.prepare_text(fs);
+            }
+        }
         for c in self.colors.iter_mut().flatten() {
             c.prepare_text(fs);
         }

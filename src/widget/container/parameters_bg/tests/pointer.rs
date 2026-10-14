@@ -359,3 +359,45 @@ fn a_gesture_beginning_on_a_spinbox_row_steps_it_trackpad_included() {
     assert!(p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 0.5), x, y, &mut ctx));
     assert_eq!(count(&p), "11", "a half-notch factor is not truncated to nothing");
 }
+
+/// A `sliderspinbox` row writes its value back from both parts: a press on the box's + steps
+/// it, a drag on the band moves it (on the step grid), a wheel over the box steps it once a
+/// notch and over the band turns the band, and the host's own write reaches both parts.
+#[test]
+fn a_slider_spinbox_row_writes_back_from_both_parts() {
+    let mut p = panel_with(&[("Count", "4", "sliderspinbox:0:10:2")]);
+    let mut ctx = UiContext::new();
+    let value = |p: &Adapted<ParametersBg>| ParamController::node_params(&**p)[0].1.clone();
+    let (s, sb) = p.slider_spinboxes[0].as_ref().unwrap().parts().unwrap();
+    let (sx, sy, sw, sh) = s.rect();
+    let (bx, by, bw, bh) = sb.rect();
+
+    // The box's +, at its right end.
+    let (px, py) = (bx + bw - 4.0, by + bh * 0.5);
+    p.mouse_input(MouseButton::Left, ElementState::Pressed, px, py, &mut ctx);
+    p.mouse_input(MouseButton::Left, ElementState::Released, px, py, &mut ctx);
+    assert_eq!(value(&p), "6");
+    let band = p.slider_spinboxes[0].as_ref().unwrap().parts().unwrap().0.get_scaled_value();
+    assert!((band - 6.0).abs() < 1e-4, "the band followed the box: {band}");
+
+    // A drag on the band, to a fifth of the way: 2 on the grid.
+    let y = sy + sh * 0.5;
+    p.drag_begin(sx + sw * 0.6, y);
+    p.drag_update(sx + sw * 0.6 - 3.0, y);
+    p.drag_update(sx + sw * 0.2, y);
+    p.drag_end();
+    assert_eq!(value(&p), "2");
+    assert_eq!(p.slider_spinboxes[0].as_ref().unwrap().parts().unwrap().1.value, 2);
+
+    // A wheel notch over the box: one step.
+    p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), px, py, &mut ctx);
+    let after: i32 = value(&p).parse().unwrap();
+    assert_eq!((after - 2).abs(), 2, "one step of 2: {after}");
+
+    // The host writes the row: both parts take it.
+    let params = vec![("Count".to_string(), "8".to_string(), "sliderspinbox:0:10:2".to_string())];
+    ParamController::set_display_params(&mut *p, &params);
+    let (s, sb) = p.slider_spinboxes[0].as_ref().unwrap().parts().unwrap();
+    assert_eq!(sb.value, 8);
+    assert!((s.get_scaled_value() - 8.0).abs() < 1e-4);
+}

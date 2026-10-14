@@ -9,7 +9,9 @@ impl ParametersBg {
     /// its track: a slider's readout and gap, plus a float3's axis column.
     /// Zero for the controls that have no track.
     pub(super) fn control_chrome(t: &str) -> f32 {
-        if t.starts_with("slider") {
+        if is_slider_spinbox_row(t) {
+            SliderSpinbox::GAP + SliderSpinbox::SPINBOX_W
+        } else if is_slider_row(t) {
             crate::widget::input::slider::Slider::readout_chrome()
         } else if is_vec_row(t) {
             let ball = if Self::has_trackball(t) { Float3::trackball_chrome() } else { 0.0 };
@@ -96,6 +98,7 @@ impl ParametersBg {
             relabel!(&mut self.sliders[i]);
             relabel!(&mut self.float3s[i]);
             relabel!(&mut self.spinboxes[i]);
+            relabel!(&mut self.slider_spinboxes[i]);
             relabel!(&mut self.texts[i]);
             relabel!(&mut self.colors[i]);
             // Only a choice row's dropdown carries the row label; a text
@@ -183,9 +186,9 @@ impl ParametersBg {
             260.0
         } else if is_vec_row(&p.2) {
             Float3::preferred_height_for(!self.inline_row(i), vec_row_n(&p.2))
-        } else if p.2.starts_with("slider") {
+        } else if is_slider_row(&p.2) {
             (38.0 - self.inline_strip(i)).max(22.0)
-        } else if is_text_row(&p.2) || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
+        } else if is_text_row(&p.2) || p.2.starts_with("spinbox") || is_slider_spinbox_row(&p.2) || p.2.starts_with("choice") {
             (42.0 - self.inline_strip(i)).max(24.0)
         } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
             (40.0 - self.inline_strip(i)).max(24.0)
@@ -462,6 +465,13 @@ impl ParametersBg {
             if let Some(sb) = sb_opt {
                 let r = rects[i];
                 sb.set_rect(r.0, r.1, r.2, r.3);
+            }
+        }
+        for (i, c_opt) in self.slider_spinboxes.iter_mut().enumerate() {
+            if let Some(c) = c_opt {
+                // The composite places its parts in its content rect.
+                let r = rects[i];
+                c.set_rect(r.0, r.1, r.2, r.3);
             }
         }
         for (i, b_opt) in self.buttons.iter_mut().enumerate() {

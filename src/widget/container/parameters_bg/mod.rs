@@ -1,5 +1,5 @@
 //! `ParametersBg` — the parameter pane (cce-designer's, and cce-files'): a scrollable column of
-//! param rows — sliders, spinboxes, dropdowns, text boxes (with an optional completion picker),
+//! param rows — sliders, spinboxes, sliders with a spinbox (`SliderSpinbox`), dropdowns, text boxes (with an optional completion picker),
 //! toggles, colours, ramps, vector groups with an optional trackball, buttons, separators,
 //! collapsible sections, and an inline code editor — each row's control owned by value in
 //! parallel `Vec<Option<..>>` fields. Behaviour reference: `docs/widgets.md`, "Parameter pane".
@@ -60,7 +60,7 @@ use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::{Float3, TextLabel};
 use crate::scene::paint::Field;
-use crate::widget::input::{Button, ColorSelector, Dropdown, Ramp, Slider, Spinbox, TextBox, Toggle};
+use crate::widget::input::{Button, ColorSelector, Dropdown, Ramp, Slider, SliderSpinbox, Spinbox, TextBox, Toggle};
 use crate::widget::{Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
     MouseScrollDelta, NamedKey, Paint, ParamController, TextEditorState, UiContext, WidgetHostExt};
 
@@ -127,6 +127,11 @@ pub struct ParametersBg {
     pub sliders: Vec<Option<Adapted<Slider>>>,
     pub float3s: Vec<Option<Adapted<Float3>>>,
     pub spinboxes: Vec<Option<Adapted<Spinbox>>>,
+    /// Slider-with-spinbox rows (`sliderspinbox:min:max:step[:decimals]`), each a
+    /// `SliderSpinbox` HELD by value: the pane draws and routes its two parts
+    /// (`SliderSpinbox::parts`) as it does a slider row's and a spinbox row's, and brings them
+    /// to one value after each event (`SliderSpinbox::sync_parts`).
+    pub slider_spinboxes: Vec<Option<Adapted<SliderSpinbox>>>,
     pub buttons: Vec<Option<Adapted<Button>>>,
     pub choices: Vec<Option<Adapted<Dropdown>>>,
     pub texts: Vec<Option<Adapted<TextBox>>>,
@@ -262,6 +267,7 @@ impl ParametersBg {
             sliders: Vec::new(),
             float3s: Vec::new(),
             spinboxes: Vec::new(),
+            slider_spinboxes: Vec::new(),
             buttons: Vec::new(),
             choices: Vec::new(),
             texts: Vec::new(),

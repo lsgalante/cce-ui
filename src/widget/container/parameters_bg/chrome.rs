@@ -58,7 +58,17 @@ impl ParametersBg {
     /// Row `i`'s plain chrome (`r` its row rect), by row type.
     pub(super) fn push_row_quads(&self, i: usize, r: (f32, f32, f32, f32), out: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) {
         let kind = self.display_params[i].2.as_str();
-        if kind.starts_with("slider") {
+        if is_slider_spinbox_row(kind) {
+            // Its slider's and its spinbox's, as their own rows draw them.
+            if let Some((s, sb)) = self.slider_spinboxes[i].as_ref().and_then(|c| c.parts()) {
+                let (sx, sy, sw, sh) = s.rect();
+                out.push((sx, sy, sw, sh, s.color()));
+                out.extend(crate::widget::shown_quads(s));
+                let (bx, by, bw, bh) = sb.rect();
+                out.push((bx, by, bw, bh, sb.color()));
+                out.extend(crate::widget::shown_quads(sb));
+            }
+        } else if is_slider_row(kind) {
             if let Some(s) = &self.sliders[i] {
                 let (sx, sy, sw, sh) = s.rect();
                 out.push((sx, sy, sw, sh, s.color()));
@@ -131,7 +141,12 @@ impl ParametersBg {
                 if let Some(d) = &self.choices[i] {
                     out.extend(crate::widget::shown_rounded_quads(d));
                 }
-            } else if p.2.starts_with("slider") {
+            } else if is_slider_spinbox_row(&p.2) {
+                if let Some((s, sb)) = self.slider_spinboxes[i].as_ref().and_then(|c| c.parts()) {
+                    out.extend(crate::widget::shown_rounded_quads(s));
+                    out.extend(crate::widget::shown_rounded_quads(sb));
+                }
+            } else if is_slider_row(&p.2) {
                 // Track (square style only — the recessed style has no track
                 // background), value fill, and readout box; the thumb knob is a
                 // `Prim::Sphere` and rides `spheres()` instead.
@@ -286,9 +301,9 @@ impl ParametersBg {
             }
             let ty = tb.label_strip();
             out.push((x, y + ty, w, h - ty, r4(crate::layout::textbox_corner_radius()), wall_depth(h - ty), false, all));
-        } else if kind.starts_with("spinbox") {
+        } else if kind.starts_with("spinbox") || is_slider_spinbox_row(kind) {
             // Same side-label inset, content band and depth cap as its paint.
-            let Some(sb) = &self.spinboxes[i] else { return };
+            let Some(sb) = self.row_spinbox(i) else { return };
             let (x, y, w, h) = sb.rect();
             let ty = sb.label_strip();
             let band = Rect { x, y: y + ty, width: w, height: h - ty };
@@ -362,8 +377,8 @@ impl ParametersBg {
                 let r = crate::layout::dropdown_corner_radius();
                 Field::run(band, (r, r, r, r), wall_depth(band.height))
             })
-        } else if kind.starts_with("spinbox") {
-            let sb = self.spinboxes[i].as_ref()?;
+        } else if kind.starts_with("spinbox") || is_slider_spinbox_row(kind) {
+            let sb = self.row_spinbox(i)?;
             let band = control_band(sb.rect(), sb.label_strip());
             let rel = sb.inner().relief_parts(band)?;
             let (split, _) = rel.run?;
@@ -392,10 +407,10 @@ impl ParametersBg {
         let mut out = Vec::new();
         let hidden = self.hidden_rows();
         for (i, p) in self.display_params.iter().enumerate() {
-            if hidden[i] || !p.2.starts_with("spinbox") {
+            if hidden[i] || !(p.2.starts_with("spinbox") || is_slider_spinbox_row(&p.2)) {
                 continue;
             }
-            if let Some(sb) = &self.spinboxes[i] {
+            if let Some(sb) = self.row_spinbox(i) {
                 let (x, y, w, h) = sb.rect();
                 let ty = sb.label_strip();
                 let band = Rect { x, y: y + ty, width: w, height: h - ty };
@@ -407,6 +422,13 @@ impl ParametersBg {
             }
         }
         out
+    }
+
+    /// Row `i`'s spinbox: a spinbox row's, or the box of a slider-spinbox row.
+    pub(super) fn row_spinbox(&self, i: usize) -> Option<&Adapted<Spinbox>> {
+        self.spinboxes[i]
+            .as_ref()
+            .or_else(|| self.slider_spinboxes[i].as_ref().and_then(|c| c.parts()).map(|(_, sb)| sb))
     }
 
     /// The knobs a flat host draws after [`Self::reliefs`] — none: the sliders

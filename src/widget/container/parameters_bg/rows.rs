@@ -9,6 +9,28 @@ pub(super) fn is_text_row(t: &str) -> bool {
     t == "text" || t.starts_with("textpick")
 }
 
+/// A slider row: `slider:lo:hi[:decimals][:soft]` — and not a [`is_slider_spinbox_row`] row,
+/// whose type begins the same way.
+pub(super) fn is_slider_row(t: &str) -> bool {
+    t.starts_with("slider") && !is_slider_spinbox_row(t)
+}
+
+/// A slider-with-spinbox row: `sliderspinbox:min:max:step[:decimals]`, one
+/// [`SliderSpinbox`](crate::widget::SliderSpinbox) holding an integer (no decimals) or a float
+/// to that many places, stepped by `step`.
+pub(super) fn is_slider_spinbox_row(t: &str) -> bool {
+    t.starts_with("sliderspinbox")
+}
+
+/// A sliderspinbox row's `(min, max, step, decimals)`: whatever its type gives, else an
+/// integer from 0 to 10 by 1.
+pub(super) fn parse_slider_spinbox(t: &str) -> (f32, f32, f32, u32) {
+    let parts: Vec<&str> = t.split(':').collect();
+    let num = |i: usize, d: f32| parts.get(i).and_then(|s| s.parse::<f32>().ok()).unwrap_or(d);
+    let decimals = parts.get(4).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+    (num(1, 0.0), num(2, 10.0), num(3, 1.0), decimals)
+}
+
 /// Display precision for a slider row from the type string's optional 4th
 /// segment (`slider:min:max:decimals`); 2 when absent — the pane-wide
 /// historical default.

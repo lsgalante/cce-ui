@@ -73,7 +73,19 @@ impl ParametersBg {
                     return true;
                 }
             }
-        } else if p.2.starts_with("slider") {
+        } else if is_slider_spinbox_row(&p.2) {
+            // The row holds the param focus while its box is open: keys are the box's.
+            if let Some((_, sb)) = self.slider_spinboxes[idx].as_mut().and_then(|c| c.parts_mut()) {
+                if sb.keyboard_input(event, ui) {
+                    let editing = sb.editing;
+                    self.sync_slider_spinbox(idx);
+                    if !editing {
+                        self.focused_param = None;
+                    }
+                    return true;
+                }
+            }
+        } else if is_slider_row(&p.2) {
             if let Some(s) = &mut self.sliders[idx] {
                 if s.keyboard_input(event, ui) {
                     let new_val = s.get_scaled_value();
