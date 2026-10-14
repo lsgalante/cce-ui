@@ -10,6 +10,22 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-14
 
+- **A grid app's context menu stands on a layer surface of its own** (`backend/menu_layer.rs`).
+  cce-grid is to draw the desktop's background menu in process (it was a `cce-cloud --json`
+  popup from a shell script), and a popup cannot ride its surface: the compositor scales that
+  surface with the desk camera, so a menu opened in overview would shrink with the desk; it is
+  pinned at buffer scale 1; and it never holds the keyboard. For a grid app `sync_menu_popup`
+  now hands over to `sync_menu_layer`: the menu is in OUTPUT-logical px, placed by
+  `constrain_to` against the output and hosted on an Overlay layer surface (`cce-menu`
+  namespace, exclusive keyboard) at the output's scale. Pointer events on it are offset by its
+  place, as the popup's are; the new `context_menu::pointer_on_host` says which surface an event
+  came from, which a grid app needs (its own surface speaks patch px). Keyboard leave closes it,
+  the compositor's click-away for cce-cloud's menus, which it now gives `cce-menu` too.
+  `render_menu_popup`'s drawing moved into `draw_menu_to`, shared by both hosts. Checked in a
+  scale-2 shadow with cce-grid: the menu opens at the click, full size and sharp at zoom 1 and in
+  overview at zoom 0.29, slides in from the right edge, hover and the page turn (Window Mode)
+  work, a row runs, Up/Down/Enter walk and run it, and Escape and a click away close it.
+
 - **`SliderSpinbox`: a slider with a spinbox at its right end, for an int or a float.**
   `new_int(value, min, max, step)` and `new_float(value, min, max, step, decimals)` build a
   standard `Slider` and `Spinbox` as `Embedded` children holding one number, kept as the spinbox

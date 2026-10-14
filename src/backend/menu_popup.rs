@@ -42,6 +42,7 @@
 //! Only xdg toplevels get a popup. A layer surface, or any app with
 //! `CCE_UI_MENU_POPUP=0`, keeps the in-window menu, constrained to the window
 //! by `context_menu::constrain_to` with the same flip / slide / shorten rules.
+//! A grid app's menu stands on a layer surface of its own (`menu_layer`).
 
 use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::{
     Anchor, ConstraintAdjustment, Gravity,
@@ -113,6 +114,11 @@ impl<A: Application> EngineState<A> {
     /// sets its slider rows (which widen it) has done both before the popup
     /// is sized.
     pub(crate) fn sync_menu_popup(&mut self) {
+        // A grid app's menu cannot ride its surface: see `menu_layer`.
+        if self.is_grid {
+            self.sync_menu_layer();
+            return;
+        }
         let visible = context_menu::is_visible();
         // A page turn is animated: frames until it lands, and the popup is
         // sized to hold both plates meanwhile (`natural_geometry`), then to
@@ -252,22 +258,44 @@ impl<A: Application> EngineState<A> {
     }
 
     /// The offset from the window of the menu popup, if `surface` is it.
+    /// The offset of the menu's surface — the popup's from the window, or a
+    /// grid app's menu layer's on the output — if `surface` is it.
     pub(crate) fn menu_popup_offset(&self, surface: &wl_surface::WlSurface) -> Option<(f32, f32)> {
-        self.menu_popup.as_ref().and_then(|p| p.offset_for(surface))
+        self.menu_popup.as_ref().and_then(|p| p.offset_for(surface)).or_else(|| self.menu_layer_offset(surface))
     }
 
     /// Draw the menu into its popup. Called after the window's own frame,
     /// and after a configure; a no-op for a popup not yet placed.
     pub(crate) fn render_menu_popup(&mut self) {
-        let (mp, renderer) = (self.menu_popup.as_mut(), self.menu_renderer.as_mut());
-        let Some(mp) = mp else { return };
+        let Some(mp) = self.menu_popup.as_ref() else { return };
         let Some((_, _, w, h)) = mp.placed else { return };
-        let Some(renderer) = renderer else { return };
-        if !renderer.has_surface() {
-            return;
+        let (surface, committed) = (mp.popup.wl_surface().clone(), mp.committed_scale);
+        let drawn = self.draw_menu_to(&surface, committed, w, h, self.scale_factor);
+        if let (Some(s), Some(mp)) = (drawn, self.menu_popup.as_mut()) {
+            mp.committed_scale = s;
         }
-        let scale = self.scale_factor as f32;
-        let (s, pw, ph) = Self::buffer_geometry(self.scale_factor, w, h);
+    }
+
+    /// Draw the menu, top-left at the origin, into the menu renderer's
+    /// surface `surface` (`w` x `h` logical px at `scale_factor`), setting
+    /// its buffer scale first where it differs from `committed`. Returns the
+    /// buffer scale now committed; `None` when nothing was drawn (no
+    /// renderer, or one without a surface). Shared by the popup and a grid
+    /// app's menu layer (`menu_layer`).
+    pub(crate) fn draw_menu_to(
+        &mut self,
+        surface: &wl_surface::WlSurface,
+        committed: i32,
+        w: f32,
+        h: f32,
+        scale_factor: f64,
+    ) -> Option<i32> {
+        let renderer = self.menu_renderer.as_mut()?;
+        if !renderer.has_surface() {
+            return None;
+        }
+        let scale = scale_factor as f32;
+        let (s, pw, ph) = Self::buffer_geometry(scale_factor, w, h);
 
         let mut pc = crate::scene::paint::PaintCtx::new();
         context_menu::paint_hosted(&mut pc);
@@ -309,9 +337,8 @@ impl<A: Application> EngineState<A> {
         if e.width != pw || e.height != ph {
             renderer.resize(pw, ph);
         }
-        if s != mp.committed_scale {
-            mp.popup.wl_surface().set_buffer_scale(s);
-            mp.committed_scale = s;
+        if s != committed {
+            surface.set_buffer_scale(s);
         }
         renderer.draw_frame_2d(Frame2D {
             verts: &verts,
@@ -322,6 +349,7 @@ impl<A: Application> EngineState<A> {
             clear_color: [0.0; 4],
             damage: None,
         });
+        Some(s)
     }
 
     fn is_menu_popup(&self, surface: &wl_surface::WlSurface) -> bool {

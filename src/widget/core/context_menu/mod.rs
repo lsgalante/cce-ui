@@ -219,6 +219,9 @@ pub struct ContextMenuState {
     /// [`text_labels`]: Self::text_labels
     /// [`extra_quads`]: Self::extra_quads
     pub hosted: bool,
+    /// Whether the pointer event being dispatched landed on the runner's
+    /// menu surface — see [`pointer_on_host`](super::pointer_on_host).
+    pub pointer_on_host: bool,
     /// The pointer's last place over the menu, to re-hover after a scroll
     /// moves a different row under it.
     last_cursor: Option<(f32, f32)>,
@@ -269,6 +272,7 @@ impl ContextMenuState {
             scroll: 0.0,
             generation: 0,
             hosted: false,
+            pointer_on_host: false,
             last_cursor: None,
             in_popup: false,
             scale: 1.0,

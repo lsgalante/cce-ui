@@ -311,5 +311,6 @@ impl<A: Application> Shell for EngineState<A> {
         if !lead {
             self.render_menu_popup();
         }
+        self.render_menu_layer();
     }
 }

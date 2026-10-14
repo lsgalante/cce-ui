@@ -26,9 +26,14 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _keyboard: &wl_keyboard::WlKeyboard,
-        _surface: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         _serial: u32,
     ) {
+        // The keyboard leaving a grid app's menu layer is the click-away.
+        if self.is_menu_layer_surface(surface) {
+            self.menu_layer_lost_keyboard();
+            return;
+        }
         if let Some(publisher) = self.a11y.as_mut() {
             publisher.window_focus(false);
         }

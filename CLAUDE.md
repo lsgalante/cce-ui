@@ -324,7 +324,8 @@ Click lands there too, and a hand-rolled `row_at` dispatch never sees it.
   multiplied by their ratio.
 - **The context menu draws in its own `xdg_popup`** on toplevels (in-window on layer surfaces,
   or with `CCE_UI_MENU_POPUP=0`); the popup's configure is written back so hit tests match the
-  screen. `docs/widgets.md` has the menu in full.
+  screen. A grid app's menu is on an Overlay layer surface instead, in OUTPUT coordinates
+  (`backend/menu_layer.rs`; `docs/runtime.md`). `docs/widgets.md` has the menu in full.
 - **Every symbol is a cce-icons glyph.** Draw a chevron, check, mark, +/− only as a glyph from
   `cce-icons/svg` through `PaintCtx::icon(name, rect, color)` — never a Unicode character in a
   fallback font, never built from primitives. A missing glyph draws nothing silently;

@@ -30,6 +30,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
             // window coordinates, which now reach outside the window.
             let popup_offset = self.menu_popup_offset(&event.surface);
             let on_popup = popup_offset.is_some();
+            crate::widget::context_menu::set_pointer_on_host(on_popup);
             let (lx, ly) = match popup_offset {
                 Some((ox, oy)) => (lx + ox, ly + oy),
                 None => (lx, ly),

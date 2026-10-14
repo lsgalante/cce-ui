@@ -8,9 +8,15 @@ impl<A: Application> CompositorHandler for EngineState<A> {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         scale_factor: i32,
     ) {
+        // A grid app's menu layer is drawn at its own output's scale, never
+        // the window's (see `menu_layer`).
+        if self.is_menu_layer_surface(surface) {
+            self.menu_layer_scale_changed(scale_factor);
+            return;
+        }
         // Don't send set_buffer_scale here: an in-flight present can commit an
         // old-scale-sized buffer right after it, which is a fatal invalid_size
         // protocol error (seen on resume, when outputs bounce 2→1→2). The scale
@@ -187,7 +193,10 @@ impl<A: Application> WindowHandler for EngineState<A> {
 }
 
 impl<A: Application> LayerShellHandler for EngineState<A> {
-    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _layer: &LayerSurface) {
+    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, layer: &LayerSurface) {
+        if self.menu_layer_closed(layer) {
+            return;
+        }
         self.exit = true;
     }
 
@@ -195,10 +204,13 @@ impl<A: Application> LayerShellHandler for EngineState<A> {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _layer: &LayerSurface,
+        layer: &LayerSurface,
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
+        if self.configure_menu_layer(layer, &configure) {
+            return;
+        }
         // new_size is in logical pixels; 0 means "client decides", so fall back
         // to the app's requested size (mirrors the xdg WindowHandler above).
         let (w, h) = configure.new_size;

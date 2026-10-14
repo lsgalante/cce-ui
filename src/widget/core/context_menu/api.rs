@@ -131,6 +131,24 @@ pub fn is_hosted() -> bool {
     with_state(|m| m.borrow().hosted)
 }
 
+/// Whether the pointer event being dispatched landed on the runner's menu
+/// surface (its popup, or a grid app's menu layer) rather than the window.
+/// Set by the runner before each pointer event, never by an app.
+///
+/// An ordinary app never needs to ask: its menu's events arrive in window
+/// coordinates like every other. A grid app's menu stands in OUTPUT
+/// coordinates (`backend/menu_layer.rs`) while its own surface speaks patch
+/// px, so the same position means two different places: the app asks this
+/// to tell which space an event is in.
+pub fn pointer_on_host() -> bool {
+    with_state(|m| m.borrow().pointer_on_host)
+}
+
+/// See [`pointer_on_host`]. Set by the runner, never by an app.
+pub fn set_pointer_on_host(on: bool) {
+    with_state(|m| m.borrow_mut().pointer_on_host = on);
+}
+
 /// See [`ContextMenuState::generation`].
 pub fn generation() -> u64 {
     with_state(|m| m.borrow().generation)

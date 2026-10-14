@@ -131,6 +131,22 @@ queue (`set_shared_uploads(false)`). A page turn moves the popup with `xdg_popup
 hands a new popup over from the window until its first configure (`MenuPopup::handoff`). The
 menu's own behaviour is in `docs/widgets.md`.
 
+**A grid app's menu stands on a layer surface instead** (`backend/menu_layer.rs`;
+`sync_menu_popup` hands over on `is_grid`). A popup would ride the grid's world-anchored
+surface, which the compositor scales with the desk camera (a menu opened in overview shrank with
+the desk), which is pinned at buffer scale 1, and which never holds the keyboard. So the menu's
+coordinates are OUTPUT-logical px for a grid app — it shows the menu at a point the compositor
+gave it, e.g. the `desktop-menu` status topic's — and the runner hosts it on an Overlay layer
+surface (namespace `cce-menu`, anchored top-left, exclusive zone -1, margins = the menu's
+place), placed by `context_menu::constrain_to` against the output, drawn at the OUTPUT's scale
+(the toolkit-wide factor the grid pins to its patch scale is swapped for the frame), with
+exclusive keyboard. Its pointer events are offset by its place on the output, as a popup's are
+by its place in the window, and `context_menu::pointer_on_host` tells the app which space an
+event is in: the grid's own surface speaks patch px. The keyboard leaving it closes the menu —
+that is the click-away, since the compositor treats `cce-menu` as it treats cce-cloud's menus
+and drops their focus on a press elsewhere. It shares `menu_renderer` and `draw_menu_to` with
+the popup; only one is ever up.
+
 ## Input methods and text input
 
 **One composition model for every shell** (`crate::ime`). Three things cross between the editing

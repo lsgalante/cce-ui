@@ -157,6 +157,9 @@ pub struct EngineState<A: Application> {
     /// The context menu's popup surface while one is open — see
     /// `backend::menu_popup`.
     pub menu_popup: Option<crate::backend::menu_popup::MenuPopup>,
+    /// A grid app's menu, on a layer surface instead — see
+    /// `backend::menu_layer`. It shares `menu_renderer` with the popup.
+    pub menu_layer: Option<crate::backend::menu_layer::MenuLayer>,
     /// The popup's renderer, kept across opens and moved from one popup
     /// surface to the next: a renderer costs a device and every pipeline
     /// (tens of ms), a re-attach costs one swapchain.
@@ -478,6 +481,7 @@ impl<A: Application> Drop for EngineState<A> {
         // The popup's renderer lets go of its surface before the popup (and
         // its wl_surface) drops with the rest of the fields.
         self.close_menu_popup();
+        self.close_menu_layer();
         self.menu_renderer = None;
         self.renderer = None;
     }

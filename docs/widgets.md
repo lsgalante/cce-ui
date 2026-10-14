@@ -66,6 +66,11 @@ and `an_embedded_childs_change_is_swept_and_its_composite_still_sees_it` are the
 One global menu per window that every app shows, paints into its display list and dispatches by
 window coordinates. On a toplevel the runner hosts it in an `xdg_popup` (`docs/runtime.md`).
 
+- **A grid app's menu is in output coordinates**, on a layer surface of its own
+  (`docs/runtime.md`): show it at a point on the output, and ask `pointer_on_host()` before
+  reading a pointer event's position — true on the menu's surface (output px), false on the
+  grid's own (patch px). cce-grid's background menu is the consumer.
+
 - **Rows**: give each row an action ID (`set_row_actions`, or
   `UiContext::show_context_menu_rows`); a press runs the row's action. A label beginning
   `MARK_CHECK` (`"✓ "`), `MARK_ON` (`"● "`) or `MARK_OFF` (`"○ "`) draws `check`, `circle` or

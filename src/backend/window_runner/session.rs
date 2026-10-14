@@ -292,6 +292,7 @@ pub(super) fn run_session<'l, A: Application>(
         overflow_was_active: false,
         sent_popover_region: None,
         menu_popup: None,
+        menu_layer: None,
         menu_renderer: None,
         menu_icon_ids: std::collections::HashMap::new(),
         display_ptr: 0,
