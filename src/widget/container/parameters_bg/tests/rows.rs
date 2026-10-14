@@ -555,3 +555,13 @@ fn a_slider_spinbox_row_is_a_band_with_a_box_at_its_end() {
         }
     }
 }
+
+/// A ramp row gives its ramp the height the ramp asks for, under the label band: a
+/// fixed 260 left the curve's plot ~20 px tall.
+#[test]
+fn a_ramp_row_gives_its_ramp_its_natural_height() {
+    let p = panel_with(&[("Bevel Profile", "smooth;0.000:0.000,1.000:1.000", "ramp")]);
+    let rp = p.ramps[0].as_ref().unwrap();
+    assert_eq!(rp.rect().3, rp.inner().natural_height());
+    assert_eq!(p.row_height(0), ParametersBg::RAMP_LABEL_BAND + crate::widget::Ramp::expanded_height());
+}

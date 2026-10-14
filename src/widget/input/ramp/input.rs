@@ -103,7 +103,14 @@ impl Input for Ramp {
             }
         }
 
+        // The dropdown's tick reports its open/close animation running, not a pick: read
+        // as a pick, opening the trigger re-applied the preset it still pointed at and
+        // wiped a hand-edited curve. A pick is its change flag — the keyboard's land here,
+        // the mouse's are drained in `on_event`.
         if self.preset_dropdown.tick(dt, ui) {
+            changed = true;
+        }
+        if self.preset_dropdown.take_change() {
             let idx = self.preset_dropdown.selected;
             self.apply_preset(idx);
             changed = true;
@@ -188,6 +195,11 @@ impl Input for Ramp {
             if let Some((idx, _)) = best {
                 self.selected_key_idx = Some(idx);
                 self.is_dragging_key = true;
+                // The key keeps where in its ring it was taken: its centre snapping to
+                // the pointer jumped it up to a ring's radius on the first move.
+                let key = &self.keys[idx];
+                let (t, v) = ((px - plot.x) / plot.width, 1.0 - (py_event - plot.y) / plot.height);
+                self.drag_grab = Some(DragGrab { origin: key.pos, offset: (key.pos - t, key.value - v) });
                 self.key_pad.set_values(self.keys[idx].pos, self.keys[idx].value);
                 self.arrange_fields();
                 return true;
@@ -208,6 +220,7 @@ impl Input for Ramp {
                 // Arm the drag: a fresh key follows the pointer until release,
                 // so create-and-place is one gesture (the grab-branch behavior).
                 self.is_dragging_key = true;
+                self.drag_grab = Some(DragGrab { origin: t, offset: (0.0, 0.0) });
                 self.arrange_fields();
                 return true;
             }
@@ -217,39 +230,26 @@ impl Input for Ramp {
                     self.apply_pad_to_selected();
                             return true;
                 }
+                // Pressed only: the button clicks on its release, below.
                 if self.del_button.mouse_input(button, state, px, py_event, ui) {
-                            if self.del_button.take_click() {
-                        if let Some(idx) = self.selected_key_idx {
-                            if self.keys.len() > 2 {
-                                self.keys.remove(idx);
-                                self.selected_key_idx = None;
-                                self.sync_preset();
-                                self.just_changed = true;
-                                self.arrange_fields();
-                            }
-                        }
-                    }
                     return true;
                 }
             }
         } else {
-            self.is_dragging_key = false;
-            if self.selected_key_idx.is_some() {
-                self.key_pad.mouse_input(button, state, px, py_event, ui);
-                if self.del_button.mouse_input(button, state, px, py_event, ui)
-                    && self.del_button.take_click() {
-                        if let Some(idx) = self.selected_key_idx {
-                            if self.keys.len() > 2 {
-                                self.keys.remove(idx);
-                                self.selected_key_idx = None;
-                                self.sync_preset();
-                                self.just_changed = true;
-                                self.arrange_fields();
-                            }
-                        }
-                    }
-                return true;
+            // A release is the ramp's only when something of it used it: a key drag
+            // ending, the key pad or the delete button letting go. Releases reach
+            // widgets without a hit test, and claiming every one while a key was
+            // selected kept them from whatever the press was on — a host's next
+            // row never clicked. Both fields are told regardless of the selection,
+            // so neither is left holding a press.
+            let dragged = std::mem::take(&mut self.is_dragging_key);
+            self.drag_grab = None;
+            let pad = self.key_pad.mouse_input(button, state, px, py_event, ui);
+            let del = self.del_button.mouse_input(button, state, px, py_event, ui);
+            if del && self.del_button.take_click() {
+                self.delete_selected();
             }
+            return dragged || pad || del;
         }
         false
     
@@ -269,9 +269,10 @@ impl Input for Ramp {
 
         if self.is_dragging_key {
             if let Some(idx) = self.selected_key_idx {
-                let t_raw = ((px - plot.x) / plot.width).clamp(0.0, 1.0);
-                let t = self.resisted_pos(idx, t_raw);
-                let val = (1.0 - (py_event - plot.y) / plot.height).clamp(0.0, 1.0);
+                let grab = self.drag_grab.unwrap_or(DragGrab { origin: self.keys[idx].pos, offset: (0.0, 0.0) });
+                let t_raw = ((px - plot.x) / plot.width + grab.offset.0).clamp(0.0, 1.0);
+                let t = self.resisted_pos(idx, t_raw, grab.origin);
+                let val = (1.0 - (py_event - plot.y) / plot.height + grab.offset.1).clamp(0.0, 1.0);
                 self.keys[idx].pos = t;
                 self.keys[idx].value = val;
                 self.key_pad.set_values(t, val);
@@ -407,7 +408,15 @@ impl Input for Ramp {
             Some(0) => self.preset_dropdown.keyboard_input(event, ui),
             Some(1) => self.line_type_dropdown.keyboard_input(event, ui),
             Some(2) => self.key_pad.keyboard_input(event, ui),
-            Some(_) => self.del_button.keyboard_input(event, ui),
+            Some(_) => {
+                // Enter/Space press the button: its click is read here, at once. Left
+                // unread, it fired on the next mouse PRESS on the button.
+                let used = self.del_button.keyboard_input(event, ui);
+                if self.del_button.take_click() {
+                    self.delete_selected();
+                }
+                used
+            }
             None => false,
         }
             }
@@ -448,5 +457,6 @@ impl Input for Ramp {
     fn drag_end(&mut self) {
         self.key_pad.drag_end();
         self.is_dragging_key = false;
+        self.drag_grab = None;
     }
 }

@@ -159,6 +159,9 @@ impl ParametersBg {
         if self.inline_row(i) { (r.0 + lw, r.1, (r.2 - lw).max(0.0), r.3) } else { r }
     }
 
+    /// The label band over a ramp row's ramp (`own_text_labels` draws the label in it).
+    pub(super) const RAMP_LABEL_BAND: f32 = 18.0;
+
     pub(super) fn row_height(&self, i: usize) -> f32 {
         let p = &self.display_params[i];
         if p.2 == "code" {
@@ -180,10 +183,12 @@ impl ParametersBg {
             // A rule, its own pixel: the row gaps either side are the air.
             1.0
         } else if p.2 == "ramp" {
-            // Label band + the ramp's graph and control strip. The control
-            // strip and label band are fixed, so this whole increase grows the
-            // curve plot (Ramp::graph_h = height − strip).
-            260.0
+            // The label band over the height the ramp asks for: its graph over its
+            // control strip (`Ramp::natural_height`). A fixed 260 left the plot
+            // ~20 px tall once the band and the strip had theirs.
+            let ramp_h = self.ramps.get(i).and_then(|r| r.as_ref())
+                .map_or_else(crate::widget::Ramp::expanded_height, |r| r.inner().natural_height());
+            Self::RAMP_LABEL_BAND + ramp_h
         } else if is_vec_row(&p.2) {
             Float3::preferred_height_for(!self.inline_row(i), vec_row_n(&p.2))
         } else if is_slider_row(&p.2) {
@@ -547,9 +552,10 @@ impl ParametersBg {
         for (i, rp_opt) in self.ramps.iter_mut().enumerate() {
             if let Some(rp) = rp_opt {
                 let r = rects[i];
-                // Below the 18px label band own_text_labels draws (the ramp
+                // Below the label band own_text_labels draws (the ramp
                 // carries no label of its own).
-                rp.set_rect(r.0, r.1 + 18.0, r.2, r.3 - 18.0);
+                let band = Self::RAMP_LABEL_BAND;
+                rp.set_rect(r.0, r.1 + band, r.2, r.3 - band);
             }
         }
     }

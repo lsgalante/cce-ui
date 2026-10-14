@@ -8,7 +8,7 @@ impl Paint for TextBox {
     }
 
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
-        let r = crate::layout::textbox_corner_radius();
+        let r = self.corner_radius();
         if r > 0.0 {
             Some((r, (true, true, true, true)))
         } else {
@@ -120,7 +120,7 @@ impl Paint for TextBox {
         let base_y = rect.y - top;
         let base_h = rect.height + top;
         let visual_h = rect.height;
-        let radius = crate::layout::textbox_corner_radius();
+        let radius = self.corner_radius();
         let border_w = self.border_width();
 
         // Open for typing: say so to the compositor this frame (the

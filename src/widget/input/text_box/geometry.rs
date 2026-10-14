@@ -144,6 +144,17 @@ impl TextBox {
         self.clamp_scroll();
     }
 
+    /// The box's corner radius: a multiline box is a panel — a page of text, with the
+    /// panels' radius (`panel_corner_radius`); a one-line box is a control, with the
+    /// text box's (`textbox_corner_radius`). Every corner the box draws reads this.
+    pub fn corner_radius(&self) -> f32 {
+        if self.multiline {
+            crate::layout::panel_corner_radius()
+        } else {
+            crate::layout::textbox_corner_radius()
+        }
+    }
+
     /// The well this TextBox carves: a [`crate::scene::paint::Field`] that is
     /// all well, lit while editing — its radii top-left, top-right,
     /// bottom-right, bottom-left, the right two square when the box is
@@ -156,7 +167,7 @@ impl TextBox {
     /// that draws the relief itself (`ParametersBg::fields`) takes it whole. A
     /// second copy of this math is exactly how the two would drift apart.
     pub fn well(&self) -> Option<crate::scene::paint::Field> {
-        let radius = crate::layout::textbox_corner_radius();
+        let radius = self.corner_radius();
         if radius <= 0.0 || !self.recessed() || !self.draw_bg_border {
             return None;
         }

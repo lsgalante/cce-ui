@@ -13,6 +13,10 @@ impl Ramp {
     /// The key pad's square well side.
     const PAD_SIDE: f32 = 64.0;
 
+    /// The graph opening's height a Ramp declares (`intrinsic_size`): the drag-in
+    /// canvases' 120 (a Slider2D's pad, the Trackpad). Given more, the graph takes it.
+    pub(super) const GRAPH_H: f32 = 120.0;
+
     /// Vertical reserve under the curve area — the strip stack at the
     /// uniform STRIP_GAP rhythm (labeled dropdown row, labeled pad row),
     /// closed by a bottom margin sized so the VISIBLE bottom gap (widget
@@ -31,16 +35,19 @@ impl Ramp {
 
     /// The key ring radius on THIS plot: the editor's full ring, shrunk so a
     /// peg never outgrows the plot it sits in (an inline ramp a control high
-    /// draws pegs a few px across, not 26px discs swallowing the curve).
+    /// draws pegs a few px across, not 26px discs swallowing the curve), and
+    /// never past the opening's walls: a key at the plot's edge has
+    /// [`PLOT_INSET`](Self::PLOT_INSET) to the wall, and its rolled rim reaches
+    /// 2.5 px past the ring — at the full 26 every edge key hung over the wall.
     pub(super) fn key_ring_r(&self) -> f32 {
         let plot = self.plot_rect();
-        Self::KEY_RING_R.min((plot.height * 0.45).max(4.0))
+        Self::KEY_RING_R.min(Self::PLOT_INSET - 2.5).min((plot.height * 0.45).max(4.0))
     }
 
     /// Inner margin between the graph opening's walls and the plotted 0..1
     /// domain, so the 0 and 1 gridlines (and their axis numbers) sit visibly
     /// inside the opening instead of on the walls.
-    const PLOT_INSET: f32 = 22.0;
+    pub(super) const PLOT_INSET: f32 = 22.0;
 
     /// The plot rect: where the ramp's 0..1 × 0..1 domain maps on screen —
     /// the graph opening inset by [`PLOT_INSET`](Self::PLOT_INSET). Every
@@ -66,17 +73,25 @@ impl Ramp {
     /// then the key compresses toward the neighbor with growing resistance
     /// (slope 1 at the zone edge, flattening at the wall), and once the
     /// cursor overshoots the neighbor by RESIST_BREAK the key pops through —
-    /// the crossing completes and tracking is free again.
-    pub(super) fn resisted_pos(&self, idx: usize, t_raw: f32) -> f32 {
+    /// the crossing completes and tracking is free again. Always in 0..1.
+    ///
+    /// `origin` is where the key was when the drag began: a key grabbed inside a
+    /// neighbor's zone has its zone start where it stood, not behind it — from the
+    /// zone's far edge, the first nudge toward the neighbor moved it AWAY (a key at
+    /// 0.50 by a neighbor at 0.52, nudged to 0.505, jumped back to 0.484).
+    pub(super) fn resisted_pos(&self, idx: usize, t_raw: f32, origin: f32) -> f32 {
         let cur = self.keys[idx].pos;
-        if t_raw > cur {
-            if let Some(next) = self.keys.get(idx + 1) {
-                return Self::soft_wall(t_raw, next.pos, 1.0);
+        let t = if t_raw > cur {
+            match self.keys.get(idx + 1) {
+                Some(next) => Self::soft_wall(t_raw, next.pos, 1.0, origin),
+                None => t_raw,
             }
         } else if idx > 0 {
-            return Self::soft_wall(t_raw, self.keys[idx - 1].pos, -1.0);
-        }
-        t_raw
+            Self::soft_wall(t_raw, self.keys[idx - 1].pos, -1.0, origin)
+        } else {
+            t_raw
+        };
+        t.clamp(0.0, 1.0)
     }
 
     /// Restore sort order after `keys[i]` changed position, by adjacent
@@ -163,16 +178,27 @@ impl Ramp {
     /// reaches the wall exactly at breakthrough depth — continuous at the
     /// zone edge, asymptotically stiff at the wall, then a `RESIST_BREAK`
     /// pop as the mapping hands back to 1:1 tracking.
-    pub(super) fn soft_wall(t_raw: f32, wall: f32, s: f32) -> f32 {
-        let entry = wall - s * Self::RESIST_ZONE;
+    ///
+    /// The zone is `RESIST_ZONE` wide, or narrower when `origin` (where the key
+    /// started) is already inside it on the approach side: then it starts there,
+    /// so the key never maps behind its own start.
+    pub(super) fn soft_wall(t_raw: f32, wall: f32, s: f32, origin: f32) -> f32 {
+        let mut entry = wall - s * Self::RESIST_ZONE;
+        if s * (origin - entry) > 0.0 && s * (wall - origin) > 0.0 {
+            entry = origin;
+        }
+        let zone = s * (wall - entry);
         let depth = s * (t_raw - entry);
-        let full = Self::RESIST_ZONE + Self::RESIST_BREAK;
+        let full = zone + Self::RESIST_BREAK;
         if depth <= 0.0 || depth >= full {
             return t_raw; // outside the zone, or broken through
         }
-        let k = full / Self::RESIST_ZONE;
+        if zone <= 1e-4 {
+            return wall; // started against the wall: held there until the break
+        }
+        let k = full / zone;
         let g = 1.0 - (1.0 - depth / full).powf(k);
-        entry + s * Self::RESIST_ZONE * g
+        entry + s * zone * g
     }
 
     /// The curve area's height: the widget minus the control strip — or,

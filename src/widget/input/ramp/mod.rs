@@ -36,6 +36,15 @@ pub struct RampKey {
     pub value: f32,
 }
 
+/// A key drag's start ([`Ramp::drag_grab`](Ramp)).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DragGrab {
+    /// The key's position when the drag began.
+    pub origin: f32,
+    /// The key's centre less the pointer, in plot units (position, value).
+    pub offset: (f32, f32),
+}
+
 pub struct Ramp {
     pub base: Widget,
     pub keys: Vec<RampKey>,
@@ -54,6 +63,11 @@ pub struct Ramp {
     /// keeps the latched key coasting with exponential decay.
     scroll_vel: (f32, f32),
     last_key_scroll: Option<web_time::Instant>,
+    /// The dragged key as the drag found it: its position when grabbed (the soft wall's
+    /// zone never starts behind it — `resisted_pos`), and where in its ring the pointer
+    /// took it, in plot units (the key keeps that offset instead of snapping its centre
+    /// to the pointer). `None` outside a key drag.
+    drag_grab: Option<DragGrab>,
 
     // Child controls for key editing & deletion. The key pad is a 2-axis
     // slider driving the selected key's position (x) and value (y).
@@ -152,6 +166,7 @@ impl Ramp {
             controls_collapsed: false,
             scroll_vel: (0.0, 0.0),
             last_key_scroll: None,
+            drag_grab: None,
             key_pad,
             del_button,
             preset_dropdown,
@@ -168,6 +183,38 @@ impl Ramp {
         self.selected_key_idx = None;
         self.sync_preset();
         self.just_changed = true;
+    }
+
+    /// Delete the selected key — what the delete button does, clicked or pressed from the
+    /// keyboard. A ramp keeps two keys at least: with two, nothing happens.
+    pub fn delete_selected(&mut self) {
+        if let Some(idx) = self.selected_key_idx {
+            if self.keys.len() > 2 {
+                self.keys.remove(idx);
+                self.selected_key_idx = None;
+                self.sync_preset();
+                self.just_changed = true;
+                self.arrange_fields();
+            }
+        }
+    }
+
+    /// The height the ramp needs: a graph [`GRAPH_H`](Ramp::GRAPH_H) tall over the
+    /// control strip ([`strip_reserve`](Ramp::strip_reserve)), or with its controls
+    /// collapsed the graph alone in its 10 px margins. What it declares
+    /// (`intrinsic_size`), and what a host that sizes its rows itself asks for.
+    pub fn natural_height(&self) -> f32 {
+        if self.controls_collapsed {
+            Self::GRAPH_H + 20.0
+        } else {
+            Self::expanded_height()
+        }
+    }
+
+    /// [`natural_height`](Self::natural_height) with the controls shown, as every ramp
+    /// starts: for a host sizing a row before its ramp exists.
+    pub fn expanded_height() -> f32 {
+        Self::GRAPH_H + Self::strip_reserve()
     }
 
     /// Show on the preset trigger the preset the curve IS, or nothing when
@@ -250,8 +297,10 @@ pub const RAMP_PRESETS: &[(&str, &[(f32, f32)])] = &[
 pub use cce_core::ramp::{format_ramp_spec, parse_ramp_spec};
 
 impl Layout for Ramp {
+    /// [`natural_height`](Ramp::natural_height). It declared a flat 150, short of the
+    /// strip's ~180 by itself, so at its own height the graph sank to its 30 px floor.
     fn intrinsic_size(&self) -> Option<Size> {
-        Some(Size::new(0.0, 150.0))
+        Some(Size::new(0.0, self.natural_height()))
     }
 
     fn rect_assigned(&mut self, rect: Rect) {

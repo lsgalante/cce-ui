@@ -35,7 +35,8 @@ impl Paint for Ramp {
             let gh = self.graph_h();
             Rect { x: self.base.x + 10.0, y: self.base.y + 10.0, width: self.base.w - 20.0, height: gh }
         };
-        let graph_radius = 6.0f32;
+        // A panel: the graph opening is rounded like the wells and Groups.
+        let graph_radius = crate::layout::panel_corner_radius();
         pc.rounded_rect(
             graph,
             graph_radius,
