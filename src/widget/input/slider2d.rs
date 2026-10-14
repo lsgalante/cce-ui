@@ -100,8 +100,8 @@ impl Paint for Slider2D {
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         // The well: the shared canvas floor (`PaintCtx::well_floor`) read as an
         // opening cut into the host's plate, rim drawn last so its shading
-        // falls over the content at the edges. Rounded like the text wells.
-        let radius = crate::layout::textbox_corner_radius();
+        // falls over the content at the edges. At the panel radius.
+        let radius = crate::layout::panel_corner_radius();
         ctx.well_floor(rect, radius, &crate::scene::Material::pane(), false);
 
         // Crosshair through the thumb — the pad's read of both axis values.

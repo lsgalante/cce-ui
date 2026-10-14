@@ -35,7 +35,7 @@ impl Paint for InfoBox {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (x, y) = (rect.x, rect.y);
-        let r = crate::layout::plate_corner_radius();
+        let r = crate::layout::panel_corner_radius();
         let radii = (r, r, r, r);
         if crate::layout::control_relief() {
             // A pane plate, raised: the DE plate fill under a rolled edge —

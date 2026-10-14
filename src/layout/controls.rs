@@ -344,13 +344,32 @@ pub fn set_list_corner_radius(radius: f32) {
 
 pub fn tree_corner_radius() -> f32 {
     lazy_init_style_registry();
-    registry_float("tree_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("tree_corner_radius").unwrap_or_else(panel_corner_radius)
 }
 
 pub fn set_tree_corner_radius(radius: f32) {
     lazy_init_style_registry();
     if let Ok(mut registry) = get_style_registry().write() {
         registry.set_float("tree_corner_radius", radius);
+    }
+}
+
+/// The corner radius every panel shares (`style.control.panel.corner_radius`, 12 unset):
+/// a Group's frame, an InfoBox, a TreeList (unless `style.data.tree.corner_radius` sets its
+/// own) and the draw-in wells — Slider2D, Trackpad, the bevel and ramp previews. Between a
+/// control's radius and a window's: they read as one family, apart from both. It is about
+/// what a control's radius becomes one padding out, so a control inside a Group sits
+/// concentric with its frame. Before it, the sections took the window's radius (24 by
+/// default, and whatever a window was set to) and the wells and tree the control's (8).
+pub fn panel_corner_radius() -> f32 {
+    lazy_init_style_registry();
+    registry_float("panel_corner_radius").unwrap_or(12.0)
+}
+
+pub fn set_panel_corner_radius(radius: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("panel_corner_radius", radius);
     }
 }
 

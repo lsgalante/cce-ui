@@ -77,7 +77,7 @@ impl Paint for BevelPreview {
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         // The opening: the shared canvas well (`PaintCtx::well_floor`), its floor
         // lifted on hover (the click cue); the rim is drawn last, over the content.
-        let radius = crate::layout::textbox_corner_radius();
+        let radius = crate::layout::panel_corner_radius();
         ctx.well_floor(rect, radius, &crate::scene::Material::pane(), self.hovered);
 
         // Mini cutaway: plateau band, the wall over a square-ish domain, then

@@ -180,6 +180,9 @@ pub(super) fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, 
                 // The control rung's default radius: every control-scale
                 // `corner_radius` below falls back to it when its own key is unset.
                 "style.control.corner_radius" => "control_corner_radius",
+                // The panels' shared radius (`panel_corner_radius`): Groups, InfoBoxes,
+                // trees and the draw-in wells.
+                "style.control.panel.corner_radius" => "panel_corner_radius",
                 "style.control.button.padding" => "button_padding",
                 "style.control.button.height" => "button_height",
                 "style.control.button.corner_radius" => "button_corner_radius",

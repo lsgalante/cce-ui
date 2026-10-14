@@ -162,7 +162,7 @@ impl Group {
         let hull = self.hull(ui)?;
         let p = self.padding;
         let mut body = Rect { x: hull.x - p, y: hull.y - p, width: hull.width + 2.0 * p, height: hull.height + 2.0 * p };
-        let r = crate::layout::plate_corner_radius();
+        let r = crate::layout::panel_corner_radius();
         let mut radii = (r, r, r, r);
         let title = self.label.as_deref().filter(|l| !l.is_empty());
         let (fam, size) = self.title_font();
@@ -396,11 +396,11 @@ mod tests {
         // Right/bottom are far from the plate: the hull's own.
         assert_eq!((f.body.x + f.body.width, f.body.y + f.body.height), (110.0, 54.0));
         assert_eq!(f.radii.0, 6.0, "the top-left corner is the plate's, concentric (16 - 10)");
-        assert_eq!(f.radii.2, crate::layout::plate_corner_radius(), "the far corner keeps the section radius");
+        assert_eq!(f.radii.2, crate::layout::panel_corner_radius(), "the far corner keeps the panel radius");
         // Unfitted, the same group hugs its member.
         let loose = Group::new(vec![a_id]).with_padding(10.0).with_plate(plate, 16.0);
         assert_eq!(loose.inner().frame(&ctx).unwrap().body.x, 10.0);
-        assert_eq!(loose.inner().frame(&ctx).unwrap().radii.0, crate::layout::plate_corner_radius());
+        assert_eq!(loose.inner().frame(&ctx).unwrap().radii.0, crate::layout::panel_corner_radius());
     }
 
     /// A member flush with the plate's top: the wall stops on the plate's edge and

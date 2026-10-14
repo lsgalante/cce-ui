@@ -100,9 +100,9 @@ impl Paint for Trackpad {
 
         let area = Rect { x, y, width: w, height: visual_h };
         // 1+2. A canvas well in the plate — the floor tint and rim every draw-in
-        // opening shares (`PaintCtx::canvas_well`), rounded like the text wells;
+        // opening shares (`PaintCtx::canvas_well`), at the panel radius;
         // the fingers draw over the rim.
-        let radius = crate::layout::textbox_corner_radius();
+        let radius = crate::layout::panel_corner_radius();
         ctx.canvas_well(area, radius, &crate::scene::Material::pane(), self.recessed(), false);
 
         // 3. Fingers
