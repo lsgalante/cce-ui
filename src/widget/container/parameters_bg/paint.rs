@@ -2,6 +2,7 @@
 //! trackballs a host paints through the scene path, and `impl Paint`.
 
 use super::*;
+use crate::widget::painter::intersect_bounds;
 
 impl ParametersBg {
     /// Each section's boxes: the title box, plus the box wrapping its rows (`None` when the
@@ -307,9 +308,9 @@ impl Paint for ParametersBg {
             self.rect.x + self.rect.width,
             self.rect.y + self.rect.height,
         ]);
-        for l in self.own_text_labels() {
+        for (l, own) in self.own_text_labels_with_bounds() {
             if l.y >= view_min - 20.0 && l.y <= view_max + 20.0 {
-                ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, None, pane);
+                ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, None, intersect_bounds(pane, own));
             }
         }
     }
@@ -320,14 +321,15 @@ impl Paint for ParametersBg {
 
     /// The legacy `text_labels_with_font_and_bounds` body: every label clipped to the panel
     /// viewport in the control-label font, except labels inside a code row — those clip to the
-    /// code box (or hide when it's scrolled out) and render monospace.
+    /// code box (or hide when it's scrolled out) and render monospace. A hosted control's
+    /// text is clipped to the overlap of that and its own bounds (its face, its field).
     fn legacy_labels_with_font_and_bounds(&self, _rect: Rect, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let view_min = self.rect.y + 4.0;
         let view_max = self.rect.y + self.rect.height - 4.0;
         let mut result = Vec::new();
         let font = Paint::widget_font(self);
         let rects = self.get_param_rects();
-        for l in self.own_text_labels() {
+        for (l, own) in self.own_text_labels_with_bounds() {
             if l.y < view_min - 20.0 || l.y > view_max + 20.0 {
                 continue;
             }
@@ -349,7 +351,7 @@ impl Paint for ParametersBg {
                     }
                 }
             }
-            result.push((l, label_font, bounds));
+            result.push((l, label_font, intersect_bounds(bounds, own)));
         }
         result
     }

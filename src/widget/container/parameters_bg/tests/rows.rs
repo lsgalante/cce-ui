@@ -477,3 +477,50 @@ fn an_inline_label_is_cut_only_when_it_does_not_fit() {
     let cut = texts.iter().find(|t| t.starts_with("A p") && t.ends_with("...")).expect("the long label is cut");
     assert!(measure_text_width(cut, &family, size) <= avail, "and what is left fits: {cut:?}");
 }
+
+/// A hosted control's text keeps the bounds its own paint gave it, inside
+/// the pane's clip: a spinbox's value is cut at its field (where the −/+
+/// begin), not merely at the pane's edge. The pane collected its controls'
+/// text as plain labels and clipped all of it to the viewport, so a long
+/// value ran under the buttons here as it did nowhere else.
+#[test]
+fn a_hosted_controls_text_keeps_its_own_bounds() {
+    use crate::scene::layout::Rect;
+    use crate::scene::paint::{PaintCtx, Prim};
+    let p = panel_with(&[("Count", "3", "spinbox:0:10")]);
+    let sb = p.spinboxes[0].as_ref().unwrap();
+    let (value, field) = sb
+        .own_text_labels_with_bounds()
+        .into_iter()
+        .find(|(l, _)| l.text == "3")
+        .expect("the spinbox paints its value");
+    let field = field.expect("the spinbox bounds its value to its field");
+    let pane_right = p.rect.x + p.rect.width - 4.0;
+    assert!(field[2] < pane_right, "the field ends inside the pane: {field:?}");
+
+    // The walk's labels: the field, within the viewport.
+    let ui = UiContext::new();
+    let rect = Rect { x: 0.0, y: 0.0, width: 300.0, height: 400.0 };
+    let labels = Paint::legacy_labels_with_font_and_bounds(&*p, rect, &ui);
+    let (_, _, bounds) = labels
+        .iter()
+        .find(|(l, _, _)| l.text == "3" && l.x == value.x && l.y == value.y)
+        .expect("the value reaches the pane's labels");
+    let b = bounds.expect("bounded");
+    assert_eq!(b[2], field[2], "cut at the field's end, not the pane's: {b:?}");
+    assert!(b[0] >= field[0] && b[1] >= field[1] && b[3] <= field[3], "and never wider than the field: {b:?}");
+
+    // The direct `paint` path agrees.
+    let mut pc = PaintCtx::new();
+    Paint::paint(&*p, rect, &mut pc);
+    let painted = pc
+        .finish()
+        .items
+        .into_iter()
+        .find_map(|item| match item.prim {
+            Prim::Text { text, bounds, .. } if text == "3" => bounds,
+            _ => None,
+        })
+        .expect("paint draws the value, bounded");
+    assert_eq!(painted[2], field[2], "paint cuts it at the field too: {painted:?}");
+}

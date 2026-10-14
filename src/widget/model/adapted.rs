@@ -256,21 +256,33 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// This widget's OWN text (prim-derived + detached base label), before any child
     /// aggregation — the shared source for the three text getters.
     pub(crate) fn own_text_labels(&self) -> Vec<TextLabel> {
+        self.own_text_labels_with_bounds().into_iter().map(|(l, _)| l).collect()
+    }
+
+    /// [`own_text_labels`](Self::own_text_labels) with each label's bounds, as
+    /// [`own_labels_from_painted`](Self::own_labels_from_painted) gives them: the bounds
+    /// `Paint::paint` set on the prim (a button's face, a spinbox's field) narrowed by
+    /// [`Paint::text_bounds`]; the detached base label is unbounded. For a container that
+    /// collects its children's text and paints it itself (the parameters pane), which
+    /// otherwise could clip that text only to its own viewport.
+    pub(crate) fn own_text_labels_with_bounds(&self) -> Vec<(TextLabel, Option<[f32; 4]>)> {
         if !self.visible() {
             return Vec::new();
         }
-        let mut out: Vec<TextLabel> = self
+        let content_bounds = Paint::text_bounds(&self.inner, self.content_rect());
+        let mut out: Vec<(TextLabel, Option<[f32; 4]>)> = self
             .painted_prims()
             .into_iter()
             .filter_map(|prim| match prim {
-                Prim::Text { text, x, y, font_size, color, .. } => {
-                    Some(TextLabel { text, x, y, font_size, color })
-                }
+                Prim::Text { text, x, y, font_size, color, bounds, .. } => Some((
+                    TextLabel { text, x, y, font_size, color },
+                    crate::widget::painter::intersect_bounds(bounds, content_bounds),
+                )),
                 _ => None,
             })
             .collect();
         if !Layout::inline_label(&self.inner) {
-            out.extend(self.base_label_fallback());
+            out.extend(self.base_label_fallback().into_iter().map(|l| (l, None)));
         }
         out
     }
