@@ -115,8 +115,9 @@ Wayland protocol bindings (`protocol/*.xml`) are generated inline by `wayland-sc
 
 **Features**: `markdown` (`widget::markdown`, on cce-core's `markdown` reading view), `doc_editor`
 (`widget::doc_editor`), `a11y` (AT-SPI publishing; see "Accessibility" below), `file_dialog`
-(`file_dialog::pick_file` / `save_file` through rfd, which brings ashpd's D-Bus stack: 119 of
-the 313 crates a client builds with it on), `graph` (`widget::Graph`, the node-graph editor, and
+(`file_dialog::pick_file` / `save_file` through rfd, which brings ashpd's D-Bus stack: about
+85 of the crates a client builds with it on — cce-image's 285 against 200 without it, as of
+2026-10-14; less for a client that already has D-Bus, e.g. cce-documents' 2), `graph` (`widget::Graph`, the node-graph editor, and
 `GraphController`; no extra dependencies — the grid lattice in `layout::graph` / `color::graph`
 stays in the core), `3d` (the 3D scene pass, lit meshes and the path tracer on both
 renderers, `Stage3D`, the `App3D` extension with `init_3d` / `stage_3d`, and glam; without it
