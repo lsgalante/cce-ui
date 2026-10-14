@@ -130,7 +130,7 @@ mod frost_exempt_tests {
         assert_eq!(first_frost_exempt(&[batch(0, 6, false), batch(6, 12, true)], &[], clear, false), None);
         assert_eq!(first_frost_exempt(&root_first, &[], clear, true), None);
         assert_eq!(first_frost_exempt(&root_first, &[], [0.0, 0.0, 0.0, 1.0], false), None);
-        let image = crate::draw::ImageQuad { image: 1, rect: (0.0, 0.0, 1.0, 1.0), alpha: 1.0, z_before: 0, clip: None };
+        let image = crate::draw::ImageQuad { image: 1, rect: (0.0, 0.0, 1.0, 1.0), alpha: 1.0, z_before: 0, clip: None, clip_rrect: None };
         assert_eq!(first_frost_exempt(&root_first, &[image], clear, false), None);
     }
 }

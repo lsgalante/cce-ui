@@ -223,6 +223,7 @@ pub fn build_frame<A: Application>(
                     (c.height * scale_f32) as u32,
                 )
             }),
+            clip_rrect: di.clip_rrect.map(|c| c.map(|v| v * scale_f32)),
         })
         .collect();
 

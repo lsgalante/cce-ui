@@ -152,7 +152,7 @@ impl WebRenderer {
         let glyph_bytes: &[u8] = bytemuck::cast_slice(self.atlas.vertices());
         self.glyph_vertices.ensure(&self.device, glyph_bytes.len() as u32)?;
         self.glyph_vertices.write(&self.queue, glyph_bytes)?;
-        let image_verts = image_quad_vertices(frame.images, w, h);
+        let image_verts = image_quad_vertices(frame.images, w, h, clip_shape);
         let image_bytes: &[u8] = bytemuck::cast_slice(&image_verts);
         self.image_vertices.ensure(&self.device, image_bytes.len() as u32)?;
         self.image_vertices.write(&self.queue, image_bytes)?;

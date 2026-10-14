@@ -37,13 +37,15 @@ pub struct GlyphVertex {
     pub uv: [f32; 2],
     pub color: [f32; 4],
     pub clip_circle: [f32; 3],
-    pub clip_extents: [f32; 2],
+    /// The rounded-rect clip's inner half-size and corner shape (see
+    /// `glyph.wgsl`); all zero for no clip or a plain circle.
+    pub clip_extents: [f32; 3],
 }
 
 // The glyph shader's vertex (locations 0..=4) for text AND image quads: both
 // pipelines feed `glyph.wgsl`, and every renderer describes this exact layout.
 const _: () = {
-    assert!(std::mem::size_of::<GlyphVertex>() == 52);
+    assert!(std::mem::size_of::<GlyphVertex>() == 56);
     assert!(std::mem::offset_of!(GlyphVertex, position) == 0);
     assert!(std::mem::offset_of!(GlyphVertex, uv) == 8);
     assert!(std::mem::offset_of!(GlyphVertex, color) == 16);
@@ -254,6 +256,8 @@ impl GlyphAtlas {
     /// Build this frame's glyph vertices. Positions/bounds in physical pixels,
     /// NDC computed against the target's
     /// `width` x `height` (Y up; the Vulkan renderer flips with its viewport).
+    /// `clip_shape` is the corner shape a span's rounded-rect clip is cut with
+    /// (`layout::corner_shape`, as the batches' clips get it).
     pub fn prepare(
         &mut self,
         font_system: &mut FontSystem,
@@ -261,9 +265,10 @@ impl GlyphAtlas {
         spans: &[TextSpan<'_>],
         width: u32,
         height: u32,
+        clip_shape: f32,
     ) {
         self.vertices.clear();
-        if !self.try_prepare(font_system, swash_cache, spans, width, height) {
+        if !self.try_prepare(font_system, swash_cache, spans, width, height, clip_shape) {
             // Atlas full: clear and repack with only the glyphs this frame needs.
             log::info!("glyph atlas full — clearing and repacking");
             self.glyphs.clear();
@@ -273,7 +278,7 @@ impl GlyphAtlas {
             self.dirty.clear();
             self.dirty_floor = self.generation;
             self.vertices.clear();
-            if !self.try_prepare(font_system, swash_cache, spans, width, height) {
+            if !self.try_prepare(font_system, swash_cache, spans, width, height, clip_shape) {
                 log::error!("glyph atlas full even after repack; text truncated this frame");
             }
         }
@@ -286,6 +291,7 @@ impl GlyphAtlas {
         spans: &[TextSpan<'_>],
         width: u32,
         height: u32,
+        clip_shape: f32,
     ) -> bool {
         let sw = width as f32;
         let sh = height as f32;
@@ -377,7 +383,9 @@ impl GlyphAtlas {
                     };
                     let uv = |u: f32, v: f32| [u / ATLAS_SIZE as f32, v / ATLAS_SIZE as f32];
                     let clip_circle = span.clip_circle;
-                    let clip_extents = span.clip_extents;
+                    // Zero extents keep `clip_circle` a plain circle, which no shape bends.
+                    let [ex, ey] = span.clip_extents;
+                    let clip_extents = if ex == 0.0 && ey == 0.0 { [0.0; 3] } else { [ex, ey, clip_shape] };
                     let tl = GlyphVertex { position: ndc(corners[0]), uv: uv(u0, v0), color, clip_circle, clip_extents };
                     let tr = GlyphVertex { position: ndc(corners[1]), uv: uv(u1, v0), color, clip_circle, clip_extents };
                     let bl = GlyphVertex { position: ndc(corners[2]), uv: uv(u0, v1), color, clip_circle, clip_extents };
@@ -392,8 +400,10 @@ impl GlyphAtlas {
 
 /// Image quads as the glyph shader's vertices, six per image in `images`
 /// order, NDC against a `width` x `height` target. A renderer draws image `i`
-/// as vertices `6i..6i+6` with that image's texture bound.
-pub fn image_quad_vertices(images: &[ImageQuad], width: u32, height: u32) -> Vec<GlyphVertex> {
+/// as vertices `6i..6i+6` with that image's texture bound. An image's rounded
+/// clip rides the vertices as the glyph shader's rounded-rect clip, its corners
+/// cut with `clip_shape` (see [`GlyphAtlas::prepare`]).
+pub fn image_quad_vertices(images: &[ImageQuad], width: u32, height: u32, clip_shape: f32) -> Vec<GlyphVertex> {
     let sw = width as f32;
     let sh = height as f32;
     let mut verts: Vec<GlyphVertex> = Vec::with_capacity(images.len() * 6);
@@ -401,11 +411,13 @@ pub fn image_quad_vertices(images: &[ImageQuad], width: u32, height: u32) -> Vec
         let (x, y, w, h) = q.rect;
         let ndc = |px: f32, py: f32| [(px / sw) * 2.0 - 1.0, 1.0 - (py / sh) * 2.0];
         let color = [1.0, 1.0, 1.0, q.alpha];
-        let clip_circle = [0.0; 3];
-        // Zero extents = the shader's plain-circle clip degenerate case. Inert
-        // while clip_circle.z is 0 (the clip branch never runs), but it must be
-        // a defined value, not whatever a missing attribute would read.
-        let clip_extents = [0.0; 2];
+        // Unclipped: all zero, so the clip branch never runs (it must still be
+        // a defined value, not whatever a missing attribute would read). A
+        // radius-0 rounded clip is a rect the scissor already cut.
+        let (clip_circle, clip_extents) = match q.clip_rrect {
+            Some([cx, cy, bx, by, r]) if r > 0.0 => ([cx, cy, r], [bx, by, clip_shape]),
+            _ => ([0.0; 3], [0.0; 3]),
+        };
         let tl = GlyphVertex { position: ndc(x, y), uv: [0.0, 0.0], color, clip_circle, clip_extents };
         let tr = GlyphVertex { position: ndc(x + w, y), uv: [1.0, 0.0], color, clip_circle, clip_extents };
         let bl = GlyphVertex { position: ndc(x, y + h), uv: [0.0, 1.0], color, clip_circle, clip_extents };
@@ -418,6 +430,24 @@ pub fn image_quad_vertices(images: &[ImageQuad], width: u32, height: u32) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An image's rounded clip rides its six vertices as the glyph shader's
+    /// rounded-rect clip — center and radius in `clip_circle`, inner half-size
+    /// and corner shape in `clip_extents` — and an unclipped image (or a
+    /// radius-0 one, which the scissor already cuts) leaves the clip off.
+    #[test]
+    fn an_image_quad_carries_its_rounded_clip_to_the_shader() {
+        let quad = |clip_rrect| ImageQuad { image: 1, rect: (10.0, 20.0, 200.0, 120.0), alpha: 1.0, z_before: 0, clip: None, clip_rrect };
+        let verts = image_quad_vertices(&[quad(Some([110.0, 80.0, 84.0, 44.0, 16.0])), quad(None), quad(Some([110.0, 80.0, 100.0, 60.0, 0.0]))], 400, 300, 4.5);
+        assert_eq!(verts.len(), 18);
+        for v in &verts[..6] {
+            assert_eq!(v.clip_circle, [110.0, 80.0, 16.0]);
+            assert_eq!(v.clip_extents, [84.0, 44.0, 4.5]);
+        }
+        for v in &verts[6..] {
+            assert_eq!((v.clip_circle, v.clip_extents), ([0.0; 3], [0.0; 3]), "no clip branch");
+        }
+    }
 
     #[test]
     fn changes_since_unions_the_glyphs_written_after_a_generation() {

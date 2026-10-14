@@ -8,6 +8,26 @@ and `docs/rfc-material.md`, and in `git log`.
 When you change behaviour: update the reference to the new state, and add an entry here under
 today's date — what changed, why, and how it was checked.
 
+## 2026-10-14
+
+- **Images honour `clip_rounded`.** The paint walk recorded the rounded clip on every item, but
+  tessellation queued an image with only its scissor, so an image inside `clip_rounded` kept
+  square corners (cce-mail's HTML view drew its page under three scissors to dodge it).
+  `DlImage` and `ImageQuad` now carry `clip_rrect` (`[cx, cy, bx, by, r]`, scaled to physical
+  px as `dl_batches_2d` scales a batch's), and `image_quad_vertices` hands it to the glyph
+  shader's existing rounded-rect clip. That clip was a hard circular-arc discard; it is now
+  shader2d's: the corner shape (`layout::corner_shape`, carried as a third `clip_extents`
+  component, so `GlyphVertex` is 56 bytes and location 4 a vec3 in all three pipelines) and a
+  ~1px feather folded into alpha. A clipped image corner and a plate corner now share both curve
+  and AA, and text under a rounded clip, which goes through the same shader, gets the same edge. The 3D
+  pass's `scene3d_image.wgsl` is unchanged: display-list images never reach it, only
+  app-staged world-space `SceneImage`s, where a screen-space rounded clip has no meaning.
+  Checked: two unit tests (an image under a translated `clip_rounded` keeps the clip through
+  tessellation; an `ImageQuad`'s clip lands on its six vertices, and an unclipped or radius-0
+  one leaves it off). Also checked in a scale-2 shadow session, in cce-mail's HTML view with a
+  full-bleed red page: all four corners were cut on the plate's squircle. The WebGPU path was
+  not compiled (no wasm target here).
+
 ## 2026-10-13
 
 - **A widget's own clips reach the frame.** `Adapted::paint_self` paints a widget into a

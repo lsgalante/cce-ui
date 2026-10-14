@@ -300,6 +300,7 @@ impl<A: Application> EngineState<A> {
                     clip: di.clip.map(|c| {
                         ((c.x * scale).max(0.0) as u32, (c.y * scale).max(0.0) as u32, (c.width * scale) as u32, (c.height * scale) as u32)
                     }),
+                    clip_rrect: di.clip_rrect.map(|c| c.map(|v| v * scale)),
                 })
             })
             .collect();

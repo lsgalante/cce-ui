@@ -146,7 +146,7 @@ impl TextStage {
                 vk::VertexInputAttributeDescription::default()
                     .location(4)
                     .binding(0)
-                    .format(vk::Format::R32G32_SFLOAT)
+                    .format(vk::Format::R32G32B32_SFLOAT)
                     .offset(44),
             ];
             let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
@@ -346,7 +346,7 @@ impl TextStage {
         spans: &[TextSpan<'_>],
         extent: vk::Extent2D,
     ) {
-        self.atlas.prepare(font_system, swash_cache, spans, extent.width, extent.height);
+        self.atlas.prepare(font_system, swash_cache, spans, extent.width, extent.height, crate::layout::corner_shape());
     }
 
     /// Called after this frame's fence has been waited: copy the current text

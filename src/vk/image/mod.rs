@@ -247,7 +247,7 @@ impl ImageStage {
                 vk::VertexInputAttributeDescription::default()
                     .location(4)
                     .binding(0)
-                    .format(vk::Format::R32G32_SFLOAT)
+                    .format(vk::Format::R32G32B32_SFLOAT)
                     .offset(44),
             ];
             let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()

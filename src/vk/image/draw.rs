@@ -14,7 +14,7 @@ impl ImageStage {
         images: &[ImageQuad],
         extent: vk::Extent2D,
     ) {
-        let verts = crate::draw::glyphs::image_quad_vertices(images, extent.width, extent.height);
+        let verts = crate::draw::glyphs::image_quad_vertices(images, extent.width, extent.height, crate::layout::corner_shape());
         let bytes: &[u8] = bytemuck::cast_slice(&verts);
         let buf = &mut self.frame_buffers[frame_index];
         if bytes.len() as vk::DeviceSize > buf.size {

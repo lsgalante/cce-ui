@@ -297,7 +297,7 @@ impl WebRenderer {
             GpuVertexAttribute::new(GpuVertexFormat::Float32x2, 8, 1),
             GpuVertexAttribute::new(GpuVertexFormat::Float32x4, 16, 2),
             GpuVertexAttribute::new(GpuVertexFormat::Float32x3, 32, 3),
-            GpuVertexAttribute::new(GpuVertexFormat::Float32x2, 44, 4),
+            GpuVertexAttribute::new(GpuVertexFormat::Float32x3, 44, 4),
         ];
         let vertex_glyph = GpuVertexState::new(&module_glyph);
         vertex_glyph.set_entry_point("vs_main");
@@ -444,7 +444,7 @@ impl WebRenderer {
     /// against the drawing buffer's current size.
     pub fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, swash: &mut cosmic_text::SwashCache, spans: &[TextSpan<'_>]) {
         let (w, h) = self.size();
-        self.atlas.prepare(fs, swash, spans, w, h);
+        self.atlas.prepare(fs, swash, spans, w, h, crate::layout::corner_shape());
     }
 
     /// Copy the next frame drawn into a buffer [`take_capture`](Self::take_capture) reads.

@@ -83,13 +83,15 @@ pub struct DlBatch {
 
 /// An image draw from the display list: `at` is the vertex index it sorts
 /// before (its position in the tessellated stream); `clip` is the item's
-/// paint-walk clip. Logical coordinates throughout.
+/// paint-walk clip and `clip_rrect` its rounded clip, `[cx, cy, bx, by, r]` as
+/// on [`DlBatch`]. Logical coordinates throughout.
 pub struct DlImage {
     pub image: u32,
     pub rect: crate::scene::layout::Rect,
     pub alpha: f32,
     pub at: u32,
     pub clip: Option<crate::scene::layout::Rect>,
+    pub clip_rrect: Option<[f32; 5]>,
 }
 
 /// Tessellate a `scene::paint::DisplayList`'s geometry into a flat vertex buffer plus per-clip draw
@@ -237,6 +239,7 @@ impl Tess {
                     alpha: *alpha,
                     at: self.verts.len() as u32,
                     clip: it.item.clip,
+                    clip_rrect: it.item.clip_rrect,
                 });
                 false
             }

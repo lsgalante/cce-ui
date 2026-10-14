@@ -20,6 +20,10 @@ pub struct ImageQuad {
     pub z_before: u32,
     /// Optional scissor (x, y, w, h) in physical pixels.
     pub clip: Option<(u32, u32, u32, u32)>,
+    /// Optional rounded clip `[cx, cy, bx, by, r]` in physical pixels — center,
+    /// inner-box half-size (half extent minus `r`) and corner radius, as on
+    /// [`Batch2D`](super::Batch2D) — cut with the frame's corner shape.
+    pub clip_rrect: Option<[f32; 5]>,
 }
 
 /// Byte order of the pixels handed over.

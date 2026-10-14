@@ -368,6 +368,24 @@ fn a_moved_rounded_rect_keeps_its_clips() {
     assert_eq!(items[1].clip_rrect, Some([45.0, 70.0, 34.0, 14.0, 6.0]), "the rounded clip's centre moved, its size kept");
 }
 
+/// An image under a rounded clip keeps it all the way to the image pass: the
+/// paint item records it, and tessellation queues the image with both the
+/// scissor and the rounded clip (an image used to arrive with the scissor
+/// only, so its corners were never cut).
+#[test]
+fn an_image_under_a_rounded_clip_keeps_it_through_tessellation() {
+    let mut pc = PaintCtx::new();
+    pc.translate(10.0, 20.0, |pc| pc.clip_rounded(r(0.0, 0.0, 100.0, 60.0), 8.0, |pc| pc.image(7, r(0.0, 0.0, 100.0, 60.0), 1.0)));
+    pc.image(8, r(0.0, 0.0, 10.0, 10.0), 1.0);
+    let dl = pc.finish();
+    assert_eq!(dl.items[0].clip_rrect, Some([60.0, 50.0, 42.0, 22.0, 8.0]));
+    let (_, _, images, _) = crate::backend::tessellate::tessellate_display_list(&dl, 400.0, 300.0, 1.0);
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].clip, Some(r(10.0, 20.0, 100.0, 60.0)), "the scissor still cuts the straight edges");
+    assert_eq!(images[0].clip_rrect, Some([60.0, 50.0, 42.0, 22.0, 8.0]), "the rounded clip reaches the image");
+    assert_eq!(images[1].clip_rrect, None, "an image outside it is unclipped");
+}
+
 /// A text moves its origin and its bounds; its scissor moves with it.
 #[test]
 fn a_moved_text_moves_its_origin_and_bounds() {
