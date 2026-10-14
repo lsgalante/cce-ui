@@ -72,9 +72,11 @@ impl Slider2D {
 }
 
 impl Layout for Slider2D {
-    /// A 64px pad.
+    /// A 120px pad: the height of the other drag-in canvases (Trackpad, the previews).
+    /// At 64 it sat in a control column as a small square with the column's width to
+    /// spare. (The Ramp's key pad is its own `PAD_SIDE`, not this.)
     fn intrinsic_size(&self) -> Option<Size> {
-        Some(Size::new(64.0, 64.0))
+        Some(Size::new(120.0, 120.0))
     }
 
     fn intrinsic_measure_width(&self) -> bool {
