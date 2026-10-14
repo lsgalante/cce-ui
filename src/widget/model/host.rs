@@ -165,10 +165,11 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         // verbatim and the single-font own-labels re-derivation below is skipped
         // (re-deriving would flatten a composite's mixed child fonts to widget_font).
         let subtree = Paint::paints_own_subtree(&self.inner);
-        // The Text prims the own-labels bridge below re-derives labels from. Only
-        // ParametersBg and Group override `paint_ui`, and neither reaches that
-        // bridge, so this pass's text is exactly what `Paint::paint` would emit.
-        let mut painted_text: Vec<TextLabel> = Vec::new();
+        // The Text prims the own-labels bridge below re-derives labels from, each
+        // with the bounds the widget authored it under. Only ParametersBg and Group
+        // override `paint_ui`, and neither reaches that bridge, so this pass's text
+        // is exactly what `Paint::paint` would emit.
+        let mut painted_text: Vec<(TextLabel, Option<[f32; 4]>)> = Vec::new();
         for item in tmp.finish().items {
             // Re-emitting through ctx records ctx's clip state, so push the clips the
             // widget authored the prim under first — its scissor (TreeList's viewport,
@@ -198,7 +199,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 if subtree {
                     ctx.text_with(text, x, y, font_size, color, font, bounds);
                 } else {
-                    painted_text.push(TextLabel { text, x, y, font_size, color });
+                    painted_text.push((TextLabel { text, x, y, font_size, color }, bounds));
                 }
             }
             if clip_rrect.is_some() {

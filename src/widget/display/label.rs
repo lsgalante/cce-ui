@@ -122,6 +122,29 @@ mod tests {
         assert!(size.width > 0.0);
         assert!(!crate::widget::WidgetHostExt::blocks_root_plate_drag(&l));
     }
+
+    /// The paint walk keeps the bound `paint` puts on the text — the label's rect plus 2px
+    /// of slack — so a Label handed a box narrower than its text clips there. Until
+    /// 2026-10-13 the adapter's own-labels bridge dropped it and the text ran on (a
+    /// gallery Status window's description over its Close button).
+    #[test]
+    fn text_is_bounded_to_the_rect() {
+        let mut ui = crate::widget::UiContext::new();
+        let id = ui.insert(Label::new("A long line of text").with_font_size(12.0)).id();
+        ui.get_widget_mut(id).unwrap().set_rect(6.0, 1.5, 26.0, 24.0);
+        let mut pc = PaintCtx::new();
+        crate::widget::painter::append_widget_text(&ui, ui.get_widget(id).unwrap(), &mut pc);
+        let bounds: Vec<_> = pc
+            .finish()
+            .items
+            .into_iter()
+            .filter_map(|it| match it.prim {
+                crate::scene::paint::Prim::Text { bounds, .. } => Some(bounds),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(bounds, vec![Some([6.0, 1.5, 34.0, 25.5])]);
+    }
 }
 
 

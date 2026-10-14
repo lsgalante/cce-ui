@@ -41,13 +41,18 @@ pub fn append_widget_text(ui: &UiContext, root: &dyn WidgetHost, pc: &mut PaintC
     for item in scratch.finish().items {
         if let Prim::Text { text, x, y, font_size, color, font, bounds, .. } = item.prim {
             let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
-            let merged = match (clip, bounds) {
-                (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
-                (Some(a), None) => Some(a),
-                (None, b) => b,
-            };
-            pc.text_with(text, x, y, font_size, color, font, merged);
+            pc.text_with(text, x, y, font_size, color, font, intersect_bounds(clip, bounds));
         }
+    }
+}
+
+/// Two optional text bounds `[x1, y1, x2, y2]` composed: their overlap when both are set,
+/// else whichever is (`None` is unbounded).
+pub(crate) fn intersect_bounds(a: Option<[f32; 4]>, b: Option<[f32; 4]>) -> Option<[f32; 4]> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
+        (a, None) => a,
+        (None, b) => b,
     }
 }
 

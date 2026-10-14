@@ -299,10 +299,15 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// ([`Paint::text_font`]), plus the detached base label in the configured detached-label
     /// font. Fed the Text prims `paint_self` already holds from its own pass — running
     /// `Paint::paint` a second time just to get them back doubled every leaf's paint cost.
+    ///
+    /// Each prim keeps the bounds `paint` gave it, narrowed by [`Paint::text_bounds`]. Until
+    /// 2026-10-13 only `text_bounds` survived: a Label's clip to its rect (and every other
+    /// leaf's `text_with` bounds — a button's face, a spinbox's field, a list item's row)
+    /// was dropped here, so a Label handed a box narrower than its text drew past it.
     pub(super) fn own_labels_from_painted(
         &self,
         _ctx: &UiContext,
-        painted: Vec<TextLabel>,
+        painted: Vec<(TextLabel, Option<[f32; 4]>)>,
         prim_font: Option<String>,
     ) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         // The detached label is the adapter's, not the widget's: one font for every
@@ -324,7 +329,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         let bounds = Paint::text_bounds(&self.inner, self.content_rect());
         let mut out: Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> = Vec::new();
         if self.visible() {
-            out.extend(painted.into_iter().map(|l| (l, prim_font.clone(), bounds)));
+            out.extend(painted.into_iter().map(|(l, own)| (l, prim_font.clone(), crate::widget::painter::intersect_bounds(own, bounds))));
             if !Layout::inline_label(&self.inner) {
                 out.extend(self.base_label_fallback().into_iter().map(|l| (l, base_font.clone(), None)));
             }
