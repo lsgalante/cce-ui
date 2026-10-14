@@ -97,8 +97,8 @@ impl Paint for TreeList {
         quads.push((list_left + 1.0, y + offset_y + header_h - 1.0, list_width - 2.0, 1.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
         
         // Vertical separators inside header
-        quads.push((list_left + 180.0, y + offset_y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
-        quads.push((list_left + 235.0, y + offset_y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
+        quads.push((list_left + Self::KEY_W, y + offset_y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
+        quads.push((list_left + self.value_col(), y + offset_y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
 
 
         // 2. Draw items (row backgrounds, separator lines, color previews)
@@ -154,8 +154,8 @@ impl Paint for TreeList {
             
             if let TreeElement::Leaf { ref val, original_idx, .. } = item {
                 let separator_color = crate::color::tree_separator_color();
-                quads.push((list_left + 180.0, draw_y, 1.0, draw_h, 0.0, apply_opacity(separator_color), (false, false, false, false)));
-                quads.push((list_left + 235.0, draw_y, 1.0, draw_h, 0.0, apply_opacity(separator_color), (false, false, false, false)));
+                quads.push((list_left + Self::KEY_W, draw_y, 1.0, draw_h, 0.0, apply_opacity(separator_color), (false, false, false, false)));
+                quads.push((list_left + self.value_col(), draw_y, 1.0, draw_h, 0.0, apply_opacity(separator_color), (false, false, false, false)));
 
                 let mut is_button = false;
                 if let Some(Some(ref anno)) = self.annotations.get(*original_idx) {
@@ -166,7 +166,7 @@ impl Paint for TreeList {
 
                 if Some(*original_idx) != self.selected_key_idx {
                     if is_button {
-                        let btn_x = list_left + 245.0;
+                        let btn_x = list_left + self.value_x();
                         let btn_y = row_y + 1.0;
                         let btn_bottom = (row_y + 27.0).min(list_bottom);
                         let btn_draw_y = btn_y.max(list_top);
@@ -178,7 +178,7 @@ impl Paint for TreeList {
                     } else if let serde_json::Value::String(s) = val {
                         if s.starts_with('#') {
                             if let Some(rgba) = parse_hex_f32(s) {
-                                let preview_x = list_left + 245.0;
+                                let preview_x = list_left + self.value_x();
                                 let preview_y = row_y + 4.0;
                                 let preview_bottom = (row_y + 20.0).min(list_bottom);
                                 let preview_draw_y = preview_y.max(list_top);
@@ -406,14 +406,14 @@ impl TreeList {
         }, None));
         labels.push((TextLabel {
             text: "Type".to_string(),
-            x: list_left + 180.0 + 8.0,
+            x: list_left + Self::KEY_W + 8.0,
             y: self.base.y + offset_y + 6.0,
             font_size: header_font_size,
             color: [200, 200, 210],
         }, None));
         labels.push((TextLabel {
             text: "Value".to_string(),
-            x: list_left + 235.0 + 8.0,
+            x: list_left + self.value_col() + 8.0,
             y: self.base.y + offset_y + 6.0,
             font_size: header_font_size,
             color: [200, 200, 210],
@@ -475,7 +475,7 @@ impl TreeList {
                             y: row_y + 6.0,
                             font_size: tree_font_size,
                             color,
-                        }, Some(list_left + 178.0)));
+                        }, Some(list_left + Self::KEY_W - 2.0)));
                     }
 
                     let val_ty = match val {
@@ -522,11 +522,11 @@ impl TreeList {
                         let ty_text = format!("({})", ty);
                         labels.push((TextLabel {
                             text: ty_text,
-                            x: list_left + 190.0,
+                            x: list_left + Self::KEY_W + 10.0,
                             y: row_y + 6.0,
                             font_size: tree_font_size,
                             color: f32_to_rgb(crate::color::tree_type_text_color()),
-                        }, Some(list_left + 233.0)));
+                        }, Some(list_left + self.value_col() - 2.0)));
                     }
 
                     if Some(*original_idx) != self.selected_key_idx {
@@ -544,15 +544,15 @@ impl TreeList {
                         };
                         
                         let label_x = if is_color {
-                            list_left + 267.0
+                            list_left + self.value_x() + 22.0
                         } else {
-                            list_left + 245.0
+                            list_left + self.value_x()
                         };
 
                         if is_button {
                             labels.push((TextLabel {
                                 text: display_val,
-                                x: list_left + 245.0 + 8.0,
+                                x: list_left + self.value_x() + 8.0,
                                 y: row_y + 6.0,
                                 font_size: tree_font_size,
                                 color: [240, 240, 245],
@@ -598,6 +598,30 @@ impl TreeList {
     }
     pub(super) fn tree_radius(&self) -> f32 {
         crate::layout::tree_corner_radius()
+    }
+
+    /// The key column's width, from a row's left edge to the type column.
+    pub(super) const KEY_W: f32 = 180.0;
+
+    /// The type column's width: the widest built-in type label, "(keybind)", in the tree
+    /// font, with 10 px before it and 8 after — never under the 55 px it was fixed at,
+    /// which cut "(string)" to "(string" in a 14 px font. An app's own annotation longer
+    /// than that is still clipped at the column's edge.
+    pub(super) fn type_w(&self) -> f32 {
+        let (family, size) = crate::layout::tree_font_parsed();
+        (crate::widget::display::measure_text_width("(keybind)", &family, size) + 18.0).max(55.0)
+    }
+
+    /// Where the value column starts (its separator), from a row's left edge.
+    pub(super) fn value_col(&self) -> f32 {
+        Self::KEY_W + self.type_w()
+    }
+
+    /// Where a row's value content starts, from its left edge (`get_row_rect`'s x): the
+    /// value text, a colour swatch, a button — and an app's inline value editor, which
+    /// lines up with them by placing itself here.
+    pub fn value_x(&self) -> f32 {
+        self.value_col() + 10.0
     }
 
     pub(super) fn tree_corners(&self) -> (bool, bool, bool, bool) {
