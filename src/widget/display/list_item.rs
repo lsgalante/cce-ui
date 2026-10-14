@@ -95,13 +95,13 @@ impl Paint for InteractiveListItem {
             }
             base_color
         } else if self.pressed {
-            let mut base_color = theme.surface_bg;
-            base_color[3] = (base_color[3] + theme.press_overlay[3]).min(1.0);
-            base_color
+            // The overlays are washes in their own right — translucent white over
+            // whatever the row sits on. Bumping `surface_bg`'s alpha by theirs
+            // painted the popover colour instead, which is opaque (and near
+            // black): hovering a row blacked it out.
+            theme.press_overlay
         } else if self.hovered {
-            let mut base_color = theme.surface_bg;
-            base_color[3] = (base_color[3] + theme.hover_overlay[3]).min(1.0);
-            base_color
+            theme.hover_overlay
         } else {
             [0.0, 0.0, 0.0, 0.0]
         }
