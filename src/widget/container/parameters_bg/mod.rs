@@ -104,7 +104,7 @@ pub struct ParametersBg {
     code_error_line: Option<usize>,
     mouse_pos: Option<(f32, f32)>,
     /// The parameter row under the pointer: its LABEL lifts
-    /// (`own_text_labels`) and its own carves light (`paint_ui`, the tint
+    /// (`own_text_labels_with_bounds`) and its own carves light (`paint_ui`, the tint
     /// channel) — the pane's ONE hover rule, over every control kind. The controls keep their own hovers (a spinbox's +/- buttons, a
     /// slider's band), but under the DE relief style most of them draw none
     /// at all — the spinbox's row border, the well frames and the dropdown

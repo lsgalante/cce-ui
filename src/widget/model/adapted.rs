@@ -254,12 +254,14 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
 
 
     /// This widget's OWN text (prim-derived + detached base label), before any child
-    /// aggregation — the shared source for the three text getters.
+    /// aggregation. Tests only: the one non-test caller (the parameters pane) needs the
+    /// bounds, so it takes [`own_text_labels_with_bounds`](Self::own_text_labels_with_bounds).
+    #[cfg(test)]
     pub(crate) fn own_text_labels(&self) -> Vec<TextLabel> {
         self.own_text_labels_with_bounds().into_iter().map(|(l, _)| l).collect()
     }
 
-    /// [`own_text_labels`](Self::own_text_labels) with each label's bounds, as
+    /// This widget's OWN text (prim-derived + detached base label) with each label's bounds, as
     /// [`own_labels_from_painted`](Self::own_labels_from_painted) gives them: the bounds
     /// `Paint::paint` set on the prim (a button's face, a spinbox's field) narrowed by
     /// [`Paint::text_bounds`]; the detached base label is unbounded. For a container that
@@ -290,7 +292,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// This widget's GLYPHS — the image prims its [`Paint::paint`] emits, a
     /// dropdown's arrow or a spinbox's −/+ — as `(image, rect, alpha)`, for a
     /// container that paints its children's chrome itself and collects their
-    /// text through [`own_text_labels`](Self::own_text_labels) (the
+    /// text through [`own_text_labels_with_bounds`](Self::own_text_labels_with_bounds) (the
     /// parameters pane). Until 2026-10-05 those symbols were text and rode
     /// the labels; as glyphs nothing carried them, and the pane drew its
     /// controls without their arrows.

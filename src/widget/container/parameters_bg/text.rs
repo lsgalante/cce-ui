@@ -4,12 +4,15 @@
 use super::*;
 
 impl ParametersBg {
+    /// [`own_text_labels_with_bounds`](Self::own_text_labels_with_bounds) without the
+    /// bounds, for the tests that only ask what text the pane draws.
+    #[cfg(test)]
     pub(super) fn own_text_labels(&self) -> Vec<TextLabel> {
         self.own_text_labels_with_bounds().into_iter().map(|(l, _)| l).collect()
     }
 
-    /// [`own_text_labels`](Self::own_text_labels), each with the bounds its
-    /// author set: a hosted control's text keeps the clip its `Paint::paint`
+    /// Every label the pane draws, each with the bounds its author set: a
+    /// hosted control's text keeps the clip its `Paint::paint`
     /// gave it (a button's face, a spinbox's field), the pane's own labels
     /// carry none. The paint paths intersect these with the pane's viewport
     /// (or a code box). Until 2026-10-14 the controls' text came through as
@@ -170,7 +173,7 @@ impl ParametersBg {
 
     /// The hosted controls' GLYPHS — a dropdown's or a picker's arrow, a
     /// spinbox's −/+ — as `(image, rect, alpha)`, row by row as
-    /// [`own_text_labels`](Self::own_text_labels) collects their text. The
+    /// [`own_text_labels_with_bounds`](Self::own_text_labels_with_bounds) collects their text. The
     /// pane paints its controls' chrome itself and never runs their
     /// `Paint::paint` into the frame, so a symbol a control draws reaches
     /// the pane only through here. Ramps are not asked: they paint whole
