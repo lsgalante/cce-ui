@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-14
 
+- **A grid app's menu opens on the output it was asked for.** The menu layer named no output,
+  so the compositor put every one on its first output — with a second display, a right-click
+  there opened its menu on the wrong one. `context_menu::set_output(name)` (after `show`; `show`
+  clears it, a page turn keeps it) names the `wl_output`, and `sync_menu_layer` creates the
+  surface on it, fits the menu to its logical size and draws at its scale; a menu for another
+  output gets a fresh surface, since a layer surface cannot move. Checked in a scale-2 shadow
+  with a second (scale-1) headless output: a right-click on the second output opened cce-desktop's
+  menu there, at the click and at scale 1, and none on the first.
+
 - **A button's icon sits at its optical centre** (`Button::optical_offset`, `OPTICAL_SHIFT`).
   The user saw cce-claude's sidebar toggle (the `menu` glyph) as off centre. Measured on the
   live window it was centred to half a pixel; what moves it to the eye is the flush plate's

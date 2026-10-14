@@ -88,11 +88,13 @@ pub fn is_visible() -> bool {
 }
 
 pub fn show(x: f32, y: f32, options: Vec<String>, header_count: usize, target: WidgetId) {
+    set_output(None);
     with_state(|m| m.borrow_mut().show(x, y, options, header_count, target));
 }
 
 /// See [`ContextMenuState::show_scaled`].
 pub fn show_scaled(x: f32, y: f32, options: Vec<String>, header_count: usize, target: WidgetId, scale: f32) {
+    set_output(None);
     with_state(|m| m.borrow_mut().show_scaled(x, y, options, header_count, target, scale));
 }
 
@@ -142,6 +144,21 @@ pub fn is_hosted() -> bool {
 /// to tell which space an event is in.
 pub fn pointer_on_host() -> bool {
     with_state(|m| m.borrow().pointer_on_host)
+}
+
+/// The output a grid app's menu stands on, by its `wl_output` name (`eDP-1`),
+/// its `x`/`y` being on that output — or `None` for the compositor's choice.
+/// Call it after [`show`]: a grid app's menu is in OUTPUT coordinates
+/// (`backend/menu_layer.rs`), and on more than one display they mean nothing
+/// without the output. `show` clears it; a page turn ([`show_page`]) keeps
+/// it. An ordinary window's menu ignores it.
+pub fn set_output(name: Option<String>) {
+    with_state(|m| m.borrow_mut().output = name);
+}
+
+/// See [`set_output`].
+pub fn output() -> Option<String> {
+    with_state(|m| m.borrow().output.clone())
 }
 
 /// See [`pointer_on_host`]. Set by the runner, never by an app.

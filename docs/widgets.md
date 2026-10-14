@@ -67,7 +67,8 @@ One global menu per window that every app shows, paints into its display list an
 window coordinates. On a toplevel the runner hosts it in an `xdg_popup` (`docs/runtime.md`).
 
 - **A grid app's menu is in output coordinates**, on a layer surface of its own
-  (`docs/runtime.md`): show it at a point on the output, and ask `pointer_on_host()` before
+  (`docs/runtime.md`): show it at a point on the output, name that output with
+  `set_output(name)` after `show` (a page turn keeps it), and ask `pointer_on_host()` before
   reading a pointer event's position — true on the menu's surface (output px), false on the
   grid's own (patch px). cce-desktop's background menu is the consumer.
 

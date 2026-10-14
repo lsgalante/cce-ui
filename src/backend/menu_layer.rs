@@ -15,6 +15,12 @@
 //!   output (the positioner's flip / slide / shorten, done here) and then the
 //!   surface's margins: anchored top-left, exclusive zone -1, so the box the
 //!   margins measure from is the whole output.
+//! - **On the output the app names** (`context_menu::set_output`, a
+//!   `wl_output` name the compositor sent with the press): the layer surface
+//!   is created on it, the menu fitted to it and drawn at its scale. A menu
+//!   naming no output, or one this client does not know, goes where the
+//!   compositor puts a layer surface with none (its first output), fitted to
+//!   the largest-scale output — right only with one display.
 //! - **It is drawn at the output's scale**, whatever the grid's own is: the
 //!   toolkit-wide factor is swapped for the frame (`draw_menu_to`).
 //! - **It takes the keyboard** (exclusive), so Up/Down/Enter reach the app
@@ -24,7 +30,7 @@
 
 use smithay_client_toolkit::shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer, LayerSurface, LayerSurfaceConfigure};
 use smithay_client_toolkit::shell::WaylandSurface;
-use wayland_client::{protocol::wl_surface, Proxy};
+use wayland_client::{protocol::wl_output, protocol::wl_surface, Proxy};
 
 use super::window_runner::{Application, EngineState};
 use crate::vk::VkRenderer;
@@ -38,6 +44,10 @@ pub struct MenuLayer {
     /// The menu's generation and the rect last asked for: `(x, y)` its
     /// margins on the output, `(w, h)` its size, all logical px.
     key: (u64, (i32, i32, u32, u32)),
+    /// The output it was created on, as the app named it (`None`: the
+    /// compositor's choice). A surface cannot change output, so a menu for
+    /// another one gets a new surface.
+    output: Option<String>,
     /// The size of the last configure; `None` before the first, until which
     /// nothing may be attached.
     placed: Option<(f32, f32)>,
@@ -64,20 +74,29 @@ impl MenuLayer {
 }
 
 impl<A: Application> EngineState<A> {
-    /// The logical size of the output the menu stands on: the one of the
-    /// largest scale, the one `detect_scale_factor` picks (a layer surface
-    /// given no output goes to the compositor's choice, on one output the same).
-    fn menu_output_size(&self) -> (f32, f32) {
-        let mut best: Option<(f32, f32, i32)> = None;
+    /// The output the menu stands on: the one named `name` when this client
+    /// knows it, else (and for no name) the one of the largest scale — the
+    /// one `detect_scale_factor` picks. Its `wl_output` (only for a named
+    /// output: an unnamed menu leaves the choice to the compositor), logical
+    /// size and scale.
+    fn menu_output(&self, name: Option<&str>) -> (Option<wl_output::WlOutput>, (f32, f32), i32) {
+        let mut best: Option<((f32, f32), i32)> = None;
         for output in self.output_state.outputs() {
             let Some(info) = self.output_state.info(&output) else { continue };
             let Some((w, h)) = info.logical_size else { continue };
-            let size = (w as f32, h as f32, info.scale_factor);
-            if best.is_none_or(|b| size.2 > b.2) {
+            let size = ((w.max(1) as f32, h.max(1) as f32), info.scale_factor.max(1));
+            if name.is_some() && info.name.as_deref() == name {
+                return (Some(output), size.0, size.1);
+            }
+            if best.is_none_or(|b| size.1 > b.1) {
                 best = Some(size);
             }
         }
-        best.map_or((1920.0, 1080.0), |(w, h, _)| (w.max(1.0), h.max(1.0)))
+        if let Some(name) = name {
+            log::warn!("[menu_layer] no output named {name}; leaving it to the compositor");
+        }
+        let (size, scale) = best.unwrap_or(((1920.0, 1080.0), 1));
+        (None, size, scale)
     }
 
     /// Bring the layer in line with the menu, as `sync_menu_popup` does the
@@ -94,15 +113,20 @@ impl<A: Application> EngineState<A> {
             context_menu::set_hosted(false);
             return;
         }
-        let (ow, oh) = self.menu_output_size();
+        let name = context_menu::output();
+        let (wl_output, (ow, oh), output_scale) = self.menu_output(name.as_deref());
         context_menu::constrain_to(0.0, 0.0, ow, oh);
         let (_, w, content_h) = context_menu::natural_geometry();
         let (x, y) = (context_menu::x(), context_menu::y());
         let h = content_h.min(oh - y).max(context_menu::h());
         let rect = (x.round() as i32, y.round() as i32, w.ceil().max(1.0) as u32, h.ceil().max(1.0) as u32);
         let key = (context_menu::generation(), rect);
-        if self.menu_layer.as_ref().is_some_and(|l| l.key == key) {
+        if self.menu_layer.as_ref().is_some_and(|l| l.key == key && l.output == name) {
             return;
+        }
+        // A menu for another output: that surface cannot follow it.
+        if self.menu_layer.as_ref().is_some_and(|l| l.output != name) {
+            self.close_menu_layer();
         }
         context_menu::set_hosted(true);
         if let Some(ml) = self.menu_layer.as_mut() {
@@ -117,15 +141,16 @@ impl<A: Application> EngineState<A> {
         }
         let Some(layer_shell) = self.layer_shell_state.as_ref() else { return };
         let surface = self.compositor_state.create_surface(&self.qh);
-        let layer = layer_shell.create_layer_surface(&self.qh, surface, Layer::Overlay, Some(MENU_NAMESPACE), None);
+        let layer =
+            layer_shell.create_layer_surface(&self.qh, surface, Layer::Overlay, Some(MENU_NAMESPACE), wl_output.as_ref());
         layer.set_anchor(Anchor::TOP | Anchor::LEFT);
         layer.set_exclusive_zone(-1);
         layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
         layer.set_margin(rect.1, 0, 0, rect.0);
         layer.set_size(rect.2, rect.3);
         layer.commit();
-        let scale = crate::wayland::detect_scale_factor(&self.output_state);
-        self.menu_layer = Some(MenuLayer { layer, key, placed: None, scale, committed_scale: 0 });
+        let scale = crate::scale::forced_scale().map_or(output_scale as f64, |f| f as f64);
+        self.menu_layer = Some(MenuLayer { layer, key, output: name, placed: None, scale, committed_scale: 0 });
     }
 
     /// Close the layer; the renderer lets go of the surface first, as for the

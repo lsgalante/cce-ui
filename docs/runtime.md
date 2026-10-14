@@ -138,7 +138,9 @@ the desk), which is pinned at buffer scale 1, and which never holds the keyboard
 coordinates are OUTPUT-logical px for a grid app — it shows the menu at a point the compositor
 gave it, e.g. the `desktop-menu` status topic's — and the runner hosts it on an Overlay layer
 surface (namespace `cce-menu`, anchored top-left, exclusive zone -1, margins = the menu's
-place), placed by `context_menu::constrain_to` against the output, drawn at the OUTPUT's scale
+place) on the output the app names (`context_menu::set_output`, a `wl_output` name; none, or
+an unknown one, leaves it to the compositor), placed by `context_menu::constrain_to` against
+that output, drawn at ITS scale
 (the toolkit-wide factor the grid pins to its patch scale is swapped for the frame), with
 exclusive keyboard. Its pointer events are offset by its place on the output, as a popup's are
 by its place in the window, and `context_menu::pointer_on_host` tells the app which space an

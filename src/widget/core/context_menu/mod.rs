@@ -222,6 +222,10 @@ pub struct ContextMenuState {
     /// Whether the pointer event being dispatched landed on the runner's
     /// menu surface — see [`pointer_on_host`](super::pointer_on_host).
     pub pointer_on_host: bool,
+    /// The output a grid app's menu stands on, by `wl_output` name — see
+    /// [`set_output`](super::set_output). Kept across page turns; `show`
+    /// clears it.
+    pub output: Option<String>,
     /// The pointer's last place over the menu, to re-hover after a scroll
     /// moves a different row under it.
     last_cursor: Option<(f32, f32)>,
@@ -273,6 +277,7 @@ impl ContextMenuState {
             generation: 0,
             hosted: false,
             pointer_on_host: false,
+            output: None,
             last_cursor: None,
             in_popup: false,
             scale: 1.0,
