@@ -186,7 +186,7 @@ returning itself: `impl Csd for MyApp { .. }` plus, in its `Application` impl,
 | extension | accessor | hooks | users |
 |---|---|---|---|
 | `LayerApp` (Wayland shell only) | `layer_app` | `layer()` → `LayerSettings` (required; `None` is a plain window after all), `wants_surface` | gallery, keyboard, notifier, the status bar's OSD |
-| `GridSurface` | `grid_surface` | `grid_patch` (required), `take_damage` (the one app that reports its own damage) | cce-grid |
+| `GridSurface` | `grid_surface` | `grid_patch` (required), `take_damage` (the one app that reports its own damage) | cce-desktop |
 | `App3D` (`3d` feature) | `app_3d` | `init_3d(stage)` / `stage_3d(stage, size, scale)` through `&mut dyn Stage3D` — portable; the native `stage_renderer` takes the `VkRenderer` and defaults to `stage_3d` | cce-model, cce-designer, `examples/probe3d` |
 | `Csd` | `csd` | `standard_csd` (default on), `csd_resize_borders`, `csd_titlebar_move`, `take_window_action` | cce-designer, the status bar and its OSD |
 

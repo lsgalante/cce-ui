@@ -1,6 +1,6 @@
 //! `MarkdownView`: a note's blocks (`cce_core::markdown`) laid out at a
 //! width into draw items and click targets — the reading view of
-//! cce-notes, the note cards on cce-grid's desktop, and any other surface
+//! cce-notes, the note cards on cce-desktop's desktop, and any other surface
 //! that shows a vault note. Behind the `markdown` feature, which brings in
 //! cce-vault; clients that draw no Markdown do not build it.
 //!
@@ -135,7 +135,7 @@ impl Layout {
     }
 
     /// Paint with every length multiplied by `k`, the layout's top-left at
-    /// `origin` — for a host that lays out in its own units (cce-grid's
+    /// `origin` — for a host that lays out in its own units (cce-desktop's
     /// virtual desktop) and draws at another resolution. Culled to
     /// `viewport`, in the painted space.
     pub fn paint_scaled(&self, pc: &mut PaintCtx, origin: (f32, f32), k: f32, viewport: Rect) {

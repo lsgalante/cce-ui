@@ -124,7 +124,7 @@ impl HeightField {
                     (p.rect[0] - r, p.rect[1] - r, p.rect[0] + r, p.rect[1] + r)
                 }
                 // A lattice's shading is bounded by its cover quad, which the
-                // batch does not record; the one consumer (cce-grid) covers
+                // batch does not record; the one consumer (cce-desktop) covers
                 // its whole surface, so the window is the honest bound.
                 MODE_GROOVE | MODE_LATTICE => (0.0, 0.0, width as f32, height as f32),
                 // A union's push rect is its boxes' bounding box.

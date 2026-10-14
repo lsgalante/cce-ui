@@ -573,7 +573,7 @@ pub trait LayerApp {
 /// window content; the app renders only when handed a patch
 /// ([`grid_patch`](Self::grid_patch)). The surface is input-transparent and
 /// lives behind all windows. Needs manager v6; on an older compositor the
-/// declaration is skipped. cce-grid is the one.
+/// declaration is skipped. cce-desktop is the one.
 ///
 /// Reached ONLY through [`Application::grid_surface`], whose `Some` is what
 /// declares the role (asked once, when a session starts). Implementing this

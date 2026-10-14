@@ -69,7 +69,7 @@ window coordinates. On a toplevel the runner hosts it in an `xdg_popup` (`docs/r
 - **A grid app's menu is in output coordinates**, on a layer surface of its own
   (`docs/runtime.md`): show it at a point on the output, and ask `pointer_on_host()` before
   reading a pointer event's position — true on the menu's surface (output px), false on the
-  grid's own (patch px). cce-grid's background menu is the consumer.
+  grid's own (patch px). cce-desktop's background menu is the consumer.
 
 - **Rows**: give each row an action ID (`set_row_actions`, or
   `UiContext::show_context_menu_rows`); a press runs the row's action. A label beginning
@@ -335,7 +335,7 @@ Opt-in features for the note clients.
   the editor's test.
 - **`markdown`** — `widget::markdown`, the reading view: cce-core's blocks laid out at a width
   into draw items and click targets (`layout`, `Layout::paint` / `paint_scaled`). cce-notes'
-  reading mode and cce-grid's note cards.
+  reading mode and cce-desktop's note cards.
 - **Links, tags, the quote bar and the highlight take the theme's colours**, `style.text.link`
   (`color::text_link_color`), `style.text.tag` (`color::text_tag_color`),
   `style.text.quote_bar` (`color::text_quote_bar_color`) and `style.text.highlight`
