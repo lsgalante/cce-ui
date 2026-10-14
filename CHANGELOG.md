@@ -10,6 +10,17 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-14
 
+- **A button's icon sits at its optical centre** (`Button::optical_offset`, `OPTICAL_SHIFT`).
+  The user saw cce-claude's sidebar toggle (the `menu` glyph) as off centre. Measured on the
+  live window it was centred to half a pixel; what moves it to the eye is the flush plate's
+  lighting: under the top-left light the bright lines are inside the groove top and left and
+  outside it bottom and right, a frame about 1.5 logical px right of and below the footprint's
+  centre (wall 4.7). The icon now moves away from the light (`relief_shade::light_vector`) by
+  a fraction of the wall. 0.4 put it on the bright lines' centre but read low on a 3x zoom, the
+  dark face pulling the eye back; 0.3 read centred. Only icons move: a symmetric glyph shows
+  the shift where a label does not. Checked: `an_icon_on_a_relief_plate_sits_away_from_the_light`;
+  shadow shots of cce-claude's header at 0, 0.3 and 0.4, the glyph's pixels measured against
+  the rim's.
 - **The parameter pane has a slider-with-spinbox row** (`sliderspinbox:min:max:step[:decimals]`),
   hosting a `SliderSpinbox` held by value as it hosts a `Float3`: the pane draws and routes the
   composite's two parts with its slider and spinbox code and writes the number back as the box

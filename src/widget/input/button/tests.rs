@@ -183,3 +183,28 @@ fn geometry_and_label_parity() {
     b.set_selected(true);
     assert!(b.selected);
 }
+
+/// An icon on a relief plate is moved off the geometric centre, away from
+/// the light, by `OPTICAL_SHIFT` of the wall; with no rim (flat, list row)
+/// it stays on the centre.
+#[test]
+fn an_icon_on_a_relief_plate_sits_away_from_the_light() {
+    let rect = Rect { x: 0.0, y: 0.0, width: 40.0, height: 24.0 };
+    // 16 square (24 less the 4px margins), centred.
+    let (cx, cy) = (12.0, 4.0);
+    let at = |b: &Button| b.icon_rect(rect).map(|(_, r, _)| (r.x, r.y, r.width, r.height)).unwrap();
+
+    let raised = Button::new(0.0, 0.0, 40.0, 24.0).with_icon(7, 32.0, 32.0).with_raised(true);
+    let (x, y, w, h) = at(&raised);
+    assert_eq!((w, h), (16.0, 16.0));
+    let [lx, ly, _] = crate::scene::relief_shade::light_vector();
+    let wall = crate::layout::bevel_width().min(24.0 * 0.2);
+    let (dx, dy) = (x - cx, y - cy);
+    assert!(((dx * dx + dy * dy).sqrt() - wall * OPTICAL_SHIFT).abs() < 1e-3, "shift ({dx}, {dy}) for wall {wall}");
+    assert!(dx * lx <= 0.0 && dy * ly <= 0.0, "shift ({dx}, {dy}) must be away from the light ({lx}, {ly})");
+
+    let flat = Button::new(0.0, 0.0, 40.0, 24.0).with_icon(7, 32.0, 32.0).with_flat(true);
+    assert_eq!(at(&flat), (cx, cy, 16.0, 16.0));
+    let row = Button::new_list_row(0.0, 0.0, 40.0, 24.0).with_icon(7, 32.0, 32.0);
+    assert_eq!(at(&row), (cx, cy, 16.0, 16.0));
+}

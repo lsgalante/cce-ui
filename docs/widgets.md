@@ -379,6 +379,13 @@ glyphs by name (`with_icons`). A widget a host places (`compose::place`) and pai
 `a_placed_dropdown_paints_its_arrow_glyph` and `a_placed_graph_paints_its_wires_and_ports` are
 the tests.
 
+A `Button`'s icon face (`with_icon_name` / `with_icon`) is centred and then moved away from the
+light by `OPTICAL_SHIFT` (0.3) of its plate's wall (`Button::optical_offset`): a relief rim is
+lit inside its groove on the near side and outside it on the far side, so a geometrically
+centred glyph reads as pushed toward the light. Flat plates, list rows and menu items have no
+rim and no shift; labels are not moved. `an_icon_on_a_relief_plate_sits_away_from_the_light`
+is the test.
+
 ## Other widget notes
 
 - **`LineEdit`** (`widget/line_edit/`): the text, caret, selection and keymap of one line of

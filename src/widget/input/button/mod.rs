@@ -26,6 +26,12 @@ use crate::widget::{
     MouseButton, NamedKey, Paint,
 };
 
+/// An icon's shift away from the light, as a fraction of its plate's wall
+/// width — see [`Button::optical_offset`]. Picked by eye on a 3x zoom of
+/// the live button: 0.4 lands on the bright lines' centre but reads low,
+/// since the dark face pulls the eye back; 0.3 reads centred.
+pub const OPTICAL_SHIFT: f32 = 0.3;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonKind {
     Primary,
@@ -202,8 +208,8 @@ impl Button {
     }
 
     /// Where the icon face draws inside `rect`: centered, inset one 4px margin
-    /// per side from the shorter extent, native aspect kept. `None` when this
-    /// button has no icon.
+    /// per side from the shorter extent, native aspect kept, then nudged by
+    /// [`Self::optical_offset`]. `None` when this button has no icon.
     pub fn icon_rect(&self, rect: Rect) -> Option<(u32, Rect, f32)> {
         let (image, iw, ih) = self.icon_face()?;
         let s = (rect.width.min(rect.height) - 8.0).max(4.0);
@@ -212,16 +218,43 @@ impl Button {
         } else {
             (s * iw / ih.max(1.0), s)
         };
+        let (ox, oy) = self.optical_offset(rect);
         Some((
             image,
             Rect {
-                x: rect.x + (rect.width - dw) / 2.0,
-                y: rect.y + (rect.height - dh) / 2.0,
+                x: rect.x + (rect.width - dw) / 2.0 + ox,
+                y: rect.y + (rect.height - dh) / 2.0 + oy,
                 width: dw,
                 height: dh,
             },
             self.icon_alpha,
         ))
+    }
+
+    /// How far an icon sits from the geometric centre so it reads as
+    /// centred: away from the light, by [`OPTICAL_SHIFT`] of the plate's wall.
+    ///
+    /// A relief plate's rim catches the light on the near side INSIDE its
+    /// groove and on the far side OUTSIDE it, so the bright lines the eye
+    /// takes for the button's frame sit a little toward the far side of
+    /// the footprint. An icon centred on the footprint then reads as
+    /// pushed toward the light (measured on cce-claude's sidebar toggle:
+    /// about 1.5 logical px right and down of the true centre under the
+    /// default top-left light, wall 4.7). A symmetric glyph shows it
+    /// plainly where a text label does not, so only icons are moved. Flat
+    /// plates, list rows and menu items have no rim: no offset.
+    pub fn optical_offset(&self, rect: Rect) -> (f32, f32) {
+        let Some(plate) = self.plate(rect) else { return (0.0, 0.0) };
+        if plate.stance == crate::widget::PlateStance::Flat {
+            return (0.0, 0.0);
+        }
+        let [lx, ly, _] = crate::scene::relief_shade::light_vector();
+        let len = (lx * lx + ly * ly).sqrt();
+        if len < 1e-3 {
+            return (0.0, 0.0);
+        }
+        let d = plate.depth * OPTICAL_SHIFT;
+        (-lx / len * d, -ly / len * d)
     }
 
     /// Hover state, also settable by immediate-mode hosts that hit-test themselves.
