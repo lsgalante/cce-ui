@@ -484,7 +484,7 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   an app draws itself, with `LineMarks` / `paint_line` to measure and draw it), `context_menu`, `doc_editor/`, `markdown`.
   `widget/container/parameters_bg/` is the designer's and cce-files' parameter pane, split by
   concern (its `mod.rs` has the table). The largest files are now the accessibility tree,
-  `src/a11y.rs` (largest file, ~940 lines); everything else is under 800.
+  `src/a11y.rs` (largest file, ~950 lines); everything else is under 800.
 - `layout/` — the style getters and setters, by topic (`relief.rs`, `spacing.rs`, `fonts.rs`,
   `controls.rs`, `graph.rs`; `mod.rs` has the table, `reload_config` and the slots), `registry.rs` (the style
   registry).
