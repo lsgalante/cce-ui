@@ -287,7 +287,12 @@ pub(super) fn callout_color(kind: &str) -> [f32; 4] {
         "tip" | "hint" | "important" | "success" | "check" | "done" => [0.30, 0.78, 0.60, 1.0],
         "question" | "help" | "faq" => [0.93, 0.75, 0.25, 1.0],
         "quote" | "cite" => [0.60, 0.60, 0.65, 1.0],
-        "example" => [0.62, 0.55, 0.98, 1.0],
+        // The DE accent (config `highlight primary`), not Obsidian's purple.
+        "example" => {
+            let mut c = crate::color::to_srgb(crate::color::highlight_primary_color());
+            c[3] = 1.0;
+            c
+        }
         _ => [0.35, 0.62, 0.95, 1.0],
     }
 }
