@@ -142,6 +142,7 @@ impl Paint for Dropdown {
         }
 
         let marks = self.mark_column();
+        let lead = self.label_lead();
         for (idx, opt) in self.options.iter().enumerate() {
             let row_top = rows_y + idx as f32 * Self::ROW_H;
             let iy = crate::layout::align_text_y(row_top, Self::ROW_H, 12.0, 0.0);
@@ -180,7 +181,11 @@ impl Paint for Dropdown {
                 let g = Rect { x: rx + 8.0, y: row_top + 0.5 * (Self::ROW_H - MARK_SIDE), width: MARK_SIDE, height: MARK_SIDE };
                 pc.clip(Rect { x: ux, y: uy, width: uw, height: uh }, |pc| pc.icon(name, g, mark_tint));
             }
-            pc.text_with(label, rx + 8.0 + marks, iy, 12.0, text_color, Some(font), bounds);
+            if let Some(&Some(swatch)) = self.swatches.get(idx) {
+                let (cx, cy) = (rx + 8.0 + marks + 0.5 * SWATCH_SIDE, row_top + 0.5 * Self::ROW_H);
+                pc.clip(Rect { x: ux, y: uy, width: uw, height: uh }, |pc| pc.circle(cx, cy, 0.5 * SWATCH_SIDE, swatch));
+            }
+            pc.text_with(label, rx + 8.0 + lead, iy, 12.0, text_color, Some(font), bounds);
         }
     }
 }

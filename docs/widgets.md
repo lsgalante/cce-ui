@@ -138,6 +138,9 @@ window coordinates. On a toplevel the runner hosts it in an `xdg_popup` (`docs/r
 - A list honours the context menu's marks: a marked option draws its glyph in a column every row
   keeps, and the closed trigger shows its value without the mark.
   `a_marked_option_draws_its_glyph` is the test.
+- `swatches` (a colour per option, by index) draws a dot in a column after the marks, which every
+  row keeps once any option has one — the calendar's Accounts menu tags each account's rows with
+  its event colour. `a_swatched_option_draws_its_dot` is the test.
 
 ## Date picker (`DatePicker`)
 

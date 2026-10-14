@@ -60,6 +60,12 @@ const MARK_SIDE: f32 = 11.0;
 
 const MARK_GAP: f32 = 6.0;
 
+/// The diameter of a list row's colour swatch, and the gap after it (see
+/// [`Dropdown::swatch_column`]).
+const SWATCH_SIDE: f32 = 8.0;
+
+const SWATCH_GAP: f32 = 6.0;
+
 /// The arrow's colour: the grey the "▼" was drawn in (raw sRGB, as a text
 /// colour is).
 const ARROW_COLOR: [f32; 4] = [0x83 as f32 / 255.0, 0x83 as f32 / 255.0, 0x8a as f32 / 255.0, 1.0];
@@ -79,6 +85,10 @@ pub const ARROW_SLOT: f32 = 24.0;
 #[derive(Debug, Clone)]
 pub struct Dropdown {
     pub options: Vec<String>,
+    /// A colour dot per option, by index, drawn in a column after the marks
+    /// (see [`Self::swatch_column`]); `None`, or no entry, draws none. The
+    /// calendar's Accounts menu tags each account's rows with its event dot.
+    pub swatches: Vec<Option<[f32; 4]>>,
     pub selected: usize,
     pub open: bool,
     pub(crate) hovered_item: Option<usize>,
@@ -180,6 +190,7 @@ impl Dropdown {
     pub fn new(options: Vec<String>, selected: usize) -> Adapted<Dropdown> {
         Adapted::new(Dropdown {
             options,
+            swatches: Vec::new(),
             selected,
             open: false,
             hovered_item: None,
@@ -251,6 +262,17 @@ impl Dropdown {
     fn mark_column(&self) -> f32 {
         let marked = self.options.iter().any(|o| crate::widget::context_menu::split_mark(o).0.is_some());
         if marked { MARK_SIDE + MARK_GAP } else { 0.0 }
+    }
+
+    /// The width the list keeps for SWATCHES, after the mark column: when
+    /// any option has one, every row keeps the column so the labels line up.
+    fn swatch_column(&self) -> f32 {
+        if self.swatches.iter().any(Option::is_some) { SWATCH_SIDE + SWATCH_GAP } else { 0.0 }
+    }
+
+    /// The width ahead of every label: the mark and swatch columns.
+    fn label_lead(&self) -> f32 {
+        self.mark_column() + self.swatch_column()
     }
 
     /// The detached-label strip height above the content rect (zero unlabeled) —

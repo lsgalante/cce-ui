@@ -109,7 +109,7 @@ impl Dropdown {
         let (font_family, font_size_opt) = crate::layout::parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(12.0);
         let mut max_w = 0.0f32;
-        let marks = self.mark_column();
+        let marks = self.label_lead();
         for opt in &self.options {
             let (_, label) = crate::widget::context_menu::split_mark(opt);
             let opt_w = marks + text_advance(label, &font_family, font_size) + Self::LABEL_INSET;

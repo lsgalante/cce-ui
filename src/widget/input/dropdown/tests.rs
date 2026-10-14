@@ -291,6 +291,43 @@ fn a_marked_option_draws_its_glyph() {
     assert_eq!(plain.inner().display_text(), "On", "the trigger shows the value without its mark");
 }
 
+/// A swatched option draws its colour dot in a column after the marks,
+/// which every row keeps so the labels line up.
+#[test]
+fn a_swatched_option_draws_its_dot() {
+    let opts = vec!["Work".to_string(), "Home".to_string(), "-".to_string(), "Local".to_string()];
+    let mut dd = Dropdown::new(opts, 0).with_custom_display_text("Accounts");
+    let rect = Rect { x: 10.0, y: 10.0, width: 200.0, height: 24.0 };
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let blue = [0.0, 0.0, 1.0, 1.0];
+    {
+        let d = dd.inner_mut();
+        d.swatches = vec![Some(red), Some(blue)];
+        d.open = true;
+        d.anim_snap = 1.0;
+    }
+    let mut pc = crate::scene::paint::PaintCtx::new();
+    crate::widget::Paint::draw_popover(dd.inner(), rect, &mut pc);
+    let list = pc.finish();
+    let mut dots: Vec<([f32; 4], f32)> = Vec::new();
+    let mut texts: Vec<(String, f32)> = Vec::new();
+    for item in &list.items {
+        match &item.prim {
+            crate::scene::paint::Prim::Circle { cx, color, .. } => dots.push((*color, *cx)),
+            crate::scene::paint::Prim::Text { text, x, .. } => texts.push((text.clone(), *x)),
+            _ => {}
+        }
+    }
+    assert_eq!(dots.iter().map(|(c, _)| *c).collect::<Vec<_>>(), [red, blue]);
+    let x_of = |t: &str| texts.iter().find(|(s, _)| s == t).map(|(_, x)| *x).unwrap_or_else(|| panic!("{t:?} not drawn: {texts:?}"));
+    assert_eq!(x_of("Work"), x_of("Local"), "a row without a swatch keeps the column");
+    assert!(x_of("Work") > dots[0].1 + 0.5 * SWATCH_SIDE, "the label stands after its dot");
+    let mut plain = Dropdown::new(vec!["Work".to_string()], 0);
+    let w = plain.inner().content_width();
+    plain.inner_mut().swatches = vec![Some(red)];
+    assert_eq!(plain.inner().content_width(), w + SWATCH_SIDE + SWATCH_GAP, "the list widens for the column");
+}
+
 /// A trigger that carries nothing but its arrow (the textpick picker)
 /// stands it in its middle: its padding about the arrow is even.
 #[test]
