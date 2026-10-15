@@ -512,7 +512,10 @@ role description (it registers as AT-SPI `Extended` and never appears on the bus
   compute; `mac/` — macOS only: the AppKit shell (its `mod.rs` has the table).
 - `icon.rs` (XDG icon-theme lookup for names other apps ship — not `lib.rs`'s `upload_icon`, which
   loads a bundled cce-icons glyph), `file_dialog.rs`, `scale.rs`, `wayland.rs` (scale and
-  metric detection), `protocol.rs`, `mcp.rs`, `engine.rs` (the client-facing re-export surface).
+  metric detection), `protocol.rs`, `mcp.rs` (the in-app MCP server: `McpServer`, tool classes as
+  `annotations`, the `context` tool's `Context`; `mcp/registry.rs` files each running server with
+  its URL and bearer token under `$XDG_RUNTIME_DIR/cce/mcp`), `engine.rs` (the client-facing
+  re-export surface).
 - Portability: native-only code (`vk`, `ipc`, `file_dialog`) is `cfg(not(target_arch =
   "wasm32"))`; the Wayland shell is additionally `not(target_os = "macos")`. Portable code keeps
   time with `web_time::Instant`. A portable path that calls into a native module fails

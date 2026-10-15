@@ -8,6 +8,28 @@ and `docs/rfc-material.md`, and in `git log`.
 When you change behaviour: update the reference to the new state, and add an entry here under
 today's date — what changed, why, and how it was checked.
 
+## 2026-10-15
+
+- **MCP servers say where they are, what each tool does, and how to use the app** — step M1 of
+  the in-app Claude popup (a shortcut opens a Claude prompt scoped to the focused app; design doc
+  "In-app Claude popup"). New `mcp::McpServer` builder: it binds a port the OS picks, writes
+  its URL and a fresh 32-byte bearer token to `mcp::registry`
+  (`$XDG_RUNTIME_DIR/cce/mcp/<app_id>-<pid>.json`, dir 0700, file 0600, removed at a normal
+  exit), and refuses requests without that token (401). Before this, every server sat on a fixed
+  port, so a second instance could not serve and a client could not tell which instance owned
+  the focused window. A registry entry records the process start time too: a file left by a
+  killed process is swept by the next reader even if its pid has been reused. `classify` marks
+  tools `Read` / `Edit` / `Outward`, sent as the spec's `annotations` hints, so a client can run
+  reads unasked and ask before anything irreversible; `instructions` is sent in `initialize`;
+  `context_tool()` and `Context` are the standard "what is the user looking at" tool and answer
+  (always classed `Read`). `start_mcp_server(name, port, ..)` is unchanged for its callers: it
+  is `McpServer::new(..).fixed_port(port)`, which still serves tokenless requests for clients
+  configured by hand in `~/.claude.json`, now files itself in the registry as well, and refuses
+  a request carrying a WRONG token. Checked by unit tests (21 in `mcp::`, including a started
+  server on port 0 filing itself in a scratch registry and admitting only its token), clippy,
+  and `cargo check` of the five apps that serve MCP (designer, notes, calendar, spreadsheet,
+  browser), whose code did not change.
+
 ## 2026-10-14
 
 - **A grid app's menu opens on the output it was asked for.** The menu layer named no output,
