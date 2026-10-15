@@ -107,6 +107,11 @@ impl VkRenderer {
             self.core.device
                 .wait_for_fences(&[in_flight], true, u64::MAX)
                 .expect("Fence wait failed");
+            // Counted for the window's renderer only, the one imported
+            // frames are drawn in (`image::dmabuf`).
+            if self.image.shared_uploads {
+                crate::vk::image::frame_finished(self.frames[frame_index].serial);
+            }
             // What this slot last carried has finished: the mesh buffers an
             // update replaced while those frames read them may be reused.
             self.scene.frame_waited(&self.core.device, self.core.allocator.as_mut().unwrap(), FRAMES_IN_FLIGHT as u64);
@@ -131,6 +136,9 @@ impl VkRenderer {
             self.core.device.end_command_buffer(cmd).unwrap();
 
             self.submit(cmd, image_available, in_flight, image_index);
+            if self.image.shared_uploads {
+                self.frames[frame_index].serial = crate::vk::image::frame_submitted();
+            }
             self.age_images(image_index, damage);
             self.present(image_index, damage, partial);
             self.frame_index = (self.frame_index + 1) % FRAMES_IN_FLIGHT;

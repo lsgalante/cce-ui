@@ -38,7 +38,9 @@
 //! | `upload` | staging, a one-shot upload and a batched run of them, recording the copy and the mip chain |
 //! | `write` | replacing an image's pixels in place, whole or by regions |
 //! | `draw` | the frame's quad vertices, an image's descriptor set and view, recording a quad |
+//! | `dmabuf` | images that are another process's GPU memory, imported rather than uploaded |
 
+mod dmabuf;
 mod draw;
 mod pending;
 mod upload;
@@ -56,6 +58,11 @@ use gpu_allocator::MemoryLocation;
 
 use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 use crate::draw::images::{image_table_built, retire_buffer, take_pending, Pending};
+pub use dmabuf::{
+    dmabuf_acquire, dmabuf_release, frames_finished, frames_submitted, import_dmabuf, probe_dmabuf,
+    take_released, DmaBuf, DmaBufPlane, DmaBufSupport,
+};
+pub(crate) use dmabuf::{frame_finished, frame_submitted, DmaBufCtx};
 pub use crate::draw::images::{
     free_image, recycle_buffer, renderer_epoch, update_pixel_regions, update_pixels,
     upload_pixels, upload_rgba, upload_rgba_mipmapped, ImageQuad, PixelFormat, Region,
@@ -84,6 +91,9 @@ struct GpuImage {
     image: vk::Image,
     view: vk::ImageView,
     allocation: Option<Allocation>,
+    /// Memory imported from a dma-buf (`dmabuf`), which the allocator does
+    /// not own: freed with the image.
+    imported: Option<vk::DeviceMemory>,
     descriptor_set: vk::DescriptorSet,
     /// What the image was created as, so an update can tell "same picture,
     /// new contents" from "different image under the same id".
@@ -171,6 +181,8 @@ pub(crate) struct ImageStage {
     /// upload meant for the window, queued between the window's frame and
     /// the popup's, would land in the popup's table and never be drawn.
     pub(crate) shared_uploads: bool,
+    /// Set when the device can import dma-bufs (`dmabuf`).
+    pub(crate) dmabuf: Option<DmaBufCtx>,
 }
 
 impl ImageStage {
@@ -366,6 +378,7 @@ impl ImageStage {
                 staging_idle: 0,
                 frame_buffers,
                 shared_uploads: true,
+                dmabuf: None,
             }
         }
     }
@@ -377,6 +390,9 @@ impl ImageStage {
                 device.destroy_image(gpu.image, None);
                 if let Some(a) = gpu.allocation.take() {
                     let _ = allocator.free(a);
+                }
+                if let Some(m) = gpu.imported.take() {
+                    device.free_memory(m, None);
                 }
             }
             for buf in &mut self.frame_buffers {

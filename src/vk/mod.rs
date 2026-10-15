@@ -56,8 +56,10 @@ mod text;
 pub use compute::{workgroups, BindKind, Binding, ComputeDevice, Kernel, MAX_BINDINGS};
 pub use core::{SurfaceLost, SurfaceTarget, VkCore};
 pub use image::{
-    free_image, recycle_buffer, renderer_epoch, update_pixel_regions, update_pixels,
-    upload_pixels, upload_rgba, upload_rgba_mipmapped, ImageQuad, PixelFormat, Region,
+    dmabuf_acquire, dmabuf_release, free_image, frames_finished, frames_submitted, import_dmabuf,
+    probe_dmabuf, recycle_buffer, renderer_epoch, take_released, update_pixel_regions, update_pixels,
+    upload_pixels, upload_rgba, upload_rgba_mipmapped, DmaBuf, DmaBufPlane, DmaBufSupport, ImageQuad,
+    PixelFormat, Region,
 };
 pub use renderer::{Batch2D, Frame2D, PlatePush, VkRenderer, MAX_PLATE_FEATURES};
 pub(crate) use renderer::present_debug;

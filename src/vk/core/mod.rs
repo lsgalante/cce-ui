@@ -14,11 +14,16 @@
 //! | `mod.rs` | `VkCore`: its constructors (for a surface, or headless), the device setup, `Drop` |
 //! | `instance` | the one Vulkan instance a process shares, with its extensions and validation |
 //! | `surface` | `SurfaceTarget` (what a surface is made from) and `SurfaceLost` |
-//! | `device` | naming a device's type, and reporting a device preference that was not met |
+//! | `device` | the `CCE_VK_DEVICE` preference and ranking devices by it, naming a device's type, and reporting a preference that was not met |
+//! | `dmabuf` | which dma-bufs the device can import and sample, and the extensions that takes |
 
 mod device;
+mod dmabuf;
 mod instance;
 mod surface;
+
+pub use dmabuf::{probe_dmabuf, DmaBufSupport};
+pub(crate) use dmabuf::{alpha_is_padding, vk_format};
 
 use device::*;
 use instance::*;
@@ -77,6 +82,9 @@ pub struct VkCore {
     /// rectangles that changed, which the Wayland WSI forwards as the
     /// surface's buffer damage in place of "everything".
     pub(crate) incremental_present: bool,
+    /// The dma-buf import extensions are enabled (`dmabuf.rs`): another
+    /// process's GPU frames can be sampled where they were rendered.
+    pub(crate) dmabuf: bool,
 }
 
 impl VkCore {
@@ -159,14 +167,7 @@ impl VkCore {
         // pin (VK_DRIVER_FILES / VK_ICD_FILENAMES) for THIS process — the
         // common setup pins Vulkan to the iGPU to keep the dGPU asleep, which
         // would otherwise make "discrete" unsatisfiable.
-        let device_pref = std::env::var("CCE_VK_DEVICE")
-            .ok()
-            .map(|v| v.to_lowercase())
-            .filter(|v| !v.is_empty());
-        if device_pref.is_some() {
-            std::env::remove_var("VK_DRIVER_FILES");
-            std::env::remove_var("VK_ICD_FILENAMES");
-        }
+        let device_pref = device_preference();
 
         let shared = shared_instance();
         let entry = &shared.entry;
@@ -219,35 +220,7 @@ impl VkCore {
             }
             if let Some(family) = family {
                 let props = instance.get_physical_device_properties(pd);
-                let name = CStr::from_ptr(props.device_name.as_ptr())
-                    .to_string_lossy()
-                    .to_lowercase();
-                let type_rank = match props.device_type {
-                    vk::PhysicalDeviceType::INTEGRATED_GPU => 0,
-                    vk::PhysicalDeviceType::DISCRETE_GPU => 1,
-                    vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
-                    _ => 3,
-                };
-                let rank = match device_pref.as_deref() {
-                    Some("discrete") => match props.device_type {
-                        vk::PhysicalDeviceType::DISCRETE_GPU => 0,
-                        other => {
-                            1 + match other {
-                                vk::PhysicalDeviceType::INTEGRATED_GPU => 0,
-                                vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
-                                _ => 3,
-                            }
-                        }
-                    },
-                    Some("integrated") | None => type_rank,
-                    Some(substr) => {
-                        if name.contains(substr) {
-                            0
-                        } else {
-                            1 + type_rank
-                        }
-                    }
-                };
+                let rank = device_rank(&props, device_pref.as_deref());
                 candidates.push((pd, family, rank));
             }
         }
@@ -376,6 +349,12 @@ impl VkCore {
         if incremental_present {
             device_extensions.push(ash::khr::incremental_present::NAME.as_ptr());
         }
+        // For a window only: a headless core renders nothing someone else
+        // made.
+        let dmabuf = window.is_some() && dmabuf::has_dmabuf_extensions(&instance, physical_device, api_version);
+        if dmabuf {
+            device_extensions.extend(dmabuf::DMABUF_EXTENSIONS.iter().map(|n| n.as_ptr()));
+        }
         if ray_query {
             device_extensions.push(ash::khr::acceleration_structure::NAME.as_ptr());
             device_extensions.push(ash::khr::ray_query::NAME.as_ptr());
@@ -442,6 +421,7 @@ impl VkCore {
                 max_line_width,
                 max_anisotropy,
                 incremental_present,
+                dmabuf,
             },
             surface,
         ))

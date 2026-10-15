@@ -107,6 +107,9 @@ struct Frame {
     cmd: vk::CommandBuffer,
     image_available: vk::Semaphore,
     in_flight: vk::Fence,
+    /// The serial of the frame this slot last carried
+    /// (`image::frame_submitted`), so the fence wait can say it finished.
+    serial: u64,
     vertex: AllocatedBuffer,
     vertex_count: u32,
     overlay_start: u32,

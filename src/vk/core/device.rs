@@ -1,7 +1,59 @@
-//! Choosing a physical device: a device type's name, and the message printed when a
-//! `CCE_VK_DEVICE` preference could not be met.
+//! Choosing a physical device: the `CCE_VK_DEVICE` preference and the rank it
+//! gives each device, a device type's name, and the message printed when the
+//! preference could not be met.
 
 use super::*;
+
+/// `CCE_VK_DEVICE`: "integrated" (the default), "discrete", or a device name
+/// substring, lower-cased. An explicit request also lifts a session-wide ICD
+/// pin (VK_DRIVER_FILES / VK_ICD_FILENAMES) for THIS process — the common
+/// setup pins Vulkan to the iGPU to keep the dGPU asleep, which would
+/// otherwise make "discrete" unsatisfiable. It has to run before the shared
+/// instance is first made, which is why the dma-buf probe asks it too.
+pub(super) fn device_preference() -> Option<String> {
+    let pref = std::env::var("CCE_VK_DEVICE")
+        .ok()
+        .map(|v| v.to_lowercase())
+        .filter(|v| !v.is_empty());
+    if pref.is_some() {
+        std::env::remove_var("VK_DRIVER_FILES");
+        std::env::remove_var("VK_ICD_FILENAMES");
+    }
+    pref
+}
+
+/// How well a device meets the preference: 0 is a match, lower is better.
+/// Integrated first unless the preference says otherwise; an unsatisfiable
+/// preference falls back to that order rather than failing.
+pub(super) unsafe fn device_rank(props: &vk::PhysicalDeviceProperties, pref: Option<&str>) -> i32 {
+    let name = CStr::from_ptr(props.device_name.as_ptr()).to_string_lossy().to_lowercase();
+    let type_rank = match props.device_type {
+        vk::PhysicalDeviceType::INTEGRATED_GPU => 0,
+        vk::PhysicalDeviceType::DISCRETE_GPU => 1,
+        vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
+        _ => 3,
+    };
+    match pref {
+        Some("discrete") => match props.device_type {
+            vk::PhysicalDeviceType::DISCRETE_GPU => 0,
+            other => {
+                1 + match other {
+                    vk::PhysicalDeviceType::INTEGRATED_GPU => 0,
+                    vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
+                    _ => 3,
+                }
+            }
+        },
+        Some("integrated") | None => type_rank,
+        Some(substr) => {
+            if name.contains(substr) {
+                0
+            } else {
+                1 + type_rank
+            }
+        }
+    }
+}
 
 pub(super) fn device_type_name(t: vk::PhysicalDeviceType) -> &'static str {
     match t {

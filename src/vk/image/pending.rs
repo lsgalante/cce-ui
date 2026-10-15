@@ -16,6 +16,8 @@ impl ImageStage {
         if !self.shared_uploads {
             return;
         }
+        // Imported frames first: a free queued for one below must find it.
+        self.process_dmabuf(device, queue, command_pool);
         let pending: Vec<Pending> = take_pending();
         if pending.is_empty() {
             self.staging_idle = self.staging_idle.saturating_add(1);
@@ -73,8 +75,10 @@ impl ImageStage {
                     // already there. Anything else about it changing (a window
                     // resize) falls back to building a fresh one under the
                     // same id.
+                    // Never into an imported image: that memory is another
+                    // process's frame, not ours to write.
                     let reusable = self.images.get(&id).is_some_and(|gpu| {
-                        gpu.width == width && gpu.height == height && gpu.format == format
+                        gpu.width == width && gpu.height == height && gpu.format == format && gpu.imported.is_none()
                     });
                     if reusable {
                         self.write_into(device, allocator, queue, command_pool, id, &pixels);
@@ -95,7 +99,7 @@ impl ImageStage {
                     // fresh image here would be blank outside them, so a
                     // mismatch writes nothing; see `update_pixel_regions`.
                     let matches = self.images.get(&id).is_some_and(|gpu| {
-                        gpu.width == width && gpu.height == height && gpu.format == format
+                        gpu.width == width && gpu.height == height && gpu.format == format && gpu.imported.is_none()
                     });
                     if matches {
                         self.write_regions(
@@ -146,6 +150,9 @@ impl ImageStage {
             }
             if let Some(a) = gpu.allocation.take() {
                 let _ = allocator.free(a);
+            }
+            if let Some(m) = gpu.imported.take() {
+                unsafe { device.free_memory(m, None) };
             }
         }
     }

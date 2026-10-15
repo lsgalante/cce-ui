@@ -10,6 +10,25 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-15
 
+- **Images can be another process's GPU memory** (`vk::image::dmabuf`, `vk::core::dmabuf`).
+  `probe_dmabuf` names the device the window will render on (the same `CCE_VK_DEVICE` ranking,
+  no window needed — a producer must be told before it starts) and every single-plane DRM
+  modifier it can import and sample `XR24`/`AR24` in; `import_dmabuf` wraps one buffer as an
+  image drawn by id like any upload, never copied; `dmabuf_acquire` / `dmabuf_release` move
+  ownership to and from `VK_QUEUE_FAMILY_FOREIGN_EXT` in a one-off submission ahead of the frame;
+  `frames_submitted` / `frames_finished` let the caller hand a buffer back only once no frame
+  draws it. A windowed device enables `VK_KHR_external_memory_fd`,
+  `VK_EXT_external_memory_dma_buf`, `VK_EXT_image_drm_format_modifier` and
+  `VK_EXT_queue_family_foreign` when it has them (and `VK_EXT_physical_device_drm` to name its
+  nodes); nothing changes for an app that imports nothing, and an update is never written into
+  an imported image. The device choice moved into `core::device` (`device_preference`,
+  `device_rank`) so the probe and the renderer cannot disagree. Why: cce-browser's page frames —
+  WebKit composited and read back the whole window every frame into mappable memory, so a 24px
+  spinner cost its web process 28% of a core at 2400x1600; drawn as an imported buffer the whole
+  browser takes 5.8%. Checked in shadows at scale 1 and 2: pages draw right, Vulkan validation
+  silent through tab switches, resizes and closes, and 20 rounds of open/resize/close leave
+  memory, dma-buf handles and GPU memory flat.
+
 - **A labelled Ramp or ColorRamp lays itself out below its label.** Both took their rect from
   `rect_assigned`, the adapter's whole block, and the detached label strip sits at its top: the
   graph or the track was laid out from the block's top and drew under the label, so the gallery

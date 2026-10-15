@@ -296,6 +296,7 @@ impl ImageStage {
                     image,
                     view,
                     allocation: Some(allocation),
+                    imported: None,
                     descriptor_set,
                     width,
                     height,

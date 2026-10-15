@@ -310,6 +310,7 @@ impl VkRenderer {
             .into_iter()
             .map(|cmd| Frame {
                 cmd,
+                serial: 0,
                 image_available: device
                     .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
                     .unwrap(),
@@ -360,7 +361,7 @@ impl VkRenderer {
             .optimal_tiling_features
             .contains(needed)
         };
-        let image = ImageStage::new(
+        let mut image = ImageStage::new(
             &device,
             allocator,
             render_pass,
@@ -368,6 +369,7 @@ impl VkRenderer {
             mips_supported,
             core.max_anisotropy,
         );
+        image.dmabuf = crate::vk::image::DmaBufCtx::new(&core);
 
         let swapchain_loader = ash::khr::swapchain::Device::new(&core.instance, &device);
         let mut renderer = Self {
