@@ -317,7 +317,7 @@ fn a_started_server_files_itself_and_admits_only_its_token() {
 
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     let entry = loop {
-        if let Some(e) = registry::find(&dir, "cce-start-test", Some(std::process::id())) {
+        if let Some(e) = registry::find(&dir, "cce-start-test", Some(std::process::id()), registry::current_display().as_deref()) {
             break e;
         }
         assert!(std::time::Instant::now() < deadline, "the server never filed itself");

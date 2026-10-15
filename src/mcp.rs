@@ -400,6 +400,7 @@ impl McpServer {
                     url,
                     token: token.clone(),
                     companions,
+                    display: registry::current_display(),
                 };
                 if let Err(e) = registry::register(&registry_dir, &entry) {
                     eprintln!("MCP server '{name}': registry write failed: {e}");

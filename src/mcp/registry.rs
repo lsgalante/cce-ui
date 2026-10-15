@@ -12,6 +12,13 @@
 //! The entry carries the server's bearer token, so the directory's and the
 //! file's modes are the access control: only this user's processes can
 //! read a token and call the app's tools.
+//!
+//! **One directory, every session.** A shadow compositor shares the live
+//! session's `$XDG_RUNTIME_DIR`, so its apps file themselves beside the
+//! live ones. Each entry names its Wayland display, and [`find`] returns
+//! only entries on the caller's: a popup in a shadow never reaches the
+//! user's live apps, nor the other way round. An entry with no display
+//! (written before the field existed) matches any caller.
 
 use std::fs;
 use std::io::{self, Write};
@@ -38,6 +45,16 @@ pub struct Entry {
     /// vault apps name each other).
     #[serde(default)]
     pub companions: Vec<String>,
+    /// The app's `$WAYLAND_DISPLAY` (`wayland-0`); `None` from an older
+    /// build, which matches any caller.
+    #[serde(default)]
+    pub display: Option<String>,
+}
+
+/// This process's `$WAYLAND_DISPLAY`, the display entries are filed under
+/// and looked up by.
+pub fn current_display() -> Option<String> {
+    std::env::var("WAYLAND_DISPLAY").ok().filter(|d| !d.is_empty())
 }
 
 /// `$XDG_RUNTIME_DIR/cce/mcp`.
@@ -123,10 +140,17 @@ pub fn read_all(dir: &Path) -> Vec<Entry> {
     entries
 }
 
-/// The server for `app_id`: the one in process `pid` when given and
-/// registered, else the newest instance of the app.
-pub fn find(dir: &Path, app_id: &str, pid: Option<u32>) -> Option<Entry> {
-    let mut of_app: Vec<Entry> = read_all(dir).into_iter().filter(|e| e.app_id == app_id).collect();
+/// The server for `app_id` on `display` (the caller's, as a rule:
+/// [`current_display`]): the one in process `pid` when given and
+/// registered, else the newest instance of the app. An entry on another
+/// display is never returned; one with no display, or a caller with none,
+/// matches.
+pub fn find(dir: &Path, app_id: &str, pid: Option<u32>, display: Option<&str>) -> Option<Entry> {
+    let on_display = |e: &Entry| match (e.display.as_deref(), display) {
+        (Some(theirs), Some(ours)) => theirs == ours,
+        _ => true,
+    };
+    let mut of_app: Vec<Entry> = read_all(dir).into_iter().filter(|e| e.app_id == app_id && on_display(e)).collect();
     if let Some(pid) = pid {
         if let Some(i) = of_app.iter().position(|e| e.pid == pid) {
             return Some(of_app.swap_remove(i));
@@ -177,6 +201,7 @@ mod tests {
             url: "http://127.0.0.1:1/mcp".into(),
             token: "t".into(),
             companions: vec![],
+            display: Some("wayland-0".into()),
         }
     }
 
@@ -200,11 +225,19 @@ mod tests {
         let mine = me();
         let path = write(&d, &mine).unwrap();
         assert!(path.ends_with(format!("cce-test-{}.json", mine.pid)));
-        assert_eq!(find(&d, "cce-test", None), Some(mine.clone()));
-        assert_eq!(find(&d, "cce-test", Some(mine.pid)), Some(mine.clone()));
+        assert_eq!(find(&d, "cce-test", None, Some("wayland-0")), Some(mine.clone()));
+        assert_eq!(find(&d, "cce-test", Some(mine.pid), Some("wayland-0")), Some(mine.clone()));
         // A pid with no entry falls back to the newest instance of the app.
-        assert_eq!(find(&d, "cce-test", Some(1)), Some(mine));
-        assert_eq!(find(&d, "cce-other", None), None);
+        assert_eq!(find(&d, "cce-test", Some(1), Some("wayland-0")), Some(mine.clone()));
+        assert_eq!(find(&d, "cce-other", None, Some("wayland-0")), None);
+        // Another session's display: a shadow never reaches the live apps.
+        assert_eq!(find(&d, "cce-test", Some(mine.pid), Some("wayland-1")), None);
+        // A caller that knows no display, or an entry from an older build
+        // that names none, still matches.
+        assert_eq!(find(&d, "cce-test", None, None), Some(mine.clone()));
+        let legacy = Entry { display: None, ..mine };
+        write(&d, &legacy).unwrap();
+        assert_eq!(find(&d, "cce-test", None, Some("wayland-1")), Some(legacy));
         fs::remove_dir_all(&d).unwrap();
     }
 

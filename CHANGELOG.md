@@ -10,6 +10,13 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-15
 
+- **The MCP registry is scoped by Wayland display.** A shadow compositor shares the live
+  session's `$XDG_RUNTIME_DIR`, so a cce-claude popup run in a shadow reached the user's LIVE
+  notes and calendar as companions (seen 2026-10-15; nothing was sent). `registry::Entry` now
+  records `display` (`$WAYLAND_DISPLAY`), and `registry::find` takes the caller's display and
+  never returns an entry on another; an entry from an older build, with no display, still
+  matches until its app is rebuilt. Unit-tested (a `wayland-1` caller does not see a
+  `wayland-0` entry).
 - **`McpServer::unclassed` / `class_of`**, so an app's test can assert every tool it serves has a
   class (an unclassed tool makes the cce-claude popup ask before every call). Unit-tested.
 - **MCP servers say where they are, what each tool does, and how to use the app** — step M1 of
