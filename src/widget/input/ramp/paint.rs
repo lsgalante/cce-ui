@@ -3,9 +3,29 @@
 
 use super::*;
 
+/// The axis numbers' size: small enough for the gutters the plot inset leaves.
+const AXIS_FONT_PX: f32 = 9.0;
+
+impl Ramp {
+    /// The curve's colour, its under-fill and the key pegs: the DE accent (`highlight
+    /// primary`), opaque — what the user acts on in the graph.
+    fn accent() -> [f32; 3] {
+        let a = crate::color::highlight_primary_color();
+        [a[0], a[1], a[2]]
+    }
+
+    /// The grid lines: the detached label colour, faint — the axis numbers' colour, so the
+    /// grid and its numbers read as one scale.
+    fn grid_color() -> [f32; 4] {
+        let c = crate::color::control_label_color_detached();
+        [c[0], c[1], c[2], 0.25]
+    }
+}
+
 impl Paint for Ramp {
+    /// No container box: the ramp draws its graph and fields itself, on the host's plate.
     fn color(&self) -> [f32; 4] {
-        [0.15, 0.15, 0.18, 1.0]
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     fn popover(&self, _rect: Rect) -> Option<(f32, f32, f32, f32)> {
@@ -28,21 +48,17 @@ impl Paint for Ramp {
 
     fn paint(&self, _rect: Rect, pc: &mut PaintCtx) {
         // No container box: the controls sit directly on the host's plate, and
-        // the graph area reads as an OPENING cut through it — a dark floor
-        // behind the plate, with the recess wall (drawn after the content, so
-        // its shading falls across the graph's edges) as the cut's bevel.
+        // the graph is a canvas well cut through it, the one every canvas shares
+        // (Slider2D, Trackpad, the previews): its floor here (`well_floor`, frost
+        // and all), its rim after the content (`well_rim`) so the wall's shading
+        // falls across the curve and keys at the edges. At the panel radius.
         let graph = {
             let gh = self.graph_h();
             Rect { x: self.base.x + 10.0, y: self.base.y + 10.0, width: self.base.w - 20.0, height: gh }
         };
-        // A panel: the graph opening is rounded like the wells and Groups.
         let graph_radius = crate::layout::panel_corner_radius();
-        pc.rounded_rect(
-            graph,
-            graph_radius,
-            (true, true, true, true),
-            [0.08, 0.08, 0.10, 1.0],
-        );
+        pc.well_floor(graph, graph_radius, &crate::scene::Material::pane(), false);
+        let accent = Self::accent();
 
         let quads: Vec<(f32, f32, f32, f32, [f32; 4])> = {
         let mut quads = Vec::new();
@@ -50,11 +66,12 @@ impl Paint for Ramp {
 
         // Grid lines over the plotted 0..1 domain — 0 and 1 included, sitting
         // inside the opening (the plot is inset from the walls).
+        let grid = Self::grid_color();
         for ratio in [0.0, 0.25, 0.5, 0.75, 1.0] {
             let gy = plot.y + plot.height * (1.0 - ratio);
-            quads.push((plot.x, gy, plot.width, 1.0, [0.25, 0.25, 0.28, 0.5]));
+            quads.push((plot.x, gy, plot.width, 1.0, grid));
             let gx = plot.x + plot.width * ratio;
-            quads.push((gx, plot.y, 1.0, plot.height, [0.25, 0.25, 0.28, 0.5]));
+            quads.push((gx, plot.y, 1.0, plot.height, grid));
         }
 
         // Curve area fill: translucent columns under the curve. The outline is
@@ -70,9 +87,11 @@ impl Paint for Ramp {
 
             let slice_h = v1 * plot.height;
             let sy = plot.y + plot.height - slice_h;
-            // Faint on purpose: the graph reads as a dark opening behind the
+            // Faint on purpose: the graph reads as an opening behind the
             // plate — a strong fill floods the floor and flattens the depth.
-            quads.push((x0, sy, x1 - x0, slice_h, [0.25, 0.40, 0.55, 0.10]));
+            // (The shared floor is the plate darkened, lighter than the near
+            // black the ramp painted: 0.10 of the accent read as a solid block.)
+            quads.push((x0, sy, x1 - x0, slice_h, [accent[0], accent[1], accent[2], 0.05]));
         }
 
         quads
@@ -86,16 +105,17 @@ impl Paint for Ramp {
         // floor (under the curve and keys, inside the opening). They sit in
         // the wall-side gutters the plot inset leaves free.
         let plot = self.plot_rect();
-        let num_color = [0x84u8, 0x84, 0x92];
+        let num_color = crate::color::control_label_color_detached_u8();
+        let (num_family, _) = crate::layout::control_label_font_detached_parsed();
         for ratio in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
             let gy = plot.y + plot.height * (1.0 - ratio);
             pc.text_with(
                 format!("{ratio:.2}"),
                 graph.x + 5.0,
                 gy - 11.0,
-                9.0,
+                AXIS_FONT_PX,
                 num_color,
-                Some("monospace".to_string()),
+                Some(format!("{num_family} {AXIS_FONT_PX}")),
                 None,
             );
             let gx = plot.x + plot.width * ratio;
@@ -103,17 +123,18 @@ impl Paint for Ramp {
                 format!("{ratio:.2}"),
                 gx - 11.0,
                 graph.y + graph.height - 13.0,
-                9.0,
+                AXIS_FONT_PX,
                 num_color,
-                Some("monospace".to_string()),
+                Some(format!("{num_family} {AXIS_FONT_PX}")),
                 None,
             );
         }
 
         // The curve itself: one anti-aliased round-capped polyline — exact
-        // key-to-key segments in linear mode, dense samples under smoothstep
-        // blending. Constant-value extensions reach the plot's 0/1 edges.
-        let curve_color = [0.5, 0.75, 1.0, 1.0];
+        // key-to-key segments in linear mode, dense samples of the smooth line
+        // (the monotone cubic, `sample_ramp_keys`). Constant-value extensions
+        // reach the plot's 0/1 edges.
+        let curve_color = [accent[0], accent[1], accent[2], 1.0];
         let px_of = |t: f32, v: f32| {
             (plot.x + t * plot.width, plot.y + plot.height * (1.0 - v))
         };
@@ -154,7 +175,7 @@ impl Paint for Ramp {
             // The disc surface: flat top out to the roll band's inner edge,
             // then the rolled perimeter out to ring_r + 2.5. Band and rim
             // shrink with the ring so a small peg keeps a flat top.
-            let base = [0.5f32, 0.75, 1.0];
+            let base = accent;
             let fill_r = (ring_r - 3.0).max(ring_r * 0.5);
             let rim_t = 6.0f32.min(ring_r * 0.25).max(1.0);
             // Bevel light: the DE light azimuth the plate shading uses.
@@ -306,18 +327,10 @@ impl Paint for Ramp {
                 }
             }
         }
-        // The opening's cut edge: drawn after the graph content so the wall's
-        // shading falls across the curve and keys where they pass behind the
-        // plate's rim. Nested translucent border rings first — the contact
-        // shadow the plate casts down into the opening — then the recess wall
-        // itself as the cut's bevel.
-        let radii = (graph_radius, graph_radius, graph_radius, graph_radius);
-        for (t, a) in [(7.0, 0.08), (4.0, 0.10), (2.0, 0.14)] {
-            pc.border(graph, radii, [0.0; 4], [0.0, 0.0, 0.0, a], t);
-        }
-        let depth = crate::layout::bevel_width().min(graph.height * 0.2);
-        let (well, radii) = crate::layout::carve_inside(graph, radii, depth);
-        pc.recess(well, radii, depth);
+        // The well's rim, after the content: the recess under relief, the frame
+        // hairline flat (it carved a recess either way, and wore three shadow
+        // rings no other well has).
+        pc.well_rim(graph, graph_radius, crate::layout::control_relief());
         if !self.controls_collapsed {
             let dummy = UiContext::new();
             self.preset_dropdown.paint_self(&dummy, pc);

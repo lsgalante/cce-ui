@@ -51,6 +51,15 @@ today's date — what changed, why, and how it was checked.
   the click is read at once, through one `delete_selected`. Checked:
   `a_color_ramp_release_is_its_own_only_when_it_used_it`, `a_color_ramp_deletes_from_the_keyboard`,
   each failing with its bug put back.
+- **The Ramp's graph is a canvas well, in the theme's colours.** It drew its own: a near-black
+  floor, three contact-shadow rings and a recess carved whatever the relief setting, so in Flat
+  style it still wore a bevel and ignored frosted materials. It now takes the well every canvas
+  shares (`well_floor` / `well_rim`, as Slider2D, Trackpad and the previews do). The curve, its
+  under-fill and the key pegs are the DE accent (`highlight_primary_color`), the grid and axis
+  numbers the detached label colour, the numbers in the detached label font; `Paint::color` is
+  transparent (it was an unused grey). The under-fill dropped from 0.10 to 0.05 of the accent: on
+  the shared floor, lighter than the old near black, 0.10 read as a solid block. Checked in shadow
+  shots of the gallery's Ramp, Relief and Flat.
 
 ## 2026-10-14
 
