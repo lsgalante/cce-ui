@@ -25,7 +25,8 @@ History is in `CHANGELOG.md`; the material design record is `rfc-material.md`.
   ColorSelector's recess. A well's floor may carry fills (a progress fill, a swatch) — floor
   segments, not plates. A **canvas well** (Trackpad, Slider2D, the bevel and ramp previews) is
   cut from one material: the plate darkened for its floor (`color::WELL_FLOOR`) and the recess
-  for its rim (`PaintCtx::well_floor` / `well_rim`). With relief off a well is its frame, the one
+  for its rim (`PaintCtx::well_floor` / `well_rim`), rounded at the panel radius
+  (`layout::panel_corner_radius`). With relief off a well is its frame, the one
   hairline `color::well_frame_color`, lit in the highlight while active.
 - **Segments** share one silhouette, parted by **seams** (`Groove`s dying into the rolled edge):
   Breadcrumb and ButtonStrip segments, the ColorSelector's text/swatch split. A `Separator` is the

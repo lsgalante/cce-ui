@@ -95,10 +95,11 @@ impl Ramp {
     }
 
     /// Restore sort order after `keys[i]` changed position, by adjacent
-    /// swaps, and return the key's new index. Exact identity tracking —
-    /// `sort_keys`' float-pos re-match misidentifies the selection when the
-    /// dragged key sits within ε of the key it is passing (leftward
-    /// crossings flipped the selection onto the passed key).
+    /// swaps, and return the key's new index. Exact identity tracking — a
+    /// re-sort that finds the key again by its position misidentifies the
+    /// selection when the dragged key sits within ε of the key it is passing
+    /// (leftward crossings flipped the selection onto the passed key).
+    /// `ColorRamp::resettle_key` is the same, for its keys.
     pub(super) fn resettle_key(&mut self, mut i: usize) -> usize {
         while i + 1 < self.keys.len() && self.keys[i].pos > self.keys[i + 1].pos {
             self.keys.swap(i, i + 1);

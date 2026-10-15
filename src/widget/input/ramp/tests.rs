@@ -226,3 +226,103 @@ fn a_drag_toward_a_close_neighbour_never_backs_away() {
         }
     }
 }
+
+/// A colour ramp registered at the gallery's editor size, with keys at 0, 0.5, 0.6, 1.
+fn color_ramp() -> (UiContext, Handle<Adapted<ColorRamp>>) {
+    let mut ctx = UiContext::new();
+    let mut cr = ColorRamp::new();
+    cr.keys = vec![
+        ColorRampKey { pos: 0.0, color: [0.0, 0.0, 0.0] },
+        ColorRampKey { pos: 0.5, color: [1.0, 0.0, 0.0] },
+        ColorRampKey { pos: 0.6, color: [0.0, 1.0, 0.0] },
+        ColorRampKey { pos: 1.0, color: [1.0, 1.0, 1.0] },
+    ];
+    let h = ctx.insert(cr);
+    ctx.lend_h(h, |r, _| WidgetHost::set_rect(r, 0.0, 0.0, 450.0, 390.0));
+    (ctx, h)
+}
+
+/// Key `i`'s peg on screen.
+fn peg(r: &ColorRamp, i: usize) -> (f32, f32) {
+    let (track_x, track_w) = (r.base.x + 10.0, r.base.w - 20.0);
+    (track_x + r.keys[i].pos * track_w, r.base.y + 10.0 + crate::layout::ramp_height() + 15.0)
+}
+
+/// Dragging a key onto its neighbour's position keeps the dragged key selected: the
+/// re-sort found the key again by its position, and took the neighbour.
+#[test]
+fn a_color_ramp_drag_onto_a_neighbour_keeps_its_key() {
+    let (mut ctx, h) = color_ramp();
+    let (gx, gy) = peg(&ctx[h], 2);
+    let (rx, _) = peg(&ctx[h], 1);
+    assert!(ctx.propagate_event(&press(gx, gy), h.id()));
+    assert_eq!(ctx[h].selected_key_idx, Some(2));
+    ctx.propagate_event(&crate::widget::Event::PointerMove { x: rx, y: gy, local_x: rx, local_y: gy }, h.id());
+    let sel = ctx[h].selected_key_idx.expect("still a selection");
+    assert_eq!(ctx[h].keys[sel].color, [0.0, 1.0, 0.0], "the green key is still the one selected");
+}
+
+/// An arrow key on the focused Red slider moves the selected key's red with it.
+#[test]
+fn a_color_ramp_slider_moved_from_the_keyboard_moves_the_key() {
+    let (mut ctx, h) = color_ramp();
+    let (x, y) = peg(&ctx[h], 1);
+    ctx.propagate_event(&press(x, y), h.id());
+    ctx.propagate_event(&release(x, y), h.id());
+    let red = ctx[h].r_slider.base().id();
+    ctx.claim_focus(red);
+    ctx[h].r_slider.focus();
+    ctx[h].just_changed = false;
+    assert!(ctx.propagate_event(&key_event(NamedKey::ArrowLeft), h.id()));
+    let slider = ctx[h].r_slider.inner().value();
+    assert!(slider < 1.0, "the slider moved: {slider}");
+    assert_eq!(ctx[h].keys[1].color[0], slider, "and the key's red with it");
+    assert!(ctx[h].just_changed);
+}
+
+/// Each slider row has its label strip and a whole slider under it, the rows do not
+/// overlap, and the delete button is the toolkit's height.
+#[test]
+fn a_color_ramp_lays_its_sliders_out_whole() {
+    let (mut ctx, h) = color_ramp();
+    let (x, y) = peg(&ctx[h], 1);
+    ctx.propagate_event(&press(x, y), h.id());
+    let r = &ctx[h];
+    let rows: Vec<_> = [&r.r_slider, &r.g_slider, &r.b_slider].iter().map(|s| s.rect()).collect();
+    for (_, _, _, rh) in &rows {
+        assert_eq!(*rh, crate::layout::control_label_strip() + crate::layout::slider_height());
+    }
+    for pair in rows.windows(2) {
+        assert!(pair[1].1 >= pair[0].1 + pair[0].3, "rows overlap: {pair:?}");
+    }
+    assert_eq!(r.del_button.rect().3, crate::layout::button_height());
+}
+
+/// The sliders and the delete button are painted once: what a selected key adds to the
+/// ramp's paint is exactly what the four fields paint themselves.
+#[test]
+fn a_color_ramp_paints_its_fields_once() {
+    let (mut ctx, h) = color_ramp();
+    let count = |ctx: &UiContext| {
+        let mut pc = crate::scene::paint::PaintCtx::new();
+        let r = &ctx[h];
+        Paint::paint(r.inner(), Rect { x: 0.0, y: 0.0, width: 450.0, height: 390.0 }, &mut pc);
+        pc.finish().len()
+    };
+    let bare = count(&ctx);
+    let (x, y) = peg(&ctx[h], 1);
+    ctx.propagate_event(&press(x, y), h.id());
+    // The pegs paint a selection ring too: one circle.
+    let selected = count(&ctx) - 1;
+    let fields: usize = {
+        let r = &ctx[h];
+        let dummy = UiContext::new();
+        let mut pc = crate::scene::paint::PaintCtx::new();
+        r.r_slider.paint_self(&dummy, &mut pc);
+        r.g_slider.paint_self(&dummy, &mut pc);
+        r.b_slider.paint_self(&dummy, &mut pc);
+        r.del_button.paint_self(&dummy, &mut pc);
+        pc.finish().len()
+    };
+    assert_eq!(selected - bare, fields);
+}

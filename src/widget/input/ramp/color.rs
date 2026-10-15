@@ -79,35 +79,61 @@ impl ColorRamp {
         self.keys[0].color
     }
     
-    pub(super) fn sort_keys(&mut self) {
-        let prev_selected_id = self.selected_key_idx.map(|idx| self.keys[idx].pos);
-        self.keys.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap());
-        if let Some(pos) = prev_selected_id {
-            if let Some(new_idx) = self.keys.iter().position(|k| (k.pos - pos).abs() < 0.0001) {
-                self.selected_key_idx = Some(new_idx);
-            }
+    /// Restore sort order after `keys[i]` changed position, by adjacent swaps, and
+    /// return the key's new index — the float ramp's `resettle_key`. It re-sorted and
+    /// found the moved key again by its position, within 0.0001: dragged onto a
+    /// neighbour's pixel, the match was the neighbour and the selection jumped to it
+    /// (and the sort's comparison panicked on a NaN).
+    pub(super) fn resettle_key(&mut self, mut i: usize) -> usize {
+        while i + 1 < self.keys.len() && self.keys[i].pos > self.keys[i + 1].pos {
+            self.keys.swap(i, i + 1);
+            i += 1;
+        }
+        while i > 0 && self.keys[i].pos < self.keys[i - 1].pos {
+            self.keys.swap(i, i - 1);
+            i -= 1;
+        }
+        i
+    }
+
+    /// Write the R, G and B sliders into the selected key's colour.
+    pub(super) fn apply_sliders_to_selected(&mut self) {
+        if let Some(idx) = self.selected_key_idx {
+            self.keys[idx].color = [
+                self.r_slider.inner().value(),
+                self.g_slider.inner().value(),
+                self.b_slider.inner().value(),
+            ];
+            self.just_changed = true;
         }
     }
 }
 
 impl ColorRamp {
+    /// The delete button's width: room for "Delete Key" in the button font.
+    const DEL_W: f32 = 100.0;
+    /// The gap between the slider rows.
+    const ROW_GAP: f32 = 8.0;
+
+    /// The R, G and B sliders and the delete button, below the track and its pegs, while a
+    /// key is selected. Each slider row is its label strip over a slider of the toolkit's
+    /// height: at a fixed 20 px the label took ~18 of them and left the slider ~2, and the
+    /// 25 px rows overlapped their labels. The button is the toolkit's height, beside the
+    /// rows' middle.
     pub(super) fn arrange_fields(&mut self) {
-        let (x, y, w, h) = (self.base.x, self.base.y, self.base.w, self.base.h);
-        self.base.x = x;
-        self.base.y = y;
-        self.base.w = w;
-        self.base.h = h;
-        
-        
+        let (x, y, w) = (self.base.x, self.base.y, self.base.w);
         let th = crate::layout::ramp_height();
         let sy = y + th + 55.0;
-        let slider_w = w - 100.0;
-        
+        let row_h = crate::layout::control_label_strip() + crate::layout::slider_height();
+        let bh = crate::layout::button_height();
+        let slider_w = (w - 20.0 - Self::DEL_W - 10.0).max(40.0);
+
         if self.selected_key_idx.is_some() {
-            self.r_slider.set_rect(x + 10.0, sy, slider_w, 20.0);
-            self.g_slider.set_rect(x + 10.0, sy + 25.0, slider_w, 20.0);
-            self.b_slider.set_rect(x + 10.0, sy + 50.0, slider_w, 20.0);
-            self.del_button.set_rect(x + w - 80.0, sy + 20.0, 70.0, 28.0);
+            for (k, slider) in [&mut self.r_slider, &mut self.g_slider, &mut self.b_slider].into_iter().enumerate() {
+                slider.set_rect(x + 10.0, sy + k as f32 * (row_h + Self::ROW_GAP), slider_w, row_h);
+            }
+            let rows_h = 3.0 * row_h + 2.0 * Self::ROW_GAP;
+            self.del_button.set_rect(x + w - 10.0 - Self::DEL_W, sy + (rows_h - bh) / 2.0, Self::DEL_W, bh);
         } else {
             self.r_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
             self.g_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
@@ -120,29 +146,11 @@ impl ColorRamp {
 
 impl Layout for ColorRamp {
     fn rect_assigned(&mut self, rect: Rect) {
-        let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
-        self.base.x = x;
-        self.base.y = y;
-        self.base.w = w;
-        self.base.h = h;
-        
-        
-        let th = crate::layout::ramp_height();
-        let sy = y + th + 55.0;
-        let slider_w = w - 100.0;
-        
-        if self.selected_key_idx.is_some() {
-            self.r_slider.set_rect(x + 10.0, sy, slider_w, 20.0);
-            self.g_slider.set_rect(x + 10.0, sy + 25.0, slider_w, 20.0);
-            self.b_slider.set_rect(x + 10.0, sy + 50.0, slider_w, 20.0);
-            self.del_button.set_rect(x + w - 80.0, sy + 20.0, 70.0, 28.0);
-        } else {
-            self.r_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.g_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.b_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-        }
-    
+        self.base.x = rect.x;
+        self.base.y = rect.y;
+        self.base.w = rect.width;
+        self.base.h = rect.height;
+        self.arrange_fields();
     }
 
 }
@@ -191,13 +199,8 @@ impl Paint for ColorRamp {
             quads.push((sx, self.base.y + 10.0, slice_w, th, [col[0], col[1], col[2], 1.0]));
         }
         
-        if self.selected_key_idx.is_some() {
-            quads.extend(crate::widget::shown_quads(&self.r_slider));
-            quads.extend(crate::widget::shown_quads(&self.g_slider));
-            quads.extend(crate::widget::shown_quads(&self.b_slider));
-            quads.extend(crate::widget::shown_quads(&self.del_button));
-        }
-        
+        // The fields paint themselves, below (`paint_self`). Their quads went in here
+        // too, so every one was drawn twice and a translucent one blended darker.
         quads
     
         };
@@ -310,15 +313,12 @@ impl Input for ColorRamp {
                 let col = self.get_interpolated_color(t);
                 let new_key = ColorRampKey { pos: t, color: col };
                 self.keys.push(new_key);
-                self.sort_keys();
+                let new_idx = self.resettle_key(self.keys.len() - 1);
                 self.just_changed = true;
-                
-                if let Some(new_idx) = self.keys.iter().position(|k| (k.pos - t).abs() < 0.0001) {
-                    self.selected_key_idx = Some(new_idx);
-                    self.r_slider.set_value(col[0]);
-                    self.g_slider.set_value(col[1]);
-                    self.b_slider.set_value(col[2]);
-                }
+                self.selected_key_idx = Some(new_idx);
+                self.r_slider.set_value(col[0]);
+                self.g_slider.set_value(col[1]);
+                self.b_slider.set_value(col[2]);
                 self.arrange_fields();
                 return true;
             }
@@ -375,7 +375,7 @@ impl Input for ColorRamp {
             if let Some(idx) = self.selected_key_idx {
                 let t = ((px - track_x) / track_w).clamp(0.0, 1.0);
                 self.keys[idx].pos = t;
-                self.sort_keys();
+                self.selected_key_idx = Some(self.resettle_key(idx));
                 changed = true;
             }
         }
@@ -444,14 +444,20 @@ impl Input for ColorRamp {
             }
             Event::KeyInput(event) => {
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
-        if ui.is_focused(&self.r_slider) {
-            return self.r_slider.keyboard_input(event, ui);
-        }
-        if ui.is_focused(&self.g_slider) {
-            return self.g_slider.keyboard_input(event, ui);
-        }
-        if ui.is_focused(&self.b_slider) {
-            return self.b_slider.keyboard_input(event, ui);
+        // A slider the keyboard moves moves the key's colour with it: it moved only
+        // the slider, and the gradient and the slider disagreed.
+        let used = if ui.is_focused(&self.r_slider) {
+            self.r_slider.keyboard_input(event, ui)
+        } else if ui.is_focused(&self.g_slider) {
+            self.g_slider.keyboard_input(event, ui)
+        } else if ui.is_focused(&self.b_slider) {
+            self.b_slider.keyboard_input(event, ui)
+        } else {
+            false
+        };
+        if used {
+            self.apply_sliders_to_selected();
+            return true;
         }
         if ui.is_focused(&self.del_button) {
             return self.del_button.keyboard_input(event, ui);

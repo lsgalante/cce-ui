@@ -30,7 +30,55 @@ today's date — what changed, why, and how it was checked.
   and `cargo check` of the five apps that serve MCP (designer, notes, calendar, spreadsheet,
   browser), whose code did not change.
 
+- **ColorRamp: a drag keeps its key, arrows recolour it, sliders whole, fields painted once.**
+  From an audit of the ramp widgets. Dragging a key onto a neighbour's position re-sorted the keys
+  and found the dragged one again by position, so the selection jumped to the neighbour (and the
+  sort panicked on a NaN); keys now resettle by adjacent swaps (`ColorRamp::resettle_key`, the
+  float Ramp's). Arrow keys moved a focused R/G/B slider but not the key's colour; the colour now
+  follows (`apply_sliders_to_selected`). The sliders sat in fixed 20 px rects, about 18 of them
+  label, 25 px apart: each row is now the label strip over a `slider_height()` slider, 8 px apart,
+  and the delete button `button_height()` tall (one `arrange_fields`, which `rect_assigned` had
+  duplicated). The fields' quads were added to the ramp's quad list and painted again by
+  `paint_self`, so each was drawn twice. Checked: `a_color_ramp_drag_onto_a_neighbour_keeps_its_key`,
+  `a_color_ramp_slider_moved_from_the_keyboard_moves_the_key`, `a_color_ramp_lays_its_sliders_out_whole`,
+  `a_color_ramp_paints_its_fields_once`, each failing with its bug put back; a shadow shot of the
+  gallery's Color Ramp Editor with a key selected.
+
 ## 2026-10-14
+
+- **Ramp fixes, and a ramp that declares the height it needs.** From an audit of the widget,
+  each with a test that fails without it. Opening the Preset dropdown re-applied the preset it
+  still named and wiped a hand-edited curve — `Dropdown::tick` reports its open/close animation,
+  not a pick; a pick is now its change flag. With a key selected the ramp claimed every left
+  release, so a parameter pane's next row never got its click; it claims one only when a key
+  drag, the key pad or the delete button used it. Enter on the delete button did nothing, then
+  deleted on the next mouse press; it deletes at once (`delete_selected`). A key grabbed inside a
+  neighbour's resistance zone jumped away from it on the first nudge toward it, and could land
+  just outside 0..1: the zone starts no earlier than the grab (`DragGrab::origin`), the result is
+  clamped, and a key keeps where in its ring it was taken. The 26 px key rings hung past the
+  graph's walls (the plot is inset 22): they are capped inside. The ramp declared 150, below its
+  ~180 px control strip alone, so its graph sank to 30 px: `natural_height` is a 120 px graph over
+  the strip, and the parameter pane sizes a ramp row from it, not from a fixed 260 that left the
+  plot ~20 px. `parse_ramp_spec` (cce-core) refuses non-finite numbers, which panicked its sort.
+  Checked: the new `ramp::tests` and `a_ramp_row_gives_its_ramp_its_natural_height`; shadow shots
+  of the gallery's Ramp.
+- **Panels share a corner radius**, `style.control.panel.corner_radius` (`panel_corner_radius`,
+  24 unset): Group frames, InfoBoxes, TreeLists (under `style.data.tree.corner_radius`), a
+  multiline TextBox, the Ramp's graph and the canvas wells (Slider2D, Trackpad, the bevel and
+  ramp previews). Groups and InfoBoxes took the window's radius, so reshaping windows reshaped
+  them, and the wells and trees took the control's 8: two families where the user saw one. A
+  one-line TextBox keeps `textbox_corner_radius`. Checked in shadow shots of the gallery, corners
+  zoomed before and after.
+- **A TreeList's type column fits its labels**, and `value_x()` says where a row's value starts.
+  The columns were fixed offsets (type 180–235), so "(string)" drew as "(string". The type column
+  is now as wide as "(keybind)" in the tree font, never under 55; every separator, label, swatch
+  and button reads it, and cce-data-editor places its inline editors at `value_x()`. Checked in
+  shadow shots of the gallery's tree and cce-data-editor with a row selected.
+- **Slider2D is a 120 px pad by default**, the height of the other canvases; at 64 it sat small in
+  a control column. (The Ramp's key pad sizes itself.)
+- **An InteractiveListItem's hover and press are the theme's overlays.** It painted
+  `surface_bg` — the popover colour, opaque and near black — with the overlay's alpha added, so
+  hovering a row blacked it out. Checked: a shadow shot of the gallery row under the pointer.
 
 - **A grid app's menu opens on the output it was asked for.** The menu layer named no output,
   so the compositor put every one on its first output — with a second display, a right-click
