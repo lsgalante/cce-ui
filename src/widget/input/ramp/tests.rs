@@ -326,3 +326,32 @@ fn a_color_ramp_paints_its_fields_once() {
     };
     assert_eq!(selected - bare, fields);
 }
+
+/// A colour ramp's release is its own only when it used it: the end of a key drag is,
+/// a stray release with a key selected is not.
+#[test]
+fn a_color_ramp_release_is_its_own_only_when_it_used_it() {
+    let (mut ctx, h) = color_ramp();
+    let (x, y) = peg(&ctx[h], 1);
+    assert!(ctx.propagate_event(&press(x, y), h.id()));
+    assert!(ctx.propagate_event(&release(x, y), h.id()), "the drag's end is the ramp's");
+    assert_eq!(ctx[h].selected_key_idx, Some(1), "the key stays selected");
+    assert!(!ctx.propagate_event(&release(2000.0, 2000.0), h.id()), "a stray release is not");
+}
+
+/// Enter on a colour ramp's focused delete button deletes the selected key then and
+/// there, and leaves no click armed for the next press.
+#[test]
+fn a_color_ramp_deletes_from_the_keyboard() {
+    let (mut ctx, h) = color_ramp();
+    let (x, y) = peg(&ctx[h], 1);
+    ctx.propagate_event(&press(x, y), h.id());
+    ctx.propagate_event(&release(x, y), h.id());
+    let del = ctx[h].del_button.base().id();
+    ctx.claim_focus(del);
+    ctx[h].del_button.focus();
+    assert!(ctx.propagate_event(&key_event(NamedKey::Enter), h.id()));
+    assert_eq!(ctx[h].keys.len(), 3, "the key is gone");
+    assert_eq!(ctx[h].selected_key_idx, None);
+    assert!(!ctx[h].del_button.take_click(), "no click left armed for the next press");
+}

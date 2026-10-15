@@ -43,6 +43,14 @@ today's date — what changed, why, and how it was checked.
   `a_color_ramp_slider_moved_from_the_keyboard_moves_the_key`, `a_color_ramp_lays_its_sliders_out_whole`,
   `a_color_ramp_paints_its_fields_once`, each failing with its bug put back; a shadow shot of the
   gallery's Color Ramp Editor with a key selected.
+- **ColorRamp: a release is its own only when it used it; Enter on Delete deletes.** The fixes
+  the float Ramp had (2026-10-14). With a key selected it claimed every left release, so a host's
+  next control never got its click; it claims one only when a key drag, a slider or the delete
+  button used it, and tells every field regardless of the selection. Enter/Space on the focused
+  delete button set its click and nothing read it, so the next mouse press on the button deleted;
+  the click is read at once, through one `delete_selected`. Checked:
+  `a_color_ramp_release_is_its_own_only_when_it_used_it`, `a_color_ramp_deletes_from_the_keyboard`,
+  each failing with its bug put back.
 
 ## 2026-10-14
 

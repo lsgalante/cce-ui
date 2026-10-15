@@ -96,6 +96,19 @@ impl ColorRamp {
         i
     }
 
+    /// Delete the selected key — what the delete button does, clicked or pressed from the
+    /// keyboard. A ramp keeps two keys at least: with two, nothing happens.
+    pub fn delete_selected(&mut self) {
+        if let Some(idx) = self.selected_key_idx {
+            if self.keys.len() > 2 {
+                self.keys.remove(idx);
+                self.selected_key_idx = None;
+                self.just_changed = true;
+                self.arrange_fields();
+            }
+        }
+    }
+
     /// Write the R, G and B sliders into the selected key's colour.
     pub(super) fn apply_sliders_to_selected(&mut self) {
         if let Some(idx) = self.selected_key_idx {
@@ -327,39 +340,26 @@ impl Input for ColorRamp {
                 if self.r_slider.mouse_input(button, state, px, py_event, ui) { return true; }
                 if self.g_slider.mouse_input(button, state, px, py_event, ui) { return true; }
                 if self.b_slider.mouse_input(button, state, px, py_event, ui) { return true; }
+                // Pressed only: the button clicks on its release, below.
                 if self.del_button.mouse_input(button, state, px, py_event, ui) {
-                    if self.del_button.take_click() {
-                        if let Some(idx) = self.selected_key_idx {
-                            if self.keys.len() > 2 {
-                                self.keys.remove(idx);
-                                self.selected_key_idx = None;
-                                self.just_changed = true;
-                                self.arrange_fields();
-                            }
-                        }
-                    }
                     return true;
                 }
             }
         } else {
-            self.is_dragging_key = false;
-            if self.selected_key_idx.is_some() {
-                self.r_slider.mouse_input(button, state, px, py_event, ui);
-                self.g_slider.mouse_input(button, state, px, py_event, ui);
-                self.b_slider.mouse_input(button, state, px, py_event, ui);
-                if self.del_button.mouse_input(button, state, px, py_event, ui)
-                    && self.del_button.take_click() {
-                        if let Some(idx) = self.selected_key_idx {
-                            if self.keys.len() > 2 {
-                                self.keys.remove(idx);
-                                self.selected_key_idx = None;
-                                self.just_changed = true;
-                                self.arrange_fields();
-                            }
-                        }
-                    }
-                return true;
+            // A release is the ramp's only when something of it used it: a key drag
+            // ending, a slider or the delete button letting go. Releases reach widgets
+            // without a hit test, and claiming every one while a key was selected kept
+            // them from whatever the press was on. Every field is told regardless of the
+            // selection, so none is left holding a press.
+            let dragged = std::mem::take(&mut self.is_dragging_key);
+            let r = self.r_slider.mouse_input(button, state, px, py_event, ui);
+            let g = self.g_slider.mouse_input(button, state, px, py_event, ui);
+            let b = self.b_slider.mouse_input(button, state, px, py_event, ui);
+            let del = self.del_button.mouse_input(button, state, px, py_event, ui);
+            if del && self.del_button.take_click() {
+                self.delete_selected();
             }
+            return dragged || r || g || b || del;
         }
         false
     
@@ -460,7 +460,13 @@ impl Input for ColorRamp {
             return true;
         }
         if ui.is_focused(&self.del_button) {
-            return self.del_button.keyboard_input(event, ui);
+            // Enter/Space press the button: its click is read here, at once. Left
+            // unread, it fired on the next mouse press on the button.
+            let used = self.del_button.keyboard_input(event, ui);
+            if self.del_button.take_click() {
+                self.delete_selected();
+            }
+            return used;
         }
         false
     
