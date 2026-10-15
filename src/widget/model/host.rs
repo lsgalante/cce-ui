@@ -173,7 +173,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         for item in tmp.finish().items {
             // Re-emitting through ctx records ctx's clip state, so push the clips the
             // widget authored the prim under first — its scissor (TreeList's viewport,
-            // Graph's wire rect), its circle (Ramp's foam cells) and its rounded clip —
+            // Graph's wire rect), its circle and its rounded clip —
             // each composing with the walk's own as a push does. Until 2026-10-13 only
             // the circle was restored: every rect a widget clipped itself to was lost
             // here, so a tree's half-scrolled rows and a graph's wires ran past their

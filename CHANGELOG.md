@@ -10,6 +10,59 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-15
 
+- **Ramp key pegs are disc plates of frosted accent glass.** Each peg was a flat translucent
+  circle with a rim of ~35 `ArcShaded` sub-arcs lit by hand from the light azimuth, and
+  overlapping pegs were cut into foam cells (strips, shared walls, merged rim spans); none of it
+  read `control_relief`. Under relief a peg is now `plate_shaped(.., Some(2.0))` — a true circle
+  at any `corner_shape` — of `highlight_primary` at 0.25 (selected 0.85) frosted with
+  `Frost::from_style`, at a control plate's depth (`bevel_width`, at most 0.4 r), lit per pixel
+  by the DE light. Frosted rather than a plain translucent plate: an unfrosted plate at 0.25
+  shows its roll at 0.25 and the relief all but vanishes, where a frosted one composites opaque
+  with the full roll. Overlapping pegs stack, the selected one drawn last, on top. Flat, a peg is
+  a flat accent circle and the selected one wears a `ControlPlate::focus_tint` ring at its outer
+  edge. Press and hover-scroll latch share one `key_at`, topmost first (selected, then reverse
+  index), each peg within the radius it is drawn to (`peg_drawn_r`): the disc under relief
+  (`key_peg_r`, the old ring + rim extent, so sizes are unchanged); flat, the selected peg's ring
+  and an unselected peg's face, 3 px inside it. Nearest-centre matched the foam walls, not
+  stacked plates; one radius for every peg let a press on one flat face take the neighbour
+  beside it. `rolled_rim_arc` and the foam code are gone; `Prim::ArcShaded` stays, with no
+  widget user. Checked:
+  `ramp_pegs_under_relief_are_frosted_disc_plates_the_selected_on_top`,
+  `ramp_pegs_flat_are_circles_the_selected_ringed_last`,
+  `a_press_where_ramp_pegs_overlap_takes_the_topmost`,
+  `a_press_on_a_flat_ramp_peg_beside_its_neighbour_takes_that_peg`, each failing with its part
+  reverted (unfrosted, circles, selected not last, bottom-first hit, one hit radius); shadow
+  shots of the gallery's Ramp in Relief and Flat. Under the live config's frost recipe (radius
+  1.5, no compression or refraction) the glass is nearly clear and the curve shows through
+  sharp; at the default radius it reads frosted. The gutter axis numbers draw over the pegs
+  (text is drawn after all geometry), so the left `0.50` sits on the Raised preset's first key.
+- **ColorRamp declares its height and looks like the Ramp.** It declared nothing, and placed its
+  sliders at a fixed offset whatever its rect, so they spilled out of a short one. It now
+  declares `natural_height` (`intrinsic_size`, width 0): the track, the peg row and the three
+  slider rows, reserved whether or not a key is selected, so selecting never changes its rect;
+  `arrange_fields` places the slider block inside it. No container box (the 1px border quads and
+  the `ramp_background_color` fill are gone, `Paint::color` is transparent): the gradient track
+  is a canvas well (`well_floor` / `well_rim` under `control_relief`) at the control radius —
+  it is `ramp_height` tall, and the panel radius would make it a pill — with the gradient
+  clipped to the well's rounded shape. Pegs are disc plates of the key's own colour, opaque
+  (the face is the key's data, so selection does not tint it); the selected one is drawn last
+  and ringed in `ControlPlate::focus_tint` outside its face. Flat, a peg is a circle in a
+  `well_frame_color` hairline a pixel wider (a key the colour of the plate still shows), ring the
+  same. Hit test topmost first, each peg within the radius it is drawn to: the selected one's
+  ring, an unselected face (its hairline, flat) — at the ring's radius for every peg, a press on
+  one face took a neighbour 14-18 px away whose face it was not on. Checked:
+  `a_color_ramp_declares_its_slider_rows_and_holds_them`,
+  `color_ramp_pegs_under_relief_are_opaque_disc_plates_the_selected_on_top`,
+  `color_ramp_pegs_flat_are_circles_in_a_hairline`,
+  `a_press_where_color_ramp_pegs_overlap_takes_the_topmost`,
+  `a_press_on_a_color_ramp_peg_beside_its_neighbour_takes_that_peg`, each failing with its part
+  reverted (the flat look back to the old black ring, one hit radius); the existing ColorRamp
+  tests unchanged in intent (selecting adds one prim, now the ring arc); shadow shots of the
+  gallery's Color Ramp Editor in Relief and Flat with a key selected. With no box left to fill,
+  `color::ramp_background_color` / `ramp_border_color` and their style slots are removed, and
+  `style.control.ramp.background` / `border_color` are no longer read (a note at the loader says
+  so; `ramp height` still is). No crate in the workspace called either getter.
+
 - **The MCP registry is scoped by Wayland display.** A shadow compositor shares the live
   session's `$XDG_RUNTIME_DIR`, so a cce-claude popup run in a shadow reached the user's LIVE
   notes and calendar as companions (seen 2026-10-15; nothing was sent). `registry::Entry` now

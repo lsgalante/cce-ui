@@ -1,6 +1,7 @@
-//! The float ramp's geometry: the strip reserved for its controls, the plot and its key rings,
-//! the rolled rim, where a dragged key lands (the soft wall at its neighbours, resettling the
-//! order), the key pad written back to the selected key, and arranging the controls.
+//! The float ramp's geometry: the strip reserved for its controls, the plot and its key pegs
+//! (their size, paint order and hit test), where a dragged key lands (the soft wall at its
+//! neighbours, resettling the order), the key pad written back to the selected key, and
+//! arranging the controls.
 
 use super::*;
 
@@ -28,20 +29,41 @@ impl Ramp {
             + 10.0
     }
 
-    /// Key peg ring stroke centerline radius (the 2px stroke spans ±1px).
-    /// Paint and the grab hit-test share it: a press anywhere inside a ring
-    /// lands on that key.
-    const KEY_RING_R: f32 = 26.0;
-
-    /// The key ring radius on THIS plot: the editor's full ring, shrunk so a
-    /// peg never outgrows the plot it sits in (an inline ramp a control high
-    /// draws pegs a few px across, not 26px discs swallowing the curve), and
-    /// never past the opening's walls: a key at the plot's edge has
-    /// [`PLOT_INSET`](Self::PLOT_INSET) to the wall, and its rolled rim reaches
-    /// 2.5 px past the ring — at the full 26 every edge key hung over the wall.
-    pub(super) fn key_ring_r(&self) -> f32 {
+    /// A key peg's radius on THIS plot — the disc plate's outer edge, and the flat selection
+    /// ring's ([`peg_drawn_r`](Self::peg_drawn_r) is what each peg is drawn to). Never past
+    /// the plot inset, so a key at the plot's edge reaches the opening's wall and no further;
+    /// on a short plot (an inline ramp a control high) under half the plot's height, so the
+    /// pegs stay a few px across instead of swallowing the curve.
+    pub(super) fn key_peg_r(&self) -> f32 {
         let plot = self.plot_rect();
-        Self::KEY_RING_R.min(Self::PLOT_INSET - 2.5).min((plot.height * 0.45).max(4.0))
+        Self::PLOT_INSET.min((plot.height * 0.45).max(4.0) + 2.5)
+    }
+
+    /// Key `idx`'s centre on screen.
+    pub(super) fn key_centre(&self, idx: usize) -> (f32, f32) {
+        let plot = self.plot_rect();
+        let key = &self.keys[idx];
+        (plot.x + key.pos * plot.width, plot.y + plot.height * (1.0 - key.value))
+    }
+
+    /// The pegs in paint order, bottom first: by index, the selected one last (on top).
+    pub(super) fn peg_order(&self) -> impl Iterator<Item = usize> + '_ {
+        let sel = self.selected_key_idx.filter(|&i| i < self.keys.len());
+        (0..self.keys.len()).filter(move |&i| Some(i) != sel).chain(sel)
+    }
+
+    /// The key whose peg is under `(px, py)`, each peg within its drawn radius
+    /// ([`peg_drawn_r`](Self::peg_drawn_r)), topmost first — the reverse of
+    /// [`peg_order`](Self::peg_order), so where pegs overlap the press takes the one drawn on
+    /// top. The press and the hover-scroll latch both ask here.
+    pub(super) fn key_at(&self, px: f32, py: f32) -> Option<usize> {
+        let order: Vec<usize> = self.peg_order().collect();
+        order.into_iter().rev().find(|&idx| {
+            let (cx, cy) = self.key_centre(idx);
+            let (dx, dy) = (px - cx, py - cy);
+            let r = self.peg_drawn_r(idx);
+            dx * dx + dy * dy <= r * r
+        })
     }
 
     /// Inner margin between the graph opening's walls and the plotted 0..1
@@ -110,56 +132,6 @@ impl Ramp {
             i -= 1;
         }
         i
-    }
-
-    /// A key's rolled edge: the disc's own surface curving away at the
-    /// perimeter — NOT a separate border. Each sub-arc blends radially from
-    /// the surface color at the band's inner edge (continuing the flat top
-    /// seamlessly), through a half-rolled tint, to the silhouette — which
-    /// leans toward the light on the lit side and falls into shadow opposite,
-    /// and runs denser than the top the way a glass edge reads. `r` is the
-    /// outer-edge radius; `base`/`top_alpha` are the disc's surface color.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn rolled_rim_arc(
-        pc: &mut PaintCtx,
-        cx: f32,
-        cy: f32,
-        r: f32,
-        thickness: f32,
-        start: f32,
-        end: f32,
-        az: f32,
-        base: [f32; 3],
-        top_alpha: f32,
-    ) {
-        let sweep = end - start;
-        let steps = ((sweep.abs() / 0.18).ceil() as usize).max(1);
-        let tint = |sv: f32, k: f32| -> [f32; 3] {
-            [
-                (base[0] + k * sv).clamp(0.0, 1.0),
-                (base[1] + k * sv).clamp(0.0, 1.0),
-                (base[2] + k * sv).clamp(0.0, 1.0),
-            ]
-        };
-        for i in 0..steps {
-            let a0 = start + sweep * i as f32 / steps as f32;
-            let a1 = start + sweep * (i + 1) as f32 / steps as f32;
-            let sv = ((a0 + a1) / 2.0 + az).cos();
-            let mid = tint(sv, 0.20);
-            let edge = tint(sv, 0.38);
-            let mid_a = (top_alpha + 0.78) / 2.0;
-            pc.arc_shaded(
-                cx,
-                cy,
-                r,
-                thickness,
-                a0,
-                a1,
-                [base[0], base[1], base[2], top_alpha],
-                [mid[0], mid[1], mid[2], mid_a],
-                [edge[0], edge[1], edge[2], 0.78],
-            );
-        }
     }
 
     /// Apply the key pad's two axes to the selected key: x is the key's

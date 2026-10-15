@@ -110,7 +110,7 @@ impl Paint for Slider2D {
         ctx.quad(Rect { x: rect.x + 2.0, y: cy - 0.5, width: rect.width - 4.0, height: 1.0 }, line);
         ctx.quad(Rect { x: cx - 0.5, y: rect.y + 2.0, width: 1.0, height: rect.height - 4.0 }, line);
 
-        // Thumb: glassy fill in a thin white ring (the ramp peg look, small).
+        // Thumb: glassy fill in a thin white ring.
         let fill_a = if self.dragging { 0.9 } else { 0.35 };
         ctx.circle(cx, cy, Self::THUMB_R - 1.0, [0.5, 0.75, 1.0, fill_a]);
         ctx.arc(

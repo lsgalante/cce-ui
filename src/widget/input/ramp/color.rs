@@ -127,37 +127,130 @@ impl ColorRamp {
     const DEL_W: f32 = 100.0;
     /// The gap between the slider rows.
     const ROW_GAP: f32 = 8.0;
+    /// The margin around the whole editor, the float Ramp's.
+    const MARGIN: f32 = 10.0;
+    /// The peg row under the track: the pegs' centres sit `PEG_DROP` below the track, and
+    /// the slider block starts `PEG_ROW` below it.
+    const PEG_DROP: f32 = 15.0;
+    const PEG_ROW: f32 = 35.0;
+    /// A peg's face radius: the key's colour, as a disc plate.
+    pub(super) const PEG_R: f32 = 7.0;
+    /// The selection ring outside the face: the gap to it, and its width.
+    const PEG_RING_GAP: f32 = 1.5;
+    const PEG_RING_W: f32 = 2.0;
 
-    /// The R, G and B sliders and the delete button, below the track and its pegs, while a
-    /// key is selected. Each slider row is its label strip over a slider of the toolkit's
-    /// height: at a fixed 20 px the label took ~18 of them and left the slider ~2, and the
-    /// 25 px rows overlapped their labels. The button is the toolkit's height, beside the
-    /// rows' middle.
+    /// The gradient track: the editor's width less its margins, `ramp_height()` tall.
+    pub(super) fn track_rect(&self) -> Rect {
+        Rect {
+            x: self.base.x + Self::MARGIN,
+            y: self.base.y + Self::MARGIN,
+            width: (self.base.w - 2.0 * Self::MARGIN).max(1.0),
+            height: crate::layout::ramp_height(),
+        }
+    }
+
+    /// Key `idx`'s peg centre, under the track at its position.
+    pub(super) fn peg_centre(&self, idx: usize) -> (f32, f32) {
+        let track = self.track_rect();
+        (track.x + self.keys[idx].pos * track.width, track.y + track.height + Self::PEG_DROP)
+    }
+
+    /// The flat peg's hairline, outside the face.
+    const PEG_HAIRLINE: f32 = 1.0;
+
+    /// A selected peg's outer radius: the face and the selection ring around it.
+    pub(super) fn peg_outer_r() -> f32 {
+        Self::PEG_R + Self::PEG_RING_GAP + Self::PEG_RING_W
+    }
+
+    /// The radius key `idx`'s peg is drawn to, and a press on it lands within: the selected
+    /// peg's ring; an unselected peg's face, in its hairline when flat. Past the drawn edge a
+    /// press is not on the peg, so it never takes a neighbour whose face is beside the one
+    /// under the pointer.
+    pub(super) fn peg_drawn_r(&self, idx: usize) -> f32 {
+        if Some(idx) == self.selected_key_idx {
+            Self::peg_outer_r()
+        } else if crate::layout::control_relief() {
+            Self::PEG_R
+        } else {
+            Self::PEG_R + Self::PEG_HAIRLINE
+        }
+    }
+
+    /// The pegs in paint order, bottom first: by index, the selected one last (on top).
+    fn peg_order(&self) -> impl Iterator<Item = usize> + '_ {
+        let sel = self.selected_key_idx.filter(|&i| i < self.keys.len());
+        (0..self.keys.len()).filter(move |&i| Some(i) != sel).chain(sel)
+    }
+
+    /// The key whose peg is under `(px, py)`, each peg within its drawn radius
+    /// ([`peg_drawn_r`](Self::peg_drawn_r)), topmost first (the reverse of the paint order),
+    /// so where pegs overlap the press takes the one drawn on top.
+    pub(super) fn key_at(&self, px: f32, py: f32) -> Option<usize> {
+        let order: Vec<usize> = self.peg_order().collect();
+        order.into_iter().rev().find(|&idx| {
+            let (cx, cy) = self.peg_centre(idx);
+            let (dx, dy) = (px - cx, py - cy);
+            let r = self.peg_drawn_r(idx);
+            dx * dx + dy * dy <= r * r
+        })
+    }
+
+    /// One slider row: its label strip over a slider of the toolkit's height.
+    fn slider_row_h() -> f32 {
+        crate::layout::control_label_strip() + crate::layout::slider_height()
+    }
+
+    /// The R, G and B rows stacked, `ROW_GAP` apart.
+    fn slider_block_h() -> f32 {
+        3.0 * Self::slider_row_h() + 2.0 * Self::ROW_GAP
+    }
+
+    /// The slider block's top: under the peg row.
+    fn slider_top(&self) -> f32 {
+        let track = self.track_rect();
+        track.y + track.height + Self::PEG_ROW
+    }
+
+    /// The height the editor needs: the track, the peg row and the three slider rows, in
+    /// its margins. The slider rows are reserved whether or not a key is selected (like the
+    /// float Ramp's control strip), so selecting a key never changes the editor's rect.
+    /// What it declares (`intrinsic_size`).
+    pub fn natural_height(&self) -> f32 {
+        Self::MARGIN + crate::layout::ramp_height() + Self::PEG_ROW + Self::slider_block_h() + Self::MARGIN
+    }
+
+    /// The R, G and B sliders and the delete button, in the slider block under the track and
+    /// its pegs, while a key is selected. Each slider row is its label strip over a slider of
+    /// the toolkit's height; the button is the toolkit's height, beside the rows' middle.
     pub(super) fn arrange_fields(&mut self) {
-        let (x, y, w) = (self.base.x, self.base.y, self.base.w);
-        let th = crate::layout::ramp_height();
-        let sy = y + th + 55.0;
-        let row_h = crate::layout::control_label_strip() + crate::layout::slider_height();
+        let (x, w) = (self.base.x, self.base.w);
+        let sy = self.slider_top();
+        let row_h = Self::slider_row_h();
         let bh = crate::layout::button_height();
-        let slider_w = (w - 20.0 - Self::DEL_W - 10.0).max(40.0);
+        let slider_w = (w - 2.0 * Self::MARGIN - Self::DEL_W - 10.0).max(40.0);
 
         if self.selected_key_idx.is_some() {
             for (k, slider) in [&mut self.r_slider, &mut self.g_slider, &mut self.b_slider].into_iter().enumerate() {
-                slider.set_rect(x + 10.0, sy + k as f32 * (row_h + Self::ROW_GAP), slider_w, row_h);
+                slider.set_rect(x + Self::MARGIN, sy + k as f32 * (row_h + Self::ROW_GAP), slider_w, row_h);
             }
-            let rows_h = 3.0 * row_h + 2.0 * Self::ROW_GAP;
-            self.del_button.set_rect(x + w - 10.0 - Self::DEL_W, sy + (rows_h - bh) / 2.0, Self::DEL_W, bh);
+            let rows_h = Self::slider_block_h();
+            self.del_button.set_rect(x + w - Self::MARGIN - Self::DEL_W, sy + (rows_h - bh) / 2.0, Self::DEL_W, bh);
         } else {
             self.r_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
             self.g_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
             self.b_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
             self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
         }
-    
     }
 }
 
 impl Layout for ColorRamp {
+    /// [`natural_height`](ColorRamp::natural_height), any width.
+    fn intrinsic_size(&self) -> Option<Size> {
+        Some(Size::new(0.0, self.natural_height()))
+    }
+
     fn rect_assigned(&mut self, rect: Rect) {
         self.base.x = rect.x;
         self.base.y = rect.y;
@@ -169,8 +262,10 @@ impl Layout for ColorRamp {
 }
 
 impl Paint for ColorRamp {
+    /// No container box: the editor draws its track, pegs and fields itself, on the host's
+    /// plate, as the float Ramp does.
     fn color(&self) -> [f32; 4] {
-        crate::color::ramp_background_color()
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     // Field children are ctx-linked for event propagation but painted here (gated on a
@@ -180,74 +275,74 @@ impl Paint for ColorRamp {
     }
 
     fn paint(&self, _rect: Rect, pc: &mut PaintCtx) {
-        let quads: Vec<(f32, f32, f32, f32, [f32; 4])> = {
-        let mut quads = Vec::new();
-        let th = crate::layout::ramp_height();
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
-        
-        // Draw outer container border
-        let bx = self.base.x;
-        let by = self.base.y;
-        let bw = self.base.w;
-        let bh = self.base.h;
-        let border_color = crate::color::ramp_border_color();
-        quads.push((bx, by, bw, 1.0, border_color));                 // Top
-        quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));         // Bottom
-        quads.push((bx, by, 1.0, bh, border_color));                 // Left
-        quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));         // Right
-        
-        // Draw track border
-        quads.push((track_x - 1.0, self.base.y + 10.0 - 1.0, track_w + 2.0, th + 2.0, border_color));
-        
-        // Draw interpolated track slices (e.g. 100 slices)
-        let slices = 100;
-        let slice_w = track_w / slices as f32;
-        for i in 0..slices {
-            let t1 = i as f32 / slices as f32;
-            let t2 = (i + 1) as f32 / slices as f32;
-            let center_t = (t1 + t2) / 2.0;
-            let col = self.get_interpolated_color(center_t);
-            let sx = track_x + t1 * track_w;
-            quads.push((sx, self.base.y + 10.0, slice_w, th, [col[0], col[1], col[2], 1.0]));
-        }
-        
-        // The fields paint themselves, below (`paint_self`). Their quads went in here
-        // too, so every one was drawn twice and a translucent one blended darker.
-        quads
-    
-        };
-        for (qx, qy, qw, qh, qc) in quads {
-            pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
-        }
-        let circles: Vec<(f32, f32, f32, [f32; 4])> = {
-        let mut circles = Vec::new();
-        let th = crate::layout::ramp_height();
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
-        let py = self.base.y + 10.0 + th + 15.0;
-        
-        for (idx, key) in self.keys.iter().enumerate() {
-            let cx = track_x + key.pos * track_w;
-            circles.push((cx, py, 7.0, [0.0, 0.0, 0.0, 0.8]));
-            circles.push((cx, py, 6.0, [key.color[0], key.color[1], key.color[2], 1.0]));
-            if Some(idx) == self.selected_key_idx {
-                circles.push((cx, py, 8.0, [0.49, 1.0, 1.0, 0.5]));
+        // The track is a canvas well cut through the host's plate, the one the float Ramp's
+        // graph and every draw-in canvas share: its floor, the gradient, then its rim over the
+        // gradient's edges. At the CONTROL radius, not the panel one: the track is a control's
+        // height (`ramp_height`, 32), and the panel's 24 would round it into a pill; at the
+        // text box's radius it reads as the field it is. The gradient is clipped to the well's
+        // rounded shape, so its square slices never poke past the corners.
+        let track = self.track_rect();
+        let radius = crate::layout::control_corner_radius();
+        pc.well_floor(track, radius, &crate::scene::Material::pane(), false);
+        pc.clip_rounded(track, radius, |pc| {
+            let slices = 100;
+            let slice_w = track.width / slices as f32;
+            for i in 0..slices {
+                let t1 = i as f32 / slices as f32;
+                let col = self.get_interpolated_color(t1 + 0.5 / slices as f32);
+                let sx = track.x + t1 * track.width;
+                pc.quad(Rect { x: sx, y: track.y, width: slice_w, height: track.height }, [col[0], col[1], col[2], 1.0]);
             }
-        }
-        
-        circles
-    
-        };
-        for (cx, cy, r, c) in circles {
-            pc.circle(cx, cy, r, c);
-        }
+        });
+        pc.well_rim(track, radius, crate::layout::control_relief());
+
+        self.paint_pegs(pc);
+
+        // The fields paint themselves (`paint_self`), once.
         if self.selected_key_idx.is_some() {
             let dummy = UiContext::new();
             self.r_slider.paint_self(&dummy, pc);
             self.g_slider.paint_self(&dummy, pc);
             self.b_slider.paint_self(&dummy, pc);
             self.del_button.paint_self(&dummy, pc);
+        }
+    }
+}
+
+impl ColorRamp {
+    /// The key pegs, in paint order — the selected one last, on top. A peg's face is the
+    /// key's colour, opaque: the face IS the key's data, so selection never tints it; the
+    /// selected peg wears the focus ring outside the face instead. Under relief the face is a
+    /// disc plate ([`PaintCtx::plate_shaped`] at `Some(2.0)`, a true circle) with a control
+    /// plate's roll (the relief width, at most 0.4 of the radius); flat, a flat disc in a
+    /// hairline of the wells' frame colour, so a key the colour of the plate still shows.
+    fn paint_pegs(&self, pc: &mut PaintCtx) {
+        let r = Self::PEG_R;
+        let relief = crate::layout::control_relief();
+        let depth = crate::layout::bevel_width().min(0.4 * r);
+        let ring = crate::scene::paint::ControlPlate::focus_tint();
+        for idx in self.peg_order() {
+            let (cx, cy) = self.peg_centre(idx);
+            let c = self.keys[idx].color;
+            let face = [c[0], c[1], c[2], 1.0];
+            if relief {
+                let disc = Rect { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r };
+                pc.plate_shaped(disc, (r, r, r, r), &crate::scene::Material::opaque(face), depth, Some(2.0));
+            } else {
+                pc.circle(cx, cy, r + Self::PEG_HAIRLINE, crate::color::well_frame_color(false, false));
+                pc.circle(cx, cy, r, face);
+            }
+            if Some(idx) == self.selected_key_idx {
+                pc.arc(
+                    cx,
+                    cy,
+                    Self::peg_outer_r(),
+                    Self::PEG_RING_W,
+                    0.0,
+                    std::f32::consts::TAU,
+                    [ring[0], ring[1], ring[2], 1.0],
+                );
+            }
         }
     }
 }
@@ -300,29 +395,23 @@ impl Input for ColorRamp {
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
         if button != MouseButton::Left { return false; }
         
-        let th = crate::layout::ramp_height();
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
-        let py_peg = self.base.y + 10.0 + th + 15.0;
-        
+        let track = self.track_rect();
+
         if state == ElementState::Pressed {
-            for (idx, key) in self.keys.iter().enumerate() {
-                let cx = track_x + key.pos * track_w;
-                let dx = px - cx;
-                let dy = py_event - py_peg;
-                if (dx*dx + dy*dy) <= 64.0 {
-                    self.selected_key_idx = Some(idx);
-                    self.is_dragging_key = true;
-                    self.r_slider.set_value(key.color[0]);
-                    self.g_slider.set_value(key.color[1]);
-                    self.b_slider.set_value(key.color[2]);
-                    self.arrange_fields();
-                    return true;
-                }
+            // The key whose peg is under the press, the topmost where pegs overlap.
+            if let Some(idx) = self.key_at(px, py_event) {
+                let color = self.keys[idx].color;
+                self.selected_key_idx = Some(idx);
+                self.is_dragging_key = true;
+                self.r_slider.set_value(color[0]);
+                self.g_slider.set_value(color[1]);
+                self.b_slider.set_value(color[2]);
+                self.arrange_fields();
+                return true;
             }
-            
-            if px >= track_x && px <= track_x + track_w && py_event >= self.base.y + 10.0 && py_event <= self.base.y + 10.0 + th {
-                let t = (px - track_x) / track_w;
+
+            if px >= track.x && px <= track.x + track.width && py_event >= track.y && py_event <= track.y + track.height {
+                let t = (px - track.x) / track.width;
                 let col = self.get_interpolated_color(t);
                 let new_key = ColorRampKey { pos: t, color: col };
                 self.keys.push(new_key);
@@ -368,12 +457,11 @@ impl Input for ColorRamp {
                 let (px, py_event) = (*x, *y);
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
         let mut changed = false;
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
-        
+        let track = self.track_rect();
+
         if self.is_dragging_key {
             if let Some(idx) = self.selected_key_idx {
-                let t = ((px - track_x) / track_w).clamp(0.0, 1.0);
+                let t = ((px - track.x) / track.width).clamp(0.0, 1.0);
                 self.keys[idx].pos = t;
                 self.selected_key_idx = Some(self.resettle_key(idx));
                 changed = true;

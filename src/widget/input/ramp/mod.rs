@@ -10,7 +10,7 @@
 //! | module | holds |
 //! |---|---|
 //! | `mod.rs` | the float `Ramp`: its key, construction, presets, the spec in and out, `impl Layout` |
-//! | `geometry` | the plot, key rings, the rolled rim, where a dragged key lands, the controls' places |
+//! | `geometry` | the plot, the key pegs (size, order, hit test), where a dragged key lands, the controls' places |
 //! | `paint` | `impl Paint for Ramp` |
 //! | `input` | `impl Input for Ramp`: key drags, the hover-scroll, the controls and their focus |
 //! | `color` | the `ColorRamp` widget whole |
@@ -64,7 +64,7 @@ pub struct Ramp {
     scroll_vel: (f32, f32),
     last_key_scroll: Option<web_time::Instant>,
     /// The dragged key as the drag found it: its position when grabbed (the soft wall's
-    /// zone never starts behind it — `resisted_pos`), and where in its ring the pointer
+    /// zone never starts behind it — `resisted_pos`), and where on its peg the pointer
     /// took it, in plot units (the key keeps that offset instead of snapping its centre
     /// to the pointer). `None` outside a key drag.
     drag_grab: Option<DragGrab>,

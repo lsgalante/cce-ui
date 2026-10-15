@@ -396,7 +396,8 @@ any off-standard row), and `src/main.rs` is the reference.
   (`layout::control_corner_radius`, default 8). A new control-scale radius getter falls back to
   the control rung, never to a literal. **Panels** — Group frames, InfoBoxes, TreeLists, a
   multiline TextBox, the Ramp's graph, the canvas wells — share `style.control.panel.corner_radius`
-  (`layout::panel_corner_radius`, default 24), apart from both the window and the controls.
+  (`layout::panel_corner_radius`, default 24), apart from both the window and the controls. A
+  canvas well a control high (the ColorRamp's track) takes the control radius instead.
 - **New layout is `scene::layout`** (measure → arrange; hand-rolled, not taffy). A settings page
   section's contents are a `Form` (`compose/form.rs`): declare widgets, text, rows, rules and
   fills; `SectionContext::place` solves and paints. One list row's cells are `lay_row`.

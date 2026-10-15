@@ -177,26 +177,13 @@ impl Input for Ramp {
             self.scroll_vel = (0.0, 0.0);
             self.scroll_key_idx = None;
             self.last_key_scroll = None;
-            // Grab the NEAREST key whose ring contains the press — the rings
-            // are the pegs' visual extent, and nearest-center also matches the
-            // foam walls (perpendicular bisectors) where rings overlap.
-            let hit_r = self.key_ring_r() + 2.5;
-            let mut best: Option<(usize, f32)> = None;
-            for (idx, key) in self.keys.iter().enumerate() {
-                let cx = plot.x + key.pos * plot.width;
-                let cy = plot.y + plot.height * (1.0 - key.value);
-                let dx = px - cx;
-                let dy = py_event - cy;
-                let d2 = dx * dx + dy * dy;
-                if d2 <= hit_r * hit_r && best.is_none_or(|(_, bd)| d2 < bd) {
-                    best = Some((idx, d2));
-                }
-            }
-            if let Some((idx, _)) = best {
+            // Grab the key whose peg is under the press, the topmost where pegs overlap —
+            // the one drawn on top is the one taken.
+            if let Some(idx) = self.key_at(px, py_event) {
                 self.selected_key_idx = Some(idx);
                 self.is_dragging_key = true;
-                // The key keeps where in its ring it was taken: its centre snapping to
-                // the pointer jumped it up to a ring's radius on the first move.
+                // The key keeps where on its peg it was taken: its centre snapping to
+                // the pointer jumped it up to a peg's radius on the first move.
                 let key = &self.keys[idx];
                 let (t, v) = ((px - plot.x) / plot.width, 1.0 - (py_event - plot.y) / plot.height);
                 self.drag_grab = Some(DragGrab { origin: key.pos, offset: (key.pos - t, key.value - v) });
@@ -320,19 +307,7 @@ impl Input for Ramp {
                 // cursor. Latching also selects the key, so the pad tracks.
                 let plot = self.plot_rect();
                 if ui.scroll_gesture_new {
-                    let hit_r = self.key_ring_r() + 2.5;
-                    let mut best: Option<(usize, f32)> = None;
-                    for (idx, key) in self.keys.iter().enumerate() {
-                        let cx = plot.x + key.pos * plot.width;
-                        let cy = plot.y + plot.height * (1.0 - key.value);
-                        let dx = px - cx;
-                        let dy = py - cy;
-                        let d2 = dx * dx + dy * dy;
-                        if d2 <= hit_r * hit_r && best.is_none_or(|(_, bd)| d2 < bd) {
-                            best = Some((idx, d2));
-                        }
-                    }
-                    self.scroll_key_idx = best.map(|(i, _)| i);
+                    self.scroll_key_idx = self.key_at(px, py);
                     self.scroll_vel = (0.0, 0.0);
                 }
                 if let Some(idx) = self.scroll_key_idx {

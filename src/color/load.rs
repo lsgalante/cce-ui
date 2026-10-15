@@ -176,12 +176,8 @@ fn parse_and_set_colors_in_batch(content: &str) {
     // The toggle state colors (enabled/disabled/gradient/background) are not
     // read: the control inherits its plate — see the note by the retired
     // getters below.
-    if let Some(c) = get_color("/style/control/ramp/background") {
-        if let Ok(mut lock) = RAMP_BACKGROUND_COLOR.write() { *lock = c; }
-    }
-    if let Some(c) = get_color("/style/control/ramp/border_color") {
-        if let Ok(mut lock) = RAMP_BORDER_COLOR.write() { *lock = c; }
-    }
+    // The `ramp` node's `background` and `border_color` are not read: the ColorRamp has
+    // no container box (its track is a canvas well). Its `height` is `layout::ramp_height`.
     if let Some(c) = get_color("/style/control/control_panel/color") {
         if let Ok(mut lock) = CONTROL_PANEL_COLOR.write() { *lock = c; }
     }

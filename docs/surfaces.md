@@ -23,11 +23,23 @@ History is in `CHANGELOG.md`; the material design record is `rfc-material.md`.
 - **A well** is an opening cut into a plate: `Recess`, or `Trough` when it holds a moving part.
   Text boxes, keybind and spinbox fields, slider and progress tracks, the trackpad, the
   ColorSelector's recess. A well's floor may carry fills (a progress fill, a swatch) — floor
-  segments, not plates. A **canvas well** (Trackpad, Slider2D, the bevel and ramp previews) is
-  cut from one material: the plate darkened for its floor (`color::WELL_FLOOR`) and the recess
-  for its rim (`PaintCtx::well_floor` / `well_rim`), rounded at the panel radius
-  (`layout::panel_corner_radius`). With relief off a well is its frame, the one
-  hairline `color::well_frame_color`, lit in the highlight while active.
+  segments, not plates. A **canvas well** (Trackpad, Slider2D, the bevel and ramp previews, the
+  Ramp's graph, the ColorRamp's gradient track) is cut from one material: the plate darkened
+  for its floor (`color::WELL_FLOOR`) and the recess for its rim (`PaintCtx::well_floor` /
+  `well_rim`), rounded at the panel radius (`layout::panel_corner_radius`) — except the
+  ColorRamp's track, a control's height (`layout::ramp_height`), which takes the control
+  radius so it is not a pill. With relief off a well is its frame, the one hairline
+  `color::well_frame_color`, lit in the highlight while active.
+- **A disc plate** is `PaintCtx::plate_shaped(square, (r, r, r, r), &material, depth,
+  Some(2.0))`: a `Plate` at the circular corner exponent, a true circle whatever
+  `layout::corner_shape` is (a `Bevel` or a flat `rounded_rect` at half-side radii is a
+  squircle). The Ramp's and ColorRamp's key pegs are disc plates under relief — the Ramp's
+  frosted accent glass (`Frost::from_style`), the ColorRamp's opaque in the key's colour — with
+  a control plate's depth (`bevel_width`, at most 0.4 r), the selected peg drawn last; with
+  relief off, flat circles (the ColorRamp's in a `color::well_frame_color` hairline). The
+  Ramp's selected peg is tinted harder under relief and ringed in `ControlPlate::focus_tint`
+  flat; the ColorRamp's is ringed outside its face in both styles. A press takes the topmost
+  peg whose drawn disc it lands on.
 - **Segments** share one silhouette, parted by **seams** (`Groove`s dying into the rolled edge):
   Breadcrumb and ButtonStrip segments, the ColorSelector's text/swatch split. A `Separator` is the
   same cut with no segments to part.

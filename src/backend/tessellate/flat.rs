@@ -63,8 +63,8 @@ impl Tess {
                 push_plate_solid_border_vertices(rect.x, rect.y, rect.width, rect.height, cr, *thickness, self.sw, self.sh, *border, it.circle, &mut self.verts);
             }
             Prim::Quad { rect, color } => {
-                // Quads honor an active circle clip like circles/arcs do (the
-                // Ramp's foam-cell fills draw as clipped strips).
+                // Quads honor an active circle clip like circles/arcs do (a
+                // circular pane's contents, cce-designer's network pane, clip to it).
                 self.verts.extend(quad_vertices_with_clip(rect.x, rect.y, rect.width, rect.height, self.sw, self.sh, *color, it.circle));
             }
             Prim::RoundedRect { rect, radius, corners, color } => {

@@ -25,10 +25,6 @@ pub(super) static TEXTBOX_BACKGROUND_EDIT_COLOR: crate::style::StyleCell<[f32; 4
 
 pub(super) static BUTTON_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.BUTTON_BACKGROUND_COLOR, |s| &mut s.color.BUTTON_BACKGROUND_COLOR);
 
-pub(super) static RAMP_BACKGROUND_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.RAMP_BACKGROUND_COLOR, |s| &mut s.color.RAMP_BACKGROUND_COLOR);
-
-pub(super) static RAMP_BORDER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.RAMP_BORDER_COLOR, |s| &mut s.color.RAMP_BORDER_COLOR);
-
 pub(super) static CONTROL_PANEL_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.CONTROL_PANEL_COLOR, |s| &mut s.color.CONTROL_PANEL_COLOR); // default #13151cff
 
 pub(super) static CONTROL_PANEL_BORDER_COLOR: crate::style::StyleCell<[f32; 4]> = crate::style::StyleCell::new(|s| &s.color.CONTROL_PANEL_BORDER_COLOR, |s| &mut s.color.CONTROL_PANEL_BORDER_COLOR); // default #292c37ff
@@ -118,16 +114,6 @@ pub fn textbox_background_edit_color() -> [f32; 4] {
 
 pub fn set_textbox_background_edit_color(color: [f32; 4]) {
     style_write(&TEXTBOX_BACKGROUND_EDIT_COLOR, color);
-}
-
-pub fn ramp_background_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&RAMP_BACKGROUND_COLOR)
-}
-
-pub fn ramp_border_color() -> [f32; 4] {
-    load_colors_once();
-    style_read(&RAMP_BORDER_COLOR)
 }
 
 pub fn control_panel_color() -> [f32; 4] {

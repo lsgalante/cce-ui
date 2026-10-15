@@ -176,8 +176,9 @@ pub enum Prim {
     Plate { rect: Rect, radii: Radii, material: Material, depth: f32, shape: Option<f32> },
     Arc { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4] },
     /// A ring band with radial color interpolation — inner rim → crest
-    /// (centerline) → outer rim — for rounded rim bevels (the Ramp's key
-    /// rings). `radius` is the stroke's outer edge, like `Arc`.
+    /// (centerline) → outer rim — for rounded rim bevels drawn by hand. No
+    /// toolkit widget emits one (a lit disc is a `Plate` at `shape: Some(2.0)`).
+    /// `radius` is the stroke's outer edge, like `Arc`.
     ArcShaded { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, inner: [f32; 4], crest: [f32; 4], outer: [f32; 4] },
     Vector { x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [f32; 4], cap: Cap },
     Circle { cx: f32, cy: f32, radius: f32, color: [f32; 4] },

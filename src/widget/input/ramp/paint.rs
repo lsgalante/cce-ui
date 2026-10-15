@@ -7,11 +7,79 @@ use super::*;
 const AXIS_FONT_PX: f32 = 9.0;
 
 impl Ramp {
-    /// The curve's colour, its under-fill and the key pegs: the DE accent (`highlight
-    /// primary`), opaque — what the user acts on in the graph.
+    /// The curve's colour, its under-fill and the key pegs' tint: the DE accent (`highlight
+    /// primary`) — what the user acts on in the graph.
     fn accent() -> [f32; 3] {
         let a = crate::color::highlight_primary_color();
         [a[0], a[1], a[2]]
+    }
+
+    /// A peg's accent tint, unselected: light, so the curve and grid read through the glass.
+    const PEG_TINT: f32 = 0.25;
+    /// The selected peg's tint: strong, the one key the pad below edits.
+    const PEG_TINT_SELECTED: f32 = 0.85;
+    /// The flat selection ring's width, at the peg's outer edge.
+    const PEG_RING_W: f32 = 1.5;
+    /// The flat face's inset from the ring: the floor shows between them.
+    const PEG_RING_GAP: f32 = 1.5;
+
+    /// A flat peg's face radius, inside the selection ring's gap.
+    fn flat_face_r(&self) -> f32 {
+        let r = self.key_peg_r();
+        (r - Self::PEG_RING_W - Self::PEG_RING_GAP).max(r * 0.5)
+    }
+
+    /// The radius key `idx`'s peg is drawn to, which [`key_at`](Self::key_at) hits: the
+    /// whole disc under relief; flat, the selected peg's ring, an unselected peg's face.
+    pub(super) fn peg_drawn_r(&self, idx: usize) -> f32 {
+        if crate::layout::control_relief() || Some(idx) == self.selected_key_idx {
+            self.key_peg_r()
+        } else {
+            self.flat_face_r()
+        }
+    }
+
+    /// The key pegs, in [`peg_order`](Self::peg_order) — the selected one last, on top.
+    ///
+    /// Under relief each is a disc plate ([`PaintCtx::plate_shaped`] at `Some(2.0)`, a true
+    /// circle whatever the DE's corner shape) of the accent as FROSTED glass: a frosted plate
+    /// composites opaque (the blurred floor tinted at the tint's alpha) with its roll at full
+    /// strength, where an unfrosted one at a light tint would show its roll at that alpha
+    /// and nearly vanish. Overlapping pegs stack: the one above shows the one below blurred.
+    /// The roll is a control plate's (the relief width, at most 0.4 of the radius), lit by
+    /// the DE light like every plate. Flat, each is a flat accent disc, and the selected one
+    /// wears the focus ring at its outer edge, the face drawn inside the ring's gap.
+    fn paint_pegs(&self, pc: &mut PaintCtx) {
+        let accent = Self::accent();
+        let r = self.key_peg_r();
+        let relief = crate::layout::control_relief();
+        let frost = crate::scene::Frost::from_style();
+        let depth = crate::layout::bevel_width().min(0.4 * r);
+        for idx in self.peg_order() {
+            let (cx, cy) = self.key_centre(idx);
+            let selected = Some(idx) == self.selected_key_idx;
+            let alpha = if selected { Self::PEG_TINT_SELECTED } else { Self::PEG_TINT };
+            let tint = [accent[0], accent[1], accent[2], alpha];
+            if relief {
+                let disc = Rect { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r };
+                let glass = crate::scene::Material::opaque(tint).with_frost(frost);
+                pc.plate_shaped(disc, (r, r, r, r), &glass, depth, Some(2.0));
+            } else {
+                pc.circle(cx, cy, self.flat_face_r(), tint);
+                if selected {
+                    let ring = crate::scene::paint::ControlPlate::focus_tint();
+                    pc.arc(
+                        cx,
+                        cy,
+                        r,
+                        Self::PEG_RING_W,
+                        0.0,
+                        std::f32::consts::TAU,
+                        [ring[0], ring[1], ring[2], 1.0],
+                    );
+                }
+            }
+        }
     }
 
     /// The grid lines: the detached label colour, faint — the axis numbers' colour, so the
@@ -101,9 +169,9 @@ impl Paint for Ramp {
             pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
         }
 
-        // Axis numbers on the gridlines — small, dim, part of the graph
-        // floor (under the curve and keys, inside the opening). They sit in
-        // the wall-side gutters the plot inset leaves free.
+        // Axis numbers on the gridlines — small, dim, inside the opening, in
+        // the wall-side gutters the plot inset leaves free. Text is drawn after
+        // all geometry, so they read over the curve and any peg in the gutter.
         let plot = self.plot_rect();
         let num_color = crate::color::control_label_color_detached_u8();
         let (num_family, _) = crate::layout::control_label_font_detached_parsed();
@@ -163,170 +231,7 @@ impl Paint for Ramp {
         for pair in pts.windows(2) {
             pc.vector(pair[0].0, pair[0].1, pair[1].0, pair[1].1, 2.0, curve_color, Cap::Round);
         }
-        // Key pegs: glassy translucent fills (solid when selected) in thin
-        // white rings. Overlapping pegs render as foam cells: each pair's
-        // shared wall is the chord through the two points where the ring
-        // circles cross (equal radii, so it lies on the perpendicular
-        // bisector of the centers); rings are cut at the wall, the wall is
-        // stroked once, and each fill keeps to its own side.
-        {
-            let plot = self.plot_rect();
-            let ring_r = self.key_ring_r(); // roll-band centerline
-            // The disc surface: flat top out to the roll band's inner edge,
-            // then the rolled perimeter out to ring_r + 2.5. Band and rim
-            // shrink with the ring so a small peg keeps a flat top.
-            let base = accent;
-            let fill_r = (ring_r - 3.0).max(ring_r * 0.5);
-            let rim_t = 6.0f32.min(ring_r * 0.25).max(1.0);
-            // Bevel light: the DE light azimuth the plate shading uses.
-            let az = crate::layout::light_source_position();
-            let tau = std::f32::consts::TAU;
-
-            let centers: Vec<(f32, f32)> = self
-                .keys
-                .iter()
-                .map(|k| (plot.x + k.pos * plot.width, plot.y + plot.height * (1.0 - k.value)))
-                .collect();
-
-            // Every intersecting pair: wall midpoint M + unit normal n toward
-            // the neighbor per key, and the chord endpoints once per pair.
-            let mut cuts: Vec<Vec<((f32, f32), (f32, f32))>> = vec![Vec::new(); centers.len()];
-            let mut walls: Vec<((f32, f32), (f32, f32), (f32, f32))> = Vec::new();
-            for i in 0..centers.len() {
-                for j in (i + 1)..centers.len() {
-                    let (dx, dy) = (centers[j].0 - centers[i].0, centers[j].1 - centers[i].1);
-                    let d = (dx * dx + dy * dy).sqrt();
-                    if d < 1e-3 || d >= 2.0 * ring_r {
-                        continue;
-                    }
-                    let n = (dx / d, dy / d);
-                    let m =
-                        ((centers[i].0 + centers[j].0) / 2.0, (centers[i].1 + centers[j].1) / 2.0);
-                    cuts[i].push((m, n));
-                    cuts[j].push((m, (-n.0, -n.1)));
-                    let h = (ring_r * ring_r - (d / 2.0) * (d / 2.0)).sqrt();
-                    walls.push((
-                        (m.0 - h * n.1, m.1 + h * n.0),
-                        (m.0 + h * n.1, m.1 - h * n.0),
-                        n,
-                    ));
-                }
-            }
-
-            // Fills. Uncut: one disc. Cut: the cell — vertical strips bounded
-            // by the wall half-planes, the round edge from the circle clip.
-            for (idx, &(cx, cy)) in centers.iter().enumerate() {
-                let selected = Some(idx) == self.selected_key_idx;
-                let fill = [base[0], base[1], base[2], if selected { 0.85 } else { 0.22 }];
-                if cuts[idx].is_empty() {
-                    pc.circle(cx, cy, fill_r, fill);
-                    continue;
-                }
-                pc.push_clip_circle([cx, cy, fill_r]);
-                let step = 1.5f32;
-                let mut x = cx - fill_r;
-                while x < cx + fill_r {
-                    let mid = x + step / 2.0;
-                    let (mut ylo, mut yhi) = (cy - fill_r, cy + fill_r);
-                    let mut visible = true;
-                    for &((mx, my), (nx, ny)) in &cuts[idx] {
-                        // Keep (p − M)·n ≤ 0 — this key's side of the wall.
-                        let c = nx * (mid - mx);
-                        if ny.abs() < 1e-4 {
-                            if c > 0.0 {
-                                visible = false;
-                                break;
-                            }
-                        } else {
-                            let yb = my - c / ny;
-                            if ny > 0.0 {
-                                yhi = yhi.min(yb);
-                            } else {
-                                ylo = ylo.max(yb);
-                            }
-                        }
-                    }
-                    if visible && ylo < yhi {
-                        pc.quad(Rect { x, y: ylo, width: step, height: yhi - ylo }, fill);
-                    }
-                    x += step;
-                }
-                pc.pop_clip_circle();
-            }
-
-            // Walls: the shared boundary as the surface rolling into the
-            // seam and back out — surface-tinted slopes (lit side leans to
-            // the light, far side into shadow) around a slightly lifted
-            // crest, in the discs\' own color like the rims.
-            let (lx, ly) = (az.cos(), -az.sin());
-            let wall_tint = |sv: f32, k: f32| -> [f32; 3] {
-                [
-                    (base[0] + k * sv).clamp(0.0, 1.0),
-                    (base[1] + k * sv).clamp(0.0, 1.0),
-                    (base[2] + k * sv).clamp(0.0, 1.0),
-                ]
-            };
-            for &((x1, y1), (x2, y2), (nx, ny)) in &walls {
-                let facing = nx * lx + ny * ly;
-                let cp = wall_tint(facing, 0.38);
-                let cm = wall_tint(-facing, 0.38);
-                let cc = wall_tint(facing, 0.12);
-                pc.vector(
-                    x1 + nx * 1.6, y1 + ny * 1.6, x2 + nx * 1.6, y2 + ny * 1.6,
-                    1.6, [cp[0], cp[1], cp[2], 0.78], Cap::Round,
-                );
-                pc.vector(
-                    x1 - nx * 1.6, y1 - ny * 1.6, x2 - nx * 1.6, y2 - ny * 1.6,
-                    1.6, [cm[0], cm[1], cm[2], 0.78], Cap::Round,
-                );
-                pc.vector(x1, y1, x2, y2, 1.8, [cc[0], cc[1], cc[2], 0.85], Cap::Round);
-            }
-
-            // Rims: beveled circles minus the angular span facing each wall
-            // (no drawn border — the shaded edge IS the ring).
-            for (idx, &(cx, cy)) in centers.iter().enumerate() {
-                let top_a = if Some(idx) == self.selected_key_idx { 0.85 } else { 0.22 };
-                if cuts[idx].is_empty() {
-                    Self::rolled_rim_arc(pc, cx, cy, ring_r + 2.5, rim_t, 0.0, tau, az, base, top_a);
-                    continue;
-                }
-                // Excluded spans [θ−α, θ+α] toward each neighbor, normalized
-                // into [0, τ) (wrapping spans split), then merged.
-                let mut segs: Vec<(f32, f32)> = Vec::new();
-                for &((mx, my), (nx, ny)) in &cuts[idx] {
-                    let theta = ny.atan2(nx);
-                    let half = (mx - cx) * nx + (my - cy) * ny;
-                    let alpha = (half / ring_r).clamp(-1.0, 1.0).acos();
-                    let (a, b) = ((theta - alpha).rem_euclid(tau), (theta + alpha).rem_euclid(tau));
-                    if a <= b {
-                        segs.push((a, b));
-                    } else {
-                        segs.push((a, tau));
-                        segs.push((0.0, b));
-                    }
-                }
-                segs.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap());
-                let mut merged: Vec<(f32, f32)> = Vec::new();
-                for s in segs {
-                    match merged.last_mut() {
-                        Some(last) if s.0 <= last.1 => last.1 = last.1.max(s.1),
-                        _ => merged.push(s),
-                    }
-                }
-                // Stroke the complement (the two pieces meeting at θ=0 join
-                // seamlessly when no span covers 0).
-                let mut prev = 0.0f32;
-                for &(a, b) in &merged {
-                    if a > prev + 1e-3 {
-                        Self::rolled_rim_arc(pc, cx, cy, ring_r + 2.5, rim_t, prev, a, az, base, top_a);
-                    }
-                    prev = prev.max(b);
-                }
-                if prev < tau - 1e-3 {
-                    Self::rolled_rim_arc(pc, cx, cy, ring_r + 2.5, rim_t, prev, tau, az, base, top_a);
-                }
-            }
-        }
+        self.paint_pegs(pc);
         // The well's rim, after the content: the recess under relief, the frame
         // hairline flat (it carved a recess either way, and wore three shadow
         // rings no other well has).

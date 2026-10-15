@@ -116,12 +116,12 @@ fn key_centre(r: &Ramp, i: usize) -> (f32, f32) {
 }
 
 /// At its natural height the ramp's graph is the height it declares for it, its
-/// controls folded or not, and its key rings stay inside the opening.
+/// controls folded or not, and its key pegs stay inside the opening.
 #[test]
-fn at_its_natural_height_the_graph_is_whole_and_holds_its_rings() {
+fn at_its_natural_height_the_graph_is_whole_and_holds_its_pegs() {
     let (mut ctx, h) = ramp_at_natural_height();
     assert_eq!(ctx[h].graph_h(), Ramp::GRAPH_H);
-    assert!(ctx[h].key_ring_r() + 2.5 <= Ramp::PLOT_INSET, "a key at the plot's edge keeps its rim off the wall");
+    assert!(ctx[h].key_peg_r() <= Ramp::PLOT_INSET, "a key at the plot's edge keeps its peg off the wall");
     ctx[h].controls_collapsed = true;
     let folded = ctx[h].natural_height();
     ctx.lend_h(h, |r, _| WidgetHost::set_rect(r, 0.0, 0.0, 300.0, folded));
@@ -244,8 +244,7 @@ fn color_ramp() -> (UiContext, Handle<Adapted<ColorRamp>>) {
 
 /// Key `i`'s peg on screen.
 fn peg(r: &ColorRamp, i: usize) -> (f32, f32) {
-    let (track_x, track_w) = (r.base.x + 10.0, r.base.w - 20.0);
-    (track_x + r.keys[i].pos * track_w, r.base.y + 10.0 + crate::layout::ramp_height() + 15.0)
+    r.peg_centre(i)
 }
 
 /// Dragging a key onto its neighbour's position keeps the dragged key selected: the
@@ -312,7 +311,7 @@ fn a_color_ramp_paints_its_fields_once() {
     let bare = count(&ctx);
     let (x, y) = peg(&ctx[h], 1);
     ctx.propagate_event(&press(x, y), h.id());
-    // The pegs paint a selection ring too: one circle.
+    // The selected peg wears its ring too: one arc.
     let selected = count(&ctx) - 1;
     let fields: usize = {
         let r = &ctx[h];
@@ -354,4 +353,241 @@ fn a_color_ramp_deletes_from_the_keyboard() {
     assert_eq!(ctx[h].keys.len(), 3, "the key is gone");
     assert_eq!(ctx[h].selected_key_idx, None);
     assert!(!ctx[h].del_button.take_click(), "no click left armed for the next press");
+}
+
+/// Everything `paint` emits, in order.
+fn painted<T: Paint>(w: &T) -> Vec<crate::scene::paint::Prim> {
+    let mut pc = crate::scene::paint::PaintCtx::new();
+    Paint::paint(w, Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 }, &mut pc);
+    pc.finish().items.into_iter().map(|i| i.prim).collect()
+}
+
+/// The disc plates among `prims` (a `Plate` at the circular corner shape), by centre, with
+/// their material.
+fn disc_plates(prims: &[crate::scene::paint::Prim]) -> Vec<((f32, f32), crate::scene::Material)> {
+    use crate::scene::paint::Prim;
+    prims
+        .iter()
+        .filter_map(|p| match p {
+            Prim::Plate { rect, radii, material, shape: Some(s), .. } if *s == 2.0 => {
+                assert!((radii.0 - rect.width / 2.0).abs() < 1e-4 && rect.width == rect.height, "a disc: radii are half its side");
+                Some(((rect.x + rect.width / 2.0, rect.y + rect.height / 2.0), *material))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn near(a: (f32, f32), b: (f32, f32)) -> bool {
+    (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3
+}
+
+/// Under relief each key's peg is a disc plate of frosted accent glass — the selected one
+/// tinted harder — and the selected peg is emitted last, on top.
+#[test]
+fn ramp_pegs_under_relief_are_frosted_disc_plates_the_selected_on_top() {
+    crate::layout::set_control_relief(true);
+    let (mut ctx, h) = ramp_at_natural_height();
+    let pegs = disc_plates(&painted(ctx[h].inner()));
+    assert_eq!(pegs.len(), ctx[h].keys.len(), "one disc plate per key");
+    for (_, m) in &pegs {
+        assert!(m.frost.is_frosted(), "frosted glass");
+    }
+    let (x, y) = key_centre(&ctx[h], 1);
+    ctx.propagate_event(&press(x, y), h.id());
+    ctx.propagate_event(&release(x, y), h.id());
+    let pegs = disc_plates(&painted(ctx[h].inner()));
+    let (last, glass) = pegs.last().copied().unwrap();
+    assert!(near(last, key_centre(&ctx[h], 1)), "the selected peg is drawn last");
+    assert!(pegs[..pegs.len() - 1].iter().all(|(_, m)| m.tint[3] < glass.tint[3]), "and tinted harder than the rest");
+}
+
+/// Flat, a peg is a flat disc, no plate; the selected one is still drawn last, and wears the
+/// focus ring.
+#[test]
+fn ramp_pegs_flat_are_circles_the_selected_ringed_last() {
+    use crate::scene::paint::Prim;
+    crate::layout::set_control_relief(false);
+    let (mut ctx, h) = ramp_at_natural_height();
+    let (x, y) = key_centre(&ctx[h], 2);
+    ctx.propagate_event(&press(x, y), h.id());
+    ctx.propagate_event(&release(x, y), h.id());
+    let prims = painted(ctx[h].inner());
+    assert!(disc_plates(&prims).is_empty(), "no plates");
+    let centres: Vec<(f32, f32)> = (0..ctx[h].keys.len()).map(|i| key_centre(&ctx[h], i)).collect();
+    let discs: Vec<(f32, f32)> = prims
+        .iter()
+        .filter_map(|p| match p {
+            Prim::Circle { cx, cy, .. } if centres.iter().any(|&c| near(c, (*cx, *cy))) => Some((*cx, *cy)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(discs.len(), centres.len(), "one flat disc per key");
+    assert!(near(*discs.last().unwrap(), centres[2]), "the selected peg is drawn last");
+    let ring = prims.iter().position(|p| matches!(p, Prim::Arc { cx, cy, .. } if near((*cx, *cy), centres[2])));
+    let last_disc = prims.iter().rposition(|p| matches!(p, Prim::Circle { cx, cy, .. } if near((*cx, *cy), centres[2])));
+    assert!(ring.is_some_and(|r| Some(r) > last_disc), "ringed, over its face");
+}
+
+/// Where pegs overlap, a press takes the one drawn on top: the later key, or the selected one
+/// whatever its index. Nearest-centre took the key under the pointer's nearer centre, which
+/// lies under the other's glass.
+#[test]
+fn a_press_where_ramp_pegs_overlap_takes_the_topmost() {
+    let (mut ctx, h) = ramp_at_natural_height();
+    ctx[h].keys = vec![
+        RampKey { pos: 0.0, value: 0.0 },
+        RampKey { pos: 0.5, value: 0.5 },
+        RampKey { pos: 0.52, value: 0.5 },
+        RampKey { pos: 1.0, value: 1.0 },
+    ];
+    let (x, y) = key_centre(&ctx[h], 1);
+    // Nearer key 1's centre, on key 2's peg as well.
+    ctx.propagate_event(&press(x - 2.0, y), h.id());
+    ctx.propagate_event(&release(x - 2.0, y), h.id());
+    assert_eq!(ctx[h].selected_key_idx, Some(2), "the later key is on top");
+    ctx[h].selected_key_idx = Some(1);
+    let (x2, _) = key_centre(&ctx[h], 2);
+    ctx.propagate_event(&press(x2 + 2.0, y), h.id());
+    ctx.propagate_event(&release(x2 + 2.0, y), h.id());
+    assert_eq!(ctx[h].selected_key_idx, Some(1), "the selected key is on top");
+}
+
+/// A colour ramp declares the height of its track, peg row and all three slider rows, key
+/// selected or not; at that height the sliders and the button lie inside it.
+#[test]
+fn a_color_ramp_declares_its_slider_rows_and_holds_them() {
+    let mut ctx = UiContext::new();
+    let h = ctx.insert(ColorRamp::new());
+    let natural = ctx[h].natural_height();
+    let rows = 3.0 * (crate::layout::control_label_strip() + crate::layout::slider_height());
+    assert!(natural >= crate::layout::ramp_height() + rows, "the slider rows are reserved: {natural}");
+    assert_eq!(Layout::intrinsic_size(ctx[h].inner()).map(|s| s.height), Some(natural));
+    ctx.lend_h(h, |r, _| WidgetHost::set_rect(r, 5.0, 7.0, 300.0, natural));
+    let (x, y) = peg(&ctx[h], 0);
+    ctx.propagate_event(&press(x, y), h.id());
+    assert_eq!(ctx[h].selected_key_idx, Some(0));
+    assert_eq!(ctx[h].natural_height(), natural, "selecting a key does not change it");
+    let r = &ctx[h];
+    let rect = (r.base.x, r.base.y, r.base.w, r.base.h);
+    for (fx, fy, fw, fh) in [r.r_slider.rect(), r.g_slider.rect(), r.b_slider.rect(), r.del_button.rect()] {
+        assert!(
+            fx >= rect.0 && fy >= rect.1 && fx + fw <= rect.0 + rect.2 + 1e-3 && fy + fh <= rect.1 + rect.3 + 1e-3,
+            "({fx}, {fy}, {fw}, {fh}) lies outside {rect:?}"
+        );
+    }
+}
+
+/// Under relief a colour ramp's pegs are disc plates of the key's own colour, opaque; the
+/// selected one is drawn last and ringed outside its face.
+#[test]
+fn color_ramp_pegs_under_relief_are_opaque_disc_plates_the_selected_on_top() {
+    use crate::scene::paint::Prim;
+    crate::layout::set_control_relief(true);
+    let (mut ctx, h) = color_ramp();
+    let (x, y) = peg(&ctx[h], 1);
+    ctx.propagate_event(&press(x, y), h.id());
+    ctx.propagate_event(&release(x, y), h.id());
+    let prims = painted(ctx[h].inner());
+    let pegs = disc_plates(&prims);
+    assert_eq!(pegs.len(), 4, "one disc plate per key");
+    for (centre, m) in &pegs {
+        let i = (0..4).find(|&i| near(peg(&ctx[h], i), *centre)).expect("a key's peg");
+        let c = ctx[h].keys[i].color;
+        assert_eq!(m.tint, [c[0], c[1], c[2], 1.0], "the key's colour, opaque");
+        assert!(!m.frost.is_frosted());
+    }
+    assert!(near(pegs.last().unwrap().0, peg(&ctx[h], 1)), "the selected peg is drawn last");
+    let plate = prims.iter().rposition(|p| matches!(p, Prim::Plate { .. })).unwrap();
+    assert!(
+        matches!(prims[plate + 1], Prim::Arc { radius, .. } if radius > ColorRamp::PEG_R),
+        "its ring follows it, outside the face"
+    );
+}
+
+/// Flat, a colour ramp's pegs are flat discs of the key's colour, no plates, each face drawn
+/// over a hairline of the wells' frame colour a pixel wider.
+#[test]
+fn color_ramp_pegs_flat_are_circles_in_a_hairline() {
+    use crate::scene::paint::Prim;
+    crate::layout::set_control_relief(false);
+    let (ctx, h) = color_ramp();
+    let prims = painted(ctx[h].inner());
+    assert!(disc_plates(&prims).is_empty(), "no plates");
+    let frame = crate::color::well_frame_color(false, false);
+    for i in 0..4 {
+        let (px, py) = peg(&ctx[h], i);
+        let c = ctx[h].keys[i].color;
+        let face = prims
+            .iter()
+            .position(|p| matches!(p, Prim::Circle { cx, cy, color, .. }
+                if near((*cx, *cy), (px, py)) && *color == [c[0], c[1], c[2], 1.0]))
+            .unwrap_or_else(|| panic!("key {i}'s face"));
+        assert!(matches!(prims[face], Prim::Circle { radius, .. } if radius == ColorRamp::PEG_R), "key {i}'s face radius");
+        assert!(
+            matches!(prims[face - 1], Prim::Circle { cx, cy, radius, color }
+                if near((cx, cy), (px, py)) && radius == ColorRamp::PEG_R + 1.0 && color == frame),
+            "key {i}'s hairline, under its face"
+        );
+    }
+}
+
+/// Where a colour ramp's pegs overlap, a press takes the one drawn on top: the later key, or
+/// the selected one.
+#[test]
+fn a_press_where_color_ramp_pegs_overlap_takes_the_topmost() {
+    let (mut ctx, h) = color_ramp();
+    ctx[h].keys[2].pos = 0.505;
+    let (x, y) = peg(&ctx[h], 1);
+    ctx.propagate_event(&press(x - 1.0, y), h.id());
+    ctx.propagate_event(&release(x - 1.0, y), h.id());
+    assert_eq!(ctx[h].selected_key_idx, Some(2), "the later key is on top");
+    ctx[h].selected_key_idx = Some(1);
+    let (x2, _) = peg(&ctx[h], 2);
+    ctx.propagate_event(&press(x2 + 1.0, y), h.id());
+    ctx.propagate_event(&release(x2 + 1.0, y), h.id());
+    assert_eq!(ctx[h].selected_key_idx, Some(1), "the selected key is on top");
+}
+
+/// A press on one colour-ramp peg's face, beside a neighbour whose face does not overlap it,
+/// takes the peg under it in either style: each peg is hit within the radius it is drawn to,
+/// so the neighbour above it in the paint order does not reach past its own face.
+#[test]
+fn a_press_on_a_color_ramp_peg_beside_its_neighbour_takes_that_peg() {
+    for relief in [true, false] {
+        crate::layout::set_control_relief(relief);
+        let (mut ctx, h) = color_ramp();
+        ctx[h].keys[2].pos = 0.54;
+        let ((x1, y), (x2, _)) = (peg(&ctx[h], 1), peg(&ctx[h], 2));
+        assert!(x2 - x1 > 2.0 * (ColorRamp::PEG_R + 1.0), "the faces do not overlap, hairlines included");
+        let x = x1 + ColorRamp::PEG_R - 0.1;
+        assert!(x2 - x < ColorRamp::peg_outer_r(), "the press lies within the neighbour's ring radius");
+        ctx.propagate_event(&press(x, y), h.id());
+        ctx.propagate_event(&release(x, y), h.id());
+        assert_eq!(ctx[h].selected_key_idx, Some(1), "relief {relief}: the face under the press");
+    }
+}
+
+/// Flat, a press on a Ramp peg's face beside a neighbour whose face does not overlap it takes
+/// the peg under it: an unselected flat peg is hit at its face, not the ring radius around it.
+#[test]
+fn a_press_on_a_flat_ramp_peg_beside_its_neighbour_takes_that_peg() {
+    crate::layout::set_control_relief(false);
+    let (mut ctx, h) = ramp_at_natural_height();
+    let (face_r, peg_r) = (ctx[h].peg_drawn_r(0), ctx[h].key_peg_r());
+    assert!(face_r + 3.0 <= peg_r, "a flat face sits inside the ring radius");
+    let plot = ctx[h].plot_rect();
+    let gap = (2.0 * face_r + 1.0) / plot.width;
+    ctx[h].keys = vec![
+        RampKey { pos: 0.0, value: 0.0 },
+        RampKey { pos: 0.4, value: 0.5 },
+        RampKey { pos: 0.4 + gap, value: 0.5 },
+        RampKey { pos: 1.0, value: 1.0 },
+    ];
+    let ((x1, y), (x2, _)) = (key_centre(&ctx[h], 1), key_centre(&ctx[h], 2));
+    let x = x1 + face_r - 1.0;
+    assert!(x2 - x < peg_r, "the press lies within the neighbour's ring radius");
+    ctx.propagate_event(&press(x, y), h.id());
+    ctx.propagate_event(&release(x, y), h.id());
+    assert_eq!(ctx[h].selected_key_idx, Some(1), "the face under the press");
 }
