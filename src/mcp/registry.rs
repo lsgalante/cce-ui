@@ -18,7 +18,9 @@
 //! live ones. Each entry names its Wayland display, and [`find`] returns
 //! only entries on the caller's: a popup in a shadow never reaches the
 //! user's live apps, nor the other way round. An entry with no display
-//! (written before the field existed) matches any caller.
+//! (written by a build from before the field existed) matches only a caller
+//! that knows no display of its own: it cannot say whose it is, and a stale
+//! app left running in some shadow must not answer a live popup.
 
 use std::fs;
 use std::io::{self, Write};
@@ -46,7 +48,7 @@ pub struct Entry {
     #[serde(default)]
     pub companions: Vec<String>,
     /// The app's `$WAYLAND_DISPLAY` (`wayland-0`); `None` from an older
-    /// build, which matches any caller.
+    /// build, which only a caller with no display of its own finds.
     #[serde(default)]
     pub display: Option<String>,
 }
@@ -142,13 +144,13 @@ pub fn read_all(dir: &Path) -> Vec<Entry> {
 
 /// The server for `app_id` on `display` (the caller's, as a rule:
 /// [`current_display`]): the one in process `pid` when given and
-/// registered, else the newest instance of the app. An entry on another
-/// display is never returned; one with no display, or a caller with none,
-/// matches.
+/// registered, else the newest instance of the app. A caller with a
+/// display finds only entries on that display; a caller with none (a script
+/// outside any session) finds every entry.
 pub fn find(dir: &Path, app_id: &str, pid: Option<u32>, display: Option<&str>) -> Option<Entry> {
-    let on_display = |e: &Entry| match (e.display.as_deref(), display) {
-        (Some(theirs), Some(ours)) => theirs == ours,
-        _ => true,
+    let on_display = |e: &Entry| match display {
+        Some(ours) => e.display.as_deref() == Some(ours),
+        None => true,
     };
     let mut of_app: Vec<Entry> = read_all(dir).into_iter().filter(|e| e.app_id == app_id && on_display(e)).collect();
     if let Some(pid) = pid {
@@ -232,12 +234,14 @@ mod tests {
         assert_eq!(find(&d, "cce-other", None, Some("wayland-0")), None);
         // Another session's display: a shadow never reaches the live apps.
         assert_eq!(find(&d, "cce-test", Some(mine.pid), Some("wayland-1")), None);
-        // A caller that knows no display, or an entry from an older build
-        // that names none, still matches.
+        // A caller that knows no display finds it.
         assert_eq!(find(&d, "cce-test", None, None), Some(mine.clone()));
+        // An entry from an older build names no display: no session's
+        // caller finds it, only one outside any session.
         let legacy = Entry { display: None, ..mine };
         write(&d, &legacy).unwrap();
-        assert_eq!(find(&d, "cce-test", None, Some("wayland-1")), Some(legacy));
+        assert_eq!(find(&d, "cce-test", None, Some("wayland-0")), None);
+        assert_eq!(find(&d, "cce-test", None, None), Some(legacy));
         fs::remove_dir_all(&d).unwrap();
     }
 

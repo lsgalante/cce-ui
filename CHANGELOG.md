@@ -10,6 +10,11 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-15
 
+- **A registry entry with no display is found only by a caller with none.** It was a stopgap
+  while the live apps were built before `Entry::display` existed; with all of them rebuilt
+  (designer last, 2026-10-15), a display-less entry can only be a stale app, typically one left
+  running in a shadow, and it must not answer a live popup. Unit-tested (a `wayland-0` caller no
+  longer finds a display-less entry; a caller with no display still does).
 - **Ramp key pegs are disc plates of frosted accent glass.** Each peg was a flat translucent
   circle with a rim of ~35 `ArcShaded` sub-arcs lit by hand from the light azimuth, and
   overlapping pegs were cut into foam cells (strips, shared walls, merged rim spans); none of it
