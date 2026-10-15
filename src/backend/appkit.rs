@@ -73,6 +73,8 @@ pub fn map_key(key_code: u16, characters: &str, unmodified: &str, accel: bool) -
         0x33 => typing(NamedKey::Backspace, "\u{8}"),
         0x35 => typing(NamedKey::Escape, "\u{1b}"),
         0x75 => typing(NamedKey::Delete, "\u{7f}"),
+        // Help: where a PC keyboard has Insert, which no Apple keyboard has.
+        0x72 => named(NamedKey::Insert),
         0x7B => named(NamedKey::ArrowLeft),
         0x7C => named(NamedKey::ArrowRight),
         0x7D => named(NamedKey::ArrowDown),
@@ -174,6 +176,8 @@ mod tests {
         // Backspace: AppKit's characters are DEL, xkb's text is BS.
         assert_eq!(map_key(0x33, "\u{7f}", "\u{7f}", false), Some((Key::Named(NamedKey::Backspace), Some("\u{8}".into()))));
         assert_eq!(map_key(0x75, "\u{F728}", "\u{F728}", false), Some((Key::Named(NamedKey::Delete), Some("\u{7f}".into()))));
+        // Help, where a PC keyboard's Insert is: Insert.
+        assert_eq!(map_key(0x72, "\u{F746}", "\u{F746}", false), Some((Key::Named(NamedKey::Insert), None)));
         assert_eq!(map_key(0x24, "\r", "\r", false), Some((Key::Named(NamedKey::Enter), Some("\r".into()))));
         assert_eq!(map_key(0x4C, "\u{3}", "\u{3}", false), Some((Key::Named(NamedKey::Enter), Some("\r".into()))));
         assert_eq!(map_key(0x30, "\t", "\t", false), Some((Key::Named(NamedKey::Tab), Some("\t".into()))));

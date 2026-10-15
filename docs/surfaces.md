@@ -29,7 +29,9 @@ History is in `CHANGELOG.md`; the material design record is `rfc-material.md`.
   `well_rim`), rounded at the panel radius (`layout::panel_corner_radius`) — except the
   ColorRamp's track, a control's height (`layout::ramp_height`), which takes the control
   radius so it is not a pill. With relief off a well is its frame, the one hairline
-  `color::well_frame_color`, lit in the highlight while active.
+  `color::well_frame_color`, lit in the highlight while active. A canvas well that has the
+  keyboard (a focused Slider2D pad, a Ramp's graph, a ColorRamp's track) lights its rim (`well_rim_lit`): the recess tinted in the
+  highlight, as a focused tree list's, or flat, the frame in its active colour.
 - **A disc plate** is `PaintCtx::plate_shaped(square, (r, r, r, r), &material, depth,
   Some(2.0))`: a `Plate` at the circular corner exponent, a true circle whatever
   `layout::corner_shape` is (a `Bevel` or a flat `rounded_rect` at half-side radii is a

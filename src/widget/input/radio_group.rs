@@ -216,11 +216,9 @@ impl Input for RadioGroup {
             .zip(&self.options)
             .enumerate()
             .map(|(i, (r, label))| crate::a11y::A11yItem {
-                role: accesskit::Role::RadioButton,
-                label: label.clone(),
-                rect: r,
                 toggled: Some(i == self.selected),
                 focused: self.focused && i == self.selected,
+                ..crate::a11y::A11yItem::new(accesskit::Role::RadioButton, label.clone(), r)
             })
             .collect()
     }

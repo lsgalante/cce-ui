@@ -23,6 +23,7 @@ pub fn map_key(key: &str, accel: bool) -> Option<(Key, Option<String>)> {
         "Backspace" => typing(NamedKey::Backspace, "\u{8}"),
         "Tab" => typing(NamedKey::Tab, "\t"),
         "Delete" => typing(NamedKey::Delete, "\u{7f}"),
+        "Insert" => named(NamedKey::Insert),
         " " => typing(NamedKey::Space, if accel { "\0" } else { " " }),
         "ArrowDown" => named(NamedKey::ArrowDown),
         "ArrowUp" => named(NamedKey::ArrowUp),
@@ -160,6 +161,7 @@ mod tests {
         assert_eq!(map_key("Backspace", false), Some((Key::Named(NamedKey::Backspace), Some("\u{8}".into()))));
         assert_eq!(map_key(" ", false), Some((Key::Named(NamedKey::Space), Some(" ".into()))));
         assert_eq!(map_key("ArrowLeft", false), Some((Key::Named(NamedKey::ArrowLeft), None)));
+        assert_eq!(map_key("Insert", false), Some((Key::Named(NamedKey::Insert), None)));
         assert_eq!(map_key("Dead", false), None);
         assert_eq!(map_key("Process", false), None);
     }

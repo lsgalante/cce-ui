@@ -444,8 +444,9 @@ pub trait Application: Sized + 'static {
     /// how a person who cannot use a pointer reaches anything. It needs the
     /// app's `ui_context_mut`, so an app without a widget tree is untouched
     /// (Tab reaches its `handle_key_input` as before); a focused widget that
-    /// takes Tab itself keeps it (`WidgetHost::keeps_tab`). An app that routes
-    /// Tab itself (its own field order, a completion popup) returns false.
+    /// takes Tab itself keeps it (`Input::keeps_tab`, asked with the direction).
+    /// An app that routes Tab itself (its own field order, a completion popup)
+    /// returns false.
     fn plate_navigation(&self) -> bool {
         true
     }

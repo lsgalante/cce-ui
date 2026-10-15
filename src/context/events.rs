@@ -101,10 +101,8 @@ impl UiContext {
                     | Key::Named(NamedKey::ArrowDown)
             );
             if is_scroll_key {
-                if let Some(focused) = self.focused_widget {
-                    if self.deliver(focused, event) {
-                        return true;
-                    }
+                if self.deliver_to_focus(event) {
+                    return true;
                 }
                 let (cx, cy) = self.cursor_pos;
                 if let Some(scrollable) = self.find_hovered_scrollable(root, cx, cy) {
@@ -199,10 +197,8 @@ impl UiContext {
 
         // For KeyInput, send directly to focused widget if it exists
         if let Event::KeyInput(_) = event {
-            if let Some(focused) = self.focused_widget {
-                if self.deliver(focused, event) {
-                    return true;
-                }
+            if self.deliver_to_focus(event) {
+                return true;
             }
         }
 
@@ -264,6 +260,21 @@ impl UiContext {
             }
         }
         handled
+    }
+
+    /// Hand a key to the keyboard: the focused widget, and when that is a field a composite
+    /// holds unregistered (`claim_field_focus`), which nothing can deliver to, the composite
+    /// ([`focus_holder`](Self::focus_holder)) — so the key reaches the part it is meant for
+    /// before a hovered scroll area or the tree walk can take it.
+    fn deliver_to_focus(&mut self, event: &Event) -> bool {
+        let Some(focused) = self.focused_widget else { return false };
+        if self.deliver(focused, event) {
+            return true;
+        }
+        match self.focus_holder() {
+            Some(holder) if holder != focused => self.deliver(holder, event),
+            _ => false,
+        }
     }
 
     pub(super) fn find_hovered_scrollable(&self, root: WidgetId, cx: f32, cy: f32) -> Option<WidgetId> {

@@ -62,6 +62,12 @@ impl Application for Mock {
     }
     fn handle_key_input(&mut self, event: &KeyEvent, _: &mut bool) -> Option<u32> {
         self.seen.push(Seen::Key(event.logical_key.clone(), event.repeat));
+        // With a widget tree, the key goes to it, as an app hands its widgets the keys.
+        if let Some(ctx) = self.ctx.as_mut() {
+            if let Some(holder) = ctx.focus_holder() {
+                ctx.propagate_event(&crate::widget::Event::KeyInput(event.clone()), holder);
+            }
+        }
         None
     }
     fn handle_focus_change(&mut self, focused: bool, _: &mut bool) {
@@ -115,7 +121,7 @@ fn tab_walks_the_stops_but_a_multi_line_box_keeps_it() {
     d.key(turn(&mut app, &mut f), tab.clone(), Some("\t".into()), ElementState::Pressed);
     assert_eq!(focused(&mut app), Some(notes.id()), "Tab leaves a one-line field");
     assert!(!app.seen.iter().any(|s| matches!(s, Seen::Key(k, _) if *k == tab)), "the walk took both");
-    assert!(app.ctx.as_ref().unwrap()[notes].keeps_tab(), "focused, the multi-line box is editing");
+    assert!(app.ctx.as_ref().unwrap()[notes].keeps_tab(false), "focused, the multi-line box is editing");
 
     d.key(turn(&mut app, &mut f), tab.clone(), Some("\t".into()), ElementState::Pressed);
     assert_eq!(focused(&mut app), Some(notes.id()), "the box keeps Tab");
@@ -124,6 +130,108 @@ fn tab_walks_the_stops_but_a_multi_line_box_keeps_it() {
     d.set_modifiers(&mut app, Modifiers { ctrl: true, shift: false, alt: false, logo: false });
     d.key(turn(&mut app, &mut f), tab.clone(), None, ElementState::Pressed);
     assert_eq!(focused(&mut app), Some(save.id()), "Ctrl+Tab leaves it");
+}
+
+/// A composite whose field has the keyboard keeps a bare Tab while it has a field to go that
+/// way: the runner asks the composite (the holder; its field is not registered), with the
+/// direction. Here it keeps Tab forward, which reaches the app; Shift+Tab leaves it.
+#[test]
+fn a_composite_keeps_tab_while_it_has_a_field_to_go() {
+    use crate::widget::test_composite::Composite;
+    use crate::widget::WidgetHost;
+    let tab = Key::Named(NamedKey::Tab);
+    let (mut d, mut app, mut f) = (driver(), mock(), Flags { redraw: false, exit: false });
+    let mut ctx = crate::context::UiContext::new();
+    let before = ctx.insert(crate::widget::Button::new(10.0, 10.0, 80.0, 24.0).with_label("Before"));
+    let c = ctx.insert(Composite::new());
+    ctx[c].set_rect(10.0, 50.0, 200.0, 100.0);
+    ctx[c].keeps = (true, false);
+    ctx.insert(crate::widget::Button::new(10.0, 200.0, 80.0, 24.0).with_label("After"));
+    let field = ctx[c].fields[0];
+    ctx.set_focused_id(c.id());
+    ctx.claim_field_focus(c.id(), field);
+    app.ctx = Some(ctx);
+    let focused = |app: &mut Mock| app.ctx.as_ref().unwrap().focused_widget;
+
+    d.key(turn(&mut app, &mut f), tab.clone(), Some("\t".into()), ElementState::Pressed);
+    assert_eq!(focused(&mut app), Some(field), "the composite keeps Tab");
+    assert_eq!(app.seen.last(), Some(&Seen::Key(tab.clone(), false)), "and the app hands it on");
+
+    d.set_modifiers(&mut app, Modifiers { ctrl: false, shift: true, alt: false, logo: false });
+    d.key(turn(&mut app, &mut f), tab.clone(), None, ElementState::Pressed);
+    assert_eq!(focused(&mut app), Some(before.id()), "Shift+Tab leaves it for the stop before");
+}
+
+/// Tab from the stop before a ramp enters it on its graph, walks its fields (the ramp keeps
+/// Tab, which the app hands it), and leaves for the next stop past its last; Shift+Tab comes
+/// back to the graph and leaves for the stop before.
+#[test]
+fn tab_enters_a_ramp_walks_its_fields_and_leaves() {
+    use crate::widget::{Button, Ramp, WidgetHost};
+    let tab = Key::Named(NamedKey::Tab);
+    let (mut d, mut app, mut f) = (driver(), mock(), Flags { redraw: false, exit: false });
+    let mut ctx = crate::context::UiContext::new();
+    let before = ctx.insert(Button::new(10.0, 10.0, 80.0, 24.0).with_label("Before"));
+    let ramp = ctx.insert(Ramp::new());
+    let natural = ctx[ramp].natural_height();
+    ctx[ramp].set_rect(10.0, 50.0, 300.0, natural);
+    let after = ctx.insert(Button::new(10.0, 60.0 + natural, 80.0, 24.0).with_label("After"));
+    let (preset, line) = (ctx[ramp].preset_dropdown.base().id(), ctx[ramp].line_type_dropdown.base().id());
+    ctx.set_focused_id(before.id());
+    app.ctx = Some(ctx);
+    let focused = |app: &mut Mock| app.ctx.as_ref().unwrap().focused_widget;
+
+    let mut walked = Vec::new();
+    for _ in 0..4 {
+        d.key(turn(&mut app, &mut f), tab.clone(), Some("\t".into()), ElementState::Pressed);
+        walked.push(focused(&mut app));
+    }
+    assert_eq!(walked, [Some(ramp.id()), Some(preset), Some(line), Some(after.id())], "the graph, its fields, the next stop");
+    assert!(!app.ctx.as_ref().unwrap()[ramp].line_type_dropdown.base().focused, "the field let go");
+
+    d.set_modifiers(&mut app, Modifiers { ctrl: false, shift: true, alt: false, logo: false });
+    d.key(turn(&mut app, &mut f), tab.clone(), None, ElementState::Pressed);
+    assert_eq!(focused(&mut app), Some(ramp.id()), "Shift+Tab back into the ramp lands on its graph");
+    d.key(turn(&mut app, &mut f), tab.clone(), None, ElementState::Pressed);
+    assert_eq!(focused(&mut app), Some(before.id()), "and from the graph leaves it");
+}
+
+/// The colour ramp likewise: with a key selected, Tab enters it on its track, walks its
+/// sliders and delete button, and leaves for the next stop; Shift+Tab comes back to the track.
+#[test]
+fn tab_enters_a_color_ramp_walks_its_fields_and_leaves() {
+    use crate::widget::{Button, ColorRamp, ColorRampKey, WidgetHost};
+    let tab = Key::Named(NamedKey::Tab);
+    let (mut d, mut app, mut f) = (driver(), mock(), Flags { redraw: false, exit: false });
+    let mut ctx = crate::context::UiContext::new();
+    let before = ctx.insert(Button::new(10.0, 10.0, 80.0, 24.0).with_label("Before"));
+    let mut cr = ColorRamp::new();
+    cr.keys.insert(1, ColorRampKey { pos: 0.5, color: [1.0, 0.0, 0.0] });
+    cr.selected_key_idx = Some(1);
+    let ramp = ctx.insert(cr);
+    let natural = ctx[ramp].natural_height();
+    ctx[ramp].set_rect(10.0, 50.0, 300.0, natural);
+    let after = ctx.insert(Button::new(10.0, 60.0 + natural, 80.0, 24.0).with_label("After"));
+    let r = &ctx[ramp];
+    let fields = [r.r_slider.base().id(), r.g_slider.base().id(), r.b_slider.base().id(), r.del_button.base().id()];
+    ctx.set_focused_id(before.id());
+    app.ctx = Some(ctx);
+    let focused = |app: &mut Mock| app.ctx.as_ref().unwrap().focused_widget;
+
+    let mut walked = Vec::new();
+    for _ in 0..6 {
+        d.key(turn(&mut app, &mut f), tab.clone(), Some("\t".into()), ElementState::Pressed);
+        walked.push(focused(&mut app));
+    }
+    let want = [Some(ramp.id()), Some(fields[0]), Some(fields[1]), Some(fields[2]), Some(fields[3]), Some(after.id())];
+    assert_eq!(walked, want, "the track, its fields, the next stop");
+    assert!(!app.ctx.as_ref().unwrap()[ramp].del_button.base().focused, "the field let go");
+
+    d.set_modifiers(&mut app, Modifiers { ctrl: false, shift: true, alt: false, logo: false });
+    d.key(turn(&mut app, &mut f), tab.clone(), None, ElementState::Pressed);
+    assert_eq!(focused(&mut app), Some(ramp.id()), "Shift+Tab back into the ramp lands on its track");
+    d.key(turn(&mut app, &mut f), tab.clone(), None, ElementState::Pressed);
+    assert_eq!(focused(&mut app), Some(before.id()), "and from the track leaves it");
 }
 
 /// A driver with known chords, whatever the machine's input.kdl says.

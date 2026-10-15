@@ -1,24 +1,31 @@
 //! The ramp editors. [`Ramp`] is a Houdini-style float ramp: keys on a curve over a plot, a
 //! preset and line-type dropdown, and while a key is selected a 2-axis key pad (its position
-//! and value) and a delete button. Those controls are the ramp's own values, never registered:
-//! the window's focus record names the one with the keyboard and the ramp hands it the keys
-//! (`focus_field`). A hover-scroll over a key steers it and coasts. [`ColorRamp`] is the colour
-//! gradient: keys of colour along a bar, the selected one edited by R, G and B sliders. A
-//! ramp's spec string is `cce_core::ramp`'s (`format_ramp_spec` / `parse_ramp_spec`, re-exported
-//! here).
+//! and value) and — with more than two keys — a delete button. A hover-scroll over a key
+//! steers it and coasts. [`ColorRamp`] is the colour gradient: keys of colour along a bar, the
+//! selected one edited by R, G and B sliders and — with more than two keys — a delete button.
+//! Each ramp's controls are its own values, never registered. Each ramp is one keyboard stop
+//! whose fields take the keyboard in turn ([`Fields`], which both share): the ramp itself (its
+//! graph or track: the ramp's own id focused), then each control, which the window's focus
+//! record names with the ramp as its owner (`claim_field_focus`); the ramp hands it the keys.
+//! To a screen reader each is a group of its keys and controls (`a11y_items`). A ramp's spec
+//! string is `cce_core::ramp`'s (`format_ramp_spec` / `parse_ramp_spec`, re-exported here).
 //!
 //! | module | holds |
 //! |---|---|
-//! | `mod.rs` | the float `Ramp`: its key, construction, presets, the spec in and out, `impl Layout`; and what both ramps share: resettling a moved key, peg order and the topmost-peg hit test, the closed point test, parking a field |
+//! | `mod.rs` | the float `Ramp`: its key, construction, presets, the spec in and out, `impl Layout`; and what both ramps share: the keyboard on their fields and keys (`Fields`), resettling a moved key, peg order and the topmost-peg hit test, the closed point test, parking a field |
 //! | `geometry` | the plot, the key pegs (size, order, hit test), where a dragged key lands, the controls' places |
 //! | `paint` | `impl Paint for Ramp` |
-//! | `input` | `impl Input for Ramp`: key drags, the hover-scroll, the controls and their focus |
+//! | `input` | `impl Input for Ramp`: key drags, the hover-scroll, its fields and keys (`impl Fields`), the accessibility items |
 //! | `color` | the `ColorRamp` widget whole |
 
 mod color;
 mod geometry;
 mod input;
 mod paint;
+#[cfg(test)]
+mod color_keyboard_tests;
+#[cfg(test)]
+mod keyboard_tests;
 #[cfg(test)]
 mod tests;
 
@@ -51,6 +58,8 @@ pub struct Ramp {
     pub selected_key_idx: Option<usize>,
     pub is_dragging_key: bool,
     pub just_changed: bool,
+    /// Where the keyboard is among the fields ([`GRAPH`] … [`DELETE`]; [`Fields`]).
+    walk: FieldWalk,
     /// The key latched by the current hover-scroll gesture: a trackpad
     /// scroll starting over a key steers that key until the fingers lift
     /// (a >250ms pause reads as a new gesture and re-latches by hover).
@@ -77,8 +86,31 @@ pub struct Ramp {
     pub line_type_dropdown: Adapted<Dropdown>,
 }
 
-/// How many fields the float ramp has: the two dropdowns, the key pad, the delete button.
-const FIELD_TOTAL: usize = 4;
+/// The float ramp's fields, in the order Tab walks them ([`Fields`]): the graph (the ramp
+/// itself), the two dropdowns, the key pad and the delete button.
+const GRAPH: usize = OWN;
+const PRESET: usize = 1;
+const LINE: usize = 2;
+const PAD: usize = 3;
+const DELETE: usize = 4;
+/// How many fields the float ramp has.
+const FIELD_TOTAL: usize = 5;
+
+/// The key a graph's arrow, Home or End selects among `n` keys, from `sel`: Left / Up the one
+/// before and Right / Down the one after, wrapping (with none selected, Right takes the first
+/// and Left the last), Home and End the ends — a radio group's keys. `None` for any other key.
+fn key_to_select(key: &Key, n: usize, sel: Option<usize>) -> Option<usize> {
+    if n == 0 {
+        return None;
+    }
+    Some(match key {
+        Key::Named(NamedKey::ArrowRight | NamedKey::ArrowDown) => sel.map_or(0, |i| (i + 1) % n),
+        Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowUp) => sel.map_or(n - 1, |i| (i + n - 1) % n),
+        Key::Named(NamedKey::Home) => 0,
+        Key::Named(NamedKey::End) => n - 1,
+        _ => return None,
+    })
+}
 
 /// Restore sort order after `keys[i]` changed position (`pos` reads a key's), by adjacent
 /// swaps, and return the key's new index — both ramps' `resettle_key`. The moved key is
@@ -125,49 +157,276 @@ fn park(w: &mut dyn WidgetHost) {
     w.set_rect(-1000.0, -1000.0, 0.0, 0.0);
 }
 
-impl Ramp {
-    /// How many fields take the keyboard, in order: the two dropdowns, then the key pad and
-    /// the delete button while a key is selected.
-    fn field_count(&self) -> usize {
-        if self.selected_key_idx.is_some() { FIELD_TOTAL } else { 2 }
+/// The field that is the ramp itself, first in the walk: its graph (the float ramp) or track
+/// (the colour ramp), the keyboard on it while the window's focus record names the ramp.
+const OWN: usize = 0;
+
+/// Where a ramp's keyboard is among its fields ([`Fields`]), beside the window's focus record.
+#[derive(Debug, Default)]
+pub(super) struct FieldWalk {
+    /// The field with the keyboard while the ramp holds it: kept here for what has no
+    /// context to ask — `keeps_tab`, the lit rim — and matched to the window's focus record
+    /// at every tick ([`Fields::follow_focus`]).
+    at: Option<usize>,
+    /// A screen reader's Click on an item, waiting for the context (`a11y_select_item` has
+    /// none): the field to give the keyboard, and whether to press it as Space does. The
+    /// next tick carries it out.
+    reader_request: Option<(usize, bool)>,
+}
+
+/// The keyboard on a ramp, which both ramps share. A ramp is one Tab stop whose fields take
+/// the keyboard in turn: field [`OWN`] is the ramp itself, and the rest are controls it holds
+/// by value and never registers, which the window's focus record names with the ramp as their
+/// owner (`UiContext::claim_field_focus`; a control checks the record before it takes a key).
+/// Keys reach the ramp, which hands them to the field with the keyboard. On the ramp itself
+/// the keys pick and edit the ramp's keys ([`own_key`](Self::own_key)). Each ramp says what
+/// its fields and keys are; the walk is here.
+trait Fields {
+    /// How many fields the ramp has at most, itself included.
+    const TOTAL: usize;
+    /// How many fields take the keyboard now, in walk order, the ramp itself first.
+    fn field_count(&self) -> usize;
+    /// Control field `i` (`1..TOTAL`).
+    fn field(&mut self, i: usize) -> &mut dyn WidgetHost;
+    /// Control field `i`'s id, which the window's focus record names while it has the
+    /// keyboard.
+    fn field_id(&self, i: usize) -> WidgetId;
+    fn walk(&self) -> &FieldWalk;
+    fn walk_mut(&mut self) -> &mut FieldWalk;
+    /// Hand `event`, a key press, to field `i`; whether it was used.
+    fn field_key(&mut self, i: usize, event: &KeyEvent, own: WidgetId, ui: &mut UiContext) -> bool;
+
+    /// How many keys the ramp has, which is selected, and key `i`'s position.
+    fn key_count(&self) -> usize;
+    fn selected_key(&self) -> Option<usize>;
+    fn key_pos(&self, i: usize) -> f32;
+    /// Select key `idx`, the controls showing it and placed.
+    fn pick_key(&mut self, idx: usize);
+    /// Add a key on the ramp at `pos` (its value or colour what the ramp is there), the keys
+    /// in order and the ramp marked changed; returns the new key's index.
+    fn add_key_at(&mut self, pos: f32) -> usize;
+    /// Delete the selected key as the mouse does, leaving none selected.
+    fn remove_selected_key(&mut self);
+    /// The delete button, a field.
+    fn delete_button(&mut self) -> &mut Adapted<Button>;
+
+    /// Whether the delete button is shown: while a key is selected and the ramp has more
+    /// than the two keys it keeps. With two it is hidden — parked, unpainted, no Tab stop —
+    /// rather than shown doing nothing (a button has no disabled state).
+    fn deletable(&self) -> bool {
+        self.selected_key().is_some() && self.key_count() > 2
     }
 
-    fn field(&mut self, i: usize) -> &mut dyn WidgetHost {
-        match i {
-            0 => &mut self.preset_dropdown,
-            1 => &mut self.line_type_dropdown,
-            2 => &mut self.key_pad,
-            _ => &mut self.del_button,
-        }
-    }
-
-    fn field_id(&self, i: usize) -> WidgetId {
-        match i {
-            0 => self.preset_dropdown.base().id(),
-            1 => self.line_type_dropdown.base().id(),
-            2 => self.key_pad.base().id(),
-            _ => self.del_button.base().id(),
-        }
-    }
-
-    /// The field the window's focus is on, if it is one of the ramp's.
-    fn focused_field(&self, ui: &UiContext) -> Option<usize> {
+    /// The field the window's focus is on, if it is one of the ramp's: the ramp itself when
+    /// the record names the ramp (`own`), a control when it names that control.
+    fn focused_field(&self, own: WidgetId, ui: &UiContext) -> Option<usize> {
         let focused = ui.focused_widget?;
-        (0..FIELD_TOTAL).find(|&i| self.field_id(i) == focused)
+        if focused == own {
+            return Some(OWN);
+        }
+        (1..Self::TOTAL).find(|&i| self.field_id(i) == focused)
     }
 
-    /// Give field `i` the keyboard: the window's focus record names it (a field checks the
-    /// record before it takes a key), and it is told. The field is the ramp's own value and
-    /// never enters the registry; keys reach the ramp, which hands them to the field the
-    /// record names (`on_event`).
-    fn focus_field(&mut self, i: usize, ui: &mut UiContext) {
-        if let Some(old) = self.focused_field(ui).filter(|&o| o != i) {
+    /// Give field `i` the keyboard: the ramp itself is its own focus (`own`); a control is
+    /// named by the window's focus record with the ramp as its owner, and it is told.
+    fn focus_field(&mut self, i: usize, own: WidgetId, ui: &mut UiContext) {
+        if let Some(old) = self.focused_field(own, ui).filter(|&o| o != i && o != OWN) {
             self.field(old).unfocus();
         }
-        ui.claim_focus(self.field_id(i));
-        self.field(i).focus();
+        if i == OWN {
+            ui.claim_focus(own);
+        } else {
+            ui.claim_field_focus(own, self.field_id(i));
+            self.field(i).focus();
+        }
+        self.walk_mut().at = Some(i);
     }
 
+    /// A control's own press that claims the keyboard for itself (a dropdown's,
+    /// `EventCtx::request_focus`, its bare id): record the ramp as its owner, so the Tab
+    /// walk, `keeps_tab` and a reader find the keyboard in the ramp.
+    fn adopt_pressed_field(&mut self, own: WidgetId, ui: &mut UiContext) {
+        let Some(i) = (1..Self::TOTAL).find(|&i| ui.focused_widget == Some(self.field_id(i))) else { return };
+        if let Some(old) = self.walk().at.filter(|&o| o != i && o != OWN) {
+            self.field(old).unfocus();
+        }
+        ui.claim_field_focus(own, self.field_id(i));
+        self.walk_mut().at = Some(i);
+    }
+
+    /// `Input::keeps_tab`: Tab stays in the ramp while it has a field to go that way; past
+    /// its last field (or, Shift+Tab, before the ramp itself) the walk leaves it.
+    fn keeps_field_tab(&self, reverse: bool) -> bool {
+        let at = self.walk().at.unwrap_or(OWN);
+        if reverse { at > OWN } else { at + 1 < self.field_count() }
+    }
+
+    /// A key the ramp is handed (`Event::KeyInput`). Tab walks the fields — the runner's walk
+    /// takes Tab past the last (or, with Shift, the first) field (`keeps_tab`), and a Tab the
+    /// ramp is handed anyway wraps; with the keyboard elsewhere it enters on the ramp
+    /// itself. Any other press goes to the field with the keyboard.
+    fn walk_key(&mut self, event: &KeyEvent, own: WidgetId, ui: &mut UiContext) -> bool {
+        if event.state != ElementState::Pressed {
+            return false;
+        }
+        let count = self.field_count();
+        let current = self.focused_field(own, ui).filter(|&i| i < count);
+        if event.logical_key == Key::Named(NamedKey::Tab) {
+            let next = match current {
+                Some(curr) if event.shift => if curr == 0 { count - 1 } else { curr - 1 },
+                Some(curr) => (curr + 1) % count,
+                None => OWN,
+            };
+            self.focus_field(next, own, ui);
+            return true;
+        }
+        match current {
+            Some(i) => self.field_key(i, event, own, ui),
+            None => false,
+        }
+    }
+
+    /// A key on the ramp itself: the arrows, Home and End select a key ([`key_to_select`]),
+    /// Delete or Backspace deletes the selected one
+    /// ([`delete_from_keyboard`](Self::delete_from_keyboard)), Insert adds one
+    /// ([`insert_key`](Self::insert_key)). Returns whether it was one of those.
+    fn own_key(&mut self, key: &Key) -> bool {
+        match key {
+            Key::Named(NamedKey::Delete | NamedKey::Backspace) => self.delete_from_keyboard(),
+            Key::Named(NamedKey::Insert) => self.insert_key(),
+            _ => match key_to_select(key, self.key_count(), self.selected_key()) {
+                Some(idx) => {
+                    self.pick_key(idx);
+                    true
+                }
+                None => false,
+            },
+        }
+    }
+
+    /// A key on the focused delete button: Enter or Space presses it, and its click is read
+    /// here, at once (left unread, it fired on the next mouse press on the button). The key
+    /// goes as [`delete_from_keyboard`](Self::delete_from_keyboard) deletes, and when that
+    /// hides the button the keyboard goes back to the ramp itself.
+    fn delete_button_key(&mut self, event: &KeyEvent, own: WidgetId, ui: &mut UiContext) -> bool {
+        let used = self.delete_button().keyboard_input(event, ui);
+        if self.delete_button().take_click() {
+            self.delete_from_keyboard();
+            if !self.deletable() {
+                self.focus_field(OWN, own, ui);
+            }
+        }
+        used
+    }
+
+    /// Delete the selected key from the keyboard — Delete on the ramp itself, the delete
+    /// button pressed from the keyboard or by a reader — and select its neighbour (the key
+    /// after it, else the one before), so a keyboard user can go on. A ramp keeps two keys
+    /// at least. Returns whether a key went.
+    fn delete_from_keyboard(&mut self) -> bool {
+        let Some(idx) = self.selected_key().filter(|_| self.key_count() > 2) else { return false };
+        self.remove_selected_key();
+        self.pick_key(idx.min(self.key_count() - 1));
+        true
+    }
+
+    /// Add a key halfway from the selected key (else the first) to the next (from the last,
+    /// to the one before), on the ramp there, and select it — Insert on the ramp itself, the
+    /// keyboard's way to make a key a press on the ramp makes.
+    fn insert_key(&mut self) -> bool {
+        let n = self.key_count();
+        if n == 0 {
+            return false;
+        }
+        let a = self.selected_key().unwrap_or(0).min(n - 1);
+        let b = if a + 1 < n { a + 1 } else { a.saturating_sub(1) };
+        let idx = self.add_key_at((self.key_pos(a) + self.key_pos(b)) / 2.0);
+        self.pick_key(idx);
+        true
+    }
+
+    /// A reader's Click on a key item, the key selected: the keyboard goes to the ramp
+    /// itself at the next tick, unless it is there. Whether that is a change.
+    fn reader_to_own(&mut self) -> bool {
+        let moves = self.walk().at != Some(OWN);
+        if moves {
+            self.walk_mut().reader_request = Some((OWN, false));
+        }
+        moves
+    }
+
+    /// A reader's Click on control field `i`'s item: at the next tick the control takes the
+    /// keyboard and, with `press`, the key Space.
+    fn reader_to_field(&mut self, i: usize, press: bool) {
+        self.walk_mut().reader_request = Some((i, press));
+    }
+
+    /// At every tick (`tick_ctx`): carry out a reader's Click, now there is a context — while
+    /// the keyboard is still the ramp's (the click put it here) — and keep the field with the
+    /// keyboard in step with the window's focus record. A field the record moved away from is
+    /// told here: the fields are not in the registry, so the focus change could not reach
+    /// them itself. A field that has gone with the keyboard on it (as the selection or a key
+    /// goes) hands it back to the ramp itself. Returns whether anything changed.
+    fn follow_focus(&mut self, own: WidgetId, ui: &mut UiContext) -> bool {
+        let mut changed = false;
+        if let Some((i, press)) = self.walk_mut().reader_request.take() {
+            if ui.focus_holder() == Some(own) && i < self.field_count() {
+                self.focus_field(i, own, ui);
+                if press {
+                    let space = KeyEvent {
+                        logical_key: Key::Named(NamedKey::Space),
+                        state: ElementState::Pressed,
+                        text: Some(" ".into()),
+                        repeat: false,
+                        ctrl: false,
+                        shift: false,
+                        alt: false,
+                    };
+                    self.field_key(i, &space, own, ui);
+                }
+                changed = true;
+            }
+        }
+        let focused = match self.focused_field(own, ui) {
+            Some(i) if i >= self.field_count() => {
+                self.focus_field(OWN, own, ui);
+                changed = true;
+                Some(OWN)
+            }
+            f => f,
+        };
+        if focused != self.walk().at {
+            self.walk_mut().at = focused;
+            changed = true;
+        }
+        for i in 1..Self::TOTAL {
+            if Some(i) != focused && self.field(i).base().focused {
+                self.field(i).unfocus();
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// `FocusIn`: focused itself — by the Tab walk (either way), a click, a reader — the ramp
+    /// takes the keyboard on itself, and a control that had it lets go.
+    fn walk_focus_in(&mut self) {
+        if let Some(old) = self.walk().at.filter(|&o| o != OWN) {
+            self.field(old).unfocus();
+        }
+        self.walk_mut().at = Some(OWN);
+    }
+
+    /// `FocusOut`: the keyboard has left the ramp, and every control lets go.
+    fn walk_focus_out(&mut self) {
+        self.walk_mut().at = None;
+        for i in 1..Self::TOTAL {
+            self.field(i).unfocus();
+        }
+    }
+}
+
+impl Ramp {
     pub fn new() -> Adapted<Ramp> {
         let keys = vec![
             RampKey { pos: 0.0, value: 0.5 },
@@ -211,6 +470,7 @@ impl Ramp {
             selected_key_idx: None,
             is_dragging_key: false,
             just_changed: false,
+            walk: FieldWalk::default(),
             scroll_key_idx: None,
             controls_collapsed: false,
             scroll_vel: (0.0, 0.0),
@@ -234,8 +494,8 @@ impl Ramp {
         self.just_changed = true;
     }
 
-    /// Delete the selected key — what the delete button does, clicked or pressed from the
-    /// keyboard. A ramp keeps two keys at least: with two, nothing happens.
+    /// Delete the selected key — what a click on the delete button does; nothing is selected
+    /// after. A ramp keeps two keys at least: with two, nothing happens.
     pub fn delete_selected(&mut self) {
         if let Some(idx) = self.selected_key_idx {
             if self.keys.len() > 2 {

@@ -8,6 +8,7 @@
 //! | `events` | the input vocabulary (`Event`, keys, buttons, wheel deltas) and shortcut matching |
 //! | `host` | `WidgetHost`, the surface the machinery sees, and `WidgetHostExt`'s derived reads |
 //! | `controllers` | the traits a host drives a widget through (`MenuController`, `GraphController`, …) |
+//! | `test_composite` | tests only: `Composite`, a stand-in for a widget whose parts take the keyboard unregistered |
 
 mod controllers;
 mod events;
@@ -17,6 +18,8 @@ pub mod painter;
 /// `WidgetTree`: the widget forest on `scene::Arena` (parents, children, ownership).
 pub mod tree;
 pub use tree::WidgetTree;
+#[cfg(test)]
+pub(crate) mod test_composite;
 
 pub use controllers::*;
 pub use events::*;

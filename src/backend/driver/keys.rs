@@ -223,11 +223,12 @@ impl Driver {
         if !app.plate_navigation() {
             return false;
         }
-        // A focused widget that types Tab (a multi-line text box) keeps a bare Tab; the
-        // group chord still leaves it.
+        // A focused widget that types Tab (a multi-line text box), or a composite with a
+        // field still to go that way, keeps a bare Tab; the group chord still leaves it.
+        // Asked of the holder: a composite's field is not registered, the composite is.
         if bare_tab
             && app.ui_context_mut().is_some_and(|ctx| {
-                ctx.focused_widget.and_then(|id| ctx.get_widget(id)).is_some_and(|w| w.keeps_tab())
+                ctx.focus_holder().and_then(|id| ctx.get_widget(id)).is_some_and(|w| w.keeps_tab(reverse))
             })
         {
             return false;

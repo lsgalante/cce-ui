@@ -121,6 +121,7 @@ pub(super) fn xkb_logical_key(event: &smithay_client_toolkit::seat::keyboard::Ke
         // the shift modifier, matching winit.
         xkeysym::Keysym::Tab | xkeysym::Keysym::ISO_Left_Tab => Key::Named(NamedKey::Tab),
         xkeysym::Keysym::Delete => Key::Named(NamedKey::Delete),
+        xkeysym::Keysym::Insert => Key::Named(NamedKey::Insert),
         xkeysym::Keysym::space => Key::Named(NamedKey::Space),
         xkeysym::Keysym::Page_Up => Key::Named(NamedKey::PageUp),
         xkeysym::Keysym::Page_Down => Key::Named(NamedKey::PageDown),

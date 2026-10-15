@@ -170,9 +170,12 @@ pub trait Input {
 
     /// Whether, focused, this widget takes Tab itself, so the toolkit's Tab walk
     /// (`Application::plate_navigation`) passes it the key instead of moving focus: a
-    /// multi-line text box that is editing types it. The group chord (`focus_next_group`,
-    /// Ctrl+Tab by default) still leaves it. Default false: Tab leaves a widget.
-    fn keeps_tab(&self) -> bool {
+    /// multi-line text box that is editing types it, and a composite whose fields take the
+    /// keyboard in turn keeps Tab until its last field (`reverse`: Shift+Tab, until its
+    /// first). Asked of the widget that holds the keyboard (`UiContext::focus_holder`), so
+    /// a composite answers for its fields. The group chord (`focus_next_group`, Ctrl+Tab by
+    /// default) still leaves it. Default false: Tab leaves a widget.
+    fn keeps_tab(&self, _reverse: bool) -> bool {
         false
     }
 
@@ -231,6 +234,13 @@ pub trait Input {
     /// An assistive tool clicked item `idx` of [`a11y_items`](Input::a11y_items): do what a
     /// press on it does, reported as a change. Returns whether anything changed.
     fn a11y_select_item(&mut self, _idx: usize) -> bool {
+        false
+    }
+
+    /// An assistive tool set item `idx`'s value (AT-SPI's `SetCurrentValue` on an item with
+    /// a range): as [`a11y_set_value`](Input::a11y_set_value), for that part. Returns
+    /// whether it changed. Default: not settable.
+    fn a11y_set_item_value(&mut self, _idx: usize, _value: f64) -> bool {
         false
     }
 

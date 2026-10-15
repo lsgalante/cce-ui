@@ -78,7 +78,10 @@ pub enum Acted {
 ///   that drains changes in `tick` sees it this turn; one that drains them only in its
 ///   input handlers sees it at the next input.
 /// - **Click** on a widget's item (a radio button, `a11y::A11yItem`) does what a press on it
-///   does (`WidgetHost::a11y_select_item`) and puts the keyboard on its widget.
+///   does (`WidgetHost::a11y_select_item`) and puts the keyboard on its widget, unless the
+///   widget holds it already (through a field of its: `UiContext::focus_holder`) —
+///   [`item_click`]. **SetValue** with a number on an item with a range sets that part
+///   (`WidgetHost::a11y_set_item_value`), focus untouched ([`set_item_value`]).
 /// - **Click** on an open context menu's row runs it as a press on it would, wherever it is
 ///   drawn ([`menu_click`]): the row's action, a page row's turn, or — a row the app owns —
 ///   the pick the app takes with `context_menu::take_picked`.
@@ -101,20 +104,18 @@ pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> Acted {
         return menu_click(row, app.ui_context_mut());
     }
     if let Some((id, idx)) = crate::a11y::item_of(request.target_node) {
-        // A click on a widget's item (a radio button): what a press on it does, and the
-        // keyboard goes to its widget, as after a press.
-        if request.action != Action::Click {
-            return Acted::Nothing;
-        }
         let Some(ctx) = app.ui_context_mut() else { return Acted::Nothing };
-        if !ctx.get_widget_mut(id).is_some_and(|w| w.a11y_select_item(idx)) {
-            return Acted::Nothing;
-        }
-        if ctx.focused_widget != Some(id) {
-            ctx.set_focused_id(id);
-            app.focus_stepped();
-        }
-        return Acted::Changed;
+        return match request.action {
+            Action::Click => {
+                let (acted, moved) = item_click(ctx, id, idx);
+                if moved {
+                    app.focus_stepped();
+                }
+                acted
+            }
+            Action::SetValue => set_item_value(ctx, id, idx, request.data.as_ref()),
+            _ => Acted::Nothing,
+        };
     }
     if let Some(n) = crate::a11y::app_node_of(request.target_node) {
         return if app_action(request).is_some_and(|action| app.accessibility_action(n, action)) { Acted::Changed } else { Acted::Nothing };
@@ -137,6 +138,29 @@ pub fn act<A: Application>(app: &mut A, request: &ActionRequest) -> Acted {
         app.focus_stepped();
     }
     key.map_or(Acted::Changed, Acted::Key)
+}
+
+/// A reader's Click on item `idx` of widget `id` (a radio button, a ramp's key): what a press
+/// on it does (`WidgetHost::a11y_select_item`), and the keyboard goes to the widget, as after
+/// a press — unless the widget holds it already, itself or through one of its fields
+/// (`UiContext::focus_holder`), whose focus the click leaves where it is. Answers what was
+/// done and whether the focus moved.
+pub fn item_click(ctx: &mut crate::context::UiContext, id: crate::widget::WidgetId, idx: usize) -> (Acted, bool) {
+    if !ctx.get_widget_mut(id).is_some_and(|w| w.a11y_select_item(idx)) {
+        return (Acted::Nothing, false);
+    }
+    let moved = ctx.focus_holder() != Some(id);
+    if moved {
+        ctx.set_focused_id(id);
+    }
+    (Acted::Changed, moved)
+}
+
+/// A reader's `SetValue` on item `idx` of widget `id`, a number for a part with a range
+/// (`WidgetHost::a11y_set_item_value`), focus untouched as in [`set_value`].
+pub fn set_item_value(ctx: &mut crate::context::UiContext, id: crate::widget::WidgetId, idx: usize, data: Option<&ActionData>) -> Acted {
+    let Some(ActionData::NumericValue(value)) = data else { return Acted::Nothing };
+    if ctx.get_widget_mut(id).is_some_and(|w| w.a11y_set_item_value(idx, *value)) { Acted::Changed } else { Acted::Nothing }
 }
 
 /// A reader's Click on row `row` of the open context menu: run as a press on it would be
@@ -305,6 +329,34 @@ mod tests {
         ctx[name].disabled = true;
         assert_eq!(set_value(&mut ctx, name.id(), Some(&text("Hopper"))), Acted::Nothing, "a disabled field");
         assert_eq!(set_value(&mut ctx, crate::widget::WidgetId(usize::MAX), Some(&text("x"))), Acted::Nothing, "nothing there");
+    }
+
+    /// A reader's Click on a composite's item selects it and puts the keyboard on the
+    /// composite — but where a field of the composite has the keyboard already, the field
+    /// keeps it. SetValue sets an item with a range by number, focus untouched.
+    #[test]
+    fn a_readers_click_on_an_item_leaves_the_keyboard_on_its_composites_field() {
+        use crate::widget::test_composite::Composite;
+        let mut ctx = UiContext::new();
+        let c = ctx.insert(Composite::new());
+        let other = ctx.insert(TextBox::new(String::new()));
+        ctx.set_focused_id(other.id());
+        assert_eq!(item_click(&mut ctx, c.id(), 0), (Acted::Changed, true));
+        assert!(ctx[c].key_selected && ctx.is_focused_id(c.id()), "selected, and the keyboard came with it");
+        assert_eq!(item_click(&mut ctx, c.id(), 0), (Acted::Nothing, false), "already selected");
+
+        ctx[c].key_selected = false;
+        let field = ctx[c].fields[1];
+        ctx.claim_field_focus(c.id(), field);
+        assert_eq!(item_click(&mut ctx, c.id(), 0), (Acted::Changed, false));
+        assert_eq!(ctx.focused_widget, Some(field), "the field keeps the keyboard");
+
+        let n = ActionData::NumericValue(0.5);
+        assert_eq!(set_item_value(&mut ctx, c.id(), 1, Some(&n)), Acted::Changed);
+        assert_eq!(ctx[c].position, 0.5);
+        assert_eq!(ctx.focused_widget, Some(field), "focus untouched");
+        assert_eq!(set_item_value(&mut ctx, c.id(), 0, Some(&n)), Acted::Nothing, "a key has no value to set");
+        assert_eq!(set_item_value(&mut ctx, c.id(), 1, Some(&ActionData::Value("0.7".into()))), Acted::Nothing, "set by number");
     }
 
     /// A reader's Click on a context-menu row the app owns lands in the pick the app takes,

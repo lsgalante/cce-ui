@@ -8,7 +8,9 @@ impl UiContext {
         if self.focused_widget == Some(id) {
             return;
         }
-        if let Some(old_id) = self.focused_widget {
+        // The holder is told, not the field: a composite whose field had the keyboard hears
+        // FocusOut, unless the focus is coming back to it.
+        if let Some(old_id) = self.focus_holder().filter(|old| *old != id) {
             self.lend(old_id, |w, ctx| {
                 w.unfocus();
                 w.handle_event(&Event::FocusOut, ctx);
@@ -29,6 +31,35 @@ impl UiContext {
         self.focused_widget == Some(id)
     }
 
+    /// Give the keyboard to `field`, a part `owner` holds by value and never registers (a
+    /// ramp's dropdown or key pad), from inside `owner`'s own event handling, as
+    /// [`claim_focus`](Self::claim_focus) does for a widget itself: recorded, the holder
+    /// before told (`unfocus`) unless it is `owner`, nothing delivered. The focus record
+    /// names `field`, which the owner checks before handing a field a key; everything that
+    /// asks where the keyboard is in the window — the Tab walk, key delivery, `keeps_tab`,
+    /// the accessibility tree — asks [`focus_holder`](Self::focus_holder), which answers
+    /// `owner`.
+    pub fn claim_field_focus(&mut self, owner: WidgetId, field: WidgetId) {
+        if let Some(old) = self.focus_holder().filter(|old| *old != owner && *old != field) {
+            if let Some(ptr) = self.tree.get_ptr(old) {
+                // SAFETY: a registry-resolved live widget other than the claimant.
+                unsafe { (*ptr).unfocus() };
+            }
+        }
+        self.focused_widget = Some(field);
+        self.field_owner = Some((field, owner));
+    }
+
+    /// The widget that holds the keyboard: the focused one, or — when the focus is a field
+    /// a composite claimed ([`claim_field_focus`](Self::claim_field_focus)) — that composite.
+    pub fn focus_holder(&self) -> Option<WidgetId> {
+        let focused = self.focused_widget?;
+        match self.field_owner {
+            Some((field, owner)) if field == focused => Some(owner),
+            _ => Some(focused),
+        }
+    }
+
     /// Offer a context action to the focused widget — the runner's first stop
     /// for the `undo` / `redo` chords. Returns whether the widget applied it;
     /// a widget that did is marked dirty.
@@ -45,7 +76,9 @@ impl UiContext {
     }
 
     pub fn clear_focus(&mut self) {
-        if let Some(id) = self.focused_widget.take() {
+        let holder = self.focus_holder();
+        self.focused_widget = None;
+        if let Some(id) = holder {
             self.lend(id, |w, ctx| {
                 w.unfocus();
                 w.handle_event(&Event::FocusOut, ctx);
@@ -64,7 +97,7 @@ impl UiContext {
             scope.members = members;
             return;
         }
-        let restore = self.focused_widget;
+        let restore = self.focus_holder();
         self.modals.push(ModalScope { owner, members, restore });
         match self.focus_stops().first() {
             Some(&first) => self.set_focused_id(first),
@@ -113,7 +146,7 @@ impl UiContext {
     /// (`EventCtx::request_focus`; a tree list on a click into its rows), setting whatever
     /// its FocusIn would have set itself.
     pub fn claim_focus(&mut self, id: WidgetId) {
-        if let Some(old) = self.focused_widget.filter(|old| *old != id) {
+        if let Some(old) = self.focus_holder().filter(|old| *old != id) {
             if let Some(ptr) = self.tree.get_ptr(old) {
                 // SAFETY: a registry-resolved live widget other than the claimant.
                 unsafe { (*ptr).unfocus() };
@@ -129,7 +162,7 @@ impl UiContext {
     /// phase 2); a focus change the context should announce with FocusIn / FocusOut is
     /// [`set_focused_id`](Self::set_focused_id).
     pub fn focus_id(&mut self, id: WidgetId) {
-        if let Some(old) = self.focused_widget.filter(|old| *old != id) {
+        if let Some(old) = self.focus_holder().filter(|old| *old != id) {
             if let Some(w) = self.get_widget_mut(old) {
                 w.unfocus();
             }
@@ -141,10 +174,10 @@ impl UiContext {
     }
 
     /// Unfocus `id` as a direct `w.unfocus()` did, and drop the window's record of focus if
-    /// it was `id` — which a direct call never did, leaving the Tab walk and the
-    /// accessibility tree on a widget that had let go.
+    /// `id` held it (itself or through a field of its) — which a direct call never did,
+    /// leaving the Tab walk and the accessibility tree on a widget that had let go.
     pub fn unfocus_id(&mut self, id: WidgetId) {
-        if self.focused_widget == Some(id) {
+        if self.focus_holder() == Some(id) {
             self.focused_widget = None;
         }
         if let Some(w) = self.get_widget_mut(id) {
@@ -266,7 +299,7 @@ impl UiContext {
                             "[focus] run {ci} stop {i}: {} {:?} at ({x:.0},{y:.0} {width:.0}x{height:.0}){}",
                             w.type_name(),
                             w.focus_role(),
-                            if self.focused_widget == Some(*id) { " <- focused" } else { "" }
+                            if self.focus_holder() == Some(*id) { " <- focused" } else { "" }
                         );
                     }
                 }
@@ -279,7 +312,9 @@ impl UiContext {
     /// `CLAUDE.md`): move focus to the next (`reverse` = previous) plate or
     /// well in walk order — reading order, a group's members walked together
     /// (`focus_clusters`). The traversal wraps, and with nothing focused the
-    /// first (or last) stop takes it. Focusing goes through `set_focused_id`,
+    /// first (or last) stop takes it. The walk steps from the stop that holds
+    /// the keyboard ([`focus_holder`](Self::focus_holder)): from a composite's
+    /// field, the composite. Focusing goes through `set_focused_id`,
     /// so the new stop gets its `FocusIn` — a well opens for typing, a plate
     /// arms Enter / Space. Returns whether focus moved. The runner calls this
     /// for Tab when the app opts in (`Application::plate_navigation`).
@@ -289,7 +324,7 @@ impl UiContext {
             return false;
         }
         let n = stops.len();
-        let current = self.focused_widget.and_then(|f| stops.iter().position(|s| *s == f));
+        let current = self.focus_holder().and_then(|f| stops.iter().position(|s| *s == f));
         let next = match (current, reverse) {
             (Some(i), false) => (i + 1) % n,
             (Some(i), true) => (i + n - 1) % n,
@@ -315,7 +350,7 @@ impl UiContext {
             return false;
         }
         let n = clusters.len();
-        let current = self.focused_widget.and_then(|f| clusters.iter().position(|c| c.contains(&f)));
+        let current = self.focus_holder().and_then(|f| clusters.iter().position(|c| c.contains(&f)));
         let next = match (current, reverse) {
             (Some(i), false) => (i + 1) % n,
             (Some(i), true) => (i + n - 1) % n,

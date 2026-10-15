@@ -95,6 +95,7 @@ pub enum NamedKey {
     PageDown,
     PageUp,
     Delete,
+    Insert,
     Control,
     Shift,
     Alt,

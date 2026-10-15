@@ -1,5 +1,7 @@
 //! `ColorRamp`: the colour gradient editor — keys of colour along a bar, interpolated between,
-//! the selected one edited by R, G and B sliders and deleted by a button.
+//! the selected one edited by R, G and B sliders and deleted by a button. One keyboard stop
+//! whose fields — the track, then the sliders and the button — take the keyboard in turn, as
+//! the float ramp's do ([`Fields`]); to a screen reader, a group of its keys and controls.
 
 use super::*;
 
@@ -15,6 +17,9 @@ pub struct ColorRamp {
     pub selected_key_idx: Option<usize>,
     pub is_dragging_key: bool,
     pub just_changed: bool,
+    /// Where the keyboard is among the fields ([`TRACK`](Self::TRACK) …
+    /// [`DELETE`](Self::DELETE); [`Fields`]).
+    walk: FieldWalk,
 
     // Child controls for color editing & deletion
     pub r_slider: Adapted<Slider>,
@@ -24,6 +29,13 @@ pub struct ColorRamp {
 }
 
 impl ColorRamp {
+    /// The colour ramp's fields, in the order Tab walks them: the track (the ramp itself),
+    /// the Red, Green and Blue sliders (channel `ch` is field `RED + ch`) and the delete
+    /// button.
+    pub(super) const TRACK: usize = OWN;
+    pub(super) const RED: usize = 1;
+    pub(super) const DELETE: usize = 4;
+
     pub fn new() -> Adapted<ColorRamp> {
         let keys = vec![
             ColorRampKey { pos: 0.0, color: [0.0, 0.0, 0.0] },
@@ -42,6 +54,7 @@ impl ColorRamp {
             selected_key_idx: None,
             is_dragging_key: false,
             just_changed: false,
+            walk: FieldWalk::default(),
             r_slider,
             g_slider,
             b_slider,
@@ -85,8 +98,8 @@ impl ColorRamp {
         resettle(&mut self.keys, i, |k| k.pos)
     }
 
-    /// Delete the selected key — what the delete button does, clicked or pressed from the
-    /// keyboard. A ramp keeps two keys at least: with two, nothing happens.
+    /// Delete the selected key — what a click on the delete button does; nothing is selected
+    /// after. A ramp keeps two keys at least: with two, nothing happens.
     pub fn delete_selected(&mut self) {
         if let Some(idx) = self.selected_key_idx {
             if self.keys.len() > 2 {
@@ -95,16 +108,6 @@ impl ColorRamp {
                 self.just_changed = true;
                 self.arrange_fields();
             }
-        }
-    }
-
-    /// Write the R, G and B sliders into the selected key's colour.
-    pub(super) fn apply_sliders_to_selected(&mut self) {
-        if self.selected_key_idx.is_some() {
-            for ch in 0..3 {
-                self.write_channel(ch);
-            }
-            self.just_changed = true;
         }
     }
 
@@ -133,10 +136,20 @@ impl ColorRamp {
         }
     }
 
-    /// Show colour `c` on the R, G and B sliders.
+    /// Select key `idx`, the sliders showing its colour.
+    fn select_key(&mut self, idx: usize) {
+        self.selected_key_idx = Some(idx);
+        self.load_sliders(self.keys[idx].color);
+    }
+
+    /// Show colour `c` on the R, G and B sliders, stopping a wheel glide: left running, it
+    /// went on into the key now shown (`tick_ctx` writes a gliding slider into the selected
+    /// key).
     fn load_sliders(&mut self, c: [f32; 3]) {
         for (ch, v) in c.into_iter().enumerate() {
-            self.slider_mut(ch).set_value(v);
+            let slider = self.slider_mut(ch).inner_mut();
+            slider.stop_glide();
+            slider.set_value(v);
         }
     }
 }
@@ -232,7 +245,8 @@ impl ColorRamp {
     }
 
     /// The R, G and B sliders and the delete button, in the slider block under the track and
-    /// its pegs, while a key is selected. Each slider row is its label strip over a slider of
+    /// its pegs, while a key is selected — the button while it is shown
+    /// ([`deletable`](Fields::deletable)). Each slider row is its label strip over a slider of
     /// the toolkit's height; the button is the toolkit's height, beside the rows' middle.
     pub(super) fn arrange_fields(&mut self) {
         let (x, w) = (self.base.x, self.base.w);
@@ -245,8 +259,12 @@ impl ColorRamp {
             for ch in 0..3 {
                 self.slider_mut(ch).set_rect(x + Self::MARGIN, sy + ch as f32 * (row_h + Self::ROW_GAP), slider_w, row_h);
             }
-            let rows_h = Self::slider_block_h();
-            self.del_button.set_rect(x + w - Self::MARGIN - Self::DEL_W, sy + (rows_h - bh) / 2.0, Self::DEL_W, bh);
+            if self.deletable() {
+                let rows_h = Self::slider_block_h();
+                self.del_button.set_rect(x + w - Self::MARGIN - Self::DEL_W, sy + (rows_h - bh) / 2.0, Self::DEL_W, bh);
+            } else {
+                park(&mut self.del_button);
+            }
         } else {
             for ch in 0..3 {
                 park(self.slider_mut(ch));
@@ -308,7 +326,8 @@ impl Paint for ColorRamp {
                 pc.quad(Rect { x: sx, y: track.y, width: slice_w, height: track.height }, [col[0], col[1], col[2], 1.0]);
             }
         });
-        pc.well_rim(track, radius, crate::layout::control_relief());
+        // Lit while the track has the keyboard.
+        pc.well_rim_lit(track, radius, crate::layout::control_relief(), self.walk.at == Some(Self::TRACK));
 
         self.paint_pegs(pc);
 
@@ -318,7 +337,9 @@ impl Paint for ColorRamp {
             self.r_slider.paint_self(&dummy, pc);
             self.g_slider.paint_self(&dummy, pc);
             self.b_slider.paint_self(&dummy, pc);
-            self.del_button.paint_self(&dummy, pc);
+            if self.deletable() {
+                self.del_button.paint_self(&dummy, pc);
+            }
         }
     }
 }
@@ -361,17 +382,221 @@ impl ColorRamp {
     }
 }
 
+impl Fields for ColorRamp {
+    const TOTAL: usize = 5;
+
+    /// The track, then the three sliders while a key is selected and the delete button while
+    /// it is shown ([`deletable`](Fields::deletable)).
+    fn field_count(&self) -> usize {
+        if self.deletable() {
+            Self::TOTAL
+        } else if self.selected_key_idx.is_some() {
+            Self::DELETE
+        } else {
+            Self::RED
+        }
+    }
+
+    fn field(&mut self, i: usize) -> &mut dyn WidgetHost {
+        match i {
+            Self::DELETE => &mut self.del_button,
+            _ => self.slider_mut(i - Self::RED),
+        }
+    }
+
+    fn field_id(&self, i: usize) -> WidgetId {
+        match i {
+            Self::DELETE => self.del_button.base().id(),
+            _ => self.slider(i - Self::RED).base().id(),
+        }
+    }
+
+    fn walk(&self) -> &FieldWalk {
+        &self.walk
+    }
+
+    fn walk_mut(&mut self) -> &mut FieldWalk {
+        &mut self.walk
+    }
+
+    /// The track's keys pick and edit the keys ([`own_key`](Fields::own_key)); a slider keeps
+    /// its own keys, and a move of it moves the selected key's channel with it; the delete
+    /// button's press deletes.
+    fn field_key(&mut self, i: usize, event: &KeyEvent, own: WidgetId, ui: &mut UiContext) -> bool {
+        match i {
+            Self::TRACK => self.own_key(&event.logical_key),
+            Self::DELETE => self.delete_button_key(event, own, ui),
+            _ => {
+                let ch = i - Self::RED;
+                let before = self.slider(ch).inner().value();
+                let used = self.slider_mut(ch).keyboard_input(event, ui);
+                if self.slider(ch).inner().value() != before {
+                    self.write_channel(ch);
+                    self.just_changed = true;
+                }
+                used
+            }
+        }
+    }
+
+    fn key_count(&self) -> usize {
+        self.keys.len()
+    }
+
+    fn selected_key(&self) -> Option<usize> {
+        self.selected_key_idx
+    }
+
+    fn key_pos(&self, i: usize) -> f32 {
+        self.keys[i].pos
+    }
+
+    fn pick_key(&mut self, idx: usize) {
+        self.select_key(idx);
+        self.arrange_fields();
+    }
+
+    /// A key of the gradient's colour at `pos`.
+    fn add_key_at(&mut self, pos: f32) -> usize {
+        let color = self.get_interpolated_color(pos);
+        self.keys.push(ColorRampKey { pos, color });
+        self.just_changed = true;
+        self.resettle_key(self.keys.len() - 1)
+    }
+
+    fn remove_selected_key(&mut self) {
+        self.delete_selected();
+    }
+
+    fn delete_button(&mut self) -> &mut Adapted<Button> {
+        &mut self.del_button
+    }
+}
+
+impl ColorRamp {
+    /// The control field item `idx` of [`a11y_items`](Input::a11y_items) stands for, past
+    /// the keys: Red, Green, Blue, Delete.
+    fn item_field(&self, idx: usize) -> Option<usize> {
+        let field = match idx.checked_sub(self.keys.len())? {
+            k @ 0..=2 => Self::RED + k,
+            3 => Self::DELETE,
+            _ => return None,
+        };
+        (field < self.field_count()).then_some(field)
+    }
+}
+
+/// A key's colour as a reader hears it: `#rrggbb`, each channel as its slider shows it.
+fn colour_hex(c: [f32; 3]) -> String {
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", byte(c[0]), byte(c[1]), byte(c[2]))
+}
+
 impl Input for ColorRamp {
     fn wants_tick(&self) -> bool {
         true
     }
 
+    /// One keyboard stop, the track first: the ramp walks its own fields (`keeps_tab`).
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Well
+    }
+
+    /// Tab stays in the ramp while it has a field to go that way ([`Fields`]).
+    fn keeps_tab(&self, reverse: bool) -> bool {
+        self.keeps_field_tab(reverse)
+    }
+
+    /// The ramp's parts as a screen reader's nodes, in reading order: a radio button per key
+    /// (on while selected, and the keyboard's node while the track has it), named with its
+    /// place, position and colour; while a key is selected the Red, Green and Blue sliders,
+    /// with their numbers, which a reader may set; and the delete button while it is shown.
+    /// Each control's item stands for its field, so it is the keyboard's node while that
+    /// field has it.
+    fn a11y_items(&self, _rect: Rect) -> Vec<crate::a11y::A11yItem> {
+        use crate::a11y::A11yItem;
+        use accesskit::Role;
+        let n = self.keys.len();
+        let r = Self::peg_outer_r();
+        let mut items: Vec<A11yItem> = (0..n)
+            .map(|i| {
+                let (cx, cy) = self.peg_centre(i);
+                let key = &self.keys[i];
+                let (place, count) = ((i + 1).to_string(), n.to_string());
+                let (pos, colour) = (format!("{:.2}", key.pos), colour_hex(key.color));
+                let args = [("n", place.as_str()), ("count", &count), ("position", &pos), ("colour", &colour)];
+                let label = crate::l10n::tr_args("ramp-colour-key", &args);
+                let selected = self.selected_key_idx == Some(i);
+                A11yItem {
+                    toggled: Some(selected),
+                    focused: selected,
+                    ..A11yItem::new(Role::RadioButton, label, Rect { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r })
+                }
+            })
+            .collect();
+        let rect = |w: &dyn WidgetHost| {
+            let (x, y, width, height) = w.rect();
+            Rect { x, y, width, height }
+        };
+        if self.selected_key_idx.is_some() {
+            for ch in 0..3 {
+                let s = self.slider(ch);
+                items.push(A11yItem {
+                    value: s.a11y_value(),
+                    range: s.a11y_range(),
+                    field: Some(self.field_id(Self::RED + ch)),
+                    ..A11yItem::new(Role::Slider, s.label().unwrap_or_default(), rect(s))
+                });
+            }
+        }
+        if self.deletable() {
+            items.push(A11yItem {
+                field: Some(self.field_id(Self::DELETE)),
+                ..A11yItem::new(Role::Button, self.del_button.label().unwrap_or_default(), rect(&self.del_button))
+            });
+        }
+        items
+    }
+
+    /// A reader's Click on item `idx`: on a key, select it and put the keyboard on the
+    /// track; on a control, give it the keyboard, and on Delete press it. The keyboard moves
+    /// at the next tick, which has the context.
+    fn a11y_select_item(&mut self, idx: usize) -> bool {
+        if idx < self.keys.len() {
+            let changed = self.selected_key_idx != Some(idx);
+            if changed {
+                self.pick_key(idx);
+            }
+            return self.reader_to_own() || changed;
+        }
+        let Some(field) = self.item_field(idx) else { return false };
+        self.reader_to_field(field, field == Self::DELETE);
+        true
+    }
+
+    /// A reader's number for a Red, Green or Blue item, in its slider's range: the selected
+    /// key's channel moves with the slider.
+    fn a11y_set_item_value(&mut self, idx: usize, value: f64) -> bool {
+        let Some(field) = self.item_field(idx).filter(|&f| f != Self::DELETE) else { return false };
+        let ch = field - Self::RED;
+        if !self.slider_mut(ch).a11y_set_value(value) {
+            return false;
+        }
+        self.write_channel(ch);
+        self.just_changed = true;
+        true
+    }
+
     fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
+        let own = ectx.id;
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
         let mut changed = self.just_changed;
         self.just_changed = false;
+        if self.follow_focus(own, ui) {
+            changed = true;
+        }
 
         if self.selected_key_idx.is_some() {
             for ch in 0..3 {
@@ -388,14 +613,23 @@ impl Input for ColorRamp {
         match event {
             Event::MouseButton { button, state, x, y, .. } => {
                 let (button, state, px, py) = (*button, *state, *x, *y);
+                let own = ectx.id;
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false };
                 if button != MouseButton::Left {
                     return false;
                 }
 
                 if state == ElementState::Pressed {
+                    // A press that takes or makes a key gives the track the keyboard when one
+                    // of the ramp's controls has it, so the track's keys act on that key — as
+                    // they do when the press brings the keyboard from outside the ramp (the
+                    // host focuses it: `FocusIn`).
+                    let to_track = self.focused_field(own, ui).is_some_and(|f| f != Self::TRACK);
                     // The key whose peg is under the press, the topmost where pegs overlap.
                     if let Some(idx) = self.key_at(px, py) {
+                        if to_track {
+                            self.focus_field(Self::TRACK, own, ui);
+                        }
                         self.selected_key_idx = Some(idx);
                         self.is_dragging_key = true;
                         self.load_sliders(self.keys[idx].color);
@@ -405,6 +639,9 @@ impl Input for ColorRamp {
 
                     let track = self.track_rect();
                     if within(track, px, py) {
+                        if to_track {
+                            self.focus_field(Self::TRACK, own, ui);
+                        }
                         let t = (px - track.x) / track.width;
                         let col = self.get_interpolated_color(t);
                         self.keys.push(ColorRampKey { pos: t, color: col });
@@ -496,27 +733,22 @@ impl Input for ColorRamp {
                 changed
             }
             Event::KeyInput(event) => {
+                // To the field with the keyboard ([`Fields::walk_key`]).
+                let own = ectx.id;
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false };
-                // A slider the keyboard moves moves the key's colour with it: it moved only
-                // the slider, and the gradient and the slider disagreed.
-                let used = match (0..3).find(|&ch| ui.is_focused(self.slider(ch))) {
-                    Some(ch) => self.slider_mut(ch).keyboard_input(event, ui),
-                    None => false,
-                };
-                if used {
-                    self.apply_sliders_to_selected();
-                    return true;
-                }
-                if ui.is_focused(&self.del_button) {
-                    // Enter/Space press the button: its click is read here, at once. Left
-                    // unread, it fired on the next mouse press on the button.
-                    let used = self.del_button.keyboard_input(event, ui);
-                    if self.del_button.take_click() {
-                        self.delete_selected();
-                    }
-                    return used;
-                }
-                false
+                self.walk_key(event, own, ui)
+            }
+            Event::FocusIn => {
+                // Focused itself — by the Tab walk (either way), a click, a reader — the
+                // ramp takes the keyboard on its track.
+                self.base.focused = true;
+                self.walk_focus_in();
+                true
+            }
+            Event::FocusOut => {
+                self.base.focused = false;
+                self.walk_focus_out();
+                true
             }
             _ => false,
         }

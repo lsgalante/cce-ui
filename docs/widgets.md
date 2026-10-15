@@ -232,6 +232,63 @@ under their ids (`child_ids`). A host that owns its controls by value and routes
 itself (the parameter pane, below) keeps it HELD — never inserted: `set_rect` places the parts,
 `parts` / `parts_mut` reach them, and `sync_parts` does the sync after each event.
 
+## Ramp, ColorRamp and Slider2D: the keyboard and a reader
+
+**Slider2D** is a `FocusRole::Well` stop. Focused, Left / Right step x by `STEP` (0.02) and Up /
+Down step y (Up is more); Home / End send x to 0 / 1 and PageDown / PageUp send y. Each move is a
+change (`take_change`); unfocused, the pad leaves the keys, as a `Slider` does. Its rim is lit
+while it has the keyboard (`PaintCtx::well_rim_lit`). To a reader it is a `Group` of two `Slider`
+items, X and Y, numbers in 0..1 at step 0.02 that a reader sets (`Input::a11y_set_item_value`);
+`Slider2D::axis_items` names them otherwise for a host (the Ramp's Position and Value).
+`a_focused_pad_steps_its_thumb_on_each_axis` and `a_pad_is_a_group_of_two_sliders` are the tests.
+
+**Ramp and ColorRamp** are each one `Well` stop whose parts take the keyboard in turn. The parts
+are fields the ramp holds by value and never registers; the walk over them is one trait both
+ramps implement (`ramp::Fields`, `widget/input/ramp/mod.rs`).
+
+- **The fields, in Tab order.** The Ramp: its graph (the ramp's own id focused), Preset, Line,
+  the key pad while a key is selected, Delete while a key is selected and there are more than
+  two keys. The ColorRamp: its track, then Red, Green and Blue while a key is selected, and
+  Delete on the same rule.
+- **Entering and leaving.** `FocusIn` (Tab, Shift+Tab, `focus_id`) always lands on the graph or
+  track. Tab and Shift+Tab move between the fields, and the ramp keeps Tab
+  (`Input::keeps_tab(reverse)`) while it has a field to go that way, so the window's walk takes
+  over past the last field or before the graph. A control takes the keyboard through
+  `claim_field_focus`: the focus record names the control and `focus_holder` the ramp. A press
+  that opens a Ramp's dropdown is adopted as its field the same way. A press that takes or
+  makes a key while a control has the keyboard gives it to the graph or track, as a press from
+  outside the ramp does (the host focuses the ramp).
+- **The graph's or track's keys.** Left / Up and Right / Down select the key before or after,
+  wrapping (with none selected Right takes the first and Left the last); Home / End select the
+  ends; Delete / Backspace delete the selected key and select its neighbour; Insert adds a key
+  halfway to the next (from the last, to the one before) — on the Ramp's curve, in the
+  ColorRamp's gradient colour — and selects it. The rim is lit while it has the keyboard. A key
+  the Ramp takes, like a press, stops a hover-scroll coast (it would go on moving the key it
+  latched by index); a key shown on the ColorRamp's sliders stops their wheel glide (it would
+  go on into that key).
+- **A field's keys are its own.** The Ramp's key pad moves the selected key; a ColorRamp
+  slider's move writes the selected key's channel; Enter or Space on Delete deletes and selects
+  the neighbour. When the field with the keyboard goes (the selection cleared, Delete hidden),
+  the keyboard goes back to the graph or track.
+- **Two keys at least.** At two the delete button is hidden — parked, unpainted, no stop — since
+  a button has no disabled state. A click on it deletes and leaves nothing selected; only the
+  keyboard and a reader select the neighbour.
+- **To a reader** each is a `Group` of `A11yItem`s in reading order: a `RadioButton` per key, on
+  while selected, named with its reading (`ramp-key`, "Key 2 of 4: position 0.20, value 1.00";
+  `ramp-colour-key`, "Key 2 of 4: position 0.50, #ff0000"); the Ramp's Preset and Line as
+  `ComboBox`es with their choice and, while a key is selected, its pad as two `Slider`s,
+  Position and Value (`ramp-position`, `ramp-value`); the ColorRamp's Red, Green and Blue
+  `Slider`s with their numbers; Delete while it is shown. The item of the field with the
+  keyboard is the reader's focus — the selected key's while the graph or track has it, Position
+  for the pad. A reader's Click on a key selects it; on a control it gives it the keyboard and
+  does what Space does there (a dropdown opens, Delete deletes), at the ramp's next tick, which
+  has the context. A number a reader sets on a slider item moves the key or sets the channel.
+
+`tab_enters_a_ramp_walks_its_fields_and_leaves` and
+`tab_enters_a_color_ramp_walks_its_fields_and_leaves` are the tests through the runner;
+`widget/input/ramp/keyboard_tests.rs` and `widget/input/ramp/color_keyboard_tests.rs` hold the
+rest.
+
 ## Float3 trackball
 
 `Float3::set_trackball` stands a ball left of the three rows. The vector is drawn from the centre

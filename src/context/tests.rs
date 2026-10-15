@@ -172,3 +172,23 @@ fn lending_a_widget_with_no_popover_keeps_the_coverage_memo() {
     assert!(ctx.is_coordinate_covered(other, 20.0, 50.0));
     assert_eq!(ctx.covered_cache.borrow().builds, before + 1, "one build serves the lend and after it");
 }
+
+/// A key for a composite's field (`claim_field_focus`) reaches the composite, which holds
+/// the keyboard, though the focus record names a part nothing can deliver to and the key
+/// was dispatched into another tree: a scroll key and any other.
+#[test]
+fn a_key_for_a_field_reaches_the_composite_that_holds_it() {
+    use crate::widget::test_composite::Composite;
+    use crate::widget::{Button, ElementState, Event, Key, KeyEvent, NamedKey};
+    let mut ctx = UiContext::new();
+    let c = ctx.insert(Composite::new());
+    WidgetHost::set_rect(&mut ctx[c], 10.0, 10.0, 200.0, 100.0);
+    let elsewhere = ctx.insert(Button::new(10.0, 200.0, 80.0, 24.0).with_label("Elsewhere"));
+    let field = ctx[c].fields[1];
+    ctx.claim_field_focus(c.id(), field);
+    let key = |k: Key| Event::KeyInput(KeyEvent { logical_key: k, state: ElementState::Pressed, text: None, repeat: false, ctrl: false, shift: false, alt: false });
+
+    assert!(ctx.propagate_event(&key(Key::Named(NamedKey::ArrowDown)), elsewhere.id()));
+    assert!(ctx.propagate_event(&key(Key::Character("a".into())), elsewhere.id()));
+    assert_eq!(ctx[c].keys, [Key::Named(NamedKey::ArrowDown), Key::Character("a".into())]);
+}

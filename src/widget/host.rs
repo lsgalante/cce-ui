@@ -276,8 +276,8 @@ pub trait WidgetHostExt: WidgetHost {
     }
 
     /// Whether, focused, it takes Tab itself instead of the Tab walk (`Input::keeps_tab`).
-    fn keeps_tab(&self) -> bool {
-        self.input_model().keeps_tab()
+    fn keeps_tab(&self, reverse: bool) -> bool {
+        self.input_model().keeps_tab(reverse)
     }
 
     fn blocks_root_plate_drag(&self) -> bool {
@@ -327,6 +327,11 @@ pub trait WidgetHostExt: WidgetHost {
     /// An assistive tool clicked one of them (`Input::a11y_select_item`).
     fn a11y_select_item(&mut self, idx: usize) -> bool {
         self.input_model_mut().a11y_select_item(idx)
+    }
+
+    /// An assistive tool set one's value (`Input::a11y_set_item_value`).
+    fn a11y_set_item_value(&mut self, idx: usize, value: f64) -> bool {
+        self.input_model_mut().a11y_set_item_value(idx, value)
     }
 
     fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {

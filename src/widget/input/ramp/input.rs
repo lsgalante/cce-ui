@@ -1,10 +1,236 @@
-//! The float ramp's input: dragging keys, the hover-scroll and its coast, and the controls with
-//! the keyboard.
+//! The float ramp's input: dragging keys, the hover-scroll and its coast, the keyboard on the
+//! graph and the controls, and what a screen reader sees and does.
 
 use super::*;
 
+impl Fields for Ramp {
+    const TOTAL: usize = FIELD_TOTAL;
+
+    /// The graph, the two dropdowns, then the key pad while a key is selected and the delete
+    /// button while it is shown ([`deletable`](Fields::deletable)). With the controls
+    /// collapsed, the graph alone.
+    fn field_count(&self) -> usize {
+        if self.controls_collapsed {
+            1
+        } else if self.deletable() {
+            FIELD_TOTAL
+        } else if self.selected_key_idx.is_some() {
+            DELETE
+        } else {
+            PAD
+        }
+    }
+
+    fn field(&mut self, i: usize) -> &mut dyn WidgetHost {
+        match i {
+            PRESET => &mut self.preset_dropdown,
+            LINE => &mut self.line_type_dropdown,
+            PAD => &mut self.key_pad,
+            _ => &mut self.del_button,
+        }
+    }
+
+    fn field_id(&self, i: usize) -> WidgetId {
+        match i {
+            PRESET => self.preset_dropdown.base().id(),
+            LINE => self.line_type_dropdown.base().id(),
+            PAD => self.key_pad.base().id(),
+            _ => self.del_button.base().id(),
+        }
+    }
+
+    fn walk(&self) -> &FieldWalk {
+        &self.walk
+    }
+
+    fn walk_mut(&mut self) -> &mut FieldWalk {
+        &mut self.walk
+    }
+
+    /// The graph's keys pick and edit the keys ([`own_key`](Fields::own_key)); a key pad's
+    /// move moves the selected key; the delete button's press deletes.
+    fn field_key(&mut self, i: usize, event: &KeyEvent, own: WidgetId, ui: &mut UiContext) -> bool {
+        match i {
+            GRAPH => self.own_key(&event.logical_key),
+            PRESET => self.preset_dropdown.keyboard_input(event, ui),
+            LINE => self.line_type_dropdown.keyboard_input(event, ui),
+            PAD => {
+                let before = (self.key_pad.inner().value_x(), self.key_pad.inner().value_y());
+                let used = self.key_pad.keyboard_input(event, ui);
+                if (self.key_pad.inner().value_x(), self.key_pad.inner().value_y()) != before {
+                    self.apply_pad_to_selected();
+                }
+                used
+            }
+            _ => self.delete_button_key(event, own, ui),
+        }
+    }
+
+    fn key_count(&self) -> usize {
+        self.keys.len()
+    }
+
+    fn selected_key(&self) -> Option<usize> {
+        self.selected_key_idx
+    }
+
+    fn key_pos(&self, i: usize) -> f32 {
+        self.keys[i].pos
+    }
+
+    fn pick_key(&mut self, idx: usize) {
+        self.select_key(idx);
+        self.arrange_fields();
+    }
+
+    /// A key on the curve at `pos`.
+    fn add_key_at(&mut self, pos: f32) -> usize {
+        let value = self.get_interpolated_value(pos).clamp(0.0, 1.0);
+        self.keys.push(RampKey { pos, value });
+        let idx = self.resettle_key(self.keys.len() - 1);
+        self.sync_preset();
+        self.just_changed = true;
+        idx
+    }
+
+    fn remove_selected_key(&mut self) {
+        self.delete_selected();
+    }
+
+    fn delete_button(&mut self) -> &mut Adapted<Button> {
+        &mut self.del_button
+    }
+}
+
+impl Ramp {
+    /// The control field item `idx` of [`a11y_items`](Input::a11y_items) stands for, past
+    /// the keys: Preset, Line, the key pad's Position and Value, Delete.
+    fn item_field(&self, idx: usize) -> Option<usize> {
+        let field = match idx.checked_sub(self.keys.len())? {
+            0 => PRESET,
+            1 => LINE,
+            2 | 3 => PAD,
+            4 => DELETE,
+            _ => return None,
+        };
+        (field < self.field_count()).then_some(field)
+    }
+
+    /// Stop a hover-scroll coast: let go of the latched key and its velocity. A press does,
+    /// and so does a key or a reader's action the ramp takes — the coast moves the key it
+    /// latched by index and selects it, so left running it moved a neighbour into a deleted
+    /// key's place, or took back a selection the keyboard had moved.
+    fn stop_coast(&mut self) {
+        self.scroll_vel = (0.0, 0.0);
+        self.scroll_key_idx = None;
+        self.last_key_scroll = None;
+    }
+}
+
 impl Input for Ramp {
     fn wants_tick(&self) -> bool {
+        true
+    }
+
+    /// One keyboard stop, the graph first: the ramp walks its own fields (`keeps_tab`).
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Well
+    }
+
+    /// Tab stays in the ramp while it has a field to go that way: past its last field (or,
+    /// Shift+Tab, before its first) the walk leaves it.
+    fn keeps_tab(&self, reverse: bool) -> bool {
+        self.keeps_field_tab(reverse)
+    }
+
+    /// The ramp's parts as a screen reader's nodes, in reading order: a radio button per key
+    /// (on while selected, and the keyboard's node while the graph has it), named with its
+    /// reading; the two dropdowns as combo boxes with their choice; while a key is selected
+    /// the key pad's two axes as sliders, Position and Value, which a reader may set; and
+    /// the delete button while it is shown. Each control's item stands for its field, so it
+    /// is the keyboard's node while that field has it. None of the controls with them
+    /// collapsed.
+    fn a11y_items(&self, _rect: Rect) -> Vec<crate::a11y::A11yItem> {
+        use crate::a11y::A11yItem;
+        use accesskit::Role;
+        let n = self.keys.len();
+        let r = self.key_peg_r();
+        let mut items: Vec<A11yItem> = (0..n)
+            .map(|i| {
+                let (cx, cy) = self.key_centre(i);
+                let key = &self.keys[i];
+                let (place, count) = ((i + 1).to_string(), n.to_string());
+                let (pos, value) = (format!("{:.2}", key.pos), format!("{:.2}", key.value));
+                let args = [("n", place.as_str()), ("count", &count), ("position", &pos), ("value", &value)];
+                let label = crate::l10n::tr_args("ramp-key", &args);
+                let selected = self.selected_key_idx == Some(i);
+                A11yItem {
+                    toggled: Some(selected),
+                    focused: selected,
+                    ..A11yItem::new(Role::RadioButton, label, Rect { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r })
+                }
+            })
+            .collect();
+        if self.controls_collapsed {
+            return items;
+        }
+        let rect = |w: &dyn WidgetHost| {
+            let (x, y, width, height) = w.rect();
+            Rect { x, y, width, height }
+        };
+        for i in [PRESET, LINE] {
+            let dd = if i == PRESET { &self.preset_dropdown } else { &self.line_type_dropdown };
+            items.push(A11yItem {
+                value: dd.a11y_value(),
+                field: Some(self.field_id(i)),
+                ..A11yItem::new(Role::ComboBox, dd.label().unwrap_or_default(), rect(dd))
+            });
+        }
+        if self.selected_key_idx.is_some() {
+            let mut axes = self.key_pad.inner().axis_items(
+                rect(&self.key_pad),
+                [crate::l10n::tr("ramp-position"), crate::l10n::tr("ramp-value")],
+            );
+            // The pad's keyboard is read as its first axis.
+            axes[0].field = Some(self.field_id(PAD));
+            items.extend(axes);
+        }
+        if self.deletable() {
+            items.push(A11yItem {
+                field: Some(self.field_id(DELETE)),
+                ..A11yItem::new(Role::Button, crate::l10n::tr("ramp-delete-key"), rect(&self.del_button))
+            });
+        }
+        items
+    }
+
+    /// A reader's Click on item `idx`: on a key, select it and put the keyboard on the
+    /// graph; on a control, give it the keyboard and do what Space does there (a dropdown
+    /// opens, Delete deletes). The keyboard moves at the next tick, which has the context.
+    fn a11y_select_item(&mut self, idx: usize) -> bool {
+        if idx < self.keys.len() {
+            self.stop_coast();
+            let changed = self.selected_key_idx != Some(idx);
+            if changed {
+                self.select_key(idx);
+                self.arrange_fields();
+            }
+            return self.reader_to_own() || changed;
+        }
+        let Some(field) = self.item_field(idx) else { return false };
+        self.stop_coast();
+        self.reader_to_field(field, field != PAD);
+        true
+    }
+
+    /// A reader's number for the key pad's Position or Value item: the selected key moves.
+    fn a11y_set_item_value(&mut self, idx: usize, value: f64) -> bool {
+        let Some(axis) = idx.checked_sub(self.keys.len() + 2).filter(|&a| a < 2) else { return false };
+        if self.item_field(idx) != Some(PAD) || !self.key_pad.inner_mut().set_axis(axis, value) {
+            return false;
+        }
+        self.stop_coast();
+        self.apply_pad_to_selected();
         true
     }
 
@@ -58,20 +284,15 @@ impl Input for Ramp {
     }
 
     fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
+        let own = ectx.id;
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
         let mut changed = self.just_changed;
         self.just_changed = false;
 
-        // A field the window's focus moved away from is told here: the fields are not in
-        // the registry, so the focus change could not reach them itself.
-        let focused = self.focused_field(ui);
-        for i in 0..FIELD_TOTAL {
-            if Some(i) != focused && self.field(i).base().focused {
-                self.field(i).unfocus();
-                changed = true;
-            }
+        if self.follow_focus(own, ui) {
+            changed = true;
         }
 
         // Hover-scroll inertia: once the finger stream stops (>60ms without
@@ -130,6 +351,7 @@ impl Input for Ramp {
                     }
                     return false;
                 }
+                let own = ectx.id;
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false };
                 if button != MouseButton::Left {
                     return false;
@@ -140,20 +362,28 @@ impl Input for Ramp {
                         let idx = self.preset_dropdown.selected;
                         self.apply_preset(idx);
                     }
+                    self.adopt_pressed_field(own, ui);
                     return true;
                 }
                 if self.line_type_dropdown.mouse_input(button, state, px, py, ui) {
+                    self.adopt_pressed_field(own, ui);
                     return true;
                 }
 
                 if state == ElementState::Pressed {
                     // Any press cancels a hover-scroll glide in progress.
-                    self.scroll_vel = (0.0, 0.0);
-                    self.scroll_key_idx = None;
-                    self.last_key_scroll = None;
+                    self.stop_coast();
+                    // A press that takes or makes a key gives the graph the keyboard when one
+                    // of the ramp's controls has it, so the graph's keys act on that key — as
+                    // they do when the press brings the keyboard from outside the ramp (the
+                    // host focuses it: `FocusIn`).
+                    let to_graph = self.focused_field(own, ui).is_some_and(|f| f != GRAPH);
                     // Grab the key whose peg is under the press, the topmost where pegs overlap —
                     // the one drawn on top is the one taken.
                     if let Some(idx) = self.key_at(px, py) {
+                        if to_graph {
+                            self.focus_field(GRAPH, own, ui);
+                        }
                         self.select_key(idx);
                         self.is_dragging_key = true;
                         // The key keeps where on its peg it was taken: its centre snapping to
@@ -168,6 +398,9 @@ impl Input for Ramp {
                     // Creation accepts the whole opening (the inset gutters included);
                     // the domain mapping clamps to the plot's 0..1.
                     if within(self.graph_rect(), px, py) {
+                        if to_graph {
+                            self.focus_field(GRAPH, own, ui);
+                        }
                         let (t, v) = self.plot_unit(px, py);
                         let (t, val) = (t.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
                         self.keys.push(RampKey { pos: t, value: val });
@@ -320,54 +553,25 @@ impl Input for Ramp {
                 false
             }
             Event::KeyInput(event) => {
+                let own = ectx.id;
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false };
-                if event.state != ElementState::Pressed {
-                    return false;
+                let used = self.walk_key(event, own, ui);
+                if used {
+                    self.stop_coast();
                 }
-
-                let count = self.field_count();
-                let current = self.focused_field(ui).filter(|&i| i < count);
-
-                if event.logical_key == Key::Named(NamedKey::Tab) {
-                    let next = match current {
-                        Some(curr) if event.shift => if curr == 0 { count - 1 } else { curr - 1 },
-                        Some(curr) => (curr + 1) % count,
-                        // Tab into the ramp: its first field takes the keyboard.
-                        None => 0,
-                    };
-                    self.focus_field(next, ui);
-                    return true;
-                }
-
-                match current {
-                    Some(0) => self.preset_dropdown.keyboard_input(event, ui),
-                    Some(1) => self.line_type_dropdown.keyboard_input(event, ui),
-                    Some(2) => self.key_pad.keyboard_input(event, ui),
-                    Some(_) => {
-                        // Enter/Space press the button: its click is read here, at once. Left
-                        // unread, it fired on the next mouse PRESS on the button.
-                        let used = self.del_button.keyboard_input(event, ui);
-                        if self.del_button.take_click() {
-                            self.delete_selected();
-                        }
-                        used
-                    }
-                    None => false,
-                }
+                used
             }
             Event::FocusIn => {
-                // Focused itself, the ramp gives the keyboard to its preset dropdown.
-                if let Some(ui) = ectx.ui.as_deref_mut() {
-                    self.focus_field(0, ui);
-                }
-                false
+                // Focused itself — by the Tab walk (either way), a click, a reader — the
+                // ramp takes the keyboard on its graph.
+                self.base.focused = true;
+                self.walk_focus_in();
+                true
             }
             Event::FocusOut => {
                 self.base.focused = false;
-                for i in 0..FIELD_TOTAL {
-                    self.field(i).unfocus();
-                }
-                false
+                self.walk_focus_out();
+                true
             }
             _ => false,
         }

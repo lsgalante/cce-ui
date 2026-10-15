@@ -54,6 +54,12 @@ pub struct UiContext {
     /// The focused widget's id (Phase 6bc: stored ids, not pointers — a stale id resolves to
     /// `None` through the generational tree instead of dereferencing freed memory).
     pub focused_widget: Option<WidgetId>,
+    /// The field a composite gave the keyboard to, and the composite: `(field, owner)`
+    /// ([`UiContext::claim_field_focus`]). A field is a part the composite holds by value and
+    /// never registers (a ramp's dropdowns and key pad), so the focus record alone cannot say
+    /// where in the window the keyboard is; [`UiContext::focus_holder`] reads this. Only
+    /// meaningful while `focused_widget` is the field, so a stale one is harmless.
+    field_owner: Option<(WidgetId, WidgetId)>,
     /// Open-popover registrations, id-keyed like focus (Phase 6bc slice 2).
     pub active_popovers: Vec<WidgetId>,
     /// Open modals, innermost last ([`UiContext::open_modal`]): while one is open the Tab
@@ -100,6 +106,7 @@ impl UiContext {
         Self {
             tree: crate::widget::WidgetTree::new(),
             focused_widget: None,
+            field_owner: None,
             active_popovers: Vec::new(),
             modals: Vec::new(),
             covered_cache: std::cell::RefCell::new(CoverageMemo::default()),
@@ -184,6 +191,13 @@ impl UiContext {
         let widget = self.tree.take_owned::<W>(id)?;
         if self.focused_widget == Some(id) {
             self.focused_widget = None;
+        }
+        // A field of it goes with it.
+        if let Some((field, _)) = self.field_owner.filter(|&(_, owner)| owner == id) {
+            if self.focused_widget == Some(field) {
+                self.focused_widget = None;
+            }
+            self.field_owner = None;
         }
         self.tick_receivers.retain(|&r| r != id);
         self.invalidate_coverage_cache();

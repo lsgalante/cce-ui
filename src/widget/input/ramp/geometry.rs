@@ -213,7 +213,7 @@ impl Ramp {
     /// strings and used to clip.
     pub(super) fn arrange_fields(&mut self) {
         if self.controls_collapsed {
-            for i in 0..FIELD_TOTAL {
+            for i in PRESET..FIELD_TOTAL {
                 park(self.field(i));
             }
             return;
@@ -237,17 +237,22 @@ impl Ramp {
 
         if self.selected_key_idx.is_some() {
             // Selected: a second row below carries the square key pad (pos × value)
-            // with the delete button beside it, centered on the pad's well.
+            // with the delete button beside it, centered on the pad's well — while it is
+            // shown ([`deletable`](Self::deletable)).
             let pad_side = Self::PAD_SIDE;
             let del_w: f32 = if self.del_button.inner().has_icon() { ctrl_h } else { 64.0 };
             let row2_y = ctrl_y + ctrl_h + gap;
             self.key_pad.set_rect(track_x, row2_y, pad_side, pad_side + strip);
-            self.del_button.set_rect(
-                track_x + pad_side + gap,
-                row2_y + strip + (pad_side - ctrl_h) / 2.0,
-                del_w,
-                ctrl_h,
-            );
+            if self.deletable() {
+                self.del_button.set_rect(
+                    track_x + pad_side + gap,
+                    row2_y + strip + (pad_side - ctrl_h) / 2.0,
+                    del_w,
+                    ctrl_h,
+                );
+            } else {
+                park(&mut self.del_button);
+            }
         } else {
             park(&mut self.key_pad);
             park(&mut self.del_button);

@@ -35,6 +35,16 @@ dock-reattach = Reattach
 search-placeholder = Search...
 button-copy = Copy
 ramp-delete-key = Delete
+# A ramp's key as a screen reader names it: its place among the keys, and where it is.
+ramp-key = Key { $n } of { $count }: position { $position }, value { $value }
+# A colour ramp's key as a screen reader names it: its place among the keys, where it is, and its colour as #rrggbb.
+ramp-colour-key = Key { $n } of { $count }: position { $position }, { $colour }
+# A ramp's key pad's two axes, as a screen reader names them: the selected key's position and value.
+ramp-position = Position
+ramp-value = Value
+# A two-axis pad's (`Slider2D`) axes, as a screen reader names them.
+slider2d-x = X
+slider2d-y = Y
 keybind-recording = [ Press Keys... ]
 keybind-none = None
 

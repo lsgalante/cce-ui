@@ -8,8 +8,8 @@ impl Input for TextBox {
     }
 
     /// A multi-line box that is editing types Tab, as an editor does; a one-line field lets
-    /// the Tab walk take it (Tab leaves a field).
-    fn keeps_tab(&self) -> bool {
+    /// the Tab walk take it (Tab leaves a field). Either way round: Shift+Tab is typed too.
+    fn keeps_tab(&self, _reverse: bool) -> bool {
         self.multiline && self.editing
     }
     /// Advances the wheel glide / trackpad coast behind the scroll offsets.

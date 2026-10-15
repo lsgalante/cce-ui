@@ -373,13 +373,25 @@ impl PaintCtx {
     /// capped at a fifth of the height — every well's rule); flat, the
     /// hairline frame every well shares ([`crate::color::well_frame_color`]).
     pub fn well_rim(&mut self, rect: Rect, radius: f32, relief: bool) {
+        self.well_rim_lit(rect, radius, relief, false);
+    }
+
+    /// [`well_rim`](Self::well_rim), lit while `lit`: the rim of a canvas well that has the
+    /// keyboard (a focused Slider2D pad, a ramp's graph, a colour ramp's track). Under `relief` the recess's rim is tinted in the
+    /// highlight, as a focused tree list's is; flat, the frame takes its active colour.
+    pub fn well_rim_lit(&mut self, rect: Rect, radius: f32, relief: bool, lit: bool) {
         let radii = (radius, radius, radius, radius);
         if relief {
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
             let (well, radii) = crate::layout::carve_inside(rect, radii, depth);
-            self.recess(well, radii, depth);
+            if lit {
+                let hc = crate::color::highlight_primary_color();
+                self.recess_tinted(well, radii, depth, [hc[0], hc[1], hc[2]]);
+            } else {
+                self.recess(well, radii, depth);
+            }
         } else {
-            self.border(rect, radii, [0.0; 4], crate::color::well_frame_color(false, false), 1.0);
+            self.border(rect, radii, [0.0; 4], crate::color::well_frame_color(false, lit), 1.0);
         }
     }
 

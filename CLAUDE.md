@@ -12,7 +12,7 @@ coherent. The depth lives in topic docs, read when you work in that area:
 |---|---|
 | `docs/runtime.md` | the run loop and shells: pacing, damage, reconnects and `renderer_init`, lost surfaces, layer surfaces, input methods and text input, touch, scrolling semantics |
 | `docs/surfaces.md` | the surface model in full: plates, wells, fields, carves, materials and frost, the `style.surface` config and its retired keys, relief geometry, units and the height field |
-| `docs/widgets.md` | per-widget behaviour: widget events (`take_events`), the context menu and page turns, params pane, slider, float3 trackball, dropdown, checkbox/toggle, spreadsheet, scrollbars, graph, Markdown and `DocEditor`, glyphs |
+| `docs/widgets.md` | per-widget behaviour: widget events (`take_events`), the context menu and page turns, params pane, slider, the ramps' and Slider2D's keyboard and reader model, float3 trackball, dropdown, checkbox/toggle, spreadsheet, scrollbars, graph, Markdown and `DocEditor`, glyphs |
 | `docs/platforms.md` | the browser shell and WebGPU renderer, the macOS shell, compute jobs, 3D scenes (`Stage3D`, lit meshes, instancing), the path tracer, and the probes that hold renderers to each other |
 | `CHANGELOG.md` | what changed and when, with the reasoning and measurements. **History goes there, not here.** |
 | `docs/rfc-*.md` | design records; see "RFCs" below for which are live |
@@ -265,7 +265,8 @@ widgets need no emit. Rules (`docs/widgets.md` has the detail):
   reach for the call: a widget reaching itself through the context mid-event gets `None`, never a
   second `&mut`.
 - Host-side API: `place_h`, `Form::widget_h` / `widget_w_h`, `render_popover(&mut pc)`,
-  `register_popover_id`, `focus_id` / `unfocus_id` / `set_focused_id` / `claim_focus`,
+  `register_popover_id`, `focus_id` / `unfocus_id` / `set_focused_id` / `claim_focus` /
+  `claim_field_focus` / `focus_holder`,
   `link_ids`, `paint_root_into(ctx, &ctx[h], pc)`, `get_widget(id)` / `get_widget_mut(id)` /
   `widgets()`, `tree.parent_id` / `child_ids`.
 - **A composite's children are `widget::Embedded`**: held by value until the composite is
@@ -287,8 +288,12 @@ control face goes through `ControlPlate`), and draws symbols as glyphs (below).
 **Keyboard navigation** is the runner's: Tab / Shift+Tab walk the focus stops in reading order
 (`UiContext::focus_step`), a `Group`'s members as one run; `ctrl+tab` jumps between runs
 (`focus_step_group`). An app opts out with `plate_navigation() == false` (the designer, display
-manager and cce-notes do). A focused widget that types Tab keeps it (`Input::keeps_tab`). Register
-a widget only while it is shown — a hidden registered widget is a stop nobody can see.
+manager and cce-notes do). A focused widget that types Tab keeps it (`Input::keeps_tab(reverse)`;
+a composite keeps it while it has a field to go that way). Register a widget only while it is
+shown — a hidden registered widget is a stop nobody can see. **A composite's parts held by value
+and never registered (a ramp's dropdowns) take the keyboard with `claim_field_focus(owner,
+field)`**, never a bare `claim_focus(field)`: the walk, key delivery, `keeps_tab` and the reader's
+focus all ask `focus_holder()`, which only that record makes the composite.
 `CCE_FOCUS_DEBUG=1` prints the stops. A `Dialog` (`UiContext::open_modal`) traps the walk and
 covers everything behind it.
 
@@ -463,6 +468,12 @@ toolkit leans on them: widgets declare a `focus_role` and a label, menu actions 
 and a string the toolkit shows goes in the `.ftl`, not the source. Never give an AccessKit node a
 role description (it registers as AT-SPI `Extended` and never appears on the bus).
 `docs/rfc-accessibility-locale.md` has the state and the parked plan.
+
+One extension was asked for and is in: the Ramp, the ColorRamp and Slider2D are keyboard stops
+and read as a `Group` of items (`docs/widgets.md` has the model). What any composite may use from
+it: `claim_field_focus` / `focus_holder` (above), and `A11yItem`'s `value`, `range` and `field` —
+an item with a range is a number a reader sets (`Input::a11y_set_item_value`), and an item whose
+`field` has the keyboard is the reader's focus. The rest of the parked plan stays parked.
 
 ## Module map
 

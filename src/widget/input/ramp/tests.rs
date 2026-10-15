@@ -1,16 +1,16 @@
-/// The ramp hands its fields the keyboard itself: the window's focus record names the
-/// field (it checks the record before taking a key), Tab walks them, and none of them
-/// enters the registry.
+/// The ramp hands its fields the keyboard itself: focused, it has it on its graph; Tab walks
+/// the controls, the window's focus record naming each (it checks the record before taking a
+/// key) with the ramp as its holder, and none of them enters the registry.
 #[test]
 fn the_ramp_hands_its_fields_the_keyboard() {
     use crate::widget::{Event, KeyEvent};
     let mut ctx = UiContext::new();
     let h = ctx.insert(Ramp::new());
     ctx.lend_h(h, |r, _| WidgetHost::set_rect(r, 0.0, 0.0, 300.0, 260.0));
-    let (preset, line) = (ctx[h].field_id(0), ctx[h].field_id(1));
+    let (preset, line) = (ctx[h].field_id(PRESET), ctx[h].field_id(LINE));
     ctx.set_focused_id(h.id());
-    assert_eq!(ctx.focused_widget, Some(preset), "focused, the ramp gives the preset dropdown the keys");
-    assert!(ctx[h].preset_dropdown.base().focused);
+    assert_eq!(ctx.focused_widget, Some(h.id()), "focused, the ramp has the keyboard on its graph");
+    assert!(!ctx[h].preset_dropdown.base().focused);
     let key = |named, shift| Event::KeyInput(KeyEvent {
         logical_key: Key::Named(named),
         state: ElementState::Pressed,
@@ -21,10 +21,14 @@ fn the_ramp_hands_its_fields_the_keyboard() {
         alt: false,
     });
     assert!(ctx.propagate_event(&key(NamedKey::Tab, false), h.id()));
+    assert_eq!(ctx.focused_widget, Some(preset), "Tab walks to the preset dropdown");
+    assert_eq!(ctx.focus_holder(), Some(h.id()), "which the ramp holds");
+    assert!(ctx[h].preset_dropdown.base().focused);
+    assert!(ctx.propagate_event(&key(NamedKey::Tab, false), h.id()));
     assert_eq!(ctx.focused_widget, Some(line), "Tab walks to the line dropdown");
     assert!(!ctx[h].preset_dropdown.base().focused && ctx[h].line_type_dropdown.base().focused);
     ctx.propagate_event(&key(NamedKey::Tab, false), h.id());
-    assert_eq!(ctx.focused_widget, Some(preset), "two fields with no key selected: it wraps");
+    assert_eq!(ctx.focused_widget, Some(h.id()), "three fields with no key selected: handed Tab, it wraps");
     ctx.propagate_event(&key(NamedKey::Tab, true), h.id());
     assert_eq!(ctx.focused_widget, Some(line), "Shift+Tab walks back");
     assert!(ctx.propagate_event(&key(NamedKey::Enter, false), h.id()), "the focused dropdown takes Enter");
@@ -136,6 +140,7 @@ fn opening_the_preset_dropdown_keeps_a_hand_edited_curve() {
     ctx[h].keys[1].value = 0.3;
     ctx[h].sync_preset();
     ctx.set_focused_id(h.id());
+    assert!(ctx.propagate_event(&key_event(NamedKey::Tab), h.id()), "from the graph to the preset");
     assert!(ctx.propagate_event(&key_event(NamedKey::Enter), h.id()));
     assert!(ctx[h].preset_dropdown.open, "Enter opens the preset dropdown");
     for _ in 0..30 {
@@ -170,19 +175,28 @@ fn a_release_is_the_ramps_only_when_it_used_it() {
     assert!(!ctx.propagate_event(&release(2000.0, 2000.0), h.id()), "a stray release is not");
 }
 
-/// Enter on the focused delete button deletes the selected key then and there, and
-/// leaves nothing armed: the next mouse press on the button deletes nothing.
+/// Enter on the focused delete button deletes the selected key then and there, selects
+/// its neighbour so the keyboard can go on, and leaves nothing armed: the next mouse press
+/// on the button deletes nothing. Down to two keys the button is gone, and the keyboard is
+/// back on the graph.
 #[test]
 fn the_delete_button_deletes_from_the_keyboard() {
     let (mut ctx, h) = ramp_at_natural_height();
     let (x, y) = key_centre(&ctx[h], 1);
     ctx.propagate_event(&press(x, y), h.id());
     ctx.propagate_event(&release(x, y), h.id());
-    ctx.lend_h(h, |r, ctx| r.inner_mut().focus_field(3, ctx));
+    let own = h.id();
+    ctx.lend_h(h, |r, ctx| r.inner_mut().focus_field(DELETE, own, ctx));
+    let del = ctx[h].field_id(DELETE);
     assert!(ctx.propagate_event(&key_event(NamedKey::Enter), h.id()));
     assert_eq!(ctx[h].keys.len(), 3, "the key is gone");
-    assert_eq!(ctx[h].selected_key_idx, None);
+    assert_eq!(ctx[h].selected_key_idx, Some(1), "the one after it selected");
     assert!(!ctx[h].del_button.take_click(), "no click left armed for the next press");
+    assert_eq!(ctx.focused_widget, Some(del), "three keys: the button stays, and keeps the keyboard");
+    assert!(ctx.propagate_event(&key_event(NamedKey::Enter), h.id()));
+    assert_eq!(ctx[h].keys.len(), 2);
+    assert_eq!(ctx.focused_widget, Some(h.id()), "two keys: the button is gone, the keyboard on the graph");
+    assert!(!ctx[h].del_button.base().focused, "the button let go");
 }
 
 /// Grabbing a key off-centre keeps the offset: a 3 px move moves it 3 px, not to the
@@ -268,9 +282,7 @@ fn a_color_ramp_slider_moved_from_the_keyboard_moves_the_key() {
     let (x, y) = peg(&ctx[h], 1);
     ctx.propagate_event(&press(x, y), h.id());
     ctx.propagate_event(&release(x, y), h.id());
-    let red = ctx[h].r_slider.base().id();
-    ctx.claim_focus(red);
-    ctx[h].r_slider.focus();
+    ctx.lend_h(h, |r, ctx| r.inner_mut().focus_field(ColorRamp::RED, h.id(), ctx));
     ctx[h].just_changed = false;
     assert!(ctx.propagate_event(&key_event(NamedKey::ArrowLeft), h.id()));
     let slider = ctx[h].r_slider.inner().value();
@@ -339,19 +351,18 @@ fn a_color_ramp_release_is_its_own_only_when_it_used_it() {
 }
 
 /// Enter on a colour ramp's focused delete button deletes the selected key then and
-/// there, and leaves no click armed for the next press.
+/// there, selects its neighbour, and leaves no click armed for the next press.
 #[test]
 fn a_color_ramp_deletes_from_the_keyboard() {
     let (mut ctx, h) = color_ramp();
     let (x, y) = peg(&ctx[h], 1);
     ctx.propagate_event(&press(x, y), h.id());
     ctx.propagate_event(&release(x, y), h.id());
-    let del = ctx[h].del_button.base().id();
-    ctx.claim_focus(del);
-    ctx[h].del_button.focus();
+    ctx.lend_h(h, |r, ctx| r.inner_mut().focus_field(ColorRamp::DELETE, h.id(), ctx));
     assert!(ctx.propagate_event(&key_event(NamedKey::Enter), h.id()));
     assert_eq!(ctx[h].keys.len(), 3, "the key is gone");
-    assert_eq!(ctx[h].selected_key_idx, None);
+    assert_eq!(ctx[h].selected_key_idx, Some(1), "the key after it selected");
+    assert_eq!(ctx[h].r_slider.inner().value(), 0.0, "the sliders show it: green's red");
     assert!(!ctx[h].del_button.take_click(), "no click left armed for the next press");
 }
 
@@ -458,7 +469,10 @@ fn a_press_where_ramp_pegs_overlap_takes_the_topmost() {
 #[test]
 fn a_color_ramp_declares_its_slider_rows_and_holds_them() {
     let mut ctx = UiContext::new();
-    let h = ctx.insert(ColorRamp::new());
+    let mut cr = ColorRamp::new();
+    // A third key, so the delete button is shown.
+    cr.keys.insert(1, ColorRampKey { pos: 0.5, color: [0.5, 0.5, 0.5] });
+    let h = ctx.insert(cr);
     let natural = ctx[h].natural_height();
     let rows = 3.0 * (crate::layout::control_label_strip() + crate::layout::slider_height());
     assert!(natural >= crate::layout::ramp_height() + rows, "the slider rows are reserved: {natural}");

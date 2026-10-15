@@ -10,6 +10,122 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-15
 
+- **The ColorRamp is one keyboard stop too, and a reader sees its keys and sliders.** It had no
+  focus role, no Tab arm and no `FocusIn` handler: its sliders and delete button took keys only
+  when the focus record named them, which nothing but its tests ever set, so it could not be
+  reached from the keyboard; to a reader it was an empty container. It now walks its fields as
+  the Ramp does — its track (the ramp's own id focused), then Red, Green and Blue while a key is
+  selected and Delete while one is and there are more than two keys — and the track takes the
+  Ramp's graph keys: the arrows, Home and End pick a key, Delete / Backspace delete the selected
+  one and select its neighbour, Insert adds a key of the gradient's colour halfway to the next. A
+  slider keeps its own keys, and a move of it writes the selected key's channel (a key it takes
+  without moving changes nothing). The delete button is hidden at two keys, and pressed from the
+  keyboard it selects the neighbour; the track's rim is lit while it has the keyboard. To a
+  reader it is a `Group` of a radio button per key (`ramp-colour-key`: "Key 2 of 4: position
+  0.50, #ff0000"), the three sliders with their numbers, which a reader sets, and Delete while it
+  is shown; a reader's Click on a key selects it, on a slider gives it the keyboard, on Delete
+  deletes. A click on the delete button still leaves nothing selected. A press on a peg or the
+  track while a slider or Delete has the keyboard gives the track the keyboard, as a press from
+  outside the ramp does, and a key shown on the sliders stops their wheel glide — a peg pick
+  during one already wrote the glide into the new key, and the track's keys were new ways to do
+  it. The walk itself — focusing a field, following the focus record at each tick, Tab,
+  `keeps_tab`, a reader's Click, the graph's or track's keys, Delete and Insert — is one trait
+  both ramps implement (`ramp::Fields`), not a copy in each. Checked by
+  `a_color_ramp_walks_its_fields_track_first`, `the_tracks_arrows_home_and_end_pick_a_key`,
+  `the_tracks_delete_and_insert_edit_the_keys`, `a_sliders_keys_write_the_selected_keys_channel`,
+  `a_field_that_goes_hands_the_keyboard_to_the_track`, `a_focused_track_lights_its_rim`,
+  `a_color_ramp_is_a_group_of_its_keys_and_sliders`,
+  `the_readers_focus_follows_the_keyboard_through_the_color_ramp`,
+  `a_readers_clicks_and_numbers_reach_the_color_ramp`,
+  `a_press_on_the_track_gives_it_the_keyboard_from_a_control`,
+  `a_key_shown_on_the_sliders_stops_their_glide` and, through the runner,
+  `tab_enters_a_color_ramp_walks_its_fields_and_leaves`, each failing with its part put back; the
+  Ramp's keyboard tests pass unchanged on the shared walk.
+
+- **The Ramp is one keyboard stop, and a reader sees its keys and controls.** It was no stop (no
+  focus role), focusing it handed its Preset dropdown the keyboard, its own Tab cycle only ran in
+  a window with no other stops, a key could be picked and a key added only with the pointer, and
+  to a reader it was an empty container. It is now a `FocusRole::Well` stop whose fields take the
+  keyboard in turn — its graph (the ramp's own id focused), Preset, Line, the key pad while a key
+  is selected, Delete while one is and there are more than two keys — the controls through
+  `claim_field_focus`; it keeps Tab while it has a field to go that way, so the window's walk
+  enters on the graph (Shift+Tab too) and leaves past the last field or before the graph. On the
+  graph Left / Up and Right / Down pick the key before or after (wrapping; with none selected
+  Right takes the first and Left the last), Home / End the ends, Delete / Backspace delete the
+  selected key and select its neighbour, and Insert adds a key on the curve halfway to the next
+  (`NamedKey::Insert`, new, from the Wayland, browser and macOS key maps; cce-wpe maps it to its
+  keysym). The key pad's keys move the selected key. The delete button pressed from the keyboard
+  selects the neighbour too, and when a field goes with the keyboard on it the keyboard goes back
+  to the graph. With two keys the delete button is hidden — parked, unpainted, no stop — instead
+  of shown doing nothing (a button has no disabled state). The graph's rim is lit while it has
+  the keyboard (`well_rim_lit`). A press on a dropdown's trigger, which claims the keyboard for
+  the dropdown's own id, is recorded as the ramp's field. A click on the delete button still
+  leaves nothing selected. A press that takes or makes a key while a control has the keyboard
+  gives the graph the keyboard, as a press from outside the ramp does; without it the graph's
+  keys went to the control and were lost. A key the ramp takes and a reader's action stop a
+  hover-scroll coast, as a press does: the coast moves the key it latched by index and selects
+  it, so it moved the neighbour that took a deleted key's place and took back a selection an
+  arrow or Insert had moved. To a reader the ramp is a `Group` named by its label, its items in
+  reading order: a radio button per key, on while selected, named with its reading (`ramp-key`:
+  "Key 2 of 4: position 0.20, value 1.00"); Preset and Line as combo boxes with their choice;
+  while a key is selected the key pad's axes as sliders, Position and Value (`ramp-position`,
+  `ramp-value`), which a reader sets to move the key; Delete while it is shown. Each control's
+  item is the reader's focus while its field has the keyboard, the selected key's while the graph
+  has it. A reader's Click on a key selects it and puts the keyboard on the graph; on a control
+  it gives it the keyboard and does what Space does there (a dropdown opens, Delete deletes), at
+  the ramp's next tick, which has the context. Checked by `a_ramp_walks_its_fields_graph_first`,
+  `the_graphs_arrows_home_and_end_pick_a_key`, `the_graphs_delete_and_insert_edit_the_keys`,
+  `the_key_pads_arrows_move_the_selected_key`, `a_focused_graph_lights_its_rim`,
+  `a_dropdown_pressed_open_is_a_field_the_ramp_holds`,
+  `a_ramp_is_a_group_of_its_keys_and_controls`,
+  `the_readers_focus_follows_the_keyboard_through_the_ramp`,
+  `a_readers_clicks_and_numbers_reach_the_ramp`,
+  `a_press_on_the_graph_gives_it_the_keyboard_from_a_control`,
+  `a_key_or_a_readers_action_stops_a_coast` and, through the runner,
+  `tab_enters_a_ramp_walks_its_fields_and_leaves`, each failing with its part put back; the
+  ramp's earlier keyboard tests now start on the graph.
+
+- **The Slider2D pad takes the keyboard and reads as two sliders.** It had no key handling and
+  no focus role, so it was no Tab stop; to a reader it was a `Slider` whose value
+  (`"0.500,0.500"`) parsed as no number, with no action a reader could use. It is now a
+  `FocusRole::Well` stop: focused, Left / Right step x by 0.02 and Up / Down y (Up is more),
+  Home / End send x to 0 / 1 and PageDown / PageUp y, each move marked as a change
+  (`take_change`) for its host; unfocused it leaves the keys, as a `Slider` does. Its rim is
+  lit in the highlight while it has the keyboard (`PaintCtx::well_rim_lit`, a focused tree
+  list's tint; flat, the frame's active colour). To a reader it is a `Group` of two `Slider`
+  items, X and Y (`slider2d-x`, `slider2d-y`), numbers in 0..1 at step 0.02 that a reader sets
+  (`Input::a11y_set_item_value`); `key_for` no longer needs to keep Increment / Decrement off
+  it. `Slider2D::axis_items` takes the axes' names, for a host that calls them something else.
+  Checked by `a_focused_pad_steps_its_thumb_on_each_axis`,
+  `a_focused_pad_lights_its_rim` and `a_pad_is_a_group_of_two_sliders`, each failing with its
+  part put back.
+
+- **A composite's unregistered parts can hold the keyboard** (`UiContext::claim_field_focus`,
+  `focus_holder`), the plumbing for the ramps' keyboard and screen-reader work (asked for, so
+  the paused accessibility work is extended by this much). A ramp's dropdowns and key pad are
+  fields it holds by value and never registers, so the focus record named a widget nothing could
+  find: the Tab walk started over from the first stop, a key for the field fell through to a
+  hovered scroll area, `keeps_tab` was asked of nothing, and the reader's focus fell back to the
+  window. Now a composite claims focus for a field with its own id beside it, and everything that
+  asks where the keyboard is asks the holder — the walk and the group chord step from the
+  composite, a key the field cannot be handed goes to the composite, `keeps_tab` is the
+  composite's, a holder losing the keyboard (stepped away from, cleared, claimed, unfocused) is
+  told, removing it drops its field's focus, and a modal gives the keyboard back to it.
+  `Input::keeps_tab` takes the direction (`reverse`), so a composite keeps Tab only while it
+  has a field to go that way; the text box ignores it. `A11yItem` gains `value`, `range` and
+  `field` and a constructor (`A11yItem::new`); an item publishes its value as a widget of its
+  role does (one helper now serves both), offers SetValue with a range — a reader's number goes
+  to `Input::a11y_set_item_value` — and is the reader's focus when the widget gives it its focus
+  or when the focus record names its field; with no such item, the holder is. A reader's Click
+  on an item leaves the keyboard where it is when the widget already holds it. Ramp and
+  ColorRamp are `Group`s. The ramps themselves are unchanged here. Checked with a stand-in
+  composite (`widget::test_composite`): `the_walk_steps_from_the_composite_whose_field_has_the_keyboard`,
+  `a_composite_hears_every_way_the_keyboard_leaves_its_field`,
+  `a_key_for_a_field_reaches_the_composite_that_holds_it`,
+  `a_composite_keeps_tab_while_it_has_a_field_to_go`, `items_carry_values_ranges_and_the_keyboard`,
+  `a_ramp_is_a_group` and `a_readers_click_on_an_item_leaves_the_keyboard_on_its_composites_field`,
+  each failing with its part put back.
+
 - **Images can be another process's GPU memory** (`vk::image::dmabuf`, `vk::core::dmabuf`).
   `probe_dmabuf` names the device the window will render on (the same `CCE_VK_DEVICE` ranking,
   no window needed — a producer must be told before it starts) and every single-plane DRM

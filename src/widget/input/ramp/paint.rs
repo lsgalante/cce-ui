@@ -220,14 +220,16 @@ impl Paint for Ramp {
         self.paint_pegs(pc);
         // The well's rim, after the content: the recess under relief, the frame
         // hairline flat (it carved a recess either way, and wore three shadow
-        // rings no other well has).
-        pc.well_rim(graph, graph_radius, crate::layout::control_relief());
+        // rings no other well has); lit while the graph has the keyboard.
+        pc.well_rim_lit(graph, graph_radius, crate::layout::control_relief(), self.walk.at == Some(GRAPH));
         if !self.controls_collapsed {
             let dummy = UiContext::new();
             self.preset_dropdown.paint_self(&dummy, pc);
             self.line_type_dropdown.paint_self(&dummy, pc);
             if self.selected_key_idx.is_some() {
                 self.key_pad.paint_self(&dummy, pc);
+            }
+            if self.deletable() {
                 self.del_button.paint_self(&dummy, pc);
             }
         }

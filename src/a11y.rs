@@ -17,7 +17,9 @@
 //! - **bounds** — its rect in LOGICAL px, the window node carrying the HiDPI scale as its
 //!   transform, so no widget's bounds change with the scale;
 //! - **actions** — focus for every keyboard stop, click for every [`FocusRole::Plate`];
-//! - **focus** — the context's focused widget, else the window.
+//! - **focus** — the item the keyboard is on (a widget's focused item, or the item standing
+//!   for the field that has it), else the widget that holds it (`UiContext::focus_holder`),
+//!   else the window.
 //!
 //! An open context menu (`widget::context_menu`, one per thread, whatever app shows it) is a
 //! [`Role::Menu`] under the window, its rows items: a `✓` row a checkable item, a `●` / `○`
@@ -48,8 +50,9 @@ pub fn widget_of(node: NodeId) -> Option<WidgetId> {
 }
 
 /// A part of a widget a screen reader sees as a node of its own, under the widget's node:
-/// a radio group's radio buttons (`Input::a11y_items`). A click on it is
-/// `Input::a11y_select_item`.
+/// a radio group's radio buttons, a ramp's keys and controls (`Input::a11y_items`). A click
+/// on it is `Input::a11y_select_item`; a number set on one with a range is
+/// `Input::a11y_set_item_value`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct A11yItem {
     pub role: Role,
@@ -60,6 +63,22 @@ pub struct A11yItem {
     pub toggled: Option<bool>,
     /// Whether the keyboard is on it: the widget's focus, given to this item.
     pub focused: bool,
+    /// Its value, published as a widget's is for its role: a slider's number, a combo box's
+    /// choice.
+    pub value: Option<String>,
+    /// The `(min, max, step)` a reader may set its value in, as a widget's `a11y_range`.
+    pub range: Option<(f64, f64, f64)>,
+    /// The unregistered part it stands for, when that part takes the keyboard itself
+    /// (`UiContext::claim_field_focus`): the item is the keyboard's node while the focus
+    /// record names it.
+    pub field: Option<WidgetId>,
+}
+
+impl A11yItem {
+    /// An item with nothing but its role, words and place; the rest is set field by field.
+    pub fn new(role: Role, label: impl Into<String>, rect: crate::scene::layout::Rect) -> Self {
+        A11yItem { role, label: label.into(), rect, toggled: None, focused: false, value: None, range: None, field: None }
+    }
 }
 
 /// Where widgets' items begin: `ITEM_BASE + (widget id << 16) + index`, below the apps' own
@@ -312,7 +331,7 @@ pub fn role_for(type_name: &str, focus: FocusRole, explicit: Option<Role>) -> Ro
         "Button" => Role::Button,
         "Checkbox" => Role::CheckBox,
         "Toggle" => Role::Switch,
-        "Slider" | "RangeSlider" | "Slider2D" => Role::Slider,
+        "Slider" | "RangeSlider" => Role::Slider,
         "Spinbox" => Role::SpinButton,
         "TextBox" | "KeybindRecorder" => Role::TextInput,
         "Dropdown" | "FontSelector" => Role::ComboBox,
@@ -327,7 +346,7 @@ pub fn role_for(type_name: &str, focus: FocusRole, explicit: Option<Role>) -> Ro
         "ImageView" => Role::Image,
         "Splitter" => Role::Splitter,
         "Graph" | "Trackpad" => Role::Canvas,
-        "Group" | "ParametersBg" => Role::Group,
+        "Group" | "ParametersBg" | "Ramp" | "ColorRamp" | "Slider2D" => Role::Group,
         _ => match focus {
             FocusRole::Plate => Role::Button,
             FocusRole::Well | FocusRole::None => Role::GenericContainer,
@@ -348,11 +367,37 @@ pub fn widget_node(w: &dyn WidgetHost, children: Vec<NodeId>) -> Node {
     if let Some(label) = name.or_else(|| w.label().filter(|l| !l.is_empty())) {
         node.set_label(label);
     }
-    if let Some(t) = &text {
-        // The text is the runs (`text_run_nodes`, the node's first children).
-        let id = w.base().id();
-        describe_text_field(&mut node, t, |line| text_run_id(id, line));
-    } else if let Some(value) = w.a11y_value() {
+    let value = match &text {
+        Some(t) => {
+            // The text is the runs (`text_run_nodes`, the node's first children).
+            let id = w.base().id();
+            describe_text_field(&mut node, t, |line| text_run_id(id, line));
+            None
+        }
+        None => w.a11y_value(),
+    };
+    publish_value(&mut node, role, value, w.a11y_range());
+    let (x, y, width, height) = w.rect();
+    node.set_bounds(Rect::new(x as f64, y as f64, (x + width) as f64, (y + height) as f64));
+    if focus != FocusRole::None {
+        node.add_action(Action::Focus);
+    }
+    for action in [Action::Click, Action::Increment, Action::Decrement] {
+        if key_for(w, action).is_some() {
+            node.add_action(action);
+        }
+    }
+    if !children.is_empty() {
+        node.set_children(children);
+    }
+    node
+}
+
+/// A widget's or an item's value on its node, as its `role` reads it: a check box or switch
+/// as toggled, a slider, spin button or progress bar as a number, anything else as text; and
+/// with a `range`, its bounds and step, settable by a reader (SetValue).
+fn publish_value(node: &mut Node, role: Role, value: Option<String>, range: Option<(f64, f64, f64)>) {
+    if let Some(value) = value {
         match role {
             Role::CheckBox | Role::Switch => {
                 if let Some(on) = truth(&value) {
@@ -366,12 +411,7 @@ pub fn widget_node(w: &dyn WidgetHost, children: Vec<NodeId>) -> Node {
             _ => node.set_value(value),
         }
     }
-    let (x, y, width, height) = w.rect();
-    node.set_bounds(Rect::new(x as f64, y as f64, (x + width) as f64, (y + height) as f64));
-    if focus != FocusRole::None {
-        node.add_action(Action::Focus);
-    }
-    if let Some((min, max, step)) = w.a11y_range() {
+    if let Some((min, max, step)) = range {
         node.set_min_numeric_value(min);
         node.set_max_numeric_value(max);
         if step > 0.0 {
@@ -379,15 +419,6 @@ pub fn widget_node(w: &dyn WidgetHost, children: Vec<NodeId>) -> Node {
         }
         node.add_action(Action::SetValue);
     }
-    for action in [Action::Click, Action::Increment, Action::Decrement] {
-        if key_for(w, action).is_some() {
-            node.add_action(action);
-        }
-    }
-    if !children.is_empty() {
-        node.set_children(children);
-    }
-    node
 }
 
 /// The key a keyboard user presses on the focused widget to do `action`, which is how the
@@ -401,8 +432,8 @@ pub fn key_for(w: &dyn WidgetHost, action: Action) -> Option<NamedKey> {
         // A radio group is clicked through its radio buttons (`A11yItem`), not as a whole.
         (Action::Click, Role::RadioGroup) => None,
         (Action::Click, _) if w.focus_role() == FocusRole::Plate => Some(NamedKey::Space),
-        (Action::Increment, Role::Slider) if w.type_name() != "Slider2D" => Some(NamedKey::ArrowRight),
-        (Action::Decrement, Role::Slider) if w.type_name() != "Slider2D" => Some(NamedKey::ArrowLeft),
+        (Action::Increment, Role::Slider) => Some(NamedKey::ArrowRight),
+        (Action::Decrement, Role::Slider) => Some(NamedKey::ArrowLeft),
         (Action::Increment, Role::SpinButton) => Some(NamedKey::ArrowUp),
         (Action::Decrement, Role::SpinButton) => Some(NamedKey::ArrowDown),
         _ => None,
@@ -477,8 +508,12 @@ pub fn window_tree(ctx: Option<&UiContext>, app: AppNodes, title: &str, scale: f
             if let Some(on) = item.toggled {
                 node.set_toggled(Toggled::from(on));
             }
+            publish_value(&mut node, item.role, item.value, item.range);
             node.add_action(Action::Click);
-            if item.focused && ctx.focused_widget == Some(*id) {
+            // The keyboard is on it when the widget has it and gives it this item, or when
+            // the focus record names the part the item stands for.
+            let widget_focused = item.focused && ctx.focused_widget == Some(*id);
+            if widget_focused || (item.field.is_some() && item.field == ctx.focused_widget) {
                 item_focus = Some(nid);
             }
             nodes.push((nid, node));
@@ -517,7 +552,7 @@ pub fn window_tree(ctx: Option<&UiContext>, app: AppNodes, title: &str, scale: f
     let mut focus = app
         .focus
         .or(item_focus)
-        .or_else(|| ctx.focused_widget.filter(|id| shown.contains(id)).map(node_id))
+        .or_else(|| ctx.focus_holder().filter(|id| shown.contains(id)).map(node_id))
         .unwrap_or(WINDOW);
     if let Some(menu_focus) = push_context_menu(&mut nodes) {
         focus = menu_focus;
@@ -587,6 +622,8 @@ fn push_context_menu(nodes: &mut Vec<(NodeId, Node)>) -> Option<NodeId> {
     Some(cm::hovered_item().filter(|&i| i >= headers).map(menu_row_id).unwrap_or(MENU))
 }
 
+#[cfg(test)]
+mod item_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
