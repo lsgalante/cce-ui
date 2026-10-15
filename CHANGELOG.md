@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-15
 
+- **A labelled Ramp or ColorRamp lays itself out below its label.** Both took their rect from
+  `rect_assigned`, the adapter's whole block, and the detached label strip sits at its top: the
+  graph or the track was laid out from the block's top and drew under the label, so the gallery
+  left both unlabelled. They now take the content rect in `arrange_children`, as the TreeList
+  does (its doc names the same bug). The adapter calls it only while the widget is shown, which
+  costs nothing here: no host hides a ramp and re-shows it without a new rect. Checked:
+  `a_labelled_ramp_lays_its_graph_below_its_label`, `a_labelled_color_ramp_lays_its_track_below_its_label`,
+  each failing with `rect_assigned` put back; the gallery's labelled Ramp and ColorRamp in a
+  shadow shot.
 - **A registry entry with no display is found only by a caller with none.** It was a stopgap
   while the live apps were built before `Entry::display` existed; with all of them rebuilt
   (designer last, 2026-10-15), a display-less entry can only be a stale app, typically one left

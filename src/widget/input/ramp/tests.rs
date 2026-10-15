@@ -591,3 +591,31 @@ fn a_press_on_a_flat_ramp_peg_beside_its_neighbour_takes_that_peg() {
     ctx.propagate_event(&release(x, y), h.id());
     assert_eq!(ctx[h].selected_key_idx, Some(1), "the face under the press");
 }
+
+/// A labelled ramp lays its graph out below its label: the adapter's block carries the
+/// detached label strip above the content, and the ramp arranges in the content.
+#[test]
+fn a_labelled_ramp_lays_its_graph_below_its_label() {
+    let mut ramp = Ramp::new().with_label("Ramp");
+    let strip = ramp.label_strip();
+    assert!(strip > 0.0, "labelled, the ramp has a strip");
+    let natural = ramp.inner().natural_height();
+    WidgetHost::set_rect(&mut ramp, 0.0, 0.0, 300.0, natural + strip);
+    let r = ramp.inner();
+    assert_eq!(r.base.y, strip, "the ramp's own rect starts below the strip");
+    assert_eq!(r.base.h, natural, "and is the content's height");
+    assert!(r.plot_rect().y >= strip, "the plot sits below the label");
+}
+
+/// A labelled colour ramp lays its track below its label, as the Ramp does.
+#[test]
+fn a_labelled_color_ramp_lays_its_track_below_its_label() {
+    let mut cr = ColorRamp::new().with_label("ColorRamp");
+    let strip = cr.label_strip();
+    assert!(strip > 0.0, "labelled, the colour ramp has a strip");
+    let natural = cr.inner().natural_height();
+    WidgetHost::set_rect(&mut cr, 0.0, 0.0, 300.0, natural + strip);
+    let r = cr.inner();
+    assert_eq!(r.base.y, strip, "the colour ramp's own rect starts below the strip");
+    assert!(r.track_rect().y >= strip, "the track sits below the label");
+}

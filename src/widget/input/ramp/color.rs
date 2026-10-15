@@ -251,7 +251,11 @@ impl Layout for ColorRamp {
         Some(Size::new(0.0, self.natural_height()))
     }
 
-    fn rect_assigned(&mut self, rect: Rect) {
+    /// Take the CONTENT rect and arrange the fields in it — the TreeList's rule. Not
+    /// `rect_assigned`'s block: the adapter's block holds the detached label strip above
+    /// the content, and from its top the track sat under a label, which is why the gallery
+    /// left the ramps unlabelled.
+    fn arrange_children(&mut self, rect: Rect) {
         self.base.x = rect.x;
         self.base.y = rect.y;
         self.base.w = rect.width;
