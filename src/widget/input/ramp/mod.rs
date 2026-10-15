@@ -9,7 +9,7 @@
 //!
 //! | module | holds |
 //! |---|---|
-//! | `mod.rs` | the float `Ramp`: its key, construction, presets, the spec in and out, `impl Layout` |
+//! | `mod.rs` | the float `Ramp`: its key, construction, presets, the spec in and out, `impl Layout`; and what both ramps share: resettling a moved key, peg order and the topmost-peg hit test, the closed point test, parking a field |
 //! | `geometry` | the plot, the key pegs (size, order, hit test), where a dragged key lands, the controls' places |
 //! | `paint` | `impl Paint for Ramp` |
 //! | `input` | `impl Input for Ramp`: key drags, the hover-scroll, the controls and their focus |
@@ -77,11 +77,59 @@ pub struct Ramp {
     pub line_type_dropdown: Adapted<Dropdown>,
 }
 
+/// How many fields the float ramp has: the two dropdowns, the key pad, the delete button.
+const FIELD_TOTAL: usize = 4;
+
+/// Restore sort order after `keys[i]` changed position (`pos` reads a key's), by adjacent
+/// swaps, and return the key's new index — both ramps' `resettle_key`. The moved key is
+/// tracked by identity, not found again by its position, so a key within ε of the one it is
+/// passing is never mistaken for it, and no float comparison can fail the order.
+fn resettle<K>(keys: &mut [K], mut i: usize, pos: impl Fn(&K) -> f32) -> usize {
+    while i + 1 < keys.len() && pos(&keys[i]) > pos(&keys[i + 1]) {
+        keys.swap(i, i + 1);
+        i += 1;
+    }
+    while i > 0 && pos(&keys[i]) < pos(&keys[i - 1]) {
+        keys.swap(i, i - 1);
+        i -= 1;
+    }
+    i
+}
+
+/// The pegs of `n` keys in paint order, bottom first: by index, the selected one (`sel`)
+/// last, on top.
+fn peg_order(n: usize, sel: Option<usize>) -> impl DoubleEndedIterator<Item = usize> {
+    let sel = sel.filter(|&i| i < n);
+    (0..n).filter(move |&i| Some(i) != sel).chain(sel)
+}
+
+/// The key whose peg is under `(px, py)`, topmost first — the reverse of [`peg_order`], so
+/// where pegs overlap the press takes the one drawn on top. `peg(i)` is key `i`'s peg centre
+/// and the radius it is drawn to; a press past that radius is not on it.
+fn topmost_peg(n: usize, sel: Option<usize>, px: f32, py: f32, peg: impl Fn(usize) -> ((f32, f32), f32)) -> Option<usize> {
+    peg_order(n, sel).rev().find(|&i| {
+        let ((cx, cy), r) = peg(i);
+        let (dx, dy) = (px - cx, py - cy);
+        dx * dx + dy * dy <= r * r
+    })
+}
+
+/// Whether `(x, y)` lies in `r`, its edges included: every ramp press test is closed
+/// (`Rect::contains` is half-open, and a press on the right or bottom edge would miss).
+fn within(r: Rect, x: f32, y: f32) -> bool {
+    x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height
+}
+
+/// Park a field off-screen at no size: how a ramp hides a control it is not showing.
+fn park(w: &mut dyn WidgetHost) {
+    w.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+}
+
 impl Ramp {
     /// How many fields take the keyboard, in order: the two dropdowns, then the key pad and
     /// the delete button while a key is selected.
     fn field_count(&self) -> usize {
-        if self.selected_key_idx.is_some() { 4 } else { 2 }
+        if self.selected_key_idx.is_some() { FIELD_TOTAL } else { 2 }
     }
 
     fn field(&mut self, i: usize) -> &mut dyn WidgetHost {
@@ -105,7 +153,7 @@ impl Ramp {
     /// The field the window's focus is on, if it is one of the ramp's.
     fn focused_field(&self, ui: &UiContext) -> Option<usize> {
         let focused = ui.focused_widget?;
-        (0..4).find(|&i| self.field_id(i) == focused)
+        (0..FIELD_TOTAL).find(|&i| self.field_id(i) == focused)
     }
 
     /// Give field `i` the keyboard: the window's focus record names it (a field checks the
@@ -127,16 +175,17 @@ impl Ramp {
             RampKey { pos: 0.8, value: 1.0 },
             RampKey { pos: 1.0, value: 0.5 },
         ];
-        
+
         // The key pad: a 2-axis slider driving the selected key's position
         // (x) and value (y), labeled like the dropdowns.
         let key_pad = Slider2D::new().with_label("Key");
         // A square x-icon button (cce-icons); label fallback if the icon set
         // is missing on this machine. By NAME, not by a captured id: an id
         // does not survive the renderer rebuild a reconnect performs, and the
-        // widget outlives the renderer (see `Button::icon_name`).
+        // widget outlives the renderer (see `Button::icon_name`). Its size is
+        // `arrange_fields`'.
         let del_button =
-            Button::new(0.0, 0.0, 22.0, 22.0).with_icon_name("x", &crate::l10n::tr("ramp-delete-key"));
+            Button::new(0.0, 0.0, 0.0, 0.0).with_icon_name("x", &crate::l10n::tr("ramp-delete-key"));
         // Short names on purpose: the strip's columns are narrow, and these
         // render inside param rows too ("Bevel (Raised)" used to clip).
         // Labeled: the dropdowns draw their own detached labels, sitting on
@@ -155,7 +204,7 @@ impl Ramp {
             ],
             0,
         ).with_open_upward(true).with_label("Line");
-        
+
         Adapted::new(Ramp {
             base: Widget::new(),
             keys,
@@ -173,12 +222,12 @@ impl Ramp {
             line_type_dropdown,
         })
     }
-    
+
     /// Replace the curve with preset `idx` of [`RAMP_PRESETS`] (an index
     /// past the end changes nothing) and show it on the trigger.
     pub fn apply_preset(&mut self, idx: usize) {
         if let Some((_, keys)) = RAMP_PRESETS.get(idx) {
-            self.keys = keys.iter().map(|&(pos, value)| RampKey { pos, value }).collect();
+            self.keys = keys_from(keys);
         }
         self.selected_key_idx = None;
         self.sync_preset();
@@ -222,13 +271,7 @@ impl Ramp {
     /// Blank rather than a stale name, and the dropdown keeps a pick of the
     /// preset it last showed live, so choosing it again puts it back.
     pub fn sync_preset(&mut self) {
-        let matches = |keys: &[(f32, f32)]| {
-            self.keys.len() == keys.len()
-                && self.keys.iter().zip(keys).all(|(k, &(pos, value))| {
-                    (k.pos - pos).abs() <= 0.0005 && (k.value - value).abs() <= 0.0005
-                })
-        };
-        match RAMP_PRESETS.iter().position(|(_, keys)| matches(keys)) {
+        match RAMP_PRESETS.iter().position(|(_, keys)| self.keys_match(keys)) {
             Some(idx) => {
                 self.preset_dropdown.selected = idx;
                 self.preset_dropdown.custom_display_text = None;
@@ -240,9 +283,24 @@ impl Ramp {
     /// The curve's value at `t` — [`crate::layout::sample_ramp_keys`], the
     /// DE's one ramp interpolation, so what this widget draws is exactly
     /// what every consumer of its spec string evaluates.
+    /// To sample many points, take [`key_pairs`](Self::key_pairs) once and sample them
+    /// (`paint` does).
     pub fn get_interpolated_value(&self, t: f32) -> f32 {
-        let keys: Vec<(f32, f32)> = self.keys.iter().map(|k| (k.pos, k.value)).collect();
-        crate::layout::sample_ramp_keys(&keys, self.smooth(), t)
+        crate::layout::sample_ramp_keys(&self.key_pairs(), self.smooth(), t)
+    }
+
+    /// The keys as `(pos, value)` pairs, the form the DE's ramp functions take.
+    pub fn key_pairs(&self) -> Vec<(f32, f32)> {
+        self.keys.iter().map(|k| (k.pos, k.value)).collect()
+    }
+
+    /// Whether the keys are `pairs`, each within 0.0005 — a preset the curve is, or a spec
+    /// that changes nothing.
+    fn keys_match(&self, pairs: &[(f32, f32)]) -> bool {
+        self.keys.len() == pairs.len()
+            && self.keys.iter().zip(pairs).all(|(k, &(pos, value))| {
+                (k.pos - pos).abs() <= 0.0005 && (k.value - value).abs() <= 0.0005
+            })
     }
 
     /// Whether the curve is the smooth (monotone cubic) line type vs straight
@@ -253,8 +311,7 @@ impl Ramp {
 
     /// This ramp's state as the DE's ramp spec string ([`format_ramp_spec`]).
     pub fn spec_string(&self) -> String {
-        let keys: Vec<(f32, f32)> = self.keys.iter().map(|k| (k.pos, k.value)).collect();
-        format_ramp_spec(&keys, self.smooth())
+        format_ramp_spec(&self.key_pairs(), self.smooth())
     }
 
     /// Apply a spec string ([`parse_ramp_spec`]); returns whether anything changed.
@@ -263,18 +320,10 @@ impl Ramp {
         let Some((keys, smooth)) = parse_ramp_spec(spec) else {
             return false;
         };
-        let new_keys: Vec<RampKey> =
-            keys.into_iter().map(|(pos, value)| RampKey { pos, value }).collect();
         let new_line = if smooth { 1 } else { 0 };
-        let changed = self.line_type_dropdown.selected != new_line
-            || self.keys.len() != new_keys.len()
-            || self
-                .keys
-                .iter()
-                .zip(new_keys.iter())
-                .any(|(a, b)| (a.pos - b.pos).abs() > 0.0005 || (a.value - b.value).abs() > 0.0005);
+        let changed = self.line_type_dropdown.selected != new_line || !self.keys_match(&keys);
         if changed {
-            self.keys = new_keys;
+            self.keys = keys_from(&keys);
             self.line_type_dropdown.selected = new_line;
             self.selected_key_idx = None;
             self.sync_preset();
@@ -282,6 +331,11 @@ impl Ramp {
         }
         changed
     }
+}
+
+/// Keys from `(pos, value)` pairs.
+fn keys_from(pairs: &[(f32, f32)]) -> Vec<RampKey> {
+    pairs.iter().map(|&(pos, value)| RampKey { pos, value }).collect()
 }
 
 /// The ramp editor's presets, in the order its Preset dropdown lists them:
@@ -297,8 +351,7 @@ pub const RAMP_PRESETS: &[(&str, &[(f32, f32)])] = &[
 pub use cce_core::ramp::{format_ramp_spec, parse_ramp_spec};
 
 impl Layout for Ramp {
-    /// [`natural_height`](Ramp::natural_height). It declared a flat 150, short of the
-    /// strip's ~180 by itself, so at its own height the graph sank to its 30 px floor.
+    /// [`natural_height`](Ramp::natural_height): the graph whole over the control strip.
     fn intrinsic_size(&self) -> Option<Size> {
         Some(Size::new(0.0, self.natural_height()))
     }
@@ -315,9 +368,8 @@ impl Layout for Ramp {
         self.arrange_fields();
     }
 
-    // register_embedded_children: gone entirely (6bd self-routing): the fields are never
-    // in the registry — the ramp decides which field has the keyboard (`focus_field`), the composite
-    // itself covers the spatial grid, and an eagerly-registered child DROPDOWN's open
-    // popover made `is_coordinate_covered` occlude the composite's own hit gate (the
-    // exclusion is exact-id only), which is why preset-item clicks never landed.
+    // No `register_embedded_children`: the fields are never in the registry. The ramp
+    // decides which field has the keyboard (`focus_field`) and covers the spatial grid
+    // itself, and a registered child dropdown's open popover would occlude the ramp's own
+    // hit gate (`is_coordinate_covered` excludes by exact id only).
 }

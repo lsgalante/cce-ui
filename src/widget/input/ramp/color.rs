@@ -15,13 +15,12 @@ pub struct ColorRamp {
     pub selected_key_idx: Option<usize>,
     pub is_dragging_key: bool,
     pub just_changed: bool,
-    
+
     // Child controls for color editing & deletion
     pub r_slider: Adapted<Slider>,
     pub g_slider: Adapted<Slider>,
     pub b_slider: Adapted<Slider>,
     pub del_button: Adapted<Button>,
-    
 }
 
 impl ColorRamp {
@@ -30,12 +29,13 @@ impl ColorRamp {
             ColorRampKey { pos: 0.0, color: [0.0, 0.0, 0.0] },
             ColorRampKey { pos: 1.0, color: [1.0, 1.0, 1.0] },
         ];
-        
+
         let r_slider = Slider::new().with_label("Red");
         let g_slider = Slider::new().with_label("Green");
         let b_slider = Slider::new().with_label("Blue");
-        let del_button = Button::new(0.0, 0.0, 70.0, 28.0).with_label("Delete Key");
-        
+        // Sized by `arrange_fields`: `DEL_W` wide, the toolkit's button height.
+        let del_button = Button::new(0.0, 0.0, 0.0, 0.0).with_label("Delete Key");
+
         Adapted::new(ColorRamp {
             base: Widget::new(),
             keys,
@@ -48,7 +48,7 @@ impl ColorRamp {
             del_button,
         })
     }
-    
+
     pub fn get_interpolated_color(&self, t: f32) -> [f32; 3] {
         if self.keys.is_empty() {
             return [0.0, 0.0, 0.0];
@@ -59,7 +59,7 @@ impl ColorRamp {
         if t >= self.keys[self.keys.len() - 1].pos {
             return self.keys[self.keys.len() - 1].color;
         }
-        
+
         for i in 0..self.keys.len() - 1 {
             let k1 = &self.keys[i];
             let k2 = &self.keys[i+1];
@@ -78,22 +78,11 @@ impl ColorRamp {
         }
         self.keys[0].color
     }
-    
-    /// Restore sort order after `keys[i]` changed position, by adjacent swaps, and
-    /// return the key's new index — the float ramp's `resettle_key`. It re-sorted and
-    /// found the moved key again by its position, within 0.0001: dragged onto a
-    /// neighbour's pixel, the match was the neighbour and the selection jumped to it
-    /// (and the sort's comparison panicked on a NaN).
-    pub(super) fn resettle_key(&mut self, mut i: usize) -> usize {
-        while i + 1 < self.keys.len() && self.keys[i].pos > self.keys[i + 1].pos {
-            self.keys.swap(i, i + 1);
-            i += 1;
-        }
-        while i > 0 && self.keys[i].pos < self.keys[i - 1].pos {
-            self.keys.swap(i, i - 1);
-            i -= 1;
-        }
-        i
+
+    /// Restore sort order after `keys[i]` changed position and return the key's new index
+    /// ([`resettle`]).
+    pub(super) fn resettle_key(&mut self, i: usize) -> usize {
+        resettle(&mut self.keys, i, |k| k.pos)
     }
 
     /// Delete the selected key — what the delete button does, clicked or pressed from the
@@ -111,13 +100,43 @@ impl ColorRamp {
 
     /// Write the R, G and B sliders into the selected key's colour.
     pub(super) fn apply_sliders_to_selected(&mut self) {
-        if let Some(idx) = self.selected_key_idx {
-            self.keys[idx].color = [
-                self.r_slider.inner().value(),
-                self.g_slider.inner().value(),
-                self.b_slider.inner().value(),
-            ];
+        if self.selected_key_idx.is_some() {
+            for ch in 0..3 {
+                self.write_channel(ch);
+            }
             self.just_changed = true;
+        }
+    }
+
+    /// Channel `ch`'s slider: red, green, blue.
+    fn slider(&self, ch: usize) -> &Adapted<Slider> {
+        match ch {
+            0 => &self.r_slider,
+            1 => &self.g_slider,
+            _ => &self.b_slider,
+        }
+    }
+
+    fn slider_mut(&mut self, ch: usize) -> &mut Adapted<Slider> {
+        match ch {
+            0 => &mut self.r_slider,
+            1 => &mut self.g_slider,
+            _ => &mut self.b_slider,
+        }
+    }
+
+    /// Write channel `ch`'s slider into the selected key's colour (with none selected,
+    /// nothing).
+    fn write_channel(&mut self, ch: usize) {
+        if let Some(idx) = self.selected_key_idx {
+            self.keys[idx].color[ch] = self.slider(ch).inner().value();
+        }
+    }
+
+    /// Show colour `c` on the R, G and B sliders.
+    fn load_sliders(&mut self, c: [f32; 3]) {
+        for (ch, v) in c.into_iter().enumerate() {
+            self.slider_mut(ch).set_value(v);
         }
     }
 }
@@ -178,22 +197,14 @@ impl ColorRamp {
     }
 
     /// The pegs in paint order, bottom first: by index, the selected one last (on top).
-    fn peg_order(&self) -> impl Iterator<Item = usize> + '_ {
-        let sel = self.selected_key_idx.filter(|&i| i < self.keys.len());
-        (0..self.keys.len()).filter(move |&i| Some(i) != sel).chain(sel)
+    fn peg_order(&self) -> impl Iterator<Item = usize> {
+        peg_order(self.keys.len(), self.selected_key_idx)
     }
 
     /// The key whose peg is under `(px, py)`, each peg within its drawn radius
-    /// ([`peg_drawn_r`](Self::peg_drawn_r)), topmost first (the reverse of the paint order),
-    /// so where pegs overlap the press takes the one drawn on top.
+    /// ([`peg_drawn_r`](Self::peg_drawn_r)), topmost first ([`topmost_peg`]).
     pub(super) fn key_at(&self, px: f32, py: f32) -> Option<usize> {
-        let order: Vec<usize> = self.peg_order().collect();
-        order.into_iter().rev().find(|&idx| {
-            let (cx, cy) = self.peg_centre(idx);
-            let (dx, dy) = (px - cx, py - cy);
-            let r = self.peg_drawn_r(idx);
-            dx * dx + dy * dy <= r * r
-        })
+        topmost_peg(self.keys.len(), self.selected_key_idx, px, py, |i| (self.peg_centre(i), self.peg_drawn_r(i)))
     }
 
     /// One slider row: its label strip over a slider of the toolkit's height.
@@ -231,16 +242,16 @@ impl ColorRamp {
         let slider_w = (w - 2.0 * Self::MARGIN - Self::DEL_W - 10.0).max(40.0);
 
         if self.selected_key_idx.is_some() {
-            for (k, slider) in [&mut self.r_slider, &mut self.g_slider, &mut self.b_slider].into_iter().enumerate() {
-                slider.set_rect(x + Self::MARGIN, sy + k as f32 * (row_h + Self::ROW_GAP), slider_w, row_h);
+            for ch in 0..3 {
+                self.slider_mut(ch).set_rect(x + Self::MARGIN, sy + ch as f32 * (row_h + Self::ROW_GAP), slider_w, row_h);
             }
             let rows_h = Self::slider_block_h();
             self.del_button.set_rect(x + w - Self::MARGIN - Self::DEL_W, sy + (rows_h - bh) / 2.0, Self::DEL_W, bh);
         } else {
-            self.r_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.g_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.b_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+            for ch in 0..3 {
+                park(self.slider_mut(ch));
+            }
+            park(&mut self.del_button);
         }
     }
 }
@@ -262,7 +273,6 @@ impl Layout for ColorRamp {
         self.base.h = rect.height;
         self.arrange_fields();
     }
-
 }
 
 impl Paint for ColorRamp {
@@ -272,8 +282,8 @@ impl Paint for ColorRamp {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    // Field children are ctx-linked for event propagation but painted here (gated on a
-    // key being selected) — the walk must not also descend.
+    // The fields are the editor's own values, never in the registry, and painted here
+    // (while a key is selected): the walk must not also descend.
     fn paints_own_subtree(&self) -> bool {
         true
     }
@@ -357,177 +367,128 @@ impl Input for ColorRamp {
     }
 
     fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
-        // (The per-tick field-widget re-parenting is gone, 6bd: it was a dummy-ctx
-        // `set_parent` whose every effect was discarded — legacy behaved the same.)
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
         let mut changed = self.just_changed;
         self.just_changed = false;
-        
+
         if self.selected_key_idx.is_some() {
-            if self.r_slider.tick(dt, ui) {
-                if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[0] = self.r_slider.inner().value();
+            for ch in 0..3 {
+                if self.slider_mut(ch).tick(dt, ui) {
+                    self.write_channel(ch);
+                    changed = true;
                 }
-                changed = true;
-            }
-            if self.g_slider.tick(dt, ui) {
-                if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[1] = self.g_slider.inner().value();
-                }
-                changed = true;
-            }
-            if self.b_slider.tick(dt, ui) {
-                if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[2] = self.b_slider.inner().value();
-                }
-                changed = true;
-            }
-            if self.del_button.tick(dt, ui) {
-                changed = true;
             }
         }
         changed
-    
     }
 
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
             Event::MouseButton { button, state, x, y, .. } => {
-                let (button, state, px, py_event) = (*button, *state, *x, *y);
-                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
-        if button != MouseButton::Left { return false; }
-        
-        let track = self.track_rect();
-
-        if state == ElementState::Pressed {
-            // The key whose peg is under the press, the topmost where pegs overlap.
-            if let Some(idx) = self.key_at(px, py_event) {
-                let color = self.keys[idx].color;
-                self.selected_key_idx = Some(idx);
-                self.is_dragging_key = true;
-                self.r_slider.set_value(color[0]);
-                self.g_slider.set_value(color[1]);
-                self.b_slider.set_value(color[2]);
-                self.arrange_fields();
-                return true;
-            }
-
-            if px >= track.x && px <= track.x + track.width && py_event >= track.y && py_event <= track.y + track.height {
-                let t = (px - track.x) / track.width;
-                let col = self.get_interpolated_color(t);
-                let new_key = ColorRampKey { pos: t, color: col };
-                self.keys.push(new_key);
-                let new_idx = self.resettle_key(self.keys.len() - 1);
-                self.just_changed = true;
-                self.selected_key_idx = Some(new_idx);
-                self.r_slider.set_value(col[0]);
-                self.g_slider.set_value(col[1]);
-                self.b_slider.set_value(col[2]);
-                self.arrange_fields();
-                return true;
-            }
-            
-            if self.selected_key_idx.is_some() {
-                if self.r_slider.mouse_input(button, state, px, py_event, ui) { return true; }
-                if self.g_slider.mouse_input(button, state, px, py_event, ui) { return true; }
-                if self.b_slider.mouse_input(button, state, px, py_event, ui) { return true; }
-                // Pressed only: the button clicks on its release, below.
-                if self.del_button.mouse_input(button, state, px, py_event, ui) {
-                    return true;
+                let (button, state, px, py) = (*button, *state, *x, *y);
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
+                if button != MouseButton::Left {
+                    return false;
                 }
-            }
-        } else {
-            // A release is the ramp's only when something of it used it: a key drag
-            // ending, a slider or the delete button letting go. Releases reach widgets
-            // without a hit test, and claiming every one while a key was selected kept
-            // them from whatever the press was on. Every field is told regardless of the
-            // selection, so none is left holding a press.
-            let dragged = std::mem::take(&mut self.is_dragging_key);
-            let r = self.r_slider.mouse_input(button, state, px, py_event, ui);
-            let g = self.g_slider.mouse_input(button, state, px, py_event, ui);
-            let b = self.b_slider.mouse_input(button, state, px, py_event, ui);
-            let del = self.del_button.mouse_input(button, state, px, py_event, ui);
-            if del && self.del_button.take_click() {
-                self.delete_selected();
-            }
-            return dragged || r || g || b || del;
-        }
-        false
-    
+
+                if state == ElementState::Pressed {
+                    // The key whose peg is under the press, the topmost where pegs overlap.
+                    if let Some(idx) = self.key_at(px, py) {
+                        self.selected_key_idx = Some(idx);
+                        self.is_dragging_key = true;
+                        self.load_sliders(self.keys[idx].color);
+                        self.arrange_fields();
+                        return true;
+                    }
+
+                    let track = self.track_rect();
+                    if within(track, px, py) {
+                        let t = (px - track.x) / track.width;
+                        let col = self.get_interpolated_color(t);
+                        self.keys.push(ColorRampKey { pos: t, color: col });
+                        let new_idx = self.resettle_key(self.keys.len() - 1);
+                        self.just_changed = true;
+                        self.selected_key_idx = Some(new_idx);
+                        self.load_sliders(col);
+                        self.arrange_fields();
+                        return true;
+                    }
+
+                    if self.selected_key_idx.is_some() {
+                        for ch in 0..3 {
+                            if self.slider_mut(ch).mouse_input(button, state, px, py, ui) {
+                                return true;
+                            }
+                        }
+                        // Pressed only: the button clicks on its release, below.
+                        if self.del_button.mouse_input(button, state, px, py, ui) {
+                            return true;
+                        }
+                    }
+                    false
+                } else {
+                    // A release is the ramp's only when something of it used it: a key drag
+                    // ending, a slider or the delete button letting go. Releases reach widgets
+                    // without a hit test, and claiming every one while a key was selected kept
+                    // them from whatever the press was on. Every field is told regardless of the
+                    // selection, so none is left holding a press.
+                    let dragged = std::mem::take(&mut self.is_dragging_key);
+                    let mut used = dragged;
+                    for ch in 0..3 {
+                        used |= self.slider_mut(ch).mouse_input(button, state, px, py, ui);
+                    }
+                    let del = self.del_button.mouse_input(button, state, px, py, ui);
+                    if del && self.del_button.take_click() {
+                        self.delete_selected();
+                    }
+                    used || del
+                }
             }
             Event::PointerMove { x, y, .. } => {
-                let (px, py_event) = (*x, *y);
-                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
-        let mut changed = false;
-        let track = self.track_rect();
+                let (px, py) = (*x, *y);
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
+                let mut changed = false;
 
-        if self.is_dragging_key {
-            if let Some(idx) = self.selected_key_idx {
-                let t = ((px - track.x) / track.width).clamp(0.0, 1.0);
-                self.keys[idx].pos = t;
-                self.selected_key_idx = Some(self.resettle_key(idx));
-                changed = true;
-            }
-        }
-        
-        if self.selected_key_idx.is_some() {
-            if self.r_slider.cursor_moved(px, py_event, ui) {
-                if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[0] = self.r_slider.inner().value();
-                    changed = true;
+                if self.is_dragging_key {
+                    if let Some(idx) = self.selected_key_idx {
+                        let track = self.track_rect();
+                        self.keys[idx].pos = ((px - track.x) / track.width).clamp(0.0, 1.0);
+                        self.selected_key_idx = Some(self.resettle_key(idx));
+                        changed = true;
+                    }
                 }
-            }
-            if self.g_slider.cursor_moved(px, py_event, ui) {
-                if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[1] = self.g_slider.inner().value();
-                    changed = true;
+
+                if self.selected_key_idx.is_some() {
+                    for ch in 0..3 {
+                        if self.slider_mut(ch).cursor_moved(px, py, ui) {
+                            self.write_channel(ch);
+                            changed = true;
+                        }
+                    }
+                    if self.del_button.cursor_moved(px, py, ui) {
+                        changed = true;
+                    }
                 }
-            }
-            if self.b_slider.cursor_moved(px, py_event, ui) {
-                if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[2] = self.b_slider.inner().value();
-                    changed = true;
+                if changed {
+                    self.just_changed = true;
                 }
-            }
-            if self.del_button.cursor_moved(px, py_event, ui) {
-                changed = true;
-            }
-        }
-        if changed {
-            self.just_changed = true;
-        }
-        changed
-    
+                changed
             }
             Event::MouseWheel { delta, x, y, .. } => {
-                // Wheel forwarding (6bd self-routing): with the field widgets no longer
-                // tree-linked, the sliders' wheel rides this arm — and the key color syncs
-                // immediately (the old descent path left it stale until the next hover flip).
+                // The sliders' wheel, the key's colour following at once.
                 let (delta, px, py) = (*delta, *x, *y);
-                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
                 if self.selected_key_idx.is_none() {
                     return false;
                 }
                 let mut changed = false;
-                if self.r_slider.mouse_wheel(&delta, px, py, ui) {
-                    if let Some(idx) = self.selected_key_idx {
-                        self.keys[idx].color[0] = self.r_slider.inner().value();
+                for ch in 0..3 {
+                    if self.slider_mut(ch).mouse_wheel(&delta, px, py, ui) {
+                        self.write_channel(ch);
+                        changed = true;
                     }
-                    changed = true;
-                }
-                if self.g_slider.mouse_wheel(&delta, px, py, ui) {
-                    if let Some(idx) = self.selected_key_idx {
-                        self.keys[idx].color[1] = self.g_slider.inner().value();
-                    }
-                    changed = true;
-                }
-                if self.b_slider.mouse_wheel(&delta, px, py, ui) {
-                    if let Some(idx) = self.selected_key_idx {
-                        self.keys[idx].color[2] = self.b_slider.inner().value();
-                    }
-                    changed = true;
                 }
                 if changed {
                     self.just_changed = true;
@@ -535,73 +496,49 @@ impl Input for ColorRamp {
                 changed
             }
             Event::KeyInput(event) => {
-                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
-        // A slider the keyboard moves moves the key's colour with it: it moved only
-        // the slider, and the gradient and the slider disagreed.
-        let used = if ui.is_focused(&self.r_slider) {
-            self.r_slider.keyboard_input(event, ui)
-        } else if ui.is_focused(&self.g_slider) {
-            self.g_slider.keyboard_input(event, ui)
-        } else if ui.is_focused(&self.b_slider) {
-            self.b_slider.keyboard_input(event, ui)
-        } else {
-            false
-        };
-        if used {
-            self.apply_sliders_to_selected();
-            return true;
-        }
-        if ui.is_focused(&self.del_button) {
-            // Enter/Space press the button: its click is read here, at once. Left
-            // unread, it fired on the next mouse press on the button.
-            let used = self.del_button.keyboard_input(event, ui);
-            if self.del_button.take_click() {
-                self.delete_selected();
-            }
-            return used;
-        }
-        false
-    
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
+                // A slider the keyboard moves moves the key's colour with it: it moved only
+                // the slider, and the gradient and the slider disagreed.
+                let used = match (0..3).find(|&ch| ui.is_focused(self.slider(ch))) {
+                    Some(ch) => self.slider_mut(ch).keyboard_input(event, ui),
+                    None => false,
+                };
+                if used {
+                    self.apply_sliders_to_selected();
+                    return true;
+                }
+                if ui.is_focused(&self.del_button) {
+                    // Enter/Space press the button: its click is read here, at once. Left
+                    // unread, it fired on the next mouse press on the button.
+                    let used = self.del_button.keyboard_input(event, ui);
+                    if self.del_button.take_click() {
+                        self.delete_selected();
+                    }
+                    return used;
+                }
+                false
             }
             _ => false,
         }
     }
 
-    // Field-slider drags forward through the composite (6bd self-routing): the router
-    // records THIS widget as the drag target once a press is handled here, so the hooks
-    // hand DragUpdate to whichever slider armed itself — and sync the key color, which
-    // the old descent path never did mid-drag.
+    // A key drag and the sliders' own drags run through the editor: the router records it as
+    // the drag target once a press is handled here, and a slider's moves sync the key's
+    // colour as they go.
     fn draggable(&self, _rect: Rect) -> bool {
-        self.is_dragging_key
-            || self.r_slider.is_dragging()
-            || self.g_slider.is_dragging()
-            || self.b_slider.is_dragging()
+        self.is_dragging()
     }
     fn is_dragging(&self) -> bool {
-        self.is_dragging_key
-            || self.r_slider.is_dragging()
-            || self.g_slider.is_dragging()
-            || self.b_slider.is_dragging()
+        self.is_dragging_key || (0..3).any(|ch| self.slider(ch).is_dragging())
     }
     fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
         let mut changed = false;
-        if self.r_slider.is_dragging() && self.r_slider.drag_update(px, py) {
-            if let Some(idx) = self.selected_key_idx {
-                self.keys[idx].color[0] = self.r_slider.inner().value();
+        for ch in 0..3 {
+            let slider = self.slider_mut(ch);
+            if slider.is_dragging() && slider.drag_update(px, py) {
+                self.write_channel(ch);
+                changed = true;
             }
-            changed = true;
-        }
-        if self.g_slider.is_dragging() && self.g_slider.drag_update(px, py) {
-            if let Some(idx) = self.selected_key_idx {
-                self.keys[idx].color[1] = self.g_slider.inner().value();
-            }
-            changed = true;
-        }
-        if self.b_slider.is_dragging() && self.b_slider.drag_update(px, py) {
-            if let Some(idx) = self.selected_key_idx {
-                self.keys[idx].color[2] = self.b_slider.inner().value();
-            }
-            changed = true;
         }
         if changed {
             self.just_changed = true;
@@ -609,9 +546,9 @@ impl Input for ColorRamp {
         changed
     }
     fn drag_end(&mut self) {
-        self.r_slider.drag_end();
-        self.g_slider.drag_end();
-        self.b_slider.drag_end();
+        for ch in 0..3 {
+            self.slider_mut(ch).drag_end();
+        }
         self.is_dragging_key = false;
     }
 }

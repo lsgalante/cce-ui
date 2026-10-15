@@ -41,29 +41,20 @@ impl Ramp {
 
     /// Key `idx`'s centre on screen.
     pub(super) fn key_centre(&self, idx: usize) -> (f32, f32) {
-        let plot = self.plot_rect();
         let key = &self.keys[idx];
-        (plot.x + key.pos * plot.width, plot.y + plot.height * (1.0 - key.value))
+        self.plot_point(key.pos, key.value)
     }
 
     /// The pegs in paint order, bottom first: by index, the selected one last (on top).
-    pub(super) fn peg_order(&self) -> impl Iterator<Item = usize> + '_ {
-        let sel = self.selected_key_idx.filter(|&i| i < self.keys.len());
-        (0..self.keys.len()).filter(move |&i| Some(i) != sel).chain(sel)
+    pub(super) fn peg_order(&self) -> impl Iterator<Item = usize> {
+        peg_order(self.keys.len(), self.selected_key_idx)
     }
 
     /// The key whose peg is under `(px, py)`, each peg within its drawn radius
-    /// ([`peg_drawn_r`](Self::peg_drawn_r)), topmost first — the reverse of
-    /// [`peg_order`](Self::peg_order), so where pegs overlap the press takes the one drawn on
-    /// top. The press and the hover-scroll latch both ask here.
+    /// ([`peg_drawn_r`](Self::peg_drawn_r)), topmost first ([`topmost_peg`]). The press and
+    /// the hover-scroll latch both ask here.
     pub(super) fn key_at(&self, px: f32, py: f32) -> Option<usize> {
-        let order: Vec<usize> = self.peg_order().collect();
-        order.into_iter().rev().find(|&idx| {
-            let (cx, cy) = self.key_centre(idx);
-            let (dx, dy) = (px - cx, py - cy);
-            let r = self.peg_drawn_r(idx);
-            dx * dx + dy * dy <= r * r
-        })
+        topmost_peg(self.keys.len(), self.selected_key_idx, px, py, |i| (self.key_centre(i), self.peg_drawn_r(i)))
     }
 
     /// Inner margin between the graph opening's walls and the plotted 0..1
@@ -71,17 +62,36 @@ impl Ramp {
     /// inside the opening instead of on the walls.
     pub(super) const PLOT_INSET: f32 = 22.0;
 
+    /// The graph opening: the canvas well the curve is drawn in, the widget's width in its
+    /// 10 px margins and [`graph_h`](Self::graph_h) tall. Paint draws it, a right-press in
+    /// it opens the context menu, and a press in it makes a key.
+    pub(super) fn graph_rect(&self) -> Rect {
+        Rect { x: self.base.x + 10.0, y: self.base.y + 10.0, width: self.base.w - 20.0, height: self.graph_h() }
+    }
+
     /// The plot rect: where the ramp's 0..1 × 0..1 domain maps on screen —
     /// the graph opening inset by [`PLOT_INSET`](Self::PLOT_INSET). Every
-    /// t/value ↔ pixel mapping (paint and input alike) goes through this.
+    /// t/value ↔ pixel mapping (paint and input alike) goes through this
+    /// ([`plot_point`](Self::plot_point), [`plot_unit`](Self::plot_unit)).
     pub(super) fn plot_rect(&self) -> Rect {
-        let gh = self.graph_h();
+        let graph = self.graph_rect();
         Rect {
-            x: self.base.x + 10.0 + Self::PLOT_INSET,
-            y: self.base.y + 10.0 + Self::PLOT_INSET,
-            width: (self.base.w - 20.0 - 2.0 * Self::PLOT_INSET).max(1.0),
-            height: (gh - 2.0 * Self::PLOT_INSET).max(1.0),
+            x: graph.x + Self::PLOT_INSET,
+            y: graph.y + Self::PLOT_INSET,
+            width: (graph.width - 2.0 * Self::PLOT_INSET).max(1.0),
+            height: (graph.height - 2.0 * Self::PLOT_INSET).max(1.0),
         }
+    }
+
+    /// Where the plot point `(t, v)` is on screen (value up).
+    pub(super) fn plot_point(&self, t: f32, v: f32) -> (f32, f32) {
+        plot_point(self.plot_rect(), t, v)
+    }
+
+    /// The plot point under `(px, py)`, in plot units, unclamped.
+    pub(super) fn plot_unit(&self, px: f32, py: f32) -> (f32, f32) {
+        let plot = self.plot_rect();
+        ((px - plot.x) / plot.width, 1.0 - (py - plot.y) / plot.height)
     }
 
     /// Neighbor resistance (drag), in track units: the soft wall starts
@@ -116,33 +126,36 @@ impl Ramp {
         t.clamp(0.0, 1.0)
     }
 
-    /// Restore sort order after `keys[i]` changed position, by adjacent
-    /// swaps, and return the key's new index. Exact identity tracking — a
-    /// re-sort that finds the key again by its position misidentifies the
-    /// selection when the dragged key sits within ε of the key it is passing
-    /// (leftward crossings flipped the selection onto the passed key).
-    /// `ColorRamp::resettle_key` is the same, for its keys.
-    pub(super) fn resettle_key(&mut self, mut i: usize) -> usize {
-        while i + 1 < self.keys.len() && self.keys[i].pos > self.keys[i + 1].pos {
-            self.keys.swap(i, i + 1);
-            i += 1;
-        }
-        while i > 0 && self.keys[i].pos < self.keys[i - 1].pos {
-            self.keys.swap(i, i - 1);
-            i -= 1;
-        }
-        i
+    /// Restore sort order after `keys[i]` changed position and return the key's new index
+    /// ([`resettle`]).
+    pub(super) fn resettle_key(&mut self, i: usize) -> usize {
+        resettle(&mut self.keys, i, |k| k.pos)
+    }
+
+    /// Put key `idx` at `(pos, value)`: the keys re-sorted, the key selected where it
+    /// lands, the key pad showing it and the preset trigger matched. Returns the key's new
+    /// index. A drag, the hover-scroll, its coast and the key pad all move a key so.
+    pub(super) fn move_key(&mut self, idx: usize, pos: f32, value: f32) -> usize {
+        self.keys[idx].pos = pos;
+        self.keys[idx].value = value;
+        let settled = self.resettle_key(idx);
+        self.select_key(settled);
+        self.sync_preset();
+        settled
+    }
+
+    /// Select key `idx`, the key pad showing it.
+    pub(super) fn select_key(&mut self, idx: usize) {
+        self.selected_key_idx = Some(idx);
+        self.key_pad.set_values(self.keys[idx].pos, self.keys[idx].value);
     }
 
     /// Apply the key pad's two axes to the selected key: x is the key's
     /// track position (order restored by adjacent swaps), y its value.
     pub(super) fn apply_pad_to_selected(&mut self) {
         let Some(idx) = self.selected_key_idx else { return };
-        self.keys[idx].pos = self.key_pad.inner().value_x();
-        self.keys[idx].value = self.key_pad.inner().value_y();
-        let settled = self.resettle_key(idx);
-        self.selected_key_idx = Some(settled);
-        self.sync_preset();
+        let (x, y) = (self.key_pad.inner().value_x(), self.key_pad.inner().value_y());
+        self.move_key(idx, x, y);
         self.just_changed = true;
     }
 
@@ -199,37 +212,34 @@ impl Ramp {
     /// column takes the wider share — its options are the strip's longest
     /// strings and used to clip.
     pub(super) fn arrange_fields(&mut self) {
-        let (x, y, w, h) = (self.base.x, self.base.y, self.base.w, self.base.h);
         if self.controls_collapsed {
-            self.preset_dropdown.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.line_type_dropdown.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.key_pad.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            let _ = (x, y, w, h);
+            for i in 0..FIELD_TOTAL {
+                park(self.field(i));
+            }
             return;
         }
-        let gh = self.graph_h();
-        let graph_bottom = y + 10.0 + gh;
+        let graph = self.graph_rect();
         let ctrl_h = 22.0;
         let strip = Self::label_strip();
         let gap = Self::STRIP_GAP;
         // One rhythm: every gap in the strip — graph to label tab, row to
         // row, columns, pad to button — is STRIP_GAP.
-        let ctrl_y = graph_bottom + gap + strip;
+        let ctrl_y = graph.y + graph.height + gap + strip;
         let (dd_y, dd_h) = (ctrl_y - strip, ctrl_h + strip);
-        let track_x = x + 10.0;
-        let track_w = w - 20.0;
+        let track_x = graph.x;
+        let track_w = graph.width;
+
+        // The dropdowns' row, two columns, preset the wider share.
+        let pre_w = ((track_w - gap) * 0.58).max(40.0);
+        let line_w = (track_w - gap - pre_w).max(40.0);
+        self.preset_dropdown.set_rect(track_x, dd_y, pre_w, dd_h);
+        self.line_type_dropdown.set_rect(track_x + pre_w + gap, dd_y, line_w, dd_h);
 
         if self.selected_key_idx.is_some() {
-            // Selected: the dropdowns keep their full-width row, and a second
-            // row below carries the square key pad (pos × value) with the
-            // delete button beside it, centered on the pad's well.
+            // Selected: a second row below carries the square key pad (pos × value)
+            // with the delete button beside it, centered on the pad's well.
             let pad_side = Self::PAD_SIDE;
             let del_w: f32 = if self.del_button.inner().has_icon() { ctrl_h } else { 64.0 };
-            let pre_w = ((track_w - gap) * 0.58).max(40.0);
-            let line_w = (track_w - gap - pre_w).max(40.0);
-            self.preset_dropdown.set_rect(track_x, dd_y, pre_w, dd_h);
-            self.line_type_dropdown.set_rect(track_x + pre_w + gap, dd_y, line_w, dd_h);
             let row2_y = ctrl_y + ctrl_h + gap;
             self.key_pad.set_rect(track_x, row2_y, pad_side, pad_side + strip);
             self.del_button.set_rect(
@@ -239,13 +249,14 @@ impl Ramp {
                 ctrl_h,
             );
         } else {
-            // Two columns, preset the wider share.
-            let pre_w = ((track_w - gap) * 0.58).max(40.0);
-            let line_w = (track_w - gap - pre_w).max(40.0);
-            self.preset_dropdown.set_rect(track_x, dd_y, pre_w, dd_h);
-            self.line_type_dropdown.set_rect(track_x + pre_w + gap, dd_y, line_w, dd_h);
-            self.key_pad.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+            park(&mut self.key_pad);
+            park(&mut self.del_button);
         }
     }
+}
+
+/// Where the plot point `(t, v)` is on screen in `plot` (value up): [`Ramp::plot_point`] on a
+/// plot rect already in hand.
+pub(super) fn plot_point(plot: Rect, t: f32, v: f32) -> (f32, f32) {
+    (plot.x + t * plot.width, plot.y + plot.height * (1.0 - v))
 }

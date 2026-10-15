@@ -49,18 +49,15 @@ impl Input for Ramp {
 
     /// The open dropdown popover extends the hit area (the 5p Dropdown pattern).
     fn hit(&self, rect: Rect, x: f32, y: f32) -> bool {
-        let popover = self.preset_dropdown.popover_rect().or_else(|| self.line_type_dropdown.popover_rect());
-        if let Some((px, py, pw, ph)) = popover {
-            if x >= px && x <= px + pw && y >= py && y <= py + ph {
+        if let Some((px, py, pw, ph)) = self.open_popover() {
+            if within(Rect { x: px, y: py, width: pw, height: ph }, x, y) {
                 return true;
             }
         }
-        x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
+        within(rect, x, y)
     }
 
     fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
-        // (The per-tick field-widget re-parenting is gone, 6bd: it was a dummy-ctx
-        // `set_parent` whose every effect was discarded — legacy behaved the same.)
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
@@ -70,7 +67,7 @@ impl Input for Ramp {
         // A field the window's focus moved away from is told here: the fields are not in
         // the registry, so the focus change could not reach them itself.
         let focused = self.focused_field(ui);
-        for i in 0..4 {
+        for i in 0..FIELD_TOTAL {
             if Some(i) != focused && self.field(i).base().focused {
                 self.field(i).unfocus();
                 changed = true;
@@ -85,14 +82,9 @@ impl Input for Ramp {
                 let (vx, vy) = self.scroll_vel;
                 // Animations off: the key stops where the scroll left it.
                 if (vx.abs() > 0.02 || vy.abs() > 0.02) && crate::motion::enabled() {
-                    self.keys[idx].pos = (self.keys[idx].pos + vx * dt).clamp(0.0, 1.0);
-                    self.keys[idx].value = (self.keys[idx].value + vy * dt).clamp(0.0, 1.0);
-                    let settled = self.resettle_key(idx);
-                    self.scroll_key_idx = Some(settled);
-                    self.selected_key_idx = Some(settled);
-                    self.key_pad
-                        .set_values(self.keys[settled].pos, self.keys[settled].value);
-                    self.sync_preset();
+                    let pos = (self.keys[idx].pos + vx * dt).clamp(0.0, 1.0);
+                    let value = (self.keys[idx].value + vy * dt).clamp(0.0, 1.0);
+                    self.scroll_key_idx = Some(self.move_key(idx, pos, value));
                     let f = (-5.0 * dt).exp();
                     self.scroll_vel = (vx * f, vy * f);
                     changed = true;
@@ -119,177 +111,148 @@ impl Input for Ramp {
         if self.line_type_dropdown.tick(dt, ui) {
             changed = true;
         }
-        
-        if self.selected_key_idx.is_some() {
-            if self.key_pad.tick(dt, ui) {
-                self.apply_pad_to_selected();
-                changed = true;
-            }
-            if self.del_button.tick(dt, ui) {
-                self.sync_preset();
-                changed = true;
-            }
-        }
+        // The key pad and the delete button have no tick of their own: neither animates,
+        // and a pad change arrives through the event that made it.
         changed
-    
     }
 
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
             Event::MouseButton { button, state, x, y, .. } => {
-                let (button, state, px, py_event) = (*button, *state, *x, *y);
-                // Right-press in the graph opening → the shared context menu
-                // (the key-crossing toggle lives there). Before the ui borrow:
-                // open_context_menu needs the whole EventCtx.
+                let (button, state, px, py) = (*button, *state, *x, *y);
+                // Right-press in the graph opening → the shared context menu (Collapse
+                // controls, Copy, Paste). Before the ui borrow: open_context_menu needs the
+                // whole EventCtx.
                 if button == MouseButton::Right {
-                    if state == ElementState::Pressed {
-                        let gh = self.graph_h();
-                        let gx = self.base.x + 10.0;
-                        let gw = self.base.w - 20.0;
-                        let gy = self.base.y + 10.0;
-                        if px >= gx && px <= gx + gw && py_event >= gy && py_event <= gy + gh {
-                            ectx.open_context_menu(px, py_event);
-                            return true;
-                        }
+                    if state == ElementState::Pressed && within(self.graph_rect(), px, py) {
+                        ectx.open_context_menu(px, py);
+                        return true;
                     }
                     return false;
                 }
-                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
-        if button != MouseButton::Left { return false; }
-
-        if self.preset_dropdown.mouse_input(button, state, px, py_event, ui) {
-            if self.preset_dropdown.take_change() {
-                let idx = self.preset_dropdown.selected;
-                self.apply_preset(idx);
-            }
-            return true;
-        }
-        
-        if self.line_type_dropdown.mouse_input(button, state, px, py_event, ui) {
-            return true;
-        }
-        
-        let gh = self.graph_h();
-        let plot = self.plot_rect();
-
-        if state == ElementState::Pressed {
-            // Any press cancels a hover-scroll glide in progress.
-            self.scroll_vel = (0.0, 0.0);
-            self.scroll_key_idx = None;
-            self.last_key_scroll = None;
-            // Grab the key whose peg is under the press, the topmost where pegs overlap —
-            // the one drawn on top is the one taken.
-            if let Some(idx) = self.key_at(px, py_event) {
-                self.selected_key_idx = Some(idx);
-                self.is_dragging_key = true;
-                // The key keeps where on its peg it was taken: its centre snapping to
-                // the pointer jumped it up to a peg's radius on the first move.
-                let key = &self.keys[idx];
-                let (t, v) = ((px - plot.x) / plot.width, 1.0 - (py_event - plot.y) / plot.height);
-                self.drag_grab = Some(DragGrab { origin: key.pos, offset: (key.pos - t, key.value - v) });
-                self.key_pad.set_values(self.keys[idx].pos, self.keys[idx].value);
-                self.arrange_fields();
-                return true;
-            }
-
-            // Creation accepts the whole opening (the inset gutters included);
-            // the domain mapping clamps to the plot's 0..1.
-            if px >= self.base.x + 10.0 && px <= self.base.x + self.base.w - 10.0 && py_event >= self.base.y + 10.0 && py_event <= self.base.y + 10.0 + gh {
-                let t = ((px - plot.x) / plot.width).clamp(0.0, 1.0);
-                let val = (1.0 - (py_event - plot.y) / plot.height).clamp(0.0, 1.0);
-                let new_key = RampKey { pos: t, value: val };
-                self.keys.push(new_key);
-                let new_idx = self.resettle_key(self.keys.len() - 1);
-                self.sync_preset();
-                self.just_changed = true;
-                self.selected_key_idx = Some(new_idx);
-                self.key_pad.set_values(t, val);
-                // Arm the drag: a fresh key follows the pointer until release,
-                // so create-and-place is one gesture (the grab-branch behavior).
-                self.is_dragging_key = true;
-                self.drag_grab = Some(DragGrab { origin: t, offset: (0.0, 0.0) });
-                self.arrange_fields();
-                return true;
-            }
-            
-            if self.selected_key_idx.is_some() {
-                if self.key_pad.mouse_input(button, state, px, py_event, ui) {
-                    self.apply_pad_to_selected();
-                            return true;
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
+                if button != MouseButton::Left {
+                    return false;
                 }
-                // Pressed only: the button clicks on its release, below.
-                if self.del_button.mouse_input(button, state, px, py_event, ui) {
+
+                if self.preset_dropdown.mouse_input(button, state, px, py, ui) {
+                    if self.preset_dropdown.take_change() {
+                        let idx = self.preset_dropdown.selected;
+                        self.apply_preset(idx);
+                    }
                     return true;
                 }
-            }
-        } else {
-            // A release is the ramp's only when something of it used it: a key drag
-            // ending, the key pad or the delete button letting go. Releases reach
-            // widgets without a hit test, and claiming every one while a key was
-            // selected kept them from whatever the press was on — a host's next
-            // row never clicked. Both fields are told regardless of the selection,
-            // so neither is left holding a press.
-            let dragged = std::mem::take(&mut self.is_dragging_key);
-            self.drag_grab = None;
-            let pad = self.key_pad.mouse_input(button, state, px, py_event, ui);
-            let del = self.del_button.mouse_input(button, state, px, py_event, ui);
-            if del && self.del_button.take_click() {
-                self.delete_selected();
-            }
-            return dragged || pad || del;
-        }
-        false
-    
+                if self.line_type_dropdown.mouse_input(button, state, px, py, ui) {
+                    return true;
+                }
+
+                if state == ElementState::Pressed {
+                    // Any press cancels a hover-scroll glide in progress.
+                    self.scroll_vel = (0.0, 0.0);
+                    self.scroll_key_idx = None;
+                    self.last_key_scroll = None;
+                    // Grab the key whose peg is under the press, the topmost where pegs overlap —
+                    // the one drawn on top is the one taken.
+                    if let Some(idx) = self.key_at(px, py) {
+                        self.select_key(idx);
+                        self.is_dragging_key = true;
+                        // The key keeps where on its peg it was taken: its centre snapping to
+                        // the pointer jumped it up to a peg's radius on the first move.
+                        let key = &self.keys[idx];
+                        let (t, v) = self.plot_unit(px, py);
+                        self.drag_grab = Some(DragGrab { origin: key.pos, offset: (key.pos - t, key.value - v) });
+                        self.arrange_fields();
+                        return true;
+                    }
+
+                    // Creation accepts the whole opening (the inset gutters included);
+                    // the domain mapping clamps to the plot's 0..1.
+                    if within(self.graph_rect(), px, py) {
+                        let (t, v) = self.plot_unit(px, py);
+                        let (t, val) = (t.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
+                        self.keys.push(RampKey { pos: t, value: val });
+                        let new_idx = self.resettle_key(self.keys.len() - 1);
+                        self.sync_preset();
+                        self.just_changed = true;
+                        self.select_key(new_idx);
+                        // Arm the drag: a fresh key follows the pointer until release,
+                        // so create-and-place is one gesture (the grab-branch behavior).
+                        self.is_dragging_key = true;
+                        self.drag_grab = Some(DragGrab { origin: t, offset: (0.0, 0.0) });
+                        self.arrange_fields();
+                        return true;
+                    }
+
+                    if self.selected_key_idx.is_some() {
+                        if self.key_pad.mouse_input(button, state, px, py, ui) {
+                            self.apply_pad_to_selected();
+                            return true;
+                        }
+                        // Pressed only: the button clicks on its release, below.
+                        if self.del_button.mouse_input(button, state, px, py, ui) {
+                            return true;
+                        }
+                    }
+                    false
+                } else {
+                    // A release is the ramp's only when something of it used it: a key drag
+                    // ending, the key pad or the delete button letting go. Releases reach
+                    // widgets without a hit test, and claiming every one while a key was
+                    // selected kept them from whatever the press was on — a host's next
+                    // row never clicked. Both fields are told regardless of the selection,
+                    // so neither is left holding a press.
+                    let dragged = std::mem::take(&mut self.is_dragging_key);
+                    self.drag_grab = None;
+                    let pad = self.key_pad.mouse_input(button, state, px, py, ui);
+                    let del = self.del_button.mouse_input(button, state, px, py, ui);
+                    if del && self.del_button.take_click() {
+                        self.delete_selected();
+                    }
+                    dragged || pad || del
+                }
             }
             Event::PointerMove { x, y, .. } => {
-                let (px, py_event) = (*x, *y);
-                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
-        if self.preset_dropdown.cursor_moved(px, py_event, ui) {
-            return true;
-        }
-        if self.line_type_dropdown.cursor_moved(px, py_event, ui) {
-            return true;
-        }
-        
-        let mut changed = false;
-        let plot = self.plot_rect();
+                let (px, py) = (*x, *y);
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
+                if self.preset_dropdown.cursor_moved(px, py, ui) {
+                    return true;
+                }
+                if self.line_type_dropdown.cursor_moved(px, py, ui) {
+                    return true;
+                }
 
-        if self.is_dragging_key {
-            if let Some(idx) = self.selected_key_idx {
-                let grab = self.drag_grab.unwrap_or(DragGrab { origin: self.keys[idx].pos, offset: (0.0, 0.0) });
-                let t_raw = ((px - plot.x) / plot.width + grab.offset.0).clamp(0.0, 1.0);
-                let t = self.resisted_pos(idx, t_raw, grab.origin);
-                let val = (1.0 - (py_event - plot.y) / plot.height + grab.offset.1).clamp(0.0, 1.0);
-                self.keys[idx].pos = t;
-                self.keys[idx].value = val;
-                self.key_pad.set_values(t, val);
-                let settled = self.resettle_key(idx);
-                self.selected_key_idx = Some(settled);
-                self.sync_preset();
-                changed = true;
-            }
-        }
-        
-        if self.selected_key_idx.is_some() {
-            if self.key_pad.cursor_moved(px, py_event, ui) {
-                self.apply_pad_to_selected();
-                changed = true;
-            }
-            if self.del_button.cursor_moved(px, py_event, ui) {
-                changed = true;
-            }
-        }
-        if changed {
-            self.just_changed = true;
-        }
-        changed
-    
+                let mut changed = false;
+                if self.is_dragging_key {
+                    if let Some(idx) = self.selected_key_idx {
+                        let grab = self.drag_grab.unwrap_or(DragGrab { origin: self.keys[idx].pos, offset: (0.0, 0.0) });
+                        let (t, v) = self.plot_unit(px, py);
+                        let t_raw = (t + grab.offset.0).clamp(0.0, 1.0);
+                        let t = self.resisted_pos(idx, t_raw, grab.origin);
+                        let val = (v + grab.offset.1).clamp(0.0, 1.0);
+                        self.move_key(idx, t, val);
+                        changed = true;
+                    }
+                }
+
+                if self.selected_key_idx.is_some() {
+                    if self.key_pad.cursor_moved(px, py, ui) {
+                        self.apply_pad_to_selected();
+                        changed = true;
+                    }
+                    if self.del_button.cursor_moved(px, py, ui) {
+                        changed = true;
+                    }
+                }
+                if changed {
+                    self.just_changed = true;
+                }
+                changed
             }
             Event::MouseWheel { delta, x, y, .. } => {
-                // Wheel forwarding (6bd self-routing): dropdowns first (mirroring the press
-                // order, incl. the preset drain), then the value slider with the key sync.
+                // The dropdowns first (mirroring the press order, the preset's pick drained),
+                // then the hover-scroll, then the key pad with the key sync.
                 let (delta, px, py) = (*delta, *x, *y);
-                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
                 if self.preset_dropdown.mouse_wheel(&delta, px, py, ui) {
                     if self.preset_dropdown.take_change() {
                         let idx = self.preset_dropdown.selected;
@@ -322,11 +285,6 @@ impl Input for Ramp {
                                 0.2 * pos.y as f32 / plot.height,
                             ),
                         };
-                        // Direct manipulation: the key moves WITH the scroll
-                        // (runner deltas are content-motion negated, so both
-                        // axes flip): scroll right → key right, down → down.
-                        self.keys[idx].pos = (self.keys[idx].pos - dx).clamp(0.0, 1.0);
-                        self.keys[idx].value = (self.keys[idx].value + dy).clamp(0.0, 1.0);
                         // Velocity estimate for the release glide: EMA of
                         // applied delta over inter-event time. A leisurely
                         // wheel produces negligible velocity (big gaps clamp
@@ -343,12 +301,12 @@ impl Input for Ramp {
                             self.scroll_vel.0 * 0.65 + ivx * 0.35,
                             self.scroll_vel.1 * 0.65 + ivy * 0.35,
                         );
-                        let settled = self.resettle_key(idx);
-                        self.scroll_key_idx = Some(settled);
-                        self.selected_key_idx = Some(settled);
-                        self.key_pad
-                            .set_values(self.keys[settled].pos, self.keys[settled].value);
-                        self.sync_preset();
+                        // Direct manipulation: the key moves WITH the scroll
+                        // (runner deltas are content-motion negated, so both
+                        // axes flip): scroll right → key right, down → down.
+                        let pos = (self.keys[idx].pos - dx).clamp(0.0, 1.0);
+                        let value = (self.keys[idx].value + dy).clamp(0.0, 1.0);
+                        self.scroll_key_idx = Some(self.move_key(idx, pos, value));
                         self.just_changed = true;
                         self.arrange_fields();
                         return true;
@@ -362,38 +320,40 @@ impl Input for Ramp {
                 false
             }
             Event::KeyInput(event) => {
-                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
-        if event.state != ElementState::Pressed { return false; }
-        
-        let count = self.field_count();
-        let current = self.focused_field(ui).filter(|&i| i < count);
-
-        if event.logical_key == Key::Named(NamedKey::Tab) {
-            let next = match current {
-                Some(curr) if event.shift => if curr == 0 { count - 1 } else { curr - 1 },
-                Some(curr) => (curr + 1) % count,
-                // Tab into the ramp: its first field takes the keyboard.
-                None => 0,
-            };
-            self.focus_field(next, ui);
-            return true;
-        }
-
-        match current {
-            Some(0) => self.preset_dropdown.keyboard_input(event, ui),
-            Some(1) => self.line_type_dropdown.keyboard_input(event, ui),
-            Some(2) => self.key_pad.keyboard_input(event, ui),
-            Some(_) => {
-                // Enter/Space press the button: its click is read here, at once. Left
-                // unread, it fired on the next mouse PRESS on the button.
-                let used = self.del_button.keyboard_input(event, ui);
-                if self.del_button.take_click() {
-                    self.delete_selected();
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
+                if event.state != ElementState::Pressed {
+                    return false;
                 }
-                used
-            }
-            None => false,
-        }
+
+                let count = self.field_count();
+                let current = self.focused_field(ui).filter(|&i| i < count);
+
+                if event.logical_key == Key::Named(NamedKey::Tab) {
+                    let next = match current {
+                        Some(curr) if event.shift => if curr == 0 { count - 1 } else { curr - 1 },
+                        Some(curr) => (curr + 1) % count,
+                        // Tab into the ramp: its first field takes the keyboard.
+                        None => 0,
+                    };
+                    self.focus_field(next, ui);
+                    return true;
+                }
+
+                match current {
+                    Some(0) => self.preset_dropdown.keyboard_input(event, ui),
+                    Some(1) => self.line_type_dropdown.keyboard_input(event, ui),
+                    Some(2) => self.key_pad.keyboard_input(event, ui),
+                    Some(_) => {
+                        // Enter/Space press the button: its click is read here, at once. Left
+                        // unread, it fired on the next mouse PRESS on the button.
+                        let used = self.del_button.keyboard_input(event, ui);
+                        if self.del_button.take_click() {
+                            self.delete_selected();
+                        }
+                        used
+                    }
+                    None => false,
+                }
             }
             Event::FocusIn => {
                 // Focused itself, the ramp gives the keyboard to its preset dropdown.
@@ -404,20 +364,20 @@ impl Input for Ramp {
             }
             Event::FocusOut => {
                 self.base.focused = false;
-                self.preset_dropdown.unfocus();
-                self.line_type_dropdown.unfocus();
-                self.key_pad.unfocus();
-                self.del_button.unfocus();
+                for i in 0..FIELD_TOTAL {
+                    self.field(i).unfocus();
+                }
                 false
             }
             _ => false,
         }
     }
 
-    // Field-slider drags forward through the composite (6bd self-routing), with the key
-    // value sync the old descent path never ran mid-drag.
+    // The key drag and the key pad's own drag both run through the ramp: the router records
+    // the ramp as the drag target once a press is handled here, and the pad's moves sync the
+    // selected key as they go.
     fn draggable(&self, _rect: Rect) -> bool {
-        self.is_dragging_key || self.key_pad.is_dragging()
+        self.is_dragging()
     }
     fn is_dragging(&self) -> bool {
         self.is_dragging_key || self.key_pad.is_dragging()
