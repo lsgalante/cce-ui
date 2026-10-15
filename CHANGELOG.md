@@ -10,6 +10,8 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-15
 
+- **`McpServer::unclassed` / `class_of`**, so an app's test can assert every tool it serves has a
+  class (an unclassed tool makes the cce-claude popup ask before every call). Unit-tested.
 - **MCP servers say where they are, what each tool does, and how to use the app** — step M1 of
   the in-app Claude popup (a shortcut opens a Claude prompt scoped to the focused app; design doc
   "In-app Claude popup"). New `mcp::McpServer` builder: it binds a port the OS picks, writes

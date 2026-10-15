@@ -347,6 +347,18 @@ impl McpServer {
         self
     }
 
+    /// The class a tool was given, if any.
+    pub fn class_of(&self, tool: &str) -> Option<ToolClass> {
+        self.classes.get(tool).copied()
+    }
+
+    /// The tools served without a class, which a client treats as able to
+    /// destroy anything (the cce-claude popup asks before every call). An
+    /// app's test asserts this is empty, so a new tool cannot ship unclassed.
+    pub fn unclassed(&self) -> Vec<&str> {
+        self.tools.iter().map(|t| t.name.as_str()).filter(|n| !self.classes.contains_key(*n)).collect()
+    }
+
     /// Spawn the server on `127.0.0.1` (one thread per connection) and file
     /// it in the [`registry`]. `wrap` lifts a tool call into the app's
     /// message type for delivery over `sender`.

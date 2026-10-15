@@ -335,3 +335,13 @@ fn a_started_server_files_itself_and_admits_only_its_token() {
     assert!(ok.contains("Call context first."), "{ok}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn unclassed_names_the_tools_without_a_class() {
+    let server = McpServer::new("test", vec![tools().remove(0), context_tool()]);
+    assert_eq!(server.unclassed(), ["echo"], "context is classed on its own");
+    assert_eq!(server.class_of(CONTEXT_TOOL), Some(ToolClass::Read));
+    let server = server.classify(ToolClass::Edit, &["echo"]);
+    assert!(server.unclassed().is_empty());
+    assert_eq!(server.class_of("echo"), Some(ToolClass::Edit));
+}
