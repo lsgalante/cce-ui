@@ -63,6 +63,24 @@ impl InteractiveListItem {
     pub fn set_selected(&mut self, selected: bool) {
         self.selected = selected;
     }
+
+    /// The title's size, the subtitle's, and the gap between their lines, all
+    /// from the list font: the title at its size, the subtitle two smaller.
+    fn text_sizes() -> (String, f32, f32, f32) {
+        let (family, size) = crate::layout::list_font_parsed();
+        let sub = (size - 2.0).max(9.0);
+        let gap = (size * 0.2).round().max(2.0);
+        (family, size, sub, gap)
+    }
+
+    /// The height a row needs for its text and a list gap above and below:
+    /// what a host sizes its `ScrollRegion` rows to, so they follow the list
+    /// font instead of a fixed figure the font can outgrow.
+    pub fn row_height(with_subtitle: bool) -> f32 {
+        let (_, size, sub, gap) = Self::text_sizes();
+        let text = if with_subtitle { size + gap + sub } else { size };
+        (text + 2.0 * crate::layout::list_gap()).ceil()
+    }
 }
 
 impl Adapted<InteractiveListItem> {
@@ -82,6 +100,14 @@ impl Paint for InteractiveListItem {
     /// A list row's text is in the list font — the rows of a TreeList, a menu's items.
     fn widget_font(&self) -> Option<String> {
         Some(crate::layout::list_font())
+    }
+
+    /// The list font's FAMILY for the row's own text, without its size: the
+    /// paint walk sets this on every text the row draws, and a size in it
+    /// ("Berkeley Mono 14") wins over the one asked for, which made the
+    /// subtitle the title's size. The sizes come from `text_sizes`.
+    fn text_font(&self) -> Option<String> {
+        Some(crate::layout::list_font_parsed().0)
     }
 
     fn color(&self) -> [f32; 4] {
@@ -115,12 +141,16 @@ impl Paint for InteractiveListItem {
             ctx.rounded_rect(rect, r, (true, true, true, true), col);
         }
 
+        // Sized from the list font, and its family passed explicitly. Until
+        // 2026-10-16 the title and subtitle were drawn at a literal 12 and 10
+        // with no font, the adapter filled in the list font, and a size in its
+        // font string ("Berkeley Mono 14") overrides the one asked for: both
+        // lines came out at 14 in slots laid out for 12 and 10, the subtitle
+        // 13 px under the title, so they overlapped.
+        let (family, size, sub_size, gap) = Self::text_sizes();
         let (x, y, h) = (rect.x, rect.y, rect.height);
-        let title_y = if self.subtitle.is_some() {
-            crate::layout::align_text_y(y, h, 22.0, 0.0)
-        } else {
-            crate::layout::align_text_y(y, h, 12.0, 0.0)
-        };
+        let block = if self.subtitle.is_some() { size + gap + sub_size } else { size };
+        let title_y = crate::layout::align_text_y(y, h, block, 0.0);
         let fc = color::list_font_color();
         let title_col = [(fc[0] * 255.0) as u8, (fc[1] * 255.0) as u8, (fc[2] * 255.0) as u8];
         // Clipped to the row. A row's width comes from the LIST, not from its
@@ -128,9 +158,10 @@ impl Paint for InteractiveListItem {
         // simply kept drawing past the row's right edge, over the scrollbar and
         // out of the list.
         let clip = Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]);
-        ctx.text_with(self.title.clone(), x + 8.0, title_y, 12.0, title_col, None, clip);
+        let inset = crate::layout::list_gap();
+        ctx.text_with(self.title.clone(), x + inset, title_y, size, title_col, Some(family.clone()), clip);
         if let Some(ref sub) = self.subtitle {
-            ctx.text_with(sub.clone(), x + 8.0, title_y + 13.0, 10.0, [140, 140, 153], None, clip);
+            ctx.text_with(sub.clone(), x + inset, title_y + size + gap, sub_size, [140, 140, 153], Some(family), clip);
         }
     }
 }
