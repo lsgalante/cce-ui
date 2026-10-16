@@ -294,8 +294,11 @@ rest.
 **ColorPalette** is the ColorRamp's discrete kin, on the same `Fields` walk: an editable row of
 colour swatches (`ColorPalette::new`, six hues; `with_colors`, linear RGB). Its strip is the
 ColorRamp's kind of track — a canvas well `ramp_height` tall at the control radius — with the
-swatches standing in it as the ColorRamp's pegs (`paint_peg`, one painter for both), ended by
-an add slot (the `plus` glyph). Under the strip, while a swatch is selected, a `ColorSelector`
+swatches standing in it as square tiles (`SWATCH`, 22 px), each a raised `ControlPlate` whose
+face is its colour, ended by an add slot (the `plus` glyph). The face is the data, so
+selection never tints the tile: the selected one wears the ramps' selection ring outside it,
+in the focus colour, as a ColorRamp's selected peg does (a lit rim showed only on the tile's
+lit top edge). Flat, each tile stands on a hairline of the wells' frame colour. Under the strip, while a swatch is selected, a `ColorSelector`
 edits it — the toolkit's colour control, not one of the palette's own: its hex field (sRGB, as
 every hex is) and its swatch, which opens the DE's picker — with the ramps' delete button
 beside it. The row is reserved, so the height it declares (`natural_height`) never changes.
@@ -309,7 +312,7 @@ beside it. The row is reserved, so the height it declares (`natural_height`) nev
   another swatch, deleting one or `set_colors` closes a picker left open
   (`ColorSelector::close_picker`), which would otherwise go on writing into the swatch now
   shown.
-- **Pointer.** A press on a swatch selects it and, held, drags it along the strip, the others
+- **Pointer.** A press on a swatch's tile selects it and, held, drags it along the strip, the others
   closing up behind it. A press on the add slot appends a copy of the last swatch and selects
   it. Swatches keep a full spacing until the strip runs short; then they close up and overlap
   (the later on top), but the add slot stays a full spacing past the last, so it can always be

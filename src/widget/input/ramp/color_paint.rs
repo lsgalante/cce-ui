@@ -83,8 +83,7 @@ impl ColorRamp {
     }
 }
 
-/// One colour peg of face radius `r` centred at `(cx, cy)` — a colour ramp's key, a palette's
-/// swatch. Its face is `color`, opaque: the face IS the data, so selection never tints it; a
+/// One colour peg of face radius `r` centred at `(cx, cy)`: a colour ramp's key. Its face is `color`, opaque: the face IS the data, so selection never tints it; a
 /// `selected` peg wears the focus ring outside the face instead. Under relief the face is a
 /// disc plate ([`PaintCtx::plate_shaped`] at `Some(2.0)`, a true circle) with a control
 /// plate's roll (the relief width, at most 0.4 of the radius); flat, a flat disc in a hairline

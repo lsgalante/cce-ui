@@ -139,7 +139,7 @@ fn the_add_slot_appends_a_swatch() {
     let n = ctx[h].swatches.len();
     assert_eq!(n, 44, "every press on the add slot added one");
     let (ax, _) = ctx[h].slot_centre(n);
-    assert!(ax + ColorPalette::SWATCH_R <= strip.x + strip.width + 0.01, "the add slot is on the strip: {ax}");
+    assert!(ax + ColorPalette::SWATCH / 2.0 <= strip.x + strip.width + 0.01, "the add slot is on the strip: {ax}");
 }
 
 /// The delete button deletes the selected swatch, and is not shown on the last one left.
@@ -238,4 +238,41 @@ fn a_palette_reads_as_its_swatches_and_controls() {
     assert!(Input::a11y_select_item(ctx[h].inner_mut(), 3));
     assert_eq!((ctx[h].swatches.len(), ctx[h].selected_idx), (4, Some(3)));
     assert_eq!(Input::a11y_items(ctx[h].inner(), Rect { x: 0.0, y: 0.0, width: 390.0, height: 260.0 }).len(), 5 + 2, "four swatches, add, the selector, Delete");
+}
+
+/// The swatches are square tiles, raised control plates whose face is the colour, untinted;
+/// the selected tile alone wears a ring in the focus colour outside it. No disc is drawn.
+#[test]
+fn swatches_are_square_plates_the_selected_one_ringed() {
+    use crate::scene::paint::{ControlPlate, Prim};
+    crate::layout::set_control_relief(true);
+    let (mut ctx, h) = palette();
+    let at = ctx[h].slot_centre(1);
+    click(&mut ctx, h, at);
+    let prims = ctx[h].painted_prims();
+    let mut tiles: Vec<Rect> = prims
+        .iter()
+        .filter_map(|p| match p {
+            Prim::Bevel { rect, tint, .. } if (rect.width - ColorPalette::SWATCH).abs() < 0.01 && (rect.height - ColorPalette::SWATCH).abs() < 0.01 => {
+                assert_ne!(*tint, ControlPlate::focus_tint(), "a tile's rim is never tinted");
+                Some(*rect)
+            }
+            _ => None,
+        })
+        .collect();
+    // Painted selected-last, so its ring lies on top: compare in place along the strip.
+    tiles.sort_by(|a, b| a.x.total_cmp(&b.x));
+    assert_eq!(tiles, (0..3).map(|i| ctx[h].slot_rect(i)).collect::<Vec<_>>(), "one square plate per swatch, at its slot");
+    let ring = ControlPlate::focus_tint();
+    let rings: Vec<Rect> = prims
+        .iter()
+        .filter_map(|p| match p {
+            Prim::Border { rect, border, .. } if border[..3] == ring[..] => Some(*rect),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rings.len(), 1, "one ring");
+    let (tile, ring) = (ctx[h].slot_rect(1), rings[0]);
+    assert!(ring.x < tile.x && ring.x + ring.width > tile.x + tile.width, "round the selected tile, outside it");
+    assert!(!prims.iter().any(|p| matches!(p, Prim::Circle { .. } | Prim::Arc { .. })), "no discs");
 }

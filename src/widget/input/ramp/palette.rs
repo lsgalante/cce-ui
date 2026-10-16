@@ -1,7 +1,7 @@
-//! `ColorPalette`: an editable palette — a row of colour swatches in a well, ended by an add
-//! slot. The selected swatch is edited by the toolkit's [`ColorSelector`] — its hex field, and
-//! its swatch, which opens the DE's picker — and deleted by the ramps' button. A swatch is
-//! dragged along the row to reorder it. One keyboard stop whose fields — the strip, then the
+//! `ColorPalette`: an editable palette — a row of square colour swatches in a well, ended by
+//! an add slot. The selected swatch is edited by the toolkit's [`ColorSelector`] — its hex
+//! field, and its swatch, which opens the DE's picker — and deleted by the ramps' button. A
+//! swatch is dragged along the row to reorder it. One keyboard stop whose fields — the strip, then the
 //! selector and the button — take the keyboard in turn ([`Fields`], the ramps'); to a screen
 //! reader, a group of its swatches and controls.
 
@@ -193,15 +193,11 @@ impl ColorPalette {
 }
 
 impl ColorPalette {
-    /// A swatch's face radius.
-    pub(super) const SWATCH_R: f32 = 10.0;
-    /// The gap between two selected swatches' rings at full spacing.
-    const SWATCH_GAP: f32 = 4.0;
-
-    /// A selected swatch's outer radius: the face and the ramps' selection ring.
-    pub(super) fn swatch_outer_r() -> f32 {
-        Self::SWATCH_R + PEG_RING_GAP + PEG_RING_W
-    }
+    /// A swatch's side: a square tile, centred in the strip's height.
+    pub(super) const SWATCH: f32 = 22.0;
+    /// The gap between two tiles at full spacing: room for the selected one's ring
+    /// ([`PEG_RING_GAP`], [`PEG_RING_W`]) with the same again to its neighbour.
+    const SWATCH_GAP: f32 = 2.0 * (PEG_RING_GAP + PEG_RING_W);
 
     /// The strip: a canvas well the editor's width, `ramp_height()` tall, [`MARGIN`] under
     /// the editor's top (the ramps' wells' depth).
@@ -209,15 +205,15 @@ impl ColorPalette {
         Rect { x: self.base.x, y: self.base.y + MARGIN, width: self.base.w.max(1.0), height: crate::layout::ramp_height() }
     }
 
-    /// A slot's full spacing: a selected swatch's ring and the gap.
+    /// A slot's full spacing: a tile and the gap.
     fn full_pitch() -> f32 {
-        2.0 * Self::swatch_outer_r() + Self::SWATCH_GAP
+        Self::SWATCH + Self::SWATCH_GAP
     }
 
-    /// The distance between neighbouring swatches' centres: [`full_pitch`](Self::full_pitch),
-    /// closed up when the swatches and the add slot would run past the strip's end (then the
-    /// swatches overlap, the later on top). The add slot is never closed up on: it stays a full
-    /// pitch past the last swatch, so it can always be pressed.
+    /// The distance between neighbouring tiles: [`full_pitch`](Self::full_pitch), closed up
+    /// when the tiles and the add slot would run past the strip's end (then the tiles
+    /// overlap, the later on top). The add slot is never closed up on: it stays a full pitch
+    /// past the last tile, so it can always be pressed.
     fn pitch(&self) -> f32 {
         let (full, n) = (Self::full_pitch(), self.swatches.len());
         if n < 2 {
@@ -228,7 +224,7 @@ impl ColorPalette {
     }
 
     /// Slot `i`'s centre: swatch `i`, or past the last the add slot. The first sits half the
-    /// strip's height in from its left end, so a ring clears the wall as it clears the floor.
+    /// strip's height in from its left end, so a tile clears the wall as it clears the floor.
     pub(super) fn slot_centre(&self, i: usize) -> (f32, f32) {
         let strip = self.strip_rect();
         let half = strip.height / 2.0;
@@ -241,42 +237,40 @@ impl ColorPalette {
         (strip.x + half + x, strip.y + half)
     }
 
-    /// The radius swatch `idx` is drawn to, and a press on it lands within: the selected
-    /// one's ring; another's face, in its hairline when flat.
-    pub(super) fn swatch_drawn_r(&self, idx: usize) -> f32 {
-        if Some(idx) == self.selected_idx {
-            Self::swatch_outer_r()
-        } else if crate::layout::control_relief() {
-            Self::SWATCH_R
-        } else {
-            Self::SWATCH_R + ColorRamp::PEG_HAIRLINE
-        }
+    /// Slot `i`'s tile: [`SWATCH`](Self::SWATCH) square about its centre.
+    pub(super) fn slot_rect(&self, i: usize) -> Rect {
+        let (cx, cy) = self.slot_centre(i);
+        let h = Self::SWATCH / 2.0;
+        Rect { x: cx - h, y: cy - h, width: Self::SWATCH, height: Self::SWATCH }
+    }
+
+    /// A tile's corner radius: the control rung's, kept small enough that the tile reads as
+    /// a square.
+    pub(super) fn swatch_radius() -> f32 {
+        crate::layout::control_corner_radius().min(Self::SWATCH * 0.15)
     }
 
     /// The swatches in paint order, the selected one last (on top).
-    pub(super) fn swatch_order(&self) -> impl Iterator<Item = usize> {
+    pub(super) fn swatch_order(&self) -> impl DoubleEndedIterator<Item = usize> {
         peg_order(self.swatches.len(), self.selected_idx)
     }
 
-    /// The swatch under `(px, py)`, topmost first.
+    /// The swatch whose tile is under `(px, py)`, topmost first where tiles overlap.
     pub(super) fn swatch_at(&self, px: f32, py: f32) -> Option<usize> {
-        topmost_peg(self.swatches.len(), self.selected_idx, px, py, |i| (self.slot_centre(i), self.swatch_drawn_r(i)))
+        self.swatch_order().rev().find(|&i| within(self.slot_rect(i), px, py))
     }
 
     /// The add slot's glyph square, centred in the slot after the last swatch.
     pub(super) fn add_rect(&self) -> Rect {
         let (cx, cy) = self.slot_centre(self.swatches.len());
-        let r = Self::SWATCH_R;
-        Rect { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r }
+        let h = 0.45 * Self::SWATCH;
+        Rect { x: cx - h, y: cy - h, width: 2.0 * h, height: 2.0 * h }
     }
 
-    /// Whether `(px, py)` is on the add slot: within a swatch's ring of its centre, and on no
-    /// swatch (a selected one's ring may reach it on a strip too short for the palette).
+    /// Whether `(px, py)` is on the add slot: its tile, and on no swatch (a tile may reach
+    /// it on a strip too short for the palette).
     fn on_add(&self, px: f32, py: f32) -> bool {
-        let (cx, cy) = self.slot_centre(self.swatches.len());
-        let r = Self::swatch_outer_r();
-        let (dx, dy) = (px - cx, py - cy);
-        dx * dx + dy * dy <= r * r && self.swatch_at(px, py).is_none()
+        within(self.slot_rect(self.swatches.len()), px, py) && self.swatch_at(px, py).is_none()
     }
 
     /// The slot the pointer at `px` is over, as a dragged swatch lands: the nearest swatch
@@ -493,8 +487,6 @@ impl Input for ColorPalette {
         use crate::a11y::A11yItem;
         use accesskit::Role;
         let n = self.swatches.len();
-        let r = Self::swatch_outer_r();
-        let disc = |(cx, cy): (f32, f32)| Rect { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r };
         let mut items: Vec<A11yItem> = (0..n)
             .map(|i| {
                 let (place, count, colour) = ((i + 1).to_string(), n.to_string(), swatch_hex(self.swatches[i]));
@@ -503,11 +495,11 @@ impl Input for ColorPalette {
                 A11yItem {
                     toggled: Some(selected),
                     focused: selected,
-                    ..A11yItem::new(Role::RadioButton, crate::l10n::tr_args("palette-colour", &args), disc(self.slot_centre(i)))
+                    ..A11yItem::new(Role::RadioButton, crate::l10n::tr_args("palette-colour", &args), self.slot_rect(i))
                 }
             })
             .collect();
-        items.push(A11yItem::new(Role::Button, crate::l10n::tr("palette-add-colour"), disc(self.slot_centre(n))));
+        items.push(A11yItem::new(Role::Button, crate::l10n::tr("palette-add-colour"), self.slot_rect(n)));
         let rect = |w: &dyn WidgetHost| {
             let (x, y, width, height) = w.rect();
             Rect { x, y, width, height }

@@ -2,7 +2,7 @@
 //! it — and while a swatch is selected its colour selector and delete button.
 
 use super::*;
-use super::color_paint::paint_peg;
+use crate::scene::paint::{ControlPlate, PlateStance};
 
 /// The add slot's `plus` glyph: the grey a dropdown's arrow is drawn in (raw sRGB, as a text
 /// colour is).
@@ -30,7 +30,7 @@ impl Paint for ColorPalette {
 
     fn paint(&self, _rect: Rect, pc: &mut PaintCtx) {
         // The strip is the colour ramp's kind of track: a canvas well a control high, at the
-        // control radius, its rim lit while it has the keyboard. The swatches stand in it,
+        // control radius, its rim lit while it has the keyboard. The swatch tiles stand in it,
         // the add slot's glyph after them.
         let strip = self.strip_rect();
         let radius = crate::layout::control_corner_radius();
@@ -38,8 +38,7 @@ impl Paint for ColorPalette {
         pc.clip_rounded(strip, radius, |pc| {
             pc.icon("plus", self.add_rect(), ADD_TINT);
             for idx in self.swatch_order() {
-                let selected = Some(idx) == self.selected_idx;
-                paint_peg(pc, self.slot_centre(idx), Self::SWATCH_R, self.swatches[idx], selected);
+                self.paint_swatch(idx, pc);
             }
         });
         pc.well_rim_lit(strip, radius, crate::layout::control_relief(), self.walk().at == Some(Self::STRIP));
@@ -50,6 +49,36 @@ impl Paint for ColorPalette {
             if self.deletable() {
                 self.del_button.paint_self(&dummy, pc);
             }
+        }
+    }
+}
+
+impl ColorPalette {
+    /// Swatch `idx`'s tile: a control plate whose face is the swatch's colour, opaque — the
+    /// face IS the data, so selection never tints it or its rim (a lit rim showed only on the
+    /// tile's lit top edge, too faint to read). The selected tile wears the ramps' selection
+    /// ring outside it instead, in the focus colour, as a colour ramp's selected peg does.
+    /// Raised under relief; flat, the face alone in a hairline of the wells' frame colour, so
+    /// a swatch the colour of the plate still shows.
+    fn paint_swatch(&self, idx: usize, pc: &mut PaintCtx) {
+        let c = self.swatches[idx];
+        let face = crate::scene::Material::opaque([c[0], c[1], c[2], 1.0]);
+        let (rect, radius) = (self.slot_rect(idx), Self::swatch_radius());
+        if crate::layout::control_relief() {
+            pc.control_plate(&ControlPlate::control(rect, radius, PlateStance::Raised, Some(face)));
+        } else {
+            // The hairline as a colour ramp's flat peg draws its own: a shape of the frame
+            // colour one hairline larger, under the face, so the two never part at a corner.
+            let h = ColorRamp::PEG_HAIRLINE;
+            let under = Rect { x: rect.x - h, y: rect.y - h, width: rect.width + 2.0 * h, height: rect.height + 2.0 * h };
+            pc.rounded_rect(under, radius + h, (true, true, true, true), crate::color::well_frame_color(false, false));
+            pc.control_plate(&ControlPlate::control(rect, radius, PlateStance::Flat, Some(face)));
+        }
+        if Some(idx) == self.selected_idx {
+            let (ring, out) = (ControlPlate::focus_tint(), PEG_RING_GAP + PEG_RING_W);
+            let r = radius + out;
+            let outer = Rect { x: rect.x - out, y: rect.y - out, width: rect.width + 2.0 * out, height: rect.height + 2.0 * out };
+            pc.border(outer, (r, r, r, r), [0.0; 4], [ring[0], ring[1], ring[2], 1.0], PEG_RING_W);
         }
     }
 }

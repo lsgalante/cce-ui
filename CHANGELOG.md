@@ -10,6 +10,17 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-16
 
+- **The ColorPalette's swatches are square tiles, not discs.** Each is a raised `ControlPlate`
+  (22 px, the control radius capped so it reads as a square) whose face is its colour; the
+  selected one wears the ramps' selection ring outside it, squared to the tile, in the focus
+  colour. Lighting the tile's own rim instead was tried and dropped: on a 22 px tile only the
+  lit top edge took the tint, too faint to read in a shadow shot. Flat, each tile stands on a
+  hairline of the wells' frame colour drawn under it (an outline drawn over it parted from
+  the face at the corners). Hits are the tiles' rects. The ColorRamp's pegs keep
+  `paint_peg`, which the palette no longer uses. Checked:
+  `swatches_are_square_plates_the_selected_one_ringed`; the gallery exhibit in a shadow shot,
+  relief and flat.
+
 - **The ColorPalette edits a swatch with a ColorSelector.** Its own R, G and B sliders are gone:
   the selected swatch shows on the toolkit's `ColorSelector` — the hex field, and the swatch
   that opens `cce-color-editor` — and its colour is written back into the swatch whenever the

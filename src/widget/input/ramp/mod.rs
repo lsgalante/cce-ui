@@ -19,9 +19,9 @@
 //! | `paint` | `impl Paint for Ramp` |
 //! | `input` | `impl Input for Ramp`: key drags, the hover-scroll, its fields and keys (`impl Fields`), the accessibility items |
 //! | `color` | the `ColorRamp` widget but its paint: its key, construction, geometry (track, pegs, the fields' places), `impl Layout`, `impl Fields`, `impl Input` and the accessibility items |
-//! | `color_paint` | `impl Paint for ColorRamp`: the track and its gradient, the pegs, the fields; `paint_peg`, a colour peg, which the palette's swatches share |
-//! | `palette` | the `ColorPalette` widget but its paint: its swatches, construction, geometry (strip, swatch slots, the add slot, the fields' places), `impl Layout`, `impl Fields`, `impl Input` and the accessibility items |
-//! | `palette_paint` | `impl Paint for ColorPalette`: the strip, its swatches and add slot, the fields |
+//! | `color_paint` | `impl Paint for ColorRamp`: the track and its gradient, the pegs (`paint_peg`), the fields |
+//! | `palette` | the `ColorPalette` widget but its paint: its swatches, construction, geometry (strip, the swatches' square tiles, the add slot, the fields' places), `impl Layout`, `impl Fields`, `impl Input` and the accessibility items |
+//! | `palette_paint` | `impl Paint for ColorPalette`: the strip, its swatch tiles (control plates) and add slot, the fields |
 
 mod color;
 mod color_paint;
