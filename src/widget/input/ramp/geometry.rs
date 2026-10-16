@@ -18,13 +18,19 @@ impl Ramp {
     /// canvases' 120 (a Slider2D's pad, the Trackpad). Given more, the graph takes it.
     pub(super) const GRAPH_H: f32 = 120.0;
 
+    /// The dropdown row's control height: the toolkit's (`layout::dropdown_height`), so the
+    /// Preset and Line dropdowns stand as tall as every other dropdown.
+    pub(super) fn ctrl_h() -> f32 {
+        crate::layout::dropdown_height()
+    }
+
     /// Vertical reserve under the curve area — the strip stack at the
     /// uniform STRIP_GAP rhythm (labeled dropdown row, labeled pad row),
     /// closed by a bottom margin sized so the VISIBLE bottom gap (widget
     /// margin + host plate padding, ~8) lands on STRIP_GAP as well.
     pub(super) fn strip_reserve() -> f32 {
         let strip = Self::label_strip();
-        MARGIN + Self::STRIP_GAP + strip + 22.0
+        MARGIN + Self::STRIP_GAP + strip + Self::ctrl_h()
             + Self::STRIP_GAP + strip + Self::PAD_SIDE
             + MARGIN
     }
@@ -219,7 +225,7 @@ impl Ramp {
             return;
         }
         let graph = self.graph_rect();
-        let ctrl_h = 22.0;
+        let ctrl_h = Self::ctrl_h();
         let strip = Self::label_strip();
         let gap = Self::STRIP_GAP;
         // One rhythm: every gap in the strip — graph to label tab, row to

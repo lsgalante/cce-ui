@@ -753,3 +753,21 @@ fn a_ramps_delete_is_the_color_ramps_button_beside_the_pad() {
         assert!((by + bh / 2.0 - well_mid).abs() < 1e-3, "icon {icon}: centred on the pad's well");
     }
 }
+
+/// The Ramp's Preset and Line dropdowns stand at the toolkit's dropdown height, and the
+/// control strip it reserves holds them and the key pad's row below.
+#[test]
+fn a_ramps_dropdowns_are_the_toolkits_height() {
+    let mut ramp = Ramp::new();
+    let natural = ramp.inner().natural_height();
+    WidgetHost::set_rect(&mut ramp, 0.0, 0.0, 300.0, natural);
+    ramp.inner_mut().selected_key_idx = Some(1);
+    ramp.inner_mut().arrange_fields();
+    let r = ramp.inner();
+    let dh = crate::layout::dropdown_height();
+    for dd in [&r.preset_dropdown, &r.line_type_dropdown] {
+        assert_eq!(dd.rect().3 - dd.label_strip(), dh, "a dropdown's content is the toolkit's height");
+    }
+    let (_, py, _, ph) = r.key_pad.rect();
+    assert!(py + ph <= r.base.y + r.base.h + 1e-3, "the key pad's row fits the reserved strip");
+}

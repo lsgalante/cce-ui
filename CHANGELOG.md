@@ -10,6 +10,12 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-16
 
+- **The Ramp's dropdowns are the toolkit's height.** Its Preset and Line row was a fixed 22 px,
+  under every other dropdown's `dropdown_height` (24 by default); the row and the control strip
+  it reserves (`strip_reserve`, so `natural_height`) now read it. The strip grows 2 px at the
+  defaults; the graph keeps its 120. Checked: `a_ramps_dropdowns_are_the_toolkits_height`,
+  failing with the fixed 22.
+
 - **The Ramp's delete button is the ColorRamp's.** It was a fixed 22 px square (64 px wide when
   it showed its label); now both ramps size it with one `delete_size`: square at
   `button_height` with its `x` icon, its label's width where the icon set is missing. The Ramp
