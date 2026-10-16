@@ -238,7 +238,7 @@ impl Button {
     /// groove and on the far side OUTSIDE it, so the bright lines the eye
     /// takes for the button's frame sit a little toward the far side of
     /// the footprint. An icon centred on the footprint then reads as
-    /// pushed toward the light (measured on cce-claude's sidebar toggle:
+    /// pushed toward the light (measured on cce-code-agent's sidebar toggle:
     /// about 1.5 logical px right and down of the true centre under the
     /// default top-left light, wall 4.7). A symmetric glyph shows it
     /// plainly where a text label does not, so only icons are moved. Flat

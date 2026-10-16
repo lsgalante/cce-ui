@@ -17,7 +17,7 @@
 //!
 //! - **Where it is.** Once listening, it writes its URL and a fresh bearer
 //!   token to the [`registry`], keyed by app id and pid, so a client (the
-//!   cce-claude popup) reaches the instance that owns the focused window.
+//!   cce-code-agent popup) reaches the instance that owns the focused window.
 //!   By default the OS picks the port and every request must carry the
 //!   token; [`McpServer::fixed_port`] keeps a port for clients configured
 //!   by hand in `~/.claude.json`, which carry none.
@@ -353,7 +353,7 @@ impl McpServer {
     }
 
     /// The tools served without a class, which a client treats as able to
-    /// destroy anything (the cce-claude popup asks before every call). An
+    /// destroy anything (the cce-code-agent popup asks before every call). An
     /// app's test asserts this is empty, so a new tool cannot ship unclassed.
     pub fn unclassed(&self) -> Vec<&str> {
         self.tools.iter().map(|t| t.name.as_str()).filter(|n| !self.classes.contains_key(*n)).collect()

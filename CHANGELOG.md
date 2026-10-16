@@ -368,14 +368,14 @@ today's date — what changed, why, and how it was checked.
   so; `ramp height` still is). No crate in the workspace called either getter.
 
 - **The MCP registry is scoped by Wayland display.** A shadow compositor shares the live
-  session's `$XDG_RUNTIME_DIR`, so a cce-claude popup run in a shadow reached the user's LIVE
+  session's `$XDG_RUNTIME_DIR`, so a cce-code-agent popup run in a shadow reached the user's LIVE
   notes and calendar as companions (seen 2026-10-15; nothing was sent). `registry::Entry` now
   records `display` (`$WAYLAND_DISPLAY`), and `registry::find` takes the caller's display and
   never returns an entry on another; an entry from an older build, with no display, still
   matches until its app is rebuilt. Unit-tested (a `wayland-1` caller does not see a
   `wayland-0` entry).
 - **`McpServer::unclassed` / `class_of`**, so an app's test can assert every tool it serves has a
-  class (an unclassed tool makes the cce-claude popup ask before every call). Unit-tested.
+  class (an unclassed tool makes the cce-code-agent popup ask before every call). Unit-tested.
 - **MCP servers say where they are, what each tool does, and how to use the app** — step M1 of
   the in-app Claude popup (a shortcut opens a Claude prompt scoped to the focused app; design doc
   "In-app Claude popup"). New `mcp::McpServer` builder: it binds a port the OS picks, writes
@@ -473,7 +473,7 @@ today's date — what changed, why, and how it was checked.
   menu there, at the click and at scale 1, and none on the first.
 
 - **A button's icon sits at its optical centre** (`Button::optical_offset`, `OPTICAL_SHIFT`).
-  The user saw cce-claude's sidebar toggle (the `menu` glyph) as off centre. Measured on the
+  The user saw cce-code-agent's sidebar toggle (the `menu` glyph) as off centre. Measured on the
   live window it was centred to half a pixel; what moves it to the eye is the flush plate's
   lighting: under the top-left light the bright lines are inside the groove top and left and
   outside it bottom and right, a frame about 1.5 logical px right of and below the footprint's
@@ -481,7 +481,7 @@ today's date — what changed, why, and how it was checked.
   a fraction of the wall. 0.4 put it on the bright lines' centre but read low on a 3x zoom, the
   dark face pulling the eye back; 0.3 read centred. Only icons move: a symmetric glyph shows
   the shift where a label does not. Checked: `an_icon_on_a_relief_plate_sits_away_from_the_light`;
-  shadow shots of cce-claude's header at 0, 0.3 and 0.4, the glyph's pixels measured against
+  shadow shots of cce-code-agent's header at 0, 0.3 and 0.4, the glyph's pixels measured against
   the rim's.
 - **The parameter pane has a slider-with-spinbox row** (`sliderspinbox:min:max:step[:decimals]`),
   hosting a `SliderSpinbox` held by value as it hosts a `Float3`: the pane draws and routes the
