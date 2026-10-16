@@ -275,40 +275,18 @@ fn a_color_ramp_drag_onto_a_neighbour_keeps_its_key() {
     assert_eq!(ctx[h].keys[sel].color, [0.0, 1.0, 0.0], "the green key is still the one selected");
 }
 
-/// An arrow key on the focused Red slider moves the selected key's red with it.
+/// The colour selector stands the controls' gap under the selected ring at its own height,
+/// and the delete button is the toolkit's height.
 #[test]
-fn a_color_ramp_slider_moved_from_the_keyboard_moves_the_key() {
-    let (mut ctx, h) = color_ramp();
-    let (x, y) = peg(&ctx[h], 1);
-    ctx.propagate_event(&press(x, y), h.id());
-    ctx.propagate_event(&release(x, y), h.id());
-    ctx.lend_h(h, |r, ctx| r.inner_mut().focus_field(ColorRamp::RED, h.id(), ctx));
-    ctx[h].just_changed = false;
-    assert!(ctx.propagate_event(&key_event(NamedKey::ArrowLeft), h.id()));
-    let slider = ctx[h].r_slider.inner().value();
-    assert!(slider < 1.0, "the slider moved: {slider}");
-    assert_eq!(ctx[h].keys[1].color[0], slider, "and the key's red with it");
-    assert!(ctx[h].just_changed);
-}
-
-/// Each slider row has its label strip and a whole slider under it, the rows do not
-/// overlap, and the delete button is the toolkit's height.
-#[test]
-fn a_color_ramp_lays_its_sliders_out_whole() {
+fn a_color_ramp_lays_its_selector_row_out() {
     let (mut ctx, h) = color_ramp();
     let (x, y) = peg(&ctx[h], 1);
     ctx.propagate_event(&press(x, y), h.id());
     let r = &ctx[h];
-    let rows: Vec<_> = [&r.r_slider, &r.g_slider, &r.b_slider].iter().map(|s| s.rect()).collect();
-    for (_, _, _, rh) in &rows {
-        assert_eq!(*rh, crate::layout::control_label_strip() + crate::layout::slider_height());
-    }
-    let gap = crate::layout::control_gap();
-    for pair in rows.windows(2) {
-        assert!((pair[1].1 - (pair[0].1 + pair[0].3) - gap).abs() < 1e-3, "rows the controls' gap apart: {pair:?}");
-    }
+    let (_, sy, _, sh) = r.selector.rect();
+    assert_eq!(sh, crate::layout::color_selector_height());
     let ring_bottom = peg(r, 1).1 + ColorRamp::peg_outer_r();
-    assert!((rows[0].1 - ring_bottom - gap).abs() < 1e-3, "the Red row the controls' gap under the selected ring");
+    assert!((sy - ring_bottom - crate::layout::control_gap()).abs() < 1e-3, "the controls' gap under the selected ring");
     assert_eq!(r.del_button.rect().3, crate::layout::button_height());
 }
 
@@ -329,10 +307,10 @@ fn a_color_ramps_end_keys_ring_stays_inside_it() {
 
 /// The delete button is the float Ramp's kind: with its x icon a square at the button height,
 /// without it its label's width; at the right of the editor, the controls' gap from the
-/// sliders, centred on the Green slider's track. Its column is kept with two keys, so the
-/// sliders are as wide with or without the button.
+/// colour selector, centred on it. Its column is kept with two keys, so the selector is as
+/// wide with or without the button.
 #[test]
-fn a_color_ramps_delete_is_a_square_x_button_beside_the_green_track() {
+fn a_color_ramps_delete_is_a_square_x_button_beside_the_selector() {
     let tr = crate::l10n::tr;
     for icon in [true, false] {
         let (mut ctx, h) = color_ramp();
@@ -349,17 +327,16 @@ fn a_color_ramps_delete_is_a_square_x_button_beside_the_green_track() {
         assert!(want_w < 100.0, "narrower than the label button was");
         let track = r.track_rect();
         assert!((bx + bw - (track.x + track.width)).abs() < 1e-3, "flush with the track's right end");
-        let (gx, gy, gw, _) = r.g_slider.rect();
-        assert!((bx - (gx + gw) - crate::layout::control_gap()).abs() < 1e-3, "the controls' gap from the sliders");
-        let green_track = gy + crate::layout::control_label_strip() + crate::layout::slider_height() / 2.0;
-        assert!((by + bh / 2.0 - green_track).abs() < 1e-3, "centred on the Green track");
-        // Two keys: the button hidden, the sliders as wide.
+        let (sx, sy, sw, sh) = r.selector.rect();
+        assert!((bx - (sx + sw) - crate::layout::control_gap()).abs() < 1e-3, "the controls' gap from the selector");
+        assert!((by + bh / 2.0 - (sy + sh / 2.0)).abs() < 1e-3, "centred on the selector");
+        // Two keys: the button hidden, the selector as wide.
         let mut r2 = ctx.remove(h).unwrap();
         r2.keys.drain(2..4);
         r2.selected_key_idx = Some(1);
         r2.arrange_fields();
         assert!(r2.del_button.rect().0 < -900.0, "hidden at two keys");
-        assert_eq!(r2.g_slider.rect().2, gw, "the sliders keep their width");
+        assert_eq!(r2.selector.rect().2, sw, "the selector keeps its width");
     }
 }
 
@@ -401,8 +378,8 @@ fn a_color_ramps_gradient_steps_a_pixel_at_most_and_meets_each_key() {
     }
 }
 
-/// The sliders and the delete button are painted once: what a selected key adds to the
-/// ramp's paint is exactly what the four fields paint themselves.
+/// The selector and the delete button are painted once: what a selected key adds to the
+/// ramp's paint is exactly what the two fields paint themselves.
 #[test]
 fn a_color_ramp_paints_its_fields_once() {
     let (mut ctx, h) = color_ramp();
@@ -421,9 +398,7 @@ fn a_color_ramp_paints_its_fields_once() {
         let r = &ctx[h];
         let dummy = UiContext::new();
         let mut pc = crate::scene::paint::PaintCtx::new();
-        r.r_slider.paint_self(&dummy, &mut pc);
-        r.g_slider.paint_self(&dummy, &mut pc);
-        r.b_slider.paint_self(&dummy, &mut pc);
+        r.selector.paint_self(&dummy, &mut pc);
         r.del_button.paint_self(&dummy, &mut pc);
         pc.finish().len()
     };
@@ -454,7 +429,7 @@ fn a_color_ramp_deletes_from_the_keyboard() {
     assert!(ctx.propagate_event(&key_event(NamedKey::Enter), h.id()));
     assert_eq!(ctx[h].keys.len(), 3, "the key is gone");
     assert_eq!(ctx[h].selected_key_idx, Some(1), "the key after it selected");
-    assert_eq!(ctx[h].r_slider.inner().value(), 0.0, "the sliders show it: green's red");
+    assert_eq!(ctx[h].selector.inner().color, [0, 255, 0], "the selector shows it: green");
     assert!(!ctx[h].del_button.take_click(), "no click left armed for the next press");
 }
 
@@ -556,18 +531,18 @@ fn a_press_where_ramp_pegs_overlap_takes_the_topmost() {
     assert_eq!(ctx[h].selected_key_idx, Some(1), "the selected key is on top");
 }
 
-/// A colour ramp declares the height of its track, peg row and all three slider rows, key
-/// selected or not; at that height the sliders and the button lie inside it.
+/// A colour ramp declares the height of its track, peg row and selector row, key selected or
+/// not; at that height the selector and the button lie inside it.
 #[test]
-fn a_color_ramp_declares_its_slider_rows_and_holds_them() {
+fn a_color_ramp_declares_its_selector_row_and_holds_it() {
     let mut ctx = UiContext::new();
     let mut cr = ColorRamp::new();
     // A third key, so the delete button is shown.
     cr.keys.insert(1, ColorRampKey { pos: 0.5, color: [0.5, 0.5, 0.5] });
     let h = ctx.insert(cr);
     let natural = ctx[h].natural_height();
-    let rows = 3.0 * (crate::layout::control_label_strip() + crate::layout::slider_height());
-    assert!(natural >= crate::layout::ramp_height() + rows, "the slider rows are reserved: {natural}");
+    let row = crate::layout::color_selector_height();
+    assert!(natural >= crate::layout::ramp_height() + row, "the selector row is reserved: {natural}");
     assert_eq!(Layout::intrinsic_size(ctx[h].inner()).map(|s| s.height), Some(natural));
     ctx.lend_h(h, |r, _| WidgetHost::set_rect(r, 5.0, 7.0, 300.0, natural));
     let (x, y) = peg(&ctx[h], 0);
@@ -576,7 +551,7 @@ fn a_color_ramp_declares_its_slider_rows_and_holds_them() {
     assert_eq!(ctx[h].natural_height(), natural, "selecting a key does not change it");
     let r = &ctx[h];
     let rect = (r.base.x, r.base.y, r.base.w, r.base.h);
-    for (fx, fy, fw, fh) in [r.r_slider.rect(), r.g_slider.rect(), r.b_slider.rect(), r.del_button.rect()] {
+    for (fx, fy, fw, fh) in [r.selector.rect(), r.del_button.rect()] {
         assert!(
             fx >= rect.0 && fy >= rect.1 && fx + fw <= rect.0 + rect.2 + 1e-3 && fy + fh <= rect.1 + rect.3 + 1e-3,
             "({fx}, {fy}, {fw}, {fh}) lies outside {rect:?}"

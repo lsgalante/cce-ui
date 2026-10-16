@@ -1,6 +1,6 @@
 //! The colour ramp from the keyboard and to a screen reader: one Tab stop that walks its
-//! fields track first, the track's keys, the sliders writing the selected key's colour, and
-//! its keys and controls as accessibility items.
+//! fields track first, the track's keys, the colour selector writing the selected key's
+//! colour, and its keys and controls as accessibility items.
 
 use super::*;
 use crate::scene::paint::Prim;
@@ -37,6 +37,18 @@ fn key(named: NamedKey, shift: bool) -> Event {
     })
 }
 
+fn typed(text: &str) -> Event {
+    Event::KeyInput(KeyEvent {
+        logical_key: Key::Character(text.into()),
+        state: ElementState::Pressed,
+        text: Some(text.into()),
+        repeat: false,
+        ctrl: false,
+        shift: false,
+        alt: false,
+    })
+}
+
 /// Press `named` on the ramp, as the window hands it a key.
 fn press(ctx: &mut UiContext, h: Handle<Adapted<ColorRamp>>, named: NamedKey) -> bool {
     ctx.propagate_event(&key(named, false), h.id())
@@ -46,8 +58,9 @@ fn tick(ctx: &mut UiContext, h: Handle<Adapted<ColorRamp>>) {
     ctx.lend_h(h, |r, ctx| WidgetHost::tick(r, 0.016, ctx));
 }
 
-fn sliders(r: &ColorRamp) -> [f32; 3] {
-    [r.r_slider.inner().value(), r.g_slider.inner().value(), r.b_slider.inner().value()]
+/// The colour the selector shows: sRGB bytes.
+fn shown(r: &ColorRamp) -> [u8; 3] {
+    r.selector.inner().color
 }
 
 fn close(a: f32, b: f32) -> bool {
@@ -58,10 +71,10 @@ fn close3(a: [f32; 3], b: [f32; 3]) -> bool {
     a.iter().zip(b).all(|(x, y)| close(*x, y))
 }
 
-/// The colour ramp is one Tab stop that walks its fields: the track, then the Red, Green and
-/// Blue sliders while a key is selected and Delete while one is and there are more than two
-/// keys. It keeps Tab while it has a field to go that way, so the window's walk leaves it past
-/// the last field and, Shift+Tab, before the track.
+/// The colour ramp is one Tab stop that walks its fields: the track, then the colour selector
+/// while a key is selected and Delete while one is and there are more than two keys. It keeps
+/// Tab while it has a field to go that way, so the window's walk leaves it past the last field
+/// and, Shift+Tab, before the track.
 #[test]
 fn a_color_ramp_walks_its_fields_track_first() {
     let (mut ctx, h) = color_ramp();
@@ -72,32 +85,30 @@ fn a_color_ramp_walks_its_fields_track_first() {
     let keeps = |ctx: &UiContext| (ctx[h].keeps_tab(false), ctx[h].keeps_tab(true));
     assert_eq!(keeps(&ctx), (false, false), "no key selected: the track alone");
 
-    // A key selected, four keys: the sliders and Delete join the walk.
+    // A key selected, four keys: the selector and Delete join the walk.
     press(&mut ctx, h, NamedKey::ArrowRight);
     assert_eq!(ctx[h].selected_key_idx, Some(0));
     assert_eq!(keeps(&ctx), (true, false), "on the track: Tab stays, Shift+Tab leaves");
-    let ids: Vec<WidgetId> = (ColorRamp::RED..=ColorRamp::DELETE).map(|i| ctx[h].field_id(i)).collect();
+    let ids: Vec<WidgetId> = (ColorRamp::SELECTOR..=ColorRamp::DELETE).map(|i| ctx[h].field_id(i)).collect();
     for &want in &ids {
         press(&mut ctx, h, NamedKey::Tab);
         assert_eq!(ctx.focused_widget, Some(want));
         assert_eq!(ctx.focus_holder(), Some(own), "each held by the ramp");
     }
     assert!(ctx[h].del_button.base().focused);
-    assert!(!ctx[h].b_slider.base().focused, "the slider before it let go");
+    assert!(!ctx[h].selector.base().focused, "the selector before it let go");
     assert_eq!(keeps(&ctx), (false, true), "Delete is the last field");
     ctx.propagate_event(&key(NamedKey::Tab, true), own);
-    assert_eq!(ctx.focused_widget, Some(ids[2]), "Shift+Tab walks back to Blue");
+    assert_eq!(ctx.focused_widget, Some(ids[0]), "Shift+Tab walks back to the selector");
 
     // Two keys: no Delete — not a stop, not placed, not painted.
     ctx[h].keys.drain(1..3);
     ctx.set_focused_id(own);
     press(&mut ctx, h, NamedKey::Home);
     assert_eq!((ctx[h].keys.len(), ctx[h].selected_key_idx), (2, Some(0)));
-    for &want in &ids[..3] {
-        press(&mut ctx, h, NamedKey::Tab);
-        assert_eq!(ctx.focused_widget, Some(want));
-    }
-    assert_eq!(keeps(&ctx), (false, true), "Blue is the last field with two keys");
+    press(&mut ctx, h, NamedKey::Tab);
+    assert_eq!(ctx.focused_widget, Some(ids[0]));
+    assert_eq!(keeps(&ctx), (false, true), "the selector is the last field with two keys");
     press(&mut ctx, h, NamedKey::Tab);
     assert_eq!(ctx.focused_widget, Some(own), "handed Tab anyway, it wraps past where Delete was");
     assert!(ctx[h].del_button.rect().0 < -900.0, "Delete is parked");
@@ -123,7 +134,7 @@ fn a_color_ramp_walks_its_fields_track_first() {
 
 /// On the focused track the arrows pick a key — Right / Down the next, Left / Up the one
 /// before, wrapping, and with none selected Right takes the first and Left the last — and
-/// Home / End the ends; the sliders show the key picked. Unfocused, the ramp declines them.
+/// Home / End the ends; the selector shows the key picked. Unfocused, the ramp declines them.
 #[test]
 fn the_tracks_arrows_home_and_end_pick_a_key() {
     let (mut ctx, h) = color_ramp();
@@ -151,8 +162,8 @@ fn the_tracks_arrows_home_and_end_pick_a_key() {
     }
     assert_eq!(seen, [0, 1, 2, 1, 0, 3, 2, 3, 3, 0]);
     press(&mut ctx, h, NamedKey::ArrowRight);
-    assert_eq!(sliders(&ctx[h]), [1.0, 0.0, 0.0], "the sliders show the key picked");
-    assert!(ctx[h].r_slider.rect().0 >= 0.0, "and are placed");
+    assert_eq!(shown(&ctx[h]), [255, 0, 0], "the selector shows the key picked");
+    assert!(ctx[h].selector.rect().0 >= 0.0, "and is placed");
 }
 
 /// Delete or Backspace on the track deletes the selected key and selects its neighbour; with
@@ -171,7 +182,7 @@ fn the_tracks_delete_and_insert_edit_the_keys() {
     let r = &ctx[h];
     assert_eq!((r.keys.len(), r.selected_key_idx), (5, Some(1)), "the new key selected");
     assert!(close(r.keys[1].pos, 0.25) && close3(r.keys[1].color, [0.5, 0.0, 0.0]), "{:?}", r.keys[1]);
-    assert!(close3(sliders(r), [0.5, 0.0, 0.0]), "the sliders show it");
+    assert_eq!(shown(r), srgb_bytes([0.5, 0.0, 0.0]), "the selector shows it");
     assert!(r.just_changed);
     // From the last key: halfway back to green, between green and white.
     press(&mut ctx, h, NamedKey::End);
@@ -190,7 +201,7 @@ fn the_tracks_delete_and_insert_edit_the_keys() {
     assert_eq!(r.keys.len(), 5);
     assert_eq!(r.selected_key_idx, Some(1));
     assert_eq!(r.keys[1].color, [1.0, 0.0, 0.0], "red, the key after it");
-    assert_eq!(sliders(r), [1.0, 0.0, 0.0]);
+    assert_eq!(shown(r), [255, 0, 0]);
     assert!(r.just_changed);
     // The last gone, the one before it; down to two, nothing more goes.
     press(&mut ctx, h, NamedKey::End);
@@ -203,27 +214,44 @@ fn the_tracks_delete_and_insert_edit_the_keys() {
     assert_eq!(ctx[h].keys.len(), 2);
 }
 
-/// A slider with the keyboard keeps its own keys and writes the selected key's channel; a
-/// key it takes without moving changes nothing.
+/// The selector with the keyboard is editing its hex, and keeps its own keys: a hex typed
+/// and taken with Enter is the selected key's colour, linear; the track's keys are not its.
 #[test]
-fn a_sliders_keys_write_the_selected_keys_channel() {
+fn the_selectors_hex_is_the_selected_keys_colour() {
     let (mut ctx, h) = color_ramp();
     let own = h.id();
     ctx.set_focused_id(own);
     press(&mut ctx, h, NamedKey::ArrowRight);
     press(&mut ctx, h, NamedKey::ArrowRight);
     press(&mut ctx, h, NamedKey::Tab);
-    press(&mut ctx, h, NamedKey::Tab);
-    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::RED + 1)), "Green");
+    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::SELECTOR)));
+    assert!(ctx[h].selector.inner().editing, "the hex field took the keyboard");
     ctx[h].just_changed = false;
-    assert!(press(&mut ctx, h, NamedKey::End));
-    assert_eq!(ctx[h].keys[1].color, [1.0, 1.0, 0.0], "red's green at the top");
+    for _ in 0..7 {
+        press(&mut ctx, h, NamedKey::Backspace);
+    }
+    for ch in ["#", "8", "0", "8", "0", "8", "0"] {
+        ctx.propagate_event(&typed(ch), own);
+    }
+    assert!(press(&mut ctx, h, NamedKey::Enter));
+    let c = ctx[h].keys[1].color;
+    assert!(c.iter().all(|v| (v - 0.2159).abs() < 1e-3), "#808080 is linear 0.216: {c:?}");
     assert!(ctx[h].just_changed);
-    ctx[h].just_changed = false;
-    assert!(press(&mut ctx, h, NamedKey::End), "taken at the top");
-    assert!(!ctx[h].just_changed, "a move that moves nothing changes nothing");
     assert!(!press(&mut ctx, h, NamedKey::Insert), "the track's keys are the track's");
     assert_eq!(ctx[h].keys.len(), 4);
+}
+
+/// Showing a key on the selector leaves its colour as it is — not rounded to the selector's
+/// bytes — and is no change.
+#[test]
+fn a_key_shown_on_the_selector_keeps_its_exact_colour() {
+    let (mut ctx, h) = color_ramp();
+    ctx[h].keys[1].color = [0.123, 0.456, 0.789];
+    ctx[h].inner_mut().select(1);
+    ctx[h].just_changed = false;
+    tick(&mut ctx, h);
+    assert_eq!(ctx[h].keys[1].color, [0.123, 0.456, 0.789]);
+    assert!(!ctx[h].just_changed);
 }
 
 /// A field that goes with the keyboard on it — the delete button as a click of the mouse's
@@ -235,7 +263,7 @@ fn a_field_that_goes_hands_the_keyboard_to_the_track() {
     let own = h.id();
     ctx.set_focused_id(own);
     press(&mut ctx, h, NamedKey::ArrowRight);
-    for _ in 0..4 {
+    for _ in 0..2 {
         press(&mut ctx, h, NamedKey::Tab);
     }
     assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::DELETE)));
@@ -261,7 +289,11 @@ fn a_focused_track_lights_its_rim() {
         let lit = |r: &ColorRamp| {
             let track = r.track_rect();
             let hc = crate::color::highlight_primary_color();
-            let inside = |q: &Rect| q.x >= track.x && q.y >= track.y && q.x + q.width <= track.x + track.width + 1e-3;
+            // Within the track on every side: the selector's hex field below it lights its
+            // own well while it edits.
+            let inside = |q: &Rect| {
+                q.x >= track.x && q.y >= track.y && q.x + q.width <= track.x + track.width + 1e-3 && q.y + q.height <= track.y + track.height + 1e-3
+            };
             let mut pc = crate::scene::paint::PaintCtx::new();
             Paint::paint(r, Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 }, &mut pc);
             pc.finish().items.into_iter().any(|i| match i.prim {
@@ -275,7 +307,7 @@ fn a_focused_track_lights_its_rim() {
         assert!(lit(ctx[h].inner()), "relief {relief}: the track focused, its rim lit");
         press(&mut ctx, h, NamedKey::ArrowRight);
         press(&mut ctx, h, NamedKey::Tab);
-        assert!(!lit(ctx[h].inner()), "relief {relief}: Red focused, not the track");
+        assert!(!lit(ctx[h].inner()), "relief {relief}: the selector focused, not the track");
         ctx.clear_focus();
         assert!(!lit(ctx[h].inner()), "relief {relief}: the keyboard gone, unlit");
         // Given the keyboard with no word to the ramp, it lights at its next tick.
@@ -295,7 +327,7 @@ fn a_press_on_the_track_gives_it_the_keyboard_from_a_control() {
     ctx.set_focused_id(own);
     press(&mut ctx, h, NamedKey::ArrowRight);
     press(&mut ctx, h, NamedKey::Tab);
-    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::RED)));
+    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::SELECTOR)));
     let click = |ctx: &mut UiContext, (px, py): (f32, f32)| {
         for state in [ElementState::Pressed, ElementState::Released] {
             let at = Event::MouseButton { button: MouseButton::Left, state, x: px, y: py, local_x: px, local_y: py };
@@ -303,18 +335,18 @@ fn a_press_on_the_track_gives_it_the_keyboard_from_a_control() {
         }
     };
 
-    // A key's peg, from Red.
+    // A key's peg, from the selector.
     let peg = ctx[h].peg_centre(2);
     click(&mut ctx, peg);
     assert_eq!(ctx[h].selected_key_idx, Some(2));
     assert_eq!(ctx.focused_widget, Some(own), "the track has the keyboard");
-    assert!(!ctx[h].r_slider.base().focused, "Red let go");
+    assert!(!ctx[h].selector.base().focused, "the selector let go");
     assert!(press(&mut ctx, h, NamedKey::Delete), "the track's Delete");
     assert_eq!(ctx[h].keys.len(), 3, "the clicked key went");
 
-    // A key made on the track, from Red.
+    // A key made on the track, from the selector.
     press(&mut ctx, h, NamedKey::Tab);
-    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::RED)));
+    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::SELECTOR)));
     let t = ctx[h].track_rect();
     click(&mut ctx, (t.x + t.width / 4.0, t.y + t.height / 2.0));
     assert_eq!(ctx[h].keys.len(), 4, "a key made");
@@ -323,37 +355,20 @@ fn a_press_on_the_track_gives_it_the_keyboard_from_a_control() {
     assert_eq!(ctx.focused_widget, Some(own), "and keeps it");
 }
 
-/// A key shown on the sliders stops a slider's wheel glide: left running, the glide went on
-/// into the key now shown.
+/// A press on the selector's hex gives it the keyboard, held by the ramp, and it begins
+/// editing.
 #[test]
-fn a_key_shown_on_the_sliders_stops_their_glide() {
-    crate::motion::force_for_test(true);
+fn a_press_on_the_hex_edits_it_within_the_ramp() {
     let (mut ctx, h) = color_ramp();
-    let own = h.id();
-    ctx[h].keys[1].color = [0.5, 0.5, 0.5];
-    ctx.set_focused_id(own);
-    press(&mut ctx, h, NamedKey::ArrowRight);
-    press(&mut ctx, h, NamedKey::ArrowRight);
-    assert_eq!(ctx[h].selected_key_idx, Some(1));
-    // A quick run of notches on Blue, then the stream stops.
-    let (x, y, w, sh) = ctx[h].b_slider.rect();
-    let (px, py) = (x + w / 2.0, y + sh / 2.0);
-    let delta = MouseScrollDelta::LineDelta(0.0, 1.0);
-    for _ in 0..3 {
-        ctx.propagate_event(&Event::MouseWheel { delta, x: px, y: py, local_x: px, local_y: py }, own);
+    ctx[h].inner_mut().select(1);
+    let (x, y, w, sh) = ctx[h].selector.rect();
+    let (px, py) = (x + w * 0.2, y + sh / 2.0);
+    for state in [ElementState::Pressed, ElementState::Released] {
+        ctx.propagate_event(&Event::MouseButton { button: MouseButton::Left, state, x: px, y: py, local_x: px, local_y: py }, h.id());
     }
-    std::thread::sleep(std::time::Duration::from_millis(80));
-    let wheeled = ctx[h].keys[1].color[2];
-    assert!(!close(wheeled, 0.5), "the wheel moved Blue");
-    tick(&mut ctx, h);
-    assert!(!close(ctx[h].keys[1].color[2], wheeled), "left alone, the glide goes on");
-
-    assert!(press(&mut ctx, h, NamedKey::ArrowRight));
-    for _ in 0..3 {
-        tick(&mut ctx, h);
-    }
-    assert_eq!(ctx[h].keys[2].color, [0.0, 1.0, 0.0], "the key now shown is not glided");
-    assert!(close3(sliders(&ctx[h]), [0.0, 1.0, 0.0]), "and the sliders show it");
+    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::SELECTOR)));
+    assert_eq!(ctx.focus_holder(), Some(h.id()), "the ramp holds it");
+    assert!(ctx[h].selector.inner().editing);
 }
 
 /// The node at `id` in a tree update.
@@ -363,10 +378,10 @@ fn node(update: &accesskit::TreeUpdate, id: accesskit::NodeId) -> &accesskit::No
 
 /// To a screen reader the colour ramp is a group named by its label: a radio button per key,
 /// named with its place, position and colour and on while selected; while a key is selected
-/// the Red, Green and Blue sliders with their numbers; Delete while it is shown. The controls
-/// stay out of the registry.
+/// the selector, a text input named with the key's hex; Delete while it is shown. The
+/// controls stay out of the registry.
 #[test]
-fn a_color_ramp_is_a_group_of_its_keys_and_sliders() {
+fn a_color_ramp_is_a_group_of_its_keys_and_controls() {
     use accesskit::{Role, Toggled};
     use crate::a11y::{item_id, node_id, tree_update};
     let (mut ctx, h) = color_ramp_of(ColorRamp::new().with_label("Gradient"));
@@ -397,38 +412,26 @@ fn a_color_ramp_is_a_group_of_its_keys_and_sliders() {
     press(&mut ctx, h, NamedKey::ArrowRight);
     press(&mut ctx, h, NamedKey::ArrowRight);
     let update = tree_update(&ctx, "", 1.0);
-    let slider = |s: &str| (Role::Slider, s.to_string());
     let tr = crate::l10n::tr;
-    assert_eq!(
-        roles(&update)[4..],
-        [slider(&tr("ramp-red")), slider(&tr("ramp-green")), slider(&tr("ramp-blue")), (Role::Button, tr("ramp-delete-key"))]
-    );
+    assert_eq!(roles(&update)[4..], [(Role::TextInput, "#ff0000".to_string()), (Role::Button, tr("ramp-delete-key"))]);
     assert_eq!(node(&update, item_id(own, 1)).toggled(), Some(Toggled::True), "the selected key is on");
-    let red = node(&update, item_id(own, 4));
-    assert_eq!((red.numeric_value(), red.min_numeric_value(), red.max_numeric_value()), (Some(1.0), Some(0.0), Some(1.0)));
-    assert!(red.supports_action(accesskit::Action::SetValue));
-    assert_eq!(node(&update, item_id(own, 5)).numeric_value(), Some(0.0));
 
     // Two keys, one selected: no Delete.
     ctx[h].keys.drain(1..3);
     press(&mut ctx, h, NamedKey::Home);
     let update = tree_update(&ctx, "", 1.0);
-    assert_eq!(roles(&update).last(), Some(&slider("Blue")));
-    for i in ColorRamp::RED..=ColorRamp::DELETE {
+    assert_eq!(roles(&update).last(), Some(&(Role::TextInput, "#000000".to_string())));
+    for i in ColorRamp::SELECTOR..=ColorRamp::DELETE {
         assert!(!ctx.tree.is_registered(ctx[h].field_id(i)), "field {i} stays out of the registry");
     }
 }
 
-/// The colour ramp's controls are named from the toolkit's catalogue: the sliders' labels
-/// are its Red, Green and Blue, and the delete button's item is its Delete whether the button
-/// wears the x icon (and so has no label) or falls back to the label.
+/// The delete button's item is the catalogue's Delete whether the button wears the x icon
+/// (and so has no label) or falls back to the label.
 #[test]
-fn a_color_ramps_controls_are_named_from_the_catalogue() {
+fn a_color_ramps_delete_is_named_from_the_catalogue() {
     use crate::l10n::tr;
     let (mut ctx, h) = color_ramp();
-    let r = &ctx[h];
-    let labels = [&r.r_slider, &r.g_slider, &r.b_slider].map(|s| s.label());
-    assert_eq!(labels, [Some(tr("ramp-red")), Some(tr("ramp-green")), Some(tr("ramp-blue"))]);
     for icon in [true, false] {
         // An icon face, as `with_icon_name` gives where the icon set is installed: no label.
         let button = Button::new(0.0, 0.0, 0.0, 0.0);
@@ -455,19 +458,19 @@ fn the_readers_focus_follows_the_keyboard_through_the_color_ramp() {
     press(&mut ctx, h, NamedKey::End);
     assert_eq!(focus(&ctx), item_id(own, 3), "the selected key");
     let mut seen = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..2 {
         press(&mut ctx, h, NamedKey::Tab);
         seen.push(focus(&ctx));
     }
-    assert_eq!(seen, [item_id(own, 4), item_id(own, 5), item_id(own, 6), item_id(own, 7)], "Red, Green, Blue, Delete");
+    assert_eq!(seen, [item_id(own, 4), item_id(own, 5)], "the selector, Delete");
 }
 
-/// A reader's Click on a key selects it and puts the keyboard on the track; on a slider it
-/// gives the slider the keyboard, and on Delete presses it — at the next tick. Its number on
-/// Red, Green or Blue moves the selected key's channel.
+/// A reader's Click on a key selects it and puts the keyboard on the track; on the selector
+/// it gives the selector the keyboard, and on Delete presses it — at the next tick. The
+/// selector takes no number.
 #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
 #[test]
-fn a_readers_clicks_and_numbers_reach_the_color_ramp() {
+fn a_readers_clicks_reach_the_color_ramp() {
     use crate::backend::a11y_unix::{item_click, set_item_value, Acted};
     let (mut ctx, h) = color_ramp();
     let own = h.id();
@@ -477,41 +480,34 @@ fn a_readers_clicks_and_numbers_reach_the_color_ramp() {
     assert_eq!(item_click(&mut ctx, own, 1), (Acted::Changed, true));
     tick(&mut ctx, h);
     assert_eq!(ctx[h].selected_key_idx, Some(1));
-    assert_eq!(sliders(&ctx[h]), [1.0, 0.0, 0.0], "the sliders show it");
+    assert_eq!(shown(&ctx[h]), [255, 0, 0], "the selector shows it");
     assert_eq!(ctx.focused_widget, Some(own), "the keyboard on the track");
 
-    // Green (item 5): the keyboard, nothing pressed.
-    assert_eq!(item_click(&mut ctx, own, 5), (Acted::Changed, false));
+    // The selector (item 4): the keyboard, nothing changed.
+    assert_eq!(item_click(&mut ctx, own, 4), (Acted::Changed, false));
     tick(&mut ctx, h);
-    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::RED + 1)));
-    assert!(ctx[h].g_slider.base().focused);
+    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::SELECTOR)));
+    assert!(ctx[h].selector.base().focused);
     assert_eq!(ctx[h].keys[1].color, [1.0, 0.0, 0.0], "unchanged");
+    let n = accesskit::ActionData::NumericValue(0.5);
+    assert_eq!(set_item_value(&mut ctx, own, 4, Some(&n)), Acted::Nothing, "the selector takes no number");
 
     // A key again, from a control: back to the track.
     assert_eq!(item_click(&mut ctx, own, 2), (Acted::Changed, false));
     tick(&mut ctx, h);
     assert_eq!((ctx[h].selected_key_idx, ctx.focused_widget), (Some(2), Some(own)));
 
-    // Red (item 4) and Blue (item 6) set by number.
-    let n = |v| accesskit::ActionData::NumericValue(v);
-    assert_eq!(set_item_value(&mut ctx, own, 4, Some(&n(0.25))), Acted::Changed);
-    assert_eq!(set_item_value(&mut ctx, own, 6, Some(&n(2.0))), Acted::Changed, "clamped to the slider's range");
-    assert!(close3(ctx[h].keys[2].color, [0.25, 1.0, 1.0]), "{:?}", ctx[h].keys[2]);
-    assert!(close(ctx[h].r_slider.inner().value(), 0.25), "the slider with it");
-    assert_eq!(set_item_value(&mut ctx, own, 7, Some(&n(0.5))), Acted::Nothing, "a button takes no number");
-    assert_eq!(set_item_value(&mut ctx, own, 1, Some(&n(0.5))), Acted::Nothing, "nor a key");
-    assert_eq!(ctx.focused_widget, Some(own), "numbers leave the keyboard where it is");
-
-    // Delete (item 7): the key goes, its neighbour selected, the keyboard on Delete.
-    assert_eq!(item_click(&mut ctx, own, 7), (Acted::Changed, false));
+    // Delete (item 5): the key goes, its neighbour selected, the keyboard on Delete.
+    assert_eq!(item_click(&mut ctx, own, 5), (Acted::Changed, false));
     tick(&mut ctx, h);
     assert_eq!(ctx[h].keys.len(), 3);
     assert_eq!(ctx[h].selected_key_idx, Some(2));
     assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorRamp::DELETE)));
-    // Down to two keys, Delete is gone and the keyboard back on the track.
-    assert_eq!(item_click(&mut ctx, own, 6), (Acted::Changed, false));
+    // Down to two keys (Delete is item 4 of three keys), Delete is gone and the keyboard back
+    // on the track.
+    assert_eq!(item_click(&mut ctx, own, 4), (Acted::Changed, false));
     tick(&mut ctx, h);
     assert_eq!(ctx[h].keys.len(), 2);
     assert_eq!(ctx.focused_widget, Some(own));
-    assert_eq!(item_click(&mut ctx, own, 5), (Acted::Nothing, false), "two keys: no item 5");
+    assert_eq!(item_click(&mut ctx, own, 3), (Acted::Nothing, false), "two keys: no item 3");
 }

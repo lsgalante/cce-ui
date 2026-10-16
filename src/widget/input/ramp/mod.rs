@@ -46,7 +46,7 @@ use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::{Cap, PaintCtx};
 use crate::widget::model::{EventCtx, Input, Layout, Paint};
 use crate::widget::*;
-use crate::widget::input::{Slider, Slider2D, Button};
+use crate::widget::input::{Slider2D, Button};
 
 #[derive(Debug, Clone)]
 pub struct RampKey {
@@ -181,6 +181,23 @@ fn delete_size(button: &Adapted<Button>) -> (f32, f32) {
         Layout::intrinsic_size(button.inner()).map_or(bh, |s| s.width)
     };
     (w, bh)
+}
+
+/// A linear colour as a [`ColorSelector`](crate::widget::input::ColorSelector) holds one:
+/// sRGB bytes. Both colour editors' (the ColorRamp's keys, the ColorPalette's swatches).
+fn srgb_bytes(c: [f32; 3]) -> [u8; 3] {
+    crate::color::to_srgb_rgb(c).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+/// sRGB bytes as a colour editor keeps them: linear.
+fn linear_of(b: [u8; 3]) -> [f32; 3] {
+    crate::color::to_linear_rgb(b.map(|v| v as f32 / 255.0))
+}
+
+/// A linear colour as the selector shows it and a reader hears it: `#rrggbb`, sRGB.
+fn colour_hex(c: [f32; 3]) -> String {
+    let [r, g, b] = srgb_bytes(c);
+    format!("#{r:02x}{g:02x}{b:02x}")
 }
 
 /// Park a field off-screen at no size: how a ramp hides a control it is not showing.

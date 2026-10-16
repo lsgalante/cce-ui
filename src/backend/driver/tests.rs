@@ -197,7 +197,8 @@ fn tab_enters_a_ramp_walks_its_fields_and_leaves() {
 }
 
 /// The colour ramp likewise: with a key selected, Tab enters it on its track, walks its
-/// sliders and delete button, and leaves for the next stop; Shift+Tab comes back to the track.
+/// colour selector and delete button, and leaves for the next stop; Shift+Tab comes back to
+/// the track.
 #[test]
 fn tab_enters_a_color_ramp_walks_its_fields_and_leaves() {
     use crate::widget::{Button, ColorRamp, ColorRampKey, WidgetHost};
@@ -213,17 +214,17 @@ fn tab_enters_a_color_ramp_walks_its_fields_and_leaves() {
     ctx[ramp].set_rect(10.0, 50.0, 300.0, natural);
     let after = ctx.insert(Button::new(10.0, 60.0 + natural, 80.0, 24.0).with_label("After"));
     let r = &ctx[ramp];
-    let fields = [r.r_slider.base().id(), r.g_slider.base().id(), r.b_slider.base().id(), r.del_button.base().id()];
+    let fields = [r.selector.base().id(), r.del_button.base().id()];
     ctx.set_focused_id(before.id());
     app.ctx = Some(ctx);
     let focused = |app: &mut Mock| app.ctx.as_ref().unwrap().focused_widget;
 
     let mut walked = Vec::new();
-    for _ in 0..6 {
+    for _ in 0..4 {
         d.key(turn(&mut app, &mut f), tab.clone(), Some("\t".into()), ElementState::Pressed);
         walked.push(focused(&mut app));
     }
-    let want = [Some(ramp.id()), Some(fields[0]), Some(fields[1]), Some(fields[2]), Some(fields[3]), Some(after.id())];
+    let want = [Some(ramp.id()), Some(fields[0]), Some(fields[1]), Some(after.id())];
     assert_eq!(walked, want, "the track, its fields, the next stop");
     assert!(!app.ctx.as_ref().unwrap()[ramp].del_button.base().focused, "the field let go");
 

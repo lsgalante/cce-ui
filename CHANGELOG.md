@@ -10,6 +10,21 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-16
 
+- **The ColorRamp edits a key's colour with a ColorSelector.** Its own R, G and B sliders are
+  gone: the selected key shows on the toolkit's `ColorSelector` — the hex field, and the swatch
+  that opens `cce-color-editor` — beside Delete, held and synced as the ColorPalette's is (the
+  key written back when the selector's bytes differ from it; a picker left open on another key
+  closed). Keys stay linear; the hex and a reader's name for a key are now sRGB (they were the
+  raw values ×255). The field walk is track, selector, Delete; the reader's items lose the
+  three sliders and their numbers, gaining the selector as a text input; the declared height
+  drops to the track, pegs and one selector row. Gone with the sliders: the `ramp-red`,
+  `ramp-green`, `ramp-blue` strings and `Slider::stop_glide`. The sRGB helpers the palette had
+  are the ramp module's now, shared. Checked: the colour ramp's keyboard, reader and layout
+  tests rewritten for the selector (`the_selectors_hex_is_the_selected_keys_colour`,
+  `a_press_on_the_hex_edits_it_within_the_ramp`,
+  `a_key_shown_on_the_selector_keeps_its_exact_colour`); the gallery's exhibit and editor in
+  a shadow session, the colour editor opened from a key.
+
 - **Ramp, ColorRamp and ColorPalette gain `select(idx)`**: a key (or swatch) selected as a
   press on it selects one, the controls showing it and placed; an index past the end changes
   nothing. Each editor reserves its key controls' rows whether or not a key is selected, so

@@ -1,5 +1,5 @@
 //! What the colour ramp draws: its track — a canvas well with the gradient in it — its key
-//! pegs, and while a key is selected its sliders and delete button.
+//! pegs, and while a key is selected its colour selector and delete button.
 
 use super::*;
 use super::color::mix;
@@ -15,6 +15,14 @@ impl Paint for ColorRamp {
     // (while a key is selected): the walk must not also descend.
     fn paints_own_subtree(&self) -> bool {
         true
+    }
+
+    /// The selector's hex is shaped here: it is the ramp's value, never in the registry, so
+    /// the host's text pass cannot reach it (its caret reads the shaped offsets).
+    fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
+        if self.selected_key_idx.is_some() {
+            self.selector.prepare_text(fs);
+        }
     }
 
     fn paint(&self, _rect: Rect, pc: &mut PaintCtx) {
@@ -36,9 +44,7 @@ impl Paint for ColorRamp {
         // The fields paint themselves (`paint_self`), once.
         if self.selected_key_idx.is_some() {
             let dummy = UiContext::new();
-            self.r_slider.paint_self(&dummy, pc);
-            self.g_slider.paint_self(&dummy, pc);
-            self.b_slider.paint_self(&dummy, pc);
+            self.selector.paint_self(&dummy, pc);
             if self.deletable() {
                 self.del_button.paint_self(&dummy, pc);
             }

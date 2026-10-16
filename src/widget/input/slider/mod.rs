@@ -124,13 +124,6 @@ impl Slider {
         self.value = val.clamp(0.0, 1.0);
     }
 
-    /// Stop a wheel glide in flight, the value staying where it is: for a host that shows
-    /// another value on the slider, which the glide must not carry on into.
-    pub(crate) fn stop_glide(&mut self) {
-        self.scroll_vel = 0.0;
-        self.last_wheel = None;
-    }
-
     pub fn set_readout(&mut self, enabled: bool) {
         self.show_readout = enabled;
     }

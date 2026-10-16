@@ -42,10 +42,6 @@ ramp-colour-key = Key { $n } of { $count }: position { $position }, { $colour }
 # A ramp's key pad's two axes, as a screen reader names them: the selected key's position and value.
 ramp-position = Position
 ramp-value = Value
-# A colour ramp's sliders for the selected key's channels: their labels, and their names to a screen reader.
-ramp-red = Red
-ramp-green = Green
-ramp-blue = Blue
 # A colour palette's swatch as a screen reader names it: its place among the swatches, and its colour as #rrggbb.
 palette-colour = Colour { $n } of { $count }: { $colour }
 # A colour palette's add slot and delete button, as a screen reader names them.

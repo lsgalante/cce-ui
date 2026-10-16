@@ -1,13 +1,16 @@
 //! `ColorRamp`: the colour gradient editor — keys of colour along a bar, interpolated between,
-//! the selected one edited by R, G and B sliders and deleted by a button. One keyboard stop
-//! whose fields — the track, then the sliders and the button — take the keyboard in turn, as
-//! the float ramp's do ([`Fields`]); to a screen reader, a group of its keys and controls.
+//! the selected one edited by the toolkit's [`ColorSelector`] — its hex field, and its swatch,
+//! which opens the DE's colour editor — and deleted by a button. One keyboard stop whose
+//! fields — the track, then the selector and the button — take the keyboard in turn, as the
+//! float ramp's do ([`Fields`]); to a screen reader, a group of its keys and controls.
 
 use super::*;
+use crate::widget::input::ColorSelector;
 
 #[derive(Debug, Clone)]
 pub struct ColorRampKey {
     pub pos: f32,
+    /// Linear RGB, each channel 0..1 (the selector shows it as sRGB hex).
     pub color: [f32; 3],
 }
 
@@ -21,20 +24,19 @@ pub struct ColorRamp {
     /// [`DELETE`](Self::DELETE); [`Fields`]).
     walk: FieldWalk,
 
-    // Child controls for color editing & deletion
-    pub r_slider: Adapted<Slider>,
-    pub g_slider: Adapted<Slider>,
-    pub b_slider: Adapted<Slider>,
+    /// The selected key's colour, as the toolkit edits one: a hex field and a swatch that
+    /// opens the colour editor. Its value is written back into the selected key after
+    /// everything that can change it ([`sync_from_selector`](Self::sync_from_selector)).
+    pub selector: Adapted<ColorSelector>,
     pub del_button: Adapted<Button>,
 }
 
 impl ColorRamp {
     /// The colour ramp's fields, in the order Tab walks them: the track (the ramp itself),
-    /// the Red, Green and Blue sliders (channel `ch` is field `RED + ch`) and the delete
-    /// button.
+    /// the colour selector and the delete button.
     pub(super) const TRACK: usize = OWN;
-    pub(super) const RED: usize = 1;
-    pub(super) const DELETE: usize = 4;
+    pub(super) const SELECTOR: usize = 1;
+    pub(super) const DELETE: usize = 2;
 
     pub fn new() -> Adapted<ColorRamp> {
         let keys = vec![
@@ -42,9 +44,6 @@ impl ColorRamp {
             ColorRampKey { pos: 1.0, color: [1.0, 1.0, 1.0] },
         ];
 
-        let r_slider = Slider::new().with_label(&crate::l10n::tr("ramp-red"));
-        let g_slider = Slider::new().with_label(&crate::l10n::tr("ramp-green"));
-        let b_slider = Slider::new().with_label(&crate::l10n::tr("ramp-blue"));
         // The float Ramp's: a square x-icon button at the button height, its label the
         // fallback where the icon set is missing; by name, so it survives a renderer rebuild.
         // Sized by `arrange_fields` (`delete_size`).
@@ -58,9 +57,7 @@ impl ColorRamp {
             is_dragging_key: false,
             just_changed: false,
             walk: FieldWalk::default(),
-            r_slider,
-            g_slider,
-            b_slider,
+            selector: ColorSelector::new([0, 0, 0]),
             del_button,
         })
     }
@@ -96,9 +93,9 @@ impl ColorRamp {
         resettle(&mut self.keys, i, |k| k.pos)
     }
 
-    /// Select key `idx` as a press on its peg does, the sliders showing its colour and
+    /// Select key `idx` as a press on its peg does, the selector showing its colour and
     /// placed; an index past the keys changes nothing. For a host that shows the ramp with a
-    /// key in hand (its sliders fill the rows it reserves for them).
+    /// key in hand (its selector fills the row it reserves for it).
     pub fn select(&mut self, idx: usize) {
         if idx < self.keys.len() {
             self.pick_key(idx);
@@ -106,10 +103,12 @@ impl ColorRamp {
     }
 
     /// Delete the selected key — what a click on the delete button does; nothing is selected
-    /// after. A ramp keeps two keys at least: with two, nothing happens.
+    /// after, and a colour editor open on it closes. A ramp keeps two keys at least: with
+    /// two, nothing happens.
     pub fn delete_selected(&mut self) {
         if let Some(idx) = self.selected_key_idx {
             if self.keys.len() > 2 {
+                self.selector.inner_mut().close_picker();
                 self.keys.remove(idx);
                 self.selected_key_idx = None;
                 self.just_changed = true;
@@ -118,46 +117,35 @@ impl ColorRamp {
         }
     }
 
-    /// Channel `ch`'s slider: red, green, blue.
-    fn slider(&self, ch: usize) -> &Adapted<Slider> {
-        match ch {
-            0 => &self.r_slider,
-            1 => &self.g_slider,
-            _ => &self.b_slider,
-        }
-    }
-
-    fn slider_mut(&mut self, ch: usize) -> &mut Adapted<Slider> {
-        match ch {
-            0 => &mut self.r_slider,
-            1 => &mut self.g_slider,
-            _ => &mut self.b_slider,
-        }
-    }
-
-    /// Write channel `ch`'s slider into the selected key's colour (with none selected,
-    /// nothing).
-    fn write_channel(&mut self, ch: usize) {
-        if let Some(idx) = self.selected_key_idx {
-            self.keys[idx].color[ch] = self.slider(ch).inner().value();
-        }
-    }
-
-    /// Select key `idx`, the sliders showing its colour.
+    /// Select key `idx` and show its colour on the selector. A colour editor opened on
+    /// another key closes: left open, it went on writing into the key now shown.
     fn select_key(&mut self, idx: usize) {
+        if self.selected_key_idx != Some(idx) {
+            self.selector.inner_mut().close_picker();
+        }
         self.selected_key_idx = Some(idx);
-        self.load_sliders(self.keys[idx].color);
+        let c = self.keys[idx].color;
+        let sel = self.selector.inner_mut();
+        if sel.color != srgb_bytes(c) {
+            Input::set_value_string(sel, &colour_hex(c));
+        }
+        // Shown, not edited.
+        Input::take_change(sel);
     }
 
-    /// Show colour `c` on the R, G and B sliders, stopping a wheel glide: left running, it
-    /// went on into the key now shown (`tick_ctx` writes a gliding slider into the selected
-    /// key).
-    fn load_sliders(&mut self, c: [f32; 3]) {
-        for (ch, v) in c.into_iter().enumerate() {
-            let slider = self.slider_mut(ch).inner_mut();
-            slider.stop_glide();
-            slider.set_value(v);
+    /// Write the selector's colour into the selected key, when it holds another — typed, or
+    /// streamed from the colour editor. Compared in the selector's bytes, so a key it merely
+    /// shows keeps its exact value. Whether the key changed.
+    fn sync_from_selector(&mut self) -> bool {
+        Input::take_change(self.selector.inner_mut());
+        let Some(idx) = self.selected_key_idx else { return false };
+        let shown = self.selector.inner().color;
+        if shown == srgb_bytes(self.keys[idx].color) {
+            return false;
         }
+        self.keys[idx].color = linear_of(shown);
+        self.just_changed = true;
+        true
     }
 }
 
@@ -231,62 +219,43 @@ impl ColorRamp {
         topmost_peg(self.keys.len(), self.selected_key_idx, px, py, |i| (self.peg_centre(i), self.peg_drawn_r(i)))
     }
 
-    /// One slider row: its label strip over a slider of the toolkit's height.
-    fn slider_row_h() -> f32 {
-        crate::layout::control_label_strip() + crate::layout::slider_height()
-    }
-
-    /// The R, G and B rows stacked, the controls' gap apart (`control_gap`): a controls
-    /// column.
-    fn slider_block_h() -> f32 {
-        3.0 * Self::slider_row_h() + 2.0 * crate::layout::control_gap()
-    }
-
-    /// The slider block's top: the controls' gap under a selected peg's ring.
-    fn slider_top(&self) -> f32 {
+    /// The selector row's top: the controls' gap under a selected peg's ring.
+    pub(super) fn row_top(&self) -> f32 {
         let track = self.track_rect();
         track.y + track.height + Self::peg_drop() + Self::peg_outer_r() + crate::layout::control_gap()
     }
 
-    /// The height the editor needs: the track, the peg row and the three slider rows, in
-    /// its margins. The slider rows are reserved whether or not a key is selected (like the
-    /// float Ramp's control strip), so selecting a key never changes the editor's rect.
-    /// What it declares (`intrinsic_size`).
+    /// The height the editor needs: the track, the peg row and the selector row, in its
+    /// margins. The row is reserved whether or not a key is selected (like the float Ramp's
+    /// control strip), so selecting a key never changes the editor's rect. What it declares
+    /// (`intrinsic_size`).
     pub fn natural_height(&self) -> f32 {
         let pegs = Self::peg_drop() + Self::peg_outer_r() + crate::layout::control_gap();
-        MARGIN + crate::layout::ramp_height() + pegs + Self::slider_block_h() + MARGIN
+        MARGIN + crate::layout::ramp_height() + pegs + crate::layout::color_selector_height() + MARGIN
     }
 
-    /// The R, G and B sliders and the delete button, in the slider block under the track and
-    /// its pegs, while a key is selected — the button while it is shown
-    /// ([`deletable`](Fields::deletable)). Each slider row is its label strip over a slider of
-    /// the toolkit's height; the button is the toolkit's height, in a column at the right the
-    /// controls' gap from the sliders, centred on the Green slider's track. The column is kept
-    /// while the button is hidden, so the sliders' width never jumps as keys come and go.
+    /// The selector and the delete button under the track and its pegs, while a key is
+    /// selected — the button while it is shown ([`deletable`](Fields::deletable)). The selector
+    /// is its own height; the button is the toolkit's height, in a column at the right the
+    /// controls' gap from it, centred on it. The column is kept while the button is hidden, so
+    /// the selector's width never jumps as keys come and go.
     pub(super) fn arrange_fields(&mut self) {
         let side = Self::side_margin();
         let (x, w) = (self.base.x + side, (self.base.w - 2.0 * side).max(1.0));
-        let sy = self.slider_top();
-        let (row_h, gap) = (Self::slider_row_h(), crate::layout::control_gap());
-        let bh = crate::layout::button_height();
+        let y = self.row_top();
+        let (sh, bh) = (crate::layout::color_selector_height(), crate::layout::button_height());
         let (del_w, _) = delete_size(&self.del_button);
-        let slider_w = (w - del_w - gap).max(1.0);
+        let gap = crate::layout::control_gap();
 
         if self.selected_key_idx.is_some() {
-            for ch in 0..3 {
-                self.slider_mut(ch).set_rect(x, sy + ch as f32 * (row_h + gap), slider_w, row_h);
-            }
+            self.selector.set_rect(x, y, (w - del_w - gap).max(1.0), sh);
             if self.deletable() {
-                let green_track = sy + row_h + gap + crate::layout::control_label_strip();
-                let by = green_track + (crate::layout::slider_height() - bh) / 2.0;
-                self.del_button.set_rect(x + w - del_w, by, del_w, bh);
+                self.del_button.set_rect(x + w - del_w, y + (sh - bh) / 2.0, del_w, bh);
             } else {
                 park(&mut self.del_button);
             }
         } else {
-            for ch in 0..3 {
-                park(self.slider_mut(ch));
-            }
+            park(&mut self.selector);
             park(&mut self.del_button);
         }
     }
@@ -312,31 +281,31 @@ impl Layout for ColorRamp {
 }
 
 impl Fields for ColorRamp {
-    const TOTAL: usize = 5;
+    const TOTAL: usize = 3;
 
-    /// The track, then the three sliders while a key is selected and the delete button while
-    /// it is shown ([`deletable`](Fields::deletable)).
+    /// The track, then the selector while a key is selected and the delete button while it
+    /// is shown ([`deletable`](Fields::deletable)).
     fn field_count(&self) -> usize {
         if self.deletable() {
             Self::TOTAL
         } else if self.selected_key_idx.is_some() {
             Self::DELETE
         } else {
-            Self::RED
+            Self::SELECTOR
         }
     }
 
     fn field(&mut self, i: usize) -> &mut dyn WidgetHost {
         match i {
             Self::DELETE => &mut self.del_button,
-            _ => self.slider_mut(i - Self::RED),
+            _ => &mut self.selector,
         }
     }
 
     fn field_id(&self, i: usize) -> WidgetId {
         match i {
             Self::DELETE => self.del_button.base().id(),
-            _ => self.slider(i - Self::RED).base().id(),
+            _ => self.selector.base().id(),
         }
     }
 
@@ -348,21 +317,16 @@ impl Fields for ColorRamp {
         &mut self.walk
     }
 
-    /// The track's keys pick and edit the keys ([`own_key`](Fields::own_key)); a slider keeps
-    /// its own keys, and a move of it moves the selected key's channel with it; the delete
-    /// button's press deletes.
+    /// The track's keys pick and edit the keys ([`own_key`](Fields::own_key)); the selector
+    /// keeps its own keys — the hex typed, Enter taking it — the selected key following; the
+    /// delete button's press deletes.
     fn field_key(&mut self, i: usize, event: &KeyEvent, own: WidgetId, ui: &mut UiContext) -> bool {
         match i {
             Self::TRACK => self.own_key(&event.logical_key),
             Self::DELETE => self.delete_button_key(event, own, ui),
             _ => {
-                let ch = i - Self::RED;
-                let before = self.slider(ch).inner().value();
-                let used = self.slider_mut(ch).keyboard_input(event, ui);
-                if self.slider(ch).inner().value() != before {
-                    self.write_channel(ch);
-                    self.just_changed = true;
-                }
+                let used = self.selector.keyboard_input(event, ui);
+                self.sync_from_selector();
                 used
             }
         }
@@ -404,11 +368,11 @@ impl Fields for ColorRamp {
 
 impl ColorRamp {
     /// The control field item `idx` of [`a11y_items`](Input::a11y_items) stands for, past
-    /// the keys: Red, Green, Blue, Delete.
+    /// the keys: the selector, Delete.
     fn item_field(&self, idx: usize) -> Option<usize> {
         let field = match idx.checked_sub(self.keys.len())? {
-            k @ 0..=2 => Self::RED + k,
-            3 => Self::DELETE,
+            0 => Self::SELECTOR,
+            1 => Self::DELETE,
             _ => return None,
         };
         (field < self.field_count()).then_some(field)
@@ -418,12 +382,6 @@ impl ColorRamp {
 /// `a` and `b` mixed, `w` of the way to `b`: the gradient between two keys.
 pub(super) fn mix(a: [f32; 3], b: [f32; 3], w: f32) -> [f32; 3] {
     [0, 1, 2].map(|i| a[i] * (1.0 - w) + b[i] * w)
-}
-
-/// A key's colour as a reader hears it: `#rrggbb`, each channel as its slider shows it.
-pub(super) fn colour_hex(c: [f32; 3]) -> String {
-    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    format!("#{:02x}{:02x}{:02x}", byte(c[0]), byte(c[1]), byte(c[2]))
 }
 
 impl Input for ColorRamp {
@@ -443,10 +401,10 @@ impl Input for ColorRamp {
 
     /// The ramp's parts as a screen reader's nodes, in reading order: a radio button per key
     /// (on while selected, and the keyboard's node while the track has it), named with its
-    /// place, position and colour; while a key is selected the Red, Green and Blue sliders,
-    /// with their numbers, which a reader may set; and the delete button while it is shown.
-    /// Each control's item stands for its field, so it is the keyboard's node while that
-    /// field has it.
+    /// place, position and colour (the sRGB hex the selector shows); while a key is selected
+    /// the selector, a text input named with that hex; and the delete button while it is
+    /// shown. Each control's item stands for its field, so it is the keyboard's node while
+    /// that field has it.
     fn a11y_items(&self, _rect: Rect) -> Vec<crate::a11y::A11yItem> {
         use crate::a11y::A11yItem;
         use accesskit::Role;
@@ -472,16 +430,11 @@ impl Input for ColorRamp {
             let (x, y, width, height) = w.rect();
             Rect { x, y, width, height }
         };
-        if self.selected_key_idx.is_some() {
-            for ch in 0..3 {
-                let s = self.slider(ch);
-                items.push(A11yItem {
-                    value: s.a11y_value(),
-                    range: s.a11y_range(),
-                    field: Some(self.field_id(Self::RED + ch)),
-                    ..A11yItem::new(Role::Slider, s.label().unwrap_or_default(), rect(s))
-                });
-            }
+        if let Some(idx) = self.selected_key_idx {
+            items.push(A11yItem {
+                field: Some(self.field_id(Self::SELECTOR)),
+                ..A11yItem::new(Role::TextInput, colour_hex(self.keys[idx].color), rect(&self.selector))
+            });
         }
         if self.deletable() {
             items.push(A11yItem {
@@ -508,38 +461,22 @@ impl Input for ColorRamp {
         true
     }
 
-    /// A reader's number for a Red, Green or Blue item, in its slider's range: the selected
-    /// key's channel moves with the slider.
-    fn a11y_set_item_value(&mut self, idx: usize, value: f64) -> bool {
-        let Some(field) = self.item_field(idx).filter(|&f| f != Self::DELETE) else { return false };
-        let ch = field - Self::RED;
-        if !self.slider_mut(ch).a11y_set_value(value) {
-            return false;
-        }
-        self.write_channel(ch);
-        self.just_changed = true;
-        true
-    }
-
     fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
         let own = ectx.id;
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
-        let mut changed = self.just_changed;
-        self.just_changed = false;
+        let mut changed = std::mem::take(&mut self.just_changed);
         if self.follow_focus(own, ui) {
             changed = true;
         }
-
         if self.selected_key_idx.is_some() {
-            for ch in 0..3 {
-                if self.slider_mut(ch).tick(dt, ui) {
-                    self.write_channel(ch);
-                    changed = true;
-                }
-            }
+            // The colour editor's stream lands in the selector's tick.
+            changed |= self.selector.tick(dt, ui);
+            changed |= self.sync_from_selector();
         }
+        // `sync_from_selector` asked for a frame this tick already gives.
+        self.just_changed = false;
         changed
     }
 
@@ -564,10 +501,9 @@ impl Input for ColorRamp {
                         if to_track {
                             self.focus_field(Self::TRACK, own, ui);
                         }
-                        self.selected_key_idx = Some(idx);
+                        self.pick_key(idx);
                         self.is_dragging_key = true;
-                        self.load_sliders(self.keys[idx].color);
-                        self.arrange_fields();
+                        self.just_changed = true;
                         return true;
                     }
 
@@ -576,22 +512,22 @@ impl Input for ColorRamp {
                         if to_track {
                             self.focus_field(Self::TRACK, own, ui);
                         }
-                        let t = (px - track.x) / track.width;
-                        let col = self.get_interpolated_color(t);
-                        self.keys.push(ColorRampKey { pos: t, color: col });
-                        let new_idx = self.resettle_key(self.keys.len() - 1);
-                        self.just_changed = true;
-                        self.selected_key_idx = Some(new_idx);
-                        self.load_sliders(col);
-                        self.arrange_fields();
+                        let new_idx = self.add_key_at((px - track.x) / track.width);
+                        self.pick_key(new_idx);
                         return true;
                     }
 
                     if self.selected_key_idx.is_some() {
-                        for ch in 0..3 {
-                            if self.slider_mut(ch).mouse_input(button, state, px, py, ui) {
-                                return true;
+                        // The selector's own press: on its hex, the field takes the keyboard
+                        // (claimed by its bare id, adopted here as the ramp's field, and told,
+                        // so it begins editing); on its swatch, the colour editor opens.
+                        if self.selector.mouse_input(button, state, px, py, ui) {
+                            self.adopt_pressed_field(own, ui);
+                            if self.walk().at == Some(Self::SELECTOR) && !self.selector.base().focused {
+                                self.selector.focus();
                             }
+                            self.just_changed = true;
+                            return true;
                         }
                         // Pressed only: the button clicks on its release, below.
                         if self.del_button.mouse_input(button, state, px, py, ui) {
@@ -601,20 +537,17 @@ impl Input for ColorRamp {
                     false
                 } else {
                     // A release is the ramp's only when something of it used it: a key drag
-                    // ending, a slider or the delete button letting go. Releases reach widgets
-                    // without a hit test, and claiming every one while a key was selected kept
-                    // them from whatever the press was on. Every field is told regardless of the
-                    // selection, so none is left holding a press.
+                    // ending, the selector or the delete button letting go. Releases reach
+                    // widgets without a hit test, and claiming every one while a key was
+                    // selected kept them from whatever the press was on. Every field is told
+                    // regardless of the selection, so none is left holding a press.
                     let dragged = std::mem::take(&mut self.is_dragging_key);
-                    let mut used = dragged;
-                    for ch in 0..3 {
-                        used |= self.slider_mut(ch).mouse_input(button, state, px, py, ui);
-                    }
+                    let sel = self.selector.mouse_input(button, state, px, py, ui);
                     let del = self.del_button.mouse_input(button, state, px, py, ui);
                     if del && self.del_button.take_click() {
                         self.delete_selected();
                     }
-                    used || del
+                    dragged || sel || del
                 }
             }
             Event::PointerMove { x, y, .. } => {
@@ -632,34 +565,8 @@ impl Input for ColorRamp {
                 }
 
                 if self.selected_key_idx.is_some() {
-                    for ch in 0..3 {
-                        if self.slider_mut(ch).cursor_moved(px, py, ui) {
-                            self.write_channel(ch);
-                            changed = true;
-                        }
-                    }
-                    if self.del_button.cursor_moved(px, py, ui) {
-                        changed = true;
-                    }
-                }
-                if changed {
-                    self.just_changed = true;
-                }
-                changed
-            }
-            Event::MouseWheel { delta, x, y, .. } => {
-                // The sliders' wheel, the key's colour following at once.
-                let (delta, px, py) = (*delta, *x, *y);
-                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
-                if self.selected_key_idx.is_none() {
-                    return false;
-                }
-                let mut changed = false;
-                for ch in 0..3 {
-                    if self.slider_mut(ch).mouse_wheel(&delta, px, py, ui) {
-                        self.write_channel(ch);
-                        changed = true;
-                    }
+                    changed |= self.selector.cursor_moved(px, py, ui);
+                    changed |= self.del_button.cursor_moved(px, py, ui);
                 }
                 if changed {
                     self.just_changed = true;
@@ -682,39 +589,23 @@ impl Input for ColorRamp {
             Event::FocusOut => {
                 self.base.focused = false;
                 self.walk_focus_out();
+                // The selector takes a half-typed hex as it lets go.
+                self.sync_from_selector();
                 true
             }
             _ => false,
         }
     }
 
-    // A key drag and the sliders' own drags run through the editor: the router records it as
-    // the drag target once a press is handled here, and a slider's moves sync the key's
-    // colour as they go.
+    // A key drag runs through the editor: the router records it as the drag target once a
+    // press is handled here.
     fn draggable(&self, _rect: Rect) -> bool {
         self.is_dragging()
     }
     fn is_dragging(&self) -> bool {
-        self.is_dragging_key || (0..3).any(|ch| self.slider(ch).is_dragging())
-    }
-    fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
-        let mut changed = false;
-        for ch in 0..3 {
-            let slider = self.slider_mut(ch);
-            if slider.is_dragging() && slider.drag_update(px, py) {
-                self.write_channel(ch);
-                changed = true;
-            }
-        }
-        if changed {
-            self.just_changed = true;
-        }
-        changed
+        self.is_dragging_key
     }
     fn drag_end(&mut self) {
-        for ch in 0..3 {
-            self.slider_mut(ch).drag_end();
-        }
         self.is_dragging_key = false;
     }
 }

@@ -248,7 +248,7 @@ ramps implement (`ramp::Fields`, `widget/input/ramp/mod.rs`).
 
 - **The fields, in Tab order.** The Ramp: its graph (the ramp's own id focused), Preset, Line,
   the key pad while a key is selected, Delete while a key is selected and there are more than
-  two keys. The ColorRamp: its track, then Red, Green and Blue while a key is selected, and
+  two keys. The ColorRamp: its track, then its colour selector while a key is selected, and
   Delete on the same rule.
 - **Entering and leaving.** `FocusIn` (Tab, Shift+Tab, `focus_id`) always lands on the graph or
   track. Tab and Shift+Tab move between the fields, and the ramp keeps Tab
@@ -264,11 +264,11 @@ ramps implement (`ramp::Fields`, `widget/input/ramp/mod.rs`).
   halfway to the next (from the last, to the one before) — on the Ramp's curve, in the
   ColorRamp's gradient colour — and selects it. The rim is lit while it has the keyboard. A key
   the Ramp takes, like a press, stops a hover-scroll coast (it would go on moving the key it
-  latched by index); a key shown on the ColorRamp's sliders stops their wheel glide (it would
-  go on into that key).
-- **A field's keys are its own.** The Ramp's key pad moves the selected key; a ColorRamp
-  slider's move writes the selected key's channel; Enter or Space on Delete deletes and selects
-  the neighbour. When the field with the keyboard goes (the selection cleared, Delete hidden),
+  latched by index); a key shown on the ColorRamp's selector closes a colour editor left open
+  on another (it would go on writing into the key now shown).
+- **A field's keys are its own.** The Ramp's key pad moves the selected key; the ColorRamp's
+  selector types its hex, Enter taking it as the selected key's colour; Enter or Space on Delete
+  deletes and selects the neighbour. When the field with the keyboard goes (the selection cleared, Delete hidden),
   the keyboard goes back to the graph or track.
 - **Two keys at least.** At two the delete button is hidden — parked, unpainted, no stop — since
   a button has no disabled state. A click on it deletes and leaves nothing selected; only the
@@ -277,21 +277,29 @@ ramps implement (`ramp::Fields`, `widget/input/ramp/mod.rs`).
   while selected, named with its reading (`ramp-key`, "Key 2 of 4: position 0.20, value 1.00";
   `ramp-colour-key`, "Key 2 of 4: position 0.50, #ff0000"); the Ramp's Preset and Line as
   `ComboBox`es with their choice and, while a key is selected, its pad as two `Slider`s,
-  Position and Value (`ramp-position`, `ramp-value`); the ColorRamp's Red, Green and Blue
-  `Slider`s with their numbers (`ramp-red`, `ramp-green`, `ramp-blue`, which are also their
-  labels); Delete while it is shown, named `ramp-delete-key` whether its button wears the `x`
+  Position and Value (`ramp-position`, `ramp-value`); the ColorRamp's selector as a
+  `TextInput` named with the selected key's hex; Delete while it is shown, named `ramp-delete-key` whether its button wears the `x`
   glyph (and so has no label) or falls back to the label. The item of the field with the
   keyboard is the reader's focus — the selected key's while the graph or track has it, Position
   for the pad. A reader's Click on a key selects it; on a control it gives it the keyboard and
   does what Space does there (a dropdown opens, Delete deletes), at the ramp's next tick, which
-  has the context. A number a reader sets on a slider item moves the key or sets the channel.
+  has the context. A number a reader sets on a pad item moves the key.
+
+**The ColorRamp edits a key's colour with a `ColorSelector`** — the toolkit's colour control:
+its hex field and its swatch, which opens the DE's colour editor (`cce-color-editor`) — beside
+the delete button, in a row under the pegs that is reserved whether a key is selected or not.
+It is held as the ColorPalette's is (below): the ramp shows the selected key on it and writes
+its colour back into the key when its bytes differ (`sync_from_selector`), so a typed hex and
+the editor's stream both land and a key merely shown keeps its exact value. Keys are linear;
+the hex, and a reader's name for a key, are sRGB.
 
 `tab_enters_a_ramp_walks_its_fields_and_leaves` and
 `tab_enters_a_color_ramp_walks_its_fields_and_leaves` are the tests through the runner;
 `widget/input/ramp/keyboard_tests.rs` and `widget/input/ramp/color_keyboard_tests.rs` hold the
 rest.
 
-**ColorPalette** is the ColorRamp's discrete kin, on the same `Fields` walk: an editable row of
+**ColorPalette** is the ColorRamp's discrete kin, on the same `Fields` walk and with the same
+`ColorSelector`: an editable row of
 colour swatches (`ColorPalette::new`, six hues; `with_colors`, linear RGB). Its strip is the
 ColorRamp's kind of track — a canvas well `ramp_height` tall at the control radius — with the
 swatches standing in it as square tiles (`SWATCH`, 22 px), each a raised `ControlPlate` whose

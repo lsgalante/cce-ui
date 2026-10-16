@@ -294,8 +294,8 @@ fn select_picks_as_a_press_does() {
     WidgetHost::set_rect(&mut r, 0.0, 0.0, 450.0, 390.0);
     r.inner_mut().select(1);
     assert_eq!(r.selected_key_idx, Some(1));
-    assert_eq!(r.r_slider.inner().value(), 1.0, "the sliders show the white key");
-    assert!(r.r_slider.rect().2 > 0.0, "and are placed");
+    assert_eq!(r.selector.inner().color, [255, 255, 255], "the selector shows the white key");
+    assert!(r.selector.rect().2 > 0.0, "and is placed");
 
     let mut f = Ramp::new();
     WidgetHost::set_rect(&mut f, 0.0, 0.0, 450.0, Ramp::expanded_height());

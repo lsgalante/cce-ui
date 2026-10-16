@@ -43,22 +43,6 @@ const DEFAULT_SWATCHES: [[f32; 3]; 6] = [
 /// The colour a swatch added to an empty palette takes.
 const NEUTRAL: [f32; 3] = [0.5, 0.5, 0.5];
 
-/// A linear colour as the selector holds one: sRGB bytes.
-fn srgb_bytes(c: [f32; 3]) -> [u8; 3] {
-    crate::color::to_srgb_rgb(c).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
-}
-
-/// sRGB bytes as a swatch holds them: linear.
-fn linear_of(b: [u8; 3]) -> [f32; 3] {
-    crate::color::to_linear_rgb(b.map(|v| v as f32 / 255.0))
-}
-
-/// A swatch's colour as the selector shows it and a reader hears it: `#rrggbb`, sRGB.
-fn swatch_hex(c: [f32; 3]) -> String {
-    let [r, g, b] = srgb_bytes(c);
-    format!("#{r:02x}{g:02x}{b:02x}")
-}
-
 impl ColorPalette {
     /// The palette's fields, in the order Tab walks them: the strip (the palette itself), the
     /// colour selector and the delete button.
@@ -179,7 +163,7 @@ impl ColorPalette {
         self.selected_idx = Some(idx);
         let sel = self.selector.inner_mut();
         if sel.color != srgb_bytes(self.swatches[idx]) {
-            Input::set_value_string(sel, &swatch_hex(self.swatches[idx]));
+            Input::set_value_string(sel, &colour_hex(self.swatches[idx]));
         }
         // Shown, not edited: the host hears of no change.
         Input::take_change(sel);
@@ -498,7 +482,7 @@ impl Input for ColorPalette {
         let n = self.swatches.len();
         let mut items: Vec<A11yItem> = (0..n)
             .map(|i| {
-                let (place, count, colour) = ((i + 1).to_string(), n.to_string(), swatch_hex(self.swatches[i]));
+                let (place, count, colour) = ((i + 1).to_string(), n.to_string(), colour_hex(self.swatches[i]));
                 let args = [("n", place.as_str()), ("count", &count), ("colour", &colour)];
                 let selected = self.selected_idx == Some(i);
                 A11yItem {
@@ -516,7 +500,7 @@ impl Input for ColorPalette {
         if let Some(idx) = self.selected_idx {
             items.push(A11yItem {
                 field: Some(self.field_id(Self::SELECTOR)),
-                ..A11yItem::new(Role::TextInput, swatch_hex(self.swatches[idx]), rect(&self.selector))
+                ..A11yItem::new(Role::TextInput, colour_hex(self.swatches[idx]), rect(&self.selector))
             });
         }
         if self.deletable() {
