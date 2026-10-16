@@ -771,3 +771,19 @@ fn a_ramps_dropdowns_are_the_toolkits_height() {
     let (_, py, _, ph) = r.key_pad.rect();
     assert!(py + ph <= r.base.y + r.base.h + 1e-3, "the key pad's row fits the reserved strip");
 }
+
+/// The Ramp's key pad is a Slider2D at its own size: the same square well the gallery's
+/// Slider2D shows, held inside the strip the ramp reserves.
+#[test]
+fn a_ramps_key_pad_is_a_slider2ds_square() {
+    let mut ramp = Ramp::new();
+    let natural = ramp.inner().natural_height();
+    WidgetHost::set_rect(&mut ramp, 0.0, 0.0, 300.0, natural);
+    ramp.inner_mut().selected_key_idx = Some(1);
+    ramp.inner_mut().arrange_fields();
+    let r = ramp.inner();
+    let (_, py, pw, ph) = r.key_pad.rect();
+    let well_h = ph - r.key_pad.label_strip();
+    assert_eq!((pw, well_h), (Slider2D::SIDE, Slider2D::SIDE), "the pad is a Slider2D's square");
+    assert!(py + ph <= r.base.y + r.base.h + 1e-3, "inside the reserved strip");
+}

@@ -11,8 +11,8 @@ impl Ramp {
     /// widget's 10px graph inset plus the host plate's padding).
     const STRIP_GAP: f32 = 18.0;
 
-    /// The key pad's square well side.
-    const PAD_SIDE: f32 = 64.0;
+    /// The key pad's square well side: a Slider2D's own ([`Slider2D::SIDE`]).
+    const PAD_SIDE: f32 = Slider2D::SIDE;
 
     /// The graph opening's height a Ramp declares (`intrinsic_size`): the drag-in
     /// canvases' 120 (a Slider2D's pad, the Trackpad). Given more, the graph takes it.

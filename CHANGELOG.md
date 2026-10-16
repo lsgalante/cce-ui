@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-16
 
+- **The Ramp's key pad is a Slider2D at its own size.** It was a 64 px square (`PAD_SIDE`), the
+  Slider2D's old size; now `PAD_SIDE` is `Slider2D::SIDE` (120), one constant with what the
+  Slider2D declares. The control strip, so `natural_height`, grows 56 px: hosts that size a ramp
+  from it (ParametersBg rows, the gallery exhibit) follow; the gallery's Ramp editor and
+  cce-ramp now size their windows from `Ramp::expanded_height` instead of fixed heights that
+  would have left the graph at its 30 px floor. Checked: `a_ramps_key_pad_is_a_slider2ds_square`,
+  failing with 64; the gallery's `the_ramp_editors_hold_their_ramps_whole`, failing with the old
+  390; the Ramp editor in a shadow shot.
+
 - **The Ramp's dropdowns are the toolkit's height.** Its Preset and Line row was a fixed 22 px,
   under every other dropdown's `dropdown_height` (24 by default); the row and the control strip
   it reserves (`strip_reserve`, so `natural_height`) now read it. The strip grows 2 px at the

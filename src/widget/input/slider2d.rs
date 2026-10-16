@@ -30,6 +30,10 @@ impl Slider2D {
     /// keeps the whole thumb inside the well.
     const THUMB_R: f32 = 6.0;
 
+    /// The pad's side: the height of the other drag-in canvases (Trackpad, the previews).
+    /// What it declares, and the Ramp's key pad's (`Ramp::PAD_SIDE`).
+    pub const SIDE: f32 = 120.0;
+
     /// What an arrow key or a wheel notch moves the thumb on its axis: a `Slider`'s notch.
     const STEP: f32 = 0.02;
 
@@ -114,11 +118,10 @@ impl Slider2D {
 }
 
 impl Layout for Slider2D {
-    /// A 120px pad: the height of the other drag-in canvases (Trackpad, the previews).
-    /// At 64 it sat in a control column as a small square with the column's width to
-    /// spare. (The Ramp's key pad is its own `PAD_SIDE`, not this.)
+    /// A [`SIDE`](Slider2D::SIDE) square pad. At 64 it sat in a control column as a small
+    /// square with the column's width to spare.
     fn intrinsic_size(&self) -> Option<Size> {
-        Some(Size::new(120.0, 120.0))
+        Some(Size::new(Self::SIDE, Self::SIDE))
     }
 
     fn intrinsic_measure_width(&self) -> bool {
