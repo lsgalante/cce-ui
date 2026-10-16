@@ -292,13 +292,23 @@ ramps implement (`ramp::Fields`, `widget/input/ramp/mod.rs`).
 rest.
 
 **ColorPalette** is the ColorRamp's discrete kin, on the same `Fields` walk: an editable row of
-colour swatches (`ColorPalette::new`, six hues; `with_colors`). Its strip is the ColorRamp's
-kind of track — a canvas well `ramp_height` tall at the control radius — with the swatches
-standing in it as the ColorRamp's pegs (`paint_peg`, one painter for both), ended by an add
-slot (the `plus` glyph). Under the strip, while a swatch is selected, the ColorRamp's Red,
-Green and Blue sliders and delete button, arranged as its are; the rows are reserved, so the
-height it declares (`natural_height`) never changes.
+colour swatches (`ColorPalette::new`, six hues; `with_colors`, linear RGB). Its strip is the
+ColorRamp's kind of track — a canvas well `ramp_height` tall at the control radius — with the
+swatches standing in it as the ColorRamp's pegs (`paint_peg`, one painter for both), ended by
+an add slot (the `plus` glyph). Under the strip, while a swatch is selected, a `ColorSelector`
+edits it — the toolkit's colour control, not one of the palette's own: its hex field (sRGB, as
+every hex is) and its swatch, which opens the DE's picker — with the ramps' delete button
+beside it. The row is reserved, so the height it declares (`natural_height`) never changes.
 
+- **The selector is a held field.** The palette shows the selected swatch on it and, after
+  every key, press, tick and focus change, writes its colour back into the swatch when its
+  bytes differ (`sync_from_selector`) — so a typed hex and the picker's stream both land, and
+  a swatch merely shown keeps its exact linear value. A press on its hex gives it the
+  keyboard (adopted as the palette's field, then told, so it begins editing); the palette
+  shapes its text (`prepare_text`), since the host's text pass cannot reach it. Selecting
+  another swatch, deleting one or `set_colors` closes a picker left open
+  (`ColorSelector::close_picker`), which would otherwise go on writing into the swatch now
+  shown.
 - **Pointer.** A press on a swatch selects it and, held, drags it along the strip, the others
   closing up behind it. A press on the add slot appends a copy of the last swatch and selects
   it. Swatches keep a full spacing until the strip runs short; then they close up and overlap
@@ -306,15 +316,17 @@ height it declares (`natural_height`) never changes.
   pressed.
 - **The strip's keys** are the ramps' (arrows, Home / End, Delete / Backspace), plus
   Shift+Left / Shift+Right, which move the selected swatch, and Insert, which adds a copy of
-  the selected swatch after it (with none selected, of the last at the end).
+  the selected swatch after it (with none selected, of the last at the end). Tab walks to the
+  selector, then Delete.
 - **One swatch at least** (`Fields::MIN_KEYS`, which a ramp keeps at two): on the last the
   delete button is hidden.
 - **What it tells its host.** An edit, an add, a delete and a move raise `take_change` (a
   `Changed` in the sweep); a selection does not, nor does `set_colors`. `colors()` and
   `selected_color()` read it.
-- **To a reader** a `RadioButton` per swatch (`palette-colour`, "Colour 2 of 6: #ff0000"), the
-  add slot as a `Button` (`palette-add-colour`; a Click adds as Insert does), the sliders and
-  Delete (`palette-delete-colour`) as the ColorRamp's.
+- **To a reader** a `RadioButton` per swatch (`palette-colour`, "Colour 2 of 6: #ff0000", the
+  sRGB hex the selector shows), the add slot as a `Button` (`palette-add-colour`; a Click adds
+  as Insert does), the selector as a `TextInput` named with its hex, and Delete
+  (`palette-delete-colour`).
 
 `widget/input/ramp/palette_tests.rs` holds its tests.
 

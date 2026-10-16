@@ -10,6 +10,18 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-16
 
+- **The ColorPalette edits a swatch with a ColorSelector.** Its own R, G and B sliders are gone:
+  the selected swatch shows on the toolkit's `ColorSelector` — the hex field, and the swatch
+  that opens `cce-color-editor` — and its colour is written back into the swatch whenever the
+  selector's bytes differ from the swatch's (typed, or streamed from the picker). Swatches stay
+  linear; the hex, and a reader's name for a swatch, are sRGB (they were the raw values). The
+  selector is a held field with the palette as its owner; the palette shapes its text. New:
+  `ColorSelector::close_picker`, which the palette calls when it shows another swatch, so a
+  picker left open stops writing into it. The palette's declared height drops to the strip
+  and one selector row. Checked: `a_pressed_swatch_is_edited_by_a_color_selector`,
+  `a_press_on_the_hex_edits_it_within_the_palette`; the gallery exhibit in a shadow shot,
+  with the picker opened from the selector's swatch.
+
 - **A new widget, `ColorPalette`**: an editable row of colour swatches — added from an add slot
   or Insert, deleted (down to one), dragged or Shift+arrowed into order, and edited by the
   ColorRamp's R, G and B sliders. It lives in the ramp module to share the ColorRamp's field

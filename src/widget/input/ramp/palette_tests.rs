@@ -45,8 +45,16 @@ fn tick(ctx: &mut UiContext, h: Handle<Adapted<ColorPalette>>) {
     ctx.lend_h(h, |p, ctx| WidgetHost::tick(p, 0.016, ctx));
 }
 
-fn sliders(p: &ColorPalette) -> [f32; 3] {
-    [p.r_slider.inner().value(), p.g_slider.inner().value(), p.b_slider.inner().value()]
+fn typed(text: &str) -> Event {
+    Event::KeyInput(KeyEvent {
+        logical_key: Key::Character(text.into()),
+        state: ElementState::Pressed,
+        text: Some(text.into()),
+        repeat: false,
+        ctrl: false,
+        shift: false,
+        alt: false,
+    })
 }
 
 /// A new palette has six hues, none selected, and declares one height whether or not one is
@@ -65,25 +73,49 @@ fn a_new_palette_has_six_hues_and_one_height() {
     assert_eq!(Layout::intrinsic_size(ctx[h].inner()).map(|s| s.height), Some(before));
 }
 
-/// A press on a swatch selects it and shows its colour on the sliders, which then edit it;
-/// the host hears of the edit once, and not of the selection.
+/// A press on a swatch selects it and shows its colour on the toolkit's ColorSelector, as
+/// sRGB hex; a hex typed there and taken with Enter is the swatch's colour, linear. The host
+/// hears of the edit once, and not of the selection.
 #[test]
-fn a_pressed_swatch_is_edited_by_the_sliders() {
+fn a_pressed_swatch_is_edited_by_a_color_selector() {
     let (mut ctx, h) = palette();
     let at = ctx[h].slot_centre(1);
     click(&mut ctx, h, at);
-    assert_eq!(sliders(&ctx[h]), [0.0, 1.0, 0.0]);
+    assert_eq!(ctx[h].selector.inner().color, [0, 255, 0], "the swatch on the selector");
     assert!(!ctx[h].take_change(), "a selection is no change");
 
     ctx.set_focused_id(h.id());
-    press(&mut ctx, h, NamedKey::Tab); // to Red
-    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorPalette::RED)));
-    press(&mut ctx, h, NamedKey::ArrowRight);
-    let red = ctx[h].swatches[1][0];
-    assert!(red > 0.0, "Red moved the swatch's red: {red}");
-    assert_eq!(red, ctx[h].r_slider.inner().value());
+    press(&mut ctx, h, NamedKey::Tab);
+    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorPalette::SELECTOR)));
+    assert!(ctx[h].selector.inner().editing, "the hex field took the keyboard");
+    for _ in 0..7 {
+        press(&mut ctx, h, NamedKey::Backspace);
+    }
+    for ch in ["#", "8", "0", "8", "0", "8", "0"] {
+        ctx.propagate_event(&typed(ch), h.id());
+    }
+    press(&mut ctx, h, NamedKey::Enter);
+    let c = ctx[h].swatches[1];
+    assert!(c.iter().all(|v| (v - 0.2159).abs() < 1e-3), "#808080 is linear 0.216: {c:?}");
     assert!(ctx[h].take_change(), "the host hears of the edit");
     assert!(!ctx[h].take_change(), "once");
+}
+
+/// A press on the selector's hex gives it the keyboard, held by the palette; showing a
+/// swatch it already shows leaves the swatch's exact value alone.
+#[test]
+fn a_press_on_the_hex_edits_it_within_the_palette() {
+    let (mut ctx, h) = palette_of(vec![[0.123, 0.456, 0.789]]);
+    let at = ctx[h].slot_centre(0);
+    click(&mut ctx, h, at);
+    let (x, y, w, sh) = ctx[h].selector.rect();
+    click(&mut ctx, h, (x + w * 0.2, y + sh / 2.0));
+    assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(ColorPalette::SELECTOR)));
+    assert_eq!(ctx.focus_holder(), Some(h.id()), "the palette holds it");
+    assert!(ctx[h].selector.inner().editing);
+    tick(&mut ctx, h);
+    assert_eq!(ctx[h].swatches[0], [0.123, 0.456, 0.789], "shown, not rounded to its bytes");
+    assert!(!ctx[h].take_change());
 }
 
 /// A press on the add slot appends a copy of the last swatch and selects it; with many
@@ -175,7 +207,7 @@ fn the_strips_keys_pick_move_add_and_delete() {
     assert_eq!(ctx[h].swatches.len(), 1, "one kept");
 }
 
-/// One Tab stop: the strip alone with nothing selected; with a swatch selected the sliders
+/// One Tab stop: the strip alone with nothing selected; with a swatch selected the selector
 /// and Delete join the walk, and the walk leaves past the last.
 #[test]
 fn a_palette_walks_its_fields_strip_first() {
@@ -185,7 +217,7 @@ fn a_palette_walks_its_fields_strip_first() {
     assert_eq!(ctx.focused_widget, Some(own), "enters on its strip");
     assert_eq!((ctx[h].keeps_tab(false), ctx[h].keeps_tab(true)), (false, false));
     press(&mut ctx, h, NamedKey::ArrowRight);
-    for f in ColorPalette::RED..=ColorPalette::DELETE {
+    for f in ColorPalette::SELECTOR..=ColorPalette::DELETE {
         assert!(ctx[h].keeps_tab(false));
         press(&mut ctx, h, NamedKey::Tab);
         assert_eq!(ctx.focused_widget, Some(ctx[h].field_id(f)));
@@ -195,15 +227,15 @@ fn a_palette_walks_its_fields_strip_first() {
 }
 
 /// To a screen reader: a radio button per swatch, the add slot, and while one is selected
-/// its sliders and Delete. Clicking the add item adds.
+/// the selector and Delete. Clicking the add item adds.
 #[test]
 fn a_palette_reads_as_its_swatches_and_controls() {
     let (mut ctx, h) = palette();
     let items = Input::a11y_items(ctx[h].inner(), Rect { x: 0.0, y: 0.0, width: 390.0, height: 260.0 });
     assert_eq!(items.len(), 4, "three swatches and the add slot");
-    assert_eq!(items[0].label, "Colour 1 of 3: #ff0000");
+    assert_eq!(items[0].label, "Colour 1 of 3: #ff0000", "sRGB, as the selector shows it");
     assert_eq!(items[3].label, "Add colour");
     assert!(Input::a11y_select_item(ctx[h].inner_mut(), 3));
     assert_eq!((ctx[h].swatches.len(), ctx[h].selected_idx), (4, Some(3)));
-    assert_eq!(Input::a11y_items(ctx[h].inner(), Rect { x: 0.0, y: 0.0, width: 390.0, height: 260.0 }).len(), 5 + 4, "four swatches, add, R, G, B, Delete");
+    assert_eq!(Input::a11y_items(ctx[h].inner(), Rect { x: 0.0, y: 0.0, width: 390.0, height: 260.0 }).len(), 5 + 2, "four swatches, add, the selector, Delete");
 }

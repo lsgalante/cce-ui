@@ -155,6 +155,20 @@ impl ColorSelector {
 
 }
 
+impl ColorSelector {
+    /// Close the picker this selector opened, if one is open, and stop reading its stream:
+    /// for a host that shows another value in the selector (a palette's other swatch), which
+    /// the picker would otherwise go on writing over.
+    pub fn close_picker(&mut self) {
+        if let Some(mut child) = self.child.lock().unwrap().take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        self.live_rx = None;
+        self.revert_hex = None;
+    }
+}
+
 impl Adapted<ColorSelector> {
     /// Recessed style: see the `recessed` field.
     pub fn with_recessed(mut self, recessed: bool) -> Self {

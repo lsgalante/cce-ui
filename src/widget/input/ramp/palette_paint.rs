@@ -1,5 +1,5 @@
 //! What the palette draws: its strip — a canvas well with the swatches and the add slot in
-//! it — and while a swatch is selected its sliders and delete button.
+//! it — and while a swatch is selected its colour selector and delete button.
 
 use super::*;
 use super::color_paint::paint_peg;
@@ -20,6 +20,14 @@ impl Paint for ColorPalette {
         true
     }
 
+    /// The selector's hex is shaped here: it is the palette's value, never in the registry,
+    /// so the host's text pass cannot reach it (its caret reads the shaped offsets).
+    fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
+        if self.selected_idx.is_some() {
+            self.selector.prepare_text(fs);
+        }
+    }
+
     fn paint(&self, _rect: Rect, pc: &mut PaintCtx) {
         // The strip is the colour ramp's kind of track: a canvas well a control high, at the
         // control radius, its rim lit while it has the keyboard. The swatches stand in it,
@@ -38,9 +46,7 @@ impl Paint for ColorPalette {
 
         if self.selected_idx.is_some() {
             let dummy = UiContext::new();
-            self.r_slider.paint_self(&dummy, pc);
-            self.g_slider.paint_self(&dummy, pc);
-            self.b_slider.paint_self(&dummy, pc);
+            self.selector.paint_self(&dummy, pc);
             if self.deletable() {
                 self.del_button.paint_self(&dummy, pc);
             }

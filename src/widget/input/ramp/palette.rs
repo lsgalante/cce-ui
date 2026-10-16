@@ -1,15 +1,16 @@
 //! `ColorPalette`: an editable palette — a row of colour swatches in a well, ended by an add
-//! slot, the selected swatch edited by R, G and B sliders and deleted by a button, as the
-//! colour ramp's keys are. A swatch is dragged along the row to reorder it. One keyboard stop
-//! whose fields — the strip, then the sliders and the button — take the keyboard in turn
-//! ([`Fields`], the ramps'); to a screen reader, a group of its swatches and controls.
+//! slot. The selected swatch is edited by the toolkit's [`ColorSelector`] — its hex field, and
+//! its swatch, which opens the DE's picker — and deleted by the ramps' button. A swatch is
+//! dragged along the row to reorder it. One keyboard stop whose fields — the strip, then the
+//! selector and the button — take the keyboard in turn ([`Fields`], the ramps'); to a screen
+//! reader, a group of its swatches and controls.
 
 use super::*;
-use super::color::colour_hex;
+use crate::widget::input::ColorSelector;
 
 pub struct ColorPalette {
     pub base: Widget,
-    /// The colours, in order along the strip.
+    /// The colours, linear RGB, in order along the strip.
     pub swatches: Vec<[f32; 3]>,
     pub selected_idx: Option<usize>,
     /// A swatch held from its press on: the pointer moves it along the strip.
@@ -22,9 +23,10 @@ pub struct ColorPalette {
     /// [`DELETE`](Self::DELETE); [`Fields`]).
     walk: FieldWalk,
 
-    pub r_slider: Adapted<Slider>,
-    pub g_slider: Adapted<Slider>,
-    pub b_slider: Adapted<Slider>,
+    /// The selected swatch's colour, as the toolkit edits one: a hex field and a swatch that
+    /// opens the picker. Its value is synced into the selected swatch after everything that
+    /// can change it ([`sync_from_selector`](Self::sync_from_selector)).
+    pub selector: Adapted<ColorSelector>,
     pub del_button: Adapted<Button>,
 }
 
@@ -41,12 +43,28 @@ const DEFAULT_SWATCHES: [[f32; 3]; 6] = [
 /// The colour a swatch added to an empty palette takes.
 const NEUTRAL: [f32; 3] = [0.5, 0.5, 0.5];
 
+/// A linear colour as the selector holds one: sRGB bytes.
+fn srgb_bytes(c: [f32; 3]) -> [u8; 3] {
+    crate::color::to_srgb_rgb(c).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+/// sRGB bytes as a swatch holds them: linear.
+fn linear_of(b: [u8; 3]) -> [f32; 3] {
+    crate::color::to_linear_rgb(b.map(|v| v as f32 / 255.0))
+}
+
+/// A swatch's colour as the selector shows it and a reader hears it: `#rrggbb`, sRGB.
+fn swatch_hex(c: [f32; 3]) -> String {
+    let [r, g, b] = srgb_bytes(c);
+    format!("#{r:02x}{g:02x}{b:02x}")
+}
+
 impl ColorPalette {
     /// The palette's fields, in the order Tab walks them: the strip (the palette itself), the
-    /// Red, Green and Blue sliders (channel `ch` is field `RED + ch`) and the delete button.
+    /// colour selector and the delete button.
     pub(super) const STRIP: usize = OWN;
-    pub(super) const RED: usize = 1;
-    pub(super) const DELETE: usize = 4;
+    pub(super) const SELECTOR: usize = 1;
+    pub(super) const DELETE: usize = 2;
 
     /// A palette of six hues ([`with_colors`](Self::with_colors) for others).
     pub fn new() -> Adapted<ColorPalette> {
@@ -64,9 +82,7 @@ impl ColorPalette {
             just_changed: false,
             changed: false,
             walk: FieldWalk::default(),
-            r_slider: Slider::new().with_label(&tr("ramp-red")),
-            g_slider: Slider::new().with_label(&tr("ramp-green")),
-            b_slider: Slider::new().with_label(&tr("ramp-blue")),
+            selector: ColorSelector::new(srgb_bytes(NEUTRAL)),
             // The ramps' delete button, by name so it survives a renderer rebuild.
             del_button: Button::new(0.0, 0.0, 0.0, 0.0).with_icon_name("x", &tr("palette-delete-colour")),
         })
@@ -80,6 +96,7 @@ impl ColorPalette {
     /// Replace the colours, none selected. Like the typed setters, not a change the host is
     /// told of ([`take_change`](Input::take_change)).
     pub fn set_colors(&mut self, colors: Vec<[f32; 3]>) {
+        self.selector.inner_mut().close_picker();
         self.swatches = colors;
         self.selected_idx = None;
         self.is_dragging_swatch = false;
@@ -115,10 +132,12 @@ impl ColorPalette {
     }
 
     /// Delete the selected swatch — what a click on the delete button does; nothing is
-    /// selected after. A palette keeps one swatch at least: with one, nothing happens.
+    /// selected after, and a picker open on it closes. A palette keeps one swatch at least:
+    /// with one, nothing happens.
     pub fn delete_selected(&mut self) {
         if let Some(idx) = self.selected_idx {
             if self.swatches.len() > Self::MIN_KEYS {
+                self.selector.inner_mut().close_picker();
                 self.swatches.remove(idx);
                 self.selected_idx = None;
                 self.mark_changed();
@@ -142,39 +161,34 @@ impl ColorPalette {
         true
     }
 
-    fn slider(&self, ch: usize) -> &Adapted<Slider> {
-        match ch {
-            0 => &self.r_slider,
-            1 => &self.g_slider,
-            _ => &self.b_slider,
-        }
-    }
-
-    fn slider_mut(&mut self, ch: usize) -> &mut Adapted<Slider> {
-        match ch {
-            0 => &mut self.r_slider,
-            1 => &mut self.g_slider,
-            _ => &mut self.b_slider,
-        }
-    }
-
-    /// Write channel `ch`'s slider into the selected swatch (with none selected, nothing).
-    fn write_channel(&mut self, ch: usize) {
-        if let Some(idx) = self.selected_idx {
-            self.swatches[idx][ch] = self.slider(ch).inner().value();
-            self.mark_changed();
-        }
-    }
-
-    /// Select swatch `idx`, the sliders showing it, a wheel glide stopped (left running, it
-    /// went on into the swatch now shown).
+    /// Select swatch `idx` and show it on the selector. A picker opened on another swatch
+    /// closes: left open, it went on writing into the swatch now shown.
     fn select_swatch(&mut self, idx: usize) {
-        self.selected_idx = Some(idx);
-        for (ch, v) in self.swatches[idx].into_iter().enumerate() {
-            let slider = self.slider_mut(ch).inner_mut();
-            slider.stop_glide();
-            slider.set_value(v);
+        if self.selected_idx != Some(idx) {
+            self.selector.inner_mut().close_picker();
         }
+        self.selected_idx = Some(idx);
+        let sel = self.selector.inner_mut();
+        if sel.color != srgb_bytes(self.swatches[idx]) {
+            Input::set_value_string(sel, &swatch_hex(self.swatches[idx]));
+        }
+        // Shown, not edited: the host hears of no change.
+        Input::take_change(sel);
+    }
+
+    /// Write the selector's colour into the selected swatch, when it holds another — typed,
+    /// or streamed from the picker. Compared in the selector's bytes, so a swatch it merely
+    /// shows keeps its exact linear value. Whether the swatch changed.
+    fn sync_from_selector(&mut self) -> bool {
+        Input::take_change(self.selector.inner_mut());
+        let Some(idx) = self.selected_idx else { return false };
+        let shown = self.selector.inner().color;
+        if shown == srgb_bytes(self.swatches[idx]) {
+            return false;
+        }
+        self.swatches[idx] = linear_of(shown);
+        self.mark_changed();
+        true
     }
 }
 
@@ -273,53 +287,39 @@ impl ColorPalette {
         slot.min(self.swatches.len().saturating_sub(1))
     }
 
-    fn slider_row_h() -> f32 {
-        crate::layout::control_label_strip() + crate::layout::slider_height()
-    }
-
-    fn slider_block_h() -> f32 {
-        3.0 * Self::slider_row_h() + 2.0 * crate::layout::control_gap()
-    }
-
-    /// The slider block's top: the controls' gap under the strip.
-    fn slider_top(&self) -> f32 {
+    /// The selector row's top: the controls' gap under the strip.
+    fn row_top(&self) -> f32 {
         let strip = self.strip_rect();
         strip.y + strip.height + crate::layout::control_gap()
     }
 
-    /// The height the editor needs: the strip and the three slider rows, in its margins. The
-    /// slider rows are reserved whether or not a swatch is selected, so selecting one never
-    /// changes the editor's rect. What it declares (`intrinsic_size`).
+    /// The height the editor needs: the strip and the selector row, in its margins. The row
+    /// is reserved whether or not a swatch is selected, so selecting one never changes the
+    /// editor's rect. What it declares (`intrinsic_size`).
     pub fn natural_height(&self) -> f32 {
-        MARGIN + crate::layout::ramp_height() + crate::layout::control_gap() + Self::slider_block_h() + MARGIN
+        MARGIN + crate::layout::ramp_height() + crate::layout::control_gap() + crate::layout::color_selector_height() + MARGIN
     }
 
-    /// The R, G and B sliders and the delete button under the strip while a swatch is
-    /// selected — the colour ramp's arrangement: the button in a column at the right,
-    /// centred on the Green slider's track, the column kept while it is hidden.
+    /// The selector and the delete button under the strip while a swatch is selected: the
+    /// selector at its own height, the button in a column at the right the controls' gap
+    /// from it, centred on it. The column is kept while the button is hidden, so the
+    /// selector's width never jumps as swatches come and go.
     pub(super) fn arrange_fields(&mut self) {
         let (x, w) = (self.base.x, self.base.w.max(1.0));
-        let sy = self.slider_top();
-        let (row_h, gap) = (Self::slider_row_h(), crate::layout::control_gap());
-        let bh = crate::layout::button_height();
+        let y = self.row_top();
+        let (sh, bh) = (crate::layout::color_selector_height(), crate::layout::button_height());
         let (del_w, _) = delete_size(&self.del_button);
-        let slider_w = (w - del_w - gap).max(1.0);
+        let gap = crate::layout::control_gap();
 
         if self.selected_idx.is_some() {
-            for ch in 0..3 {
-                self.slider_mut(ch).set_rect(x, sy + ch as f32 * (row_h + gap), slider_w, row_h);
-            }
+            self.selector.set_rect(x, y, (w - del_w - gap).max(1.0), sh);
             if self.deletable() {
-                let green_track = sy + row_h + gap + crate::layout::control_label_strip();
-                let by = green_track + (crate::layout::slider_height() - bh) / 2.0;
-                self.del_button.set_rect(x + w - del_w, by, del_w, bh);
+                self.del_button.set_rect(x + w - del_w, y + (sh - bh) / 2.0, del_w, bh);
             } else {
                 park(&mut self.del_button);
             }
         } else {
-            for ch in 0..3 {
-                park(self.slider_mut(ch));
-            }
+            park(&mut self.selector);
             park(&mut self.del_button);
         }
     }
@@ -331,11 +331,11 @@ impl ColorPalette {
     }
 
     /// The control field item `idx` of [`a11y_items`](Input::a11y_items) stands for, past
-    /// the swatches and the add slot: Red, Green, Blue, Delete.
+    /// the swatches and the add slot: the selector, Delete.
     fn item_field(&self, idx: usize) -> Option<usize> {
         let field = match idx.checked_sub(self.swatches.len() + 1)? {
-            k @ 0..=2 => Self::RED + k,
-            3 => Self::DELETE,
+            0 => Self::SELECTOR,
+            1 => Self::DELETE,
             _ => return None,
         };
         (field < self.field_count()).then_some(field)
@@ -359,32 +359,32 @@ impl Layout for ColorPalette {
 }
 
 impl Fields for ColorPalette {
-    const TOTAL: usize = 5;
+    const TOTAL: usize = 3;
     const MIN_KEYS: usize = 1;
 
-    /// The strip, then the three sliders while a swatch is selected and the delete button
-    /// while it is shown.
+    /// The strip, then the selector while a swatch is selected and the delete button while
+    /// it is shown.
     fn field_count(&self) -> usize {
         if self.deletable() {
             Self::TOTAL
         } else if self.selected_idx.is_some() {
             Self::DELETE
         } else {
-            Self::RED
+            Self::SELECTOR
         }
     }
 
     fn field(&mut self, i: usize) -> &mut dyn WidgetHost {
         match i {
             Self::DELETE => &mut self.del_button,
-            _ => self.slider_mut(i - Self::RED),
+            _ => &mut self.selector,
         }
     }
 
     fn field_id(&self, i: usize) -> WidgetId {
         match i {
             Self::DELETE => self.del_button.base().id(),
-            _ => self.slider(i - Self::RED).base().id(),
+            _ => self.selector.base().id(),
         }
     }
 
@@ -397,9 +397,9 @@ impl Fields for ColorPalette {
     }
 
     /// On the strip: Shift+Left and Shift+Right move the selected swatch along it, and the
-    /// ramps' keys pick, add and delete ([`own_key`](Fields::own_key)). A slider keeps its
-    /// own keys, the selected swatch's channel moving with it; the delete button's press
-    /// deletes.
+    /// ramps' keys pick, add and delete ([`own_key`](Fields::own_key)). The selector keeps
+    /// its own keys — the hex typed, Enter taking it — the swatch following; the delete
+    /// button's press deletes.
     fn field_key(&mut self, i: usize, event: &KeyEvent, own: WidgetId, ui: &mut UiContext) -> bool {
         match i {
             Self::STRIP => {
@@ -419,12 +419,8 @@ impl Fields for ColorPalette {
             }
             Self::DELETE => self.delete_button_key(event, own, ui),
             _ => {
-                let ch = i - Self::RED;
-                let before = self.slider(ch).inner().value();
-                let used = self.slider_mut(ch).keyboard_input(event, ui);
-                if self.slider(ch).inner().value() != before {
-                    self.write_channel(ch);
-                }
+                let used = self.selector.keyboard_input(event, ui);
+                self.sync_from_selector();
                 used
             }
         }
@@ -491,8 +487,8 @@ impl Input for ColorPalette {
 
     /// The palette's parts as a screen reader's nodes, in reading order: a radio button per
     /// swatch (on while selected), named with its place and colour; the add slot, a button;
-    /// while a swatch is selected the Red, Green and Blue sliders; and the delete button
-    /// while it is shown.
+    /// while a swatch is selected the selector, its hex; and the delete button while it is
+    /// shown.
     fn a11y_items(&self, _rect: Rect) -> Vec<crate::a11y::A11yItem> {
         use crate::a11y::A11yItem;
         use accesskit::Role;
@@ -501,7 +497,7 @@ impl Input for ColorPalette {
         let disc = |(cx, cy): (f32, f32)| Rect { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r };
         let mut items: Vec<A11yItem> = (0..n)
             .map(|i| {
-                let (place, count, colour) = ((i + 1).to_string(), n.to_string(), colour_hex(self.swatches[i]));
+                let (place, count, colour) = ((i + 1).to_string(), n.to_string(), swatch_hex(self.swatches[i]));
                 let args = [("n", place.as_str()), ("count", &count), ("colour", &colour)];
                 let selected = self.selected_idx == Some(i);
                 A11yItem {
@@ -516,16 +512,11 @@ impl Input for ColorPalette {
             let (x, y, width, height) = w.rect();
             Rect { x, y, width, height }
         };
-        if self.selected_idx.is_some() {
-            for ch in 0..3 {
-                let s = self.slider(ch);
-                items.push(A11yItem {
-                    value: s.a11y_value(),
-                    range: s.a11y_range(),
-                    field: Some(self.field_id(Self::RED + ch)),
-                    ..A11yItem::new(Role::Slider, s.label().unwrap_or_default(), rect(s))
-                });
-            }
+        if let Some(idx) = self.selected_idx {
+            items.push(A11yItem {
+                field: Some(self.field_id(Self::SELECTOR)),
+                ..A11yItem::new(Role::TextInput, swatch_hex(self.swatches[idx]), rect(&self.selector))
+            });
         }
         if self.deletable() {
             items.push(A11yItem {
@@ -558,16 +549,6 @@ impl Input for ColorPalette {
         true
     }
 
-    fn a11y_set_item_value(&mut self, idx: usize, value: f64) -> bool {
-        let Some(field) = self.item_field(idx).filter(|&f| f != Self::DELETE) else { return false };
-        let ch = field - Self::RED;
-        if !self.slider_mut(ch).a11y_set_value(value) {
-            return false;
-        }
-        self.write_channel(ch);
-        true
-    }
-
     fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
         let own = ectx.id;
         let Some(ui) = ectx.ui.as_deref_mut() else {
@@ -578,14 +559,11 @@ impl Input for ColorPalette {
             changed = true;
         }
         if self.selected_idx.is_some() {
-            for ch in 0..3 {
-                if self.slider_mut(ch).tick(dt, ui) {
-                    self.write_channel(ch);
-                    changed = true;
-                }
-            }
+            // The picker's stream lands in the selector's tick.
+            changed |= self.selector.tick(dt, ui);
+            changed |= self.sync_from_selector();
         }
-        // `write_channel` asked for a frame this tick already gives.
+        // `sync_from_selector` asked for a frame this tick already gives.
         self.just_changed = false;
         changed
     }
@@ -620,10 +598,16 @@ impl Input for ColorPalette {
                         return true;
                     }
                     if self.selected_idx.is_some() {
-                        for ch in 0..3 {
-                            if self.slider_mut(ch).mouse_input(button, state, px, py, ui) {
-                                return true;
+                        // The selector's own press: on its hex, the field takes the keyboard
+                        // (claimed by its bare id, adopted here as the palette's field, and
+                        // told, so it begins editing); on its swatch, the picker opens.
+                        if self.selector.mouse_input(button, state, px, py, ui) {
+                            self.adopt_pressed_field(own, ui);
+                            if self.walk().at == Some(Self::SELECTOR) && !self.selector.base().focused {
+                                self.selector.focus();
                             }
+                            self.just_changed = true;
+                            return true;
                         }
                         // Pressed only: the button clicks on its release, below.
                         if self.del_button.mouse_input(button, state, px, py, ui) {
@@ -635,15 +619,13 @@ impl Input for ColorPalette {
                     // A release is the palette's only when something of it used it (the
                     // colour ramp's rule); every field is told, so none is left holding a
                     // press.
-                    let mut used = std::mem::take(&mut self.is_dragging_swatch);
-                    for ch in 0..3 {
-                        used |= self.slider_mut(ch).mouse_input(button, state, px, py, ui);
-                    }
+                    let dragged = std::mem::take(&mut self.is_dragging_swatch);
+                    let sel = self.selector.mouse_input(button, state, px, py, ui);
                     let del = self.del_button.mouse_input(button, state, px, py, ui);
                     if del && self.del_button.take_click() {
                         self.delete_selected();
                     }
-                    used || del
+                    dragged || sel || del
                 }
             }
             Event::PointerMove { x, y, .. } => {
@@ -654,33 +636,11 @@ impl Input for ColorPalette {
                     changed |= self.move_selected_to(self.slot_under(px));
                 }
                 if self.selected_idx.is_some() {
-                    for ch in 0..3 {
-                        if self.slider_mut(ch).cursor_moved(px, py, ui) {
-                            self.write_channel(ch);
-                            changed = true;
-                        }
-                    }
-                    if self.del_button.cursor_moved(px, py, ui) {
-                        changed = true;
-                    }
+                    changed |= self.selector.cursor_moved(px, py, ui);
+                    changed |= self.del_button.cursor_moved(px, py, ui);
                 }
                 if changed {
                     self.just_changed = true;
-                }
-                changed
-            }
-            Event::MouseWheel { delta, x, y, .. } => {
-                let (delta, px, py) = (*delta, *x, *y);
-                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
-                if self.selected_idx.is_none() {
-                    return false;
-                }
-                let mut changed = false;
-                for ch in 0..3 {
-                    if self.slider_mut(ch).mouse_wheel(&delta, px, py, ui) {
-                        self.write_channel(ch);
-                        changed = true;
-                    }
                 }
                 changed
             }
@@ -697,35 +657,22 @@ impl Input for ColorPalette {
             Event::FocusOut => {
                 self.base.focused = false;
                 self.walk_focus_out();
+                // The selector takes a half-typed hex as it lets go.
+                self.sync_from_selector();
                 true
             }
             _ => false,
         }
     }
 
-    // A swatch drag and the sliders' own drags run through the palette, as the colour
-    // ramp's do.
+    // A swatch drag runs through the palette, as a colour ramp's key drag does.
     fn draggable(&self, _rect: Rect) -> bool {
         self.is_dragging()
     }
     fn is_dragging(&self) -> bool {
-        self.is_dragging_swatch || (0..3).any(|ch| self.slider(ch).is_dragging())
-    }
-    fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
-        let mut changed = false;
-        for ch in 0..3 {
-            let slider = self.slider_mut(ch);
-            if slider.is_dragging() && slider.drag_update(px, py) {
-                self.write_channel(ch);
-                changed = true;
-            }
-        }
-        changed
+        self.is_dragging_swatch
     }
     fn drag_end(&mut self) {
-        for ch in 0..3 {
-            self.slider_mut(ch).drag_end();
-        }
         self.is_dragging_swatch = false;
     }
 }
