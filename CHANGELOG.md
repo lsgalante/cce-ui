@@ -8,6 +8,15 @@ and `docs/rfc-material.md`, and in `git log`.
 When you change behaviour: update the reference to the new state, and add an entry here under
 today's date — what changed, why, and how it was checked.
 
+## 2026-10-16
+
+- **The Ramp's delete button is the ColorRamp's.** It was a fixed 22 px square (64 px wide when
+  it showed its label); now both ramps size it with one `delete_size`: square at
+  `button_height` with its `x` icon, its label's width where the icon set is missing. The Ramp
+  keeps it beside the key pad, centred on the pad's well. Checked:
+  `a_ramps_delete_is_the_color_ramps_button_beside_the_pad`, failing with the old sizing; a
+  shadow shot of the Ramp editor with a key selected.
+
 ## 2026-10-15
 
 - **The ColorRamp's look comes from the toolkit, not from numbers of its own.** Its delete

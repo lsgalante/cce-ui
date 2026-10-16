@@ -162,6 +162,18 @@ const MARGIN: f32 = 10.0;
 const PEG_RING_W: f32 = 1.5;
 const PEG_RING_GAP: f32 = 1.5;
 
+/// A ramp's delete button's size: square at the button height with its icon; where the
+/// icon set is missing, its label's width in the button font. Both ramps' (`arrange_fields`).
+fn delete_size(button: &Adapted<Button>) -> (f32, f32) {
+    let bh = crate::layout::button_height();
+    let w = if button.inner().has_icon() {
+        bh
+    } else {
+        Layout::intrinsic_size(button.inner()).map_or(bh, |s| s.width)
+    };
+    (w, bh)
+}
+
 /// Park a field off-screen at no size: how a ramp hides a control it is not showing.
 fn park(w: &mut dyn WidgetHost) {
     w.set_rect(-1000.0, -1000.0, 0.0, 0.0);

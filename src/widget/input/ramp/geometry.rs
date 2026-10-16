@@ -240,15 +240,17 @@ impl Ramp {
             // with the delete button beside it, centered on the pad's well — while it is
             // shown ([`deletable`](Self::deletable)).
             let pad_side = Self::PAD_SIDE;
-            let del_w: f32 = if self.del_button.inner().has_icon() { ctrl_h } else { 64.0 };
+            // The delete button is the ColorRamp's: square at the button height, its label's
+            // width where the icon set is missing (`delete_size`).
+            let (del_w, del_h) = delete_size(&self.del_button);
             let row2_y = ctrl_y + ctrl_h + gap;
             self.key_pad.set_rect(track_x, row2_y, pad_side, pad_side + strip);
             if self.deletable() {
                 self.del_button.set_rect(
                     track_x + pad_side + gap,
-                    row2_y + strip + (pad_side - ctrl_h) / 2.0,
+                    row2_y + strip + (pad_side - del_h) / 2.0,
                     del_w,
-                    ctrl_h,
+                    del_h,
                 );
             } else {
                 park(&mut self.del_button);

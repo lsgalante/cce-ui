@@ -729,3 +729,27 @@ fn a_labelled_color_ramp_lays_its_track_below_its_label() {
     assert_eq!(r.base.y, strip, "the colour ramp's own rect starts below the strip");
     assert!(r.track_rect().y >= strip, "the track sits below the label");
 }
+
+/// The Ramp's delete button is the ColorRamp's: square at the button height with its icon,
+/// its label's width without, centred on the key pad's well beside it.
+#[test]
+fn a_ramps_delete_is_the_color_ramps_button_beside_the_pad() {
+    let tr = crate::l10n::tr;
+    for icon in [true, false] {
+        let mut ramp = Ramp::new();
+        let button = Button::new(0.0, 0.0, 0.0, 0.0);
+        ramp.del_button = if icon { button.with_icon(1, 32.0, 32.0) } else { button.with_label(&tr("ramp-delete-key")) };
+        let natural = ramp.inner().natural_height();
+        WidgetHost::set_rect(&mut ramp, 0.0, 0.0, 300.0, natural);
+        ramp.inner_mut().selected_key_idx = Some(1);
+        ramp.inner_mut().arrange_fields();
+        let r = ramp.inner();
+        let bh = crate::layout::button_height();
+        let (_, by, bw, bhh) = r.del_button.rect();
+        let want_w = if icon { bh } else { Layout::intrinsic_size(r.del_button.inner()).unwrap().width };
+        assert_eq!((bw, bhh), (want_w, bh), "icon {icon}: the button's size");
+        let (_, py, _, ph) = r.key_pad.rect();
+        let well_mid = py + r.key_pad.label_strip() + (ph - r.key_pad.label_strip()) / 2.0;
+        assert!((by + bh / 2.0 - well_mid).abs() < 1e-3, "icon {icon}: centred on the pad's well");
+    }
+}

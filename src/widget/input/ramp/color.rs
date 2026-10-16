@@ -45,9 +45,9 @@ impl ColorRamp {
         let r_slider = Slider::new().with_label(&crate::l10n::tr("ramp-red"));
         let g_slider = Slider::new().with_label(&crate::l10n::tr("ramp-green"));
         let b_slider = Slider::new().with_label(&crate::l10n::tr("ramp-blue"));
-        // The float Ramp's kind: a square x-icon button (at the button height, not the Ramp's
-        // 22 px), its label the fallback where the icon set is missing; by name, so it
-        // survives a renderer rebuild. Sized by `arrange_fields`.
+        // The float Ramp's: a square x-icon button at the button height, its label the
+        // fallback where the icon set is missing; by name, so it survives a renderer rebuild.
+        // Sized by `arrange_fields` (`delete_size`).
         let del_button =
             Button::new(0.0, 0.0, 0.0, 0.0).with_icon_name("x", &crate::l10n::tr("ramp-delete-key"));
 
@@ -248,17 +248,6 @@ impl ColorRamp {
         MARGIN + crate::layout::ramp_height() + pegs + Self::slider_block_h() + MARGIN
     }
 
-    /// The delete button's width: square at the button height with its icon (the float Ramp's
-    /// is a fixed 22 px); where the icon set is missing, its label's width in the button font.
-    fn delete_w(&self) -> f32 {
-        let bh = crate::layout::button_height();
-        if self.del_button.inner().has_icon() {
-            bh
-        } else {
-            Layout::intrinsic_size(self.del_button.inner()).map_or(bh, |s| s.width)
-        }
-    }
-
     /// The R, G and B sliders and the delete button, in the slider block under the track and
     /// its pegs, while a key is selected — the button while it is shown
     /// ([`deletable`](Fields::deletable)). Each slider row is its label strip over a slider of
@@ -271,7 +260,7 @@ impl ColorRamp {
         let sy = self.slider_top();
         let (row_h, gap) = (Self::slider_row_h(), crate::layout::control_gap());
         let bh = crate::layout::button_height();
-        let del_w = self.delete_w();
+        let (del_w, _) = delete_size(&self.del_button);
         let slider_w = (w - del_w - gap).max(1.0);
 
         if self.selected_key_idx.is_some() {

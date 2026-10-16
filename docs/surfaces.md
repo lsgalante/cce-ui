@@ -48,9 +48,9 @@ History is in `CHANGELOG.md`; the material design record is `rfc-material.md`.
   its position; outside the first and last keys the track is their colour. There is no
   gradient primitive (`PaintCtx` has none; the tessellator's shaded quad is the bevels'). Its
   sliders sit a controls column under the pegs (`layout::control_gap` apart, and under a
-  selected peg's ring), and its delete button is the Ramp's kind, the `x` glyph on a square
-  plated button, but at `button_height` (the Ramp's is its own 22 px, with a 64 px label
-  fallback). Where the icon set is missing it shows its label, at that label's width. It sits
+  selected peg's ring), and its delete button is the Ramp's, the `x` glyph on a square
+  plated button at `button_height` (both ramps size it with one `delete_size`). Where the
+  icon set is missing it shows its label, at that label's width. It sits
   in a column the sliders keep whether or not it is shown, centred on the Green slider's track.
 - **Segments** share one silhouette, parted by **seams** (`Groove`s dying into the rolled edge):
   Breadcrumb and ButtonStrip segments, the ColorSelector's text/swatch split. A `Separator` is the
