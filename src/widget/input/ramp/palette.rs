@@ -104,6 +104,15 @@ impl ColorPalette {
         self.arrange_fields();
     }
 
+    /// Select swatch `idx` as a press on it does, the selector showing it and placed; an
+    /// index past the swatches changes nothing. For a host that shows the palette with a
+    /// swatch in hand (its selector fills the row it reserves for it).
+    pub fn select(&mut self, idx: usize) {
+        if idx < self.swatches.len() {
+            self.pick_key(idx);
+        }
+    }
+
     /// The selected swatch's colour.
     pub fn selected_color(&self) -> Option<[f32; 3]> {
         self.selected_idx.map(|i| self.swatches[i])

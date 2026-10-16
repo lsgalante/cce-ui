@@ -528,6 +528,15 @@ impl Ramp {
         self.just_changed = true;
     }
 
+    /// Select key `idx` as a press on its peg does, the key pad showing it and placed; an
+    /// index past the keys changes nothing. For a host that shows the ramp with a key in hand
+    /// (its controls fill the strip it reserves for them).
+    pub fn select(&mut self, idx: usize) {
+        if idx < self.keys.len() {
+            self.pick_key(idx);
+        }
+    }
+
     /// Delete the selected key — what a click on the delete button does; nothing is selected
     /// after. A ramp keeps two keys at least: with two, nothing happens.
     pub fn delete_selected(&mut self) {

@@ -276,3 +276,32 @@ fn swatches_are_square_plates_the_selected_one_ringed() {
     assert!(ring.x < tile.x && ring.x + ring.width > tile.x + tile.width, "round the selected tile, outside it");
     assert!(!prims.iter().any(|p| matches!(p, Prim::Circle { .. } | Prim::Arc { .. })), "no discs");
 }
+
+/// `select` does what a press on a swatch, or a key, does — on all three editors: the
+/// controls show it and are placed; an index past the end changes nothing.
+#[test]
+fn select_picks_as_a_press_does() {
+    let mut p = ColorPalette::with_colors(vec![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]);
+    WidgetHost::set_rect(&mut p, 0.0, 0.0, 390.0, 260.0);
+    p.inner_mut().select(1);
+    assert_eq!((p.selected_idx, p.selector.inner().color), (Some(1), [0, 255, 0]));
+    assert!(p.selector.rect().2 > 0.0, "the selector is placed");
+    p.inner_mut().select(9);
+    assert_eq!(p.selected_idx, Some(1));
+    assert!(!Input::take_change(p.inner_mut()), "a selection is no change");
+
+    let mut r = ColorRamp::new();
+    WidgetHost::set_rect(&mut r, 0.0, 0.0, 450.0, 390.0);
+    r.inner_mut().select(1);
+    assert_eq!(r.selected_key_idx, Some(1));
+    assert_eq!(r.r_slider.inner().value(), 1.0, "the sliders show the white key");
+    assert!(r.r_slider.rect().2 > 0.0, "and are placed");
+
+    let mut f = Ramp::new();
+    WidgetHost::set_rect(&mut f, 0.0, 0.0, 450.0, Ramp::expanded_height());
+    f.inner_mut().select(1);
+    assert_eq!(f.selected_key_idx, Some(1));
+    let k = &f.keys[1];
+    assert_eq!((f.key_pad.inner().value_x(), f.key_pad.inner().value_y()), (k.pos, k.value), "the pad shows the key");
+    assert!(f.key_pad.rect().2 > 0.0, "and is placed");
+}

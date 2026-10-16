@@ -96,6 +96,15 @@ impl ColorRamp {
         resettle(&mut self.keys, i, |k| k.pos)
     }
 
+    /// Select key `idx` as a press on its peg does, the sliders showing its colour and
+    /// placed; an index past the keys changes nothing. For a host that shows the ramp with a
+    /// key in hand (its sliders fill the rows it reserves for them).
+    pub fn select(&mut self, idx: usize) {
+        if idx < self.keys.len() {
+            self.pick_key(idx);
+        }
+    }
+
     /// Delete the selected key — what a click on the delete button does; nothing is selected
     /// after. A ramp keeps two keys at least: with two, nothing happens.
     pub fn delete_selected(&mut self) {
