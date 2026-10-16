@@ -10,6 +10,23 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-16
 
+- **A scroll gesture belongs to the first thing it moved, for every widget.** The latch was each
+  widget's own: Slider, RangeSlider, Slider2D, the Ramp, Float3 and the parameter pane checked
+  `scroll_initiate_widget_id`, everything else did not, and even the Slider took a wheel the
+  pointer happened to be over (`latched || hit`) — so a page scrolled under the pointer handed
+  the rest of its gesture to whatever control arrived there. Now `UiContext` keeps the gesture's
+  owner (`scroll_gesture_owner`, cleared with the 250 ms gesture break), and the adapter's wheel
+  arm rules once for every widget: while the gesture is another's a widget declines it; the
+  first widget a wheel has an effect on claims it; the owner keeps it off its rect (not while
+  hidden). A wheel a composite hands its parts is not ruled on (`wheel_depth`). App-side
+  scrolling takes part: `ScrollBox::mouse_wheel` gates and claims, and `ScrollRegion` gains
+  `wheel_in` (its `wheel`, which has no context, does not; the apps on it are to move). Two
+  tests changed meaning: a spinbox's out-of-rect wheel now starts a new gesture to show the
+  rect gate (in the same gesture the owner keeps it), and a hidden owner was found to keep the
+  gesture and now does not. Checked: `a_scroll_gesture_belongs_to_what_it_first_moved`,
+  `a_scroll_box_claims_the_gesture_it_moves`, `a_regions_wheel_in_claims_the_gesture_it_moves`;
+  the gallery's page scrolled across a slider in a shadow session.
+
 - **The ColorRamp edits a key's colour with a ColorSelector.** Its own R, G and B sliders are
   gone: the selected key shows on the toolkit's `ColorSelector` — the hex field, and the swatch
   that opens `cce-color-editor` — beside Delete, held and synced as the ColorPalette's is (the

@@ -179,7 +179,21 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         py: f32,
         ctx: &mut UiContext,
     ) -> bool {
-        self.offer(&Event::MouseWheel { delta: *delta, x: px, y: py, local_x: px, local_y: py }, ctx)
+        let event = Event::MouseWheel { delta: *delta, x: px, y: py, local_x: px, local_y: py };
+        if !ctx.wheel_at_top() {
+            return self.offer(&event, ctx);
+        }
+        // Ungated by the rect, not by the gesture's owner (`handle_event`'s wheel arm).
+        ctx.note_scroll_event();
+        let id = self.base.id();
+        if !ctx.may_take_wheel(id) {
+            return false;
+        }
+        let took = ctx.within_wheel(|ctx| self.offer(&event, ctx));
+        if took {
+            ctx.claim_scroll_gesture(id);
+        }
+        took
     }
     pub fn keyboard_input(&mut self, event: &crate::widget::KeyEvent, ctx: &mut UiContext) -> bool {
         self.handle_event(&Event::KeyInput(event.clone()), ctx)

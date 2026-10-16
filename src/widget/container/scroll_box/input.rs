@@ -141,13 +141,24 @@ impl ScrollBox {
         moved || animating || flipped || holding
     }
 
+    /// Scroll by a wheel over the box. The box takes part in the gesture rule as a widget
+    /// does (`UiContext::may_take_wheel`): while the gesture belongs to something else it
+    /// stays put, a wheel that moves it claims the gesture for it, and it keeps the gesture
+    /// wherever the pointer goes — so the controls its scroll carries under the pointer
+    /// decline the rest of the gesture.
     pub fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if self.hit_test(px, py, ctx) {
+        let id = self.base.id();
+        ctx.note_scroll_event();
+        if !ctx.may_take_wheel(id) {
+            return false;
+        }
+        if ctx.owns_scroll_gesture(id) || self.hit_test(px, py, ctx) {
             self.motion.reconcile(0.0, self.scroll_y);
             let changed = self.motion.apply(delta, (LINE_PX, LINE_PX), Bounds::max(0.0), self.bounds_y());
             self.scroll_y = self.motion.y.pos();
             if changed {
                 self.notify_scrolled();
+                ctx.claim_scroll_gesture(id);
             }
             changed
         } else {

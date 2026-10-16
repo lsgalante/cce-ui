@@ -151,7 +151,9 @@ fn spinbox_wheel_steps_by_notch_and_accumulates_fractions() {
     assert!(ctx.lend_h(sb, |w, ctx| w.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 0.5), 50.0, 33.0, ctx)).unwrap());
     assert_eq!(ctx[sb].value, 15, "the second half completes the notch");
 
-    // Outside the rect the wheel is not the spinbox's (hit-gated by the adapter).
+    // A new gesture outside the rect is not the spinbox's (hit-gated by the adapter); the
+    // gesture it took above stays its own wherever the pointer goes.
+    ctx.last_scroll_time = None;
     assert!(!ctx.lend_h(sb, |w, ctx| w.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 200.0, 200.0, ctx)).unwrap());
     assert_eq!(ctx[sb].value, 15);
 }

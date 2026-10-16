@@ -192,3 +192,83 @@ fn a_key_for_a_field_reaches_the_composite_that_holds_it() {
     assert!(ctx.propagate_event(&key(Key::Character("a".into())), elsewhere.id()));
     assert_eq!(ctx[c].keys, [Key::Named(NamedKey::ArrowDown), Key::Character("a".into())]);
 }
+
+/// A scroll gesture belongs to the first thing a wheel of it has an effect on: every other
+/// widget declines the rest of it, wherever the pointer is — a page scrolled under the pointer
+/// does not hand the gesture to the control it carries there — and the owner keeps it wherever
+/// the pointer goes. A new gesture is anyone's.
+#[test]
+fn a_scroll_gesture_belongs_to_what_it_first_moved() {
+    use crate::widget::{Event, MouseScrollDelta, Slider};
+    let mut ctx = UiContext::new();
+    let a = ctx.insert(Slider::new().with_value(0.5));
+    let b = ctx.insert(Slider::new().with_value(0.5));
+    WidgetHost::set_rect(&mut ctx[a], 0.0, 0.0, 200.0, 30.0);
+    WidgetHost::set_rect(&mut ctx[b], 0.0, 100.0, 200.0, 30.0);
+    let wheel = |x: f32, y: f32| Event::MouseWheel { delta: MouseScrollDelta::LineDelta(0.0, 1.0), x, y, local_x: x, local_y: y };
+    // As an app dispatches it: to each root in turn, a wheel's interval after the last (the
+    // router reads wheels under 5 ms apart as one).
+    let dispatch = |ctx: &mut UiContext, x: f32, y: f32| {
+        std::thread::sleep(std::time::Duration::from_millis(8));
+        let ev = wheel(x, y);
+        let took_a = ctx.propagate_event(&ev, a.id());
+        let took_b = ctx.propagate_event(&ev, b.id());
+        (took_a, took_b)
+    };
+
+    // The gesture starts on A: A moves and owns it.
+    assert_eq!(dispatch(&mut ctx, 100.0, 15.0), (true, false));
+    assert_eq!(ctx.scroll_gesture_owner(), Some(a.id()));
+    let (va, vb) = (ctx[a].inner().value(), ctx[b].inner().value());
+    assert!(va > 0.5 && vb == 0.5);
+    // The same gesture over B: B declines it, A keeps it.
+    assert_eq!(dispatch(&mut ctx, 100.0, 115.0), (true, false), "the owner keeps it off its rect");
+    assert_eq!(ctx[b].inner().value(), 0.5, "B declined");
+    assert!(ctx[a].inner().value() > va, "A moved on");
+
+    // Something outside the widgets owns a gesture (a page an app scrolls): both decline.
+    ctx.last_scroll_time = None;
+    ctx.note_scroll_event();
+    let page = crate::widget::Widget::new().id();
+    ctx.claim_scroll_gesture(page);
+    assert_eq!(dispatch(&mut ctx, 100.0, 115.0), (false, false), "the page's gesture is no slider's");
+    assert_eq!(ctx[b].inner().value(), 0.5);
+
+    // A new gesture over B is B's.
+    ctx.last_scroll_time = None;
+    assert_eq!(dispatch(&mut ctx, 100.0, 115.0), (false, true));
+    assert_eq!(ctx.scroll_gesture_owner(), Some(b.id()));
+}
+
+/// A ScrollBox an app scrolls itself takes part in the rule: a wheel that moves it claims the
+/// gesture, so a control its scroll carries under the pointer declines the rest; while the
+/// gesture is another's, the box stays put.
+#[test]
+fn a_scroll_box_claims_the_gesture_it_moves() {
+    use crate::widget::{Event, MouseScrollDelta, Slider};
+    let mut ctx = UiContext::new();
+    let mut page = crate::widget::ScrollBox::new();
+    page.set_rect(0.0, 0.0, 300.0, 200.0);
+    page.update_bounds(1000.0, 0.0, 200.0);
+    let delta = MouseScrollDelta::LineDelta(0.0, -1.0);
+    assert!(page.mouse_wheel(&delta, 100.0, 100.0, &mut ctx), "the page scrolls");
+    assert_eq!(ctx.scroll_gesture_owner(), Some(page.base.id()));
+    // The control now under the pointer declines the same gesture.
+    let s = ctx.insert(Slider::new().with_value(0.5));
+    WidgetHost::set_rect(&mut ctx[s], 0.0, 90.0, 200.0, 30.0);
+    let ev = Event::MouseWheel { delta, x: 100.0, y: 100.0, local_x: 100.0, local_y: 100.0 };
+    let pause = || std::thread::sleep(std::time::Duration::from_millis(8));
+    pause();
+    assert!(!ctx.propagate_event(&ev, s.id()));
+    assert_eq!(ctx[s].inner().value(), 0.5);
+    pause();
+    assert!(page.mouse_wheel(&delta, 100.0, 100.0, &mut ctx), "and the page goes on");
+
+    // A gesture the slider took: the page stays put under it.
+    ctx.last_scroll_time = None;
+    assert!(ctx.propagate_event(&ev, s.id()));
+    let y = page.scroll_y;
+    pause();
+    assert!(!page.mouse_wheel(&delta, 100.0, 100.0, &mut ctx));
+    assert_eq!(page.scroll_y, y);
+}

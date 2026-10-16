@@ -94,6 +94,9 @@ pub struct ScrollRegion {
     /// hosts keep reading them — and any host write to them is adopted on the
     /// next `wheel`/`tick` via `reconcile`.
     motion: ScrollMotion,
+    /// What the region is to the scroll-gesture rule (`wheel_in`): an id of its own, the way
+    /// a widget's is, though the region is not one.
+    gesture_id: crate::widget::WidgetId,
 }
 
 impl Default for ScrollRegion {
@@ -133,6 +136,7 @@ impl ScrollRegion {
             sink_behind: false,
             activity: ScrollbarActivity::new(),
             motion: ScrollMotion::new(),
+            gesture_id: crate::widget::Widget::new().id(),
         }
     }
 

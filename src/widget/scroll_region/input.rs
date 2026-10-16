@@ -106,10 +106,38 @@ impl ScrollRegion {
         false
     }
 
+    /// Scroll by a wheel over the region, outside the scroll-gesture rule: prefer
+    /// [`wheel_in`](Self::wheel_in), which takes part in it.
     pub fn wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
         if !self.hit(px, py) {
             return false;
         }
+        self.apply_wheel(delta)
+    }
+
+    /// Scroll by a wheel over the region, taking part in the scroll-gesture rule as a widget
+    /// does (`UiContext::may_take_wheel`): while the gesture belongs to something else the
+    /// region stays put; a wheel that moves it claims the gesture for it, so the rows its
+    /// scroll carries under the pointer — and any control there — decline the rest; and it
+    /// keeps the gesture wherever the pointer goes.
+    pub fn wheel_in(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ui: &mut crate::context::UiContext) -> bool {
+        ui.note_scroll_event();
+        let id = self.gesture_id;
+        if !ui.may_take_wheel(id) {
+            return false;
+        }
+        if !ui.owns_scroll_gesture(id) && !self.hit(px, py) {
+            return false;
+        }
+        let moved = self.apply_wheel(delta);
+        if moved {
+            ui.claim_scroll_gesture(id);
+        }
+        moved
+    }
+
+    /// Apply a wheel's delta to the scroll; whether it moved.
+    fn apply_wheel(&mut self, delta: &MouseScrollDelta) -> bool {
         // Sideways wheel/trackpad deltas pan an h-scrollable list; a
         // vertical-only list ignores them (max_scroll_x = 0 clamps to 0).
         self.motion.reconcile(self.scroll_x, self.scroll_y);

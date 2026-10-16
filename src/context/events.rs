@@ -63,6 +63,7 @@ impl UiContext {
             let is_new_gesture = elapsed_ms > 250;
             if is_new_gesture {
                 self.scroll_initiate_widget_id = None;
+                self.scroll_gesture_owner = None;
                 self.scroll_gesture_new = true;
             } else {
                 self.scroll_gesture_new = false;
@@ -75,6 +76,47 @@ impl UiContext {
             }
             self.last_scroll_time = Some(now);
         }
+    }
+
+    /// What the current scroll gesture belongs to, if a wheel of it has had an effect yet.
+    pub fn scroll_gesture_owner(&self) -> Option<WidgetId> {
+        self.scroll_gesture_owner
+    }
+
+    /// Claim the current scroll gesture for `id`, unless something already has it: what a
+    /// wheel that had an effect on `id` does. The adapter claims for every widget that takes
+    /// a wheel; a container an app scrolls itself, outside the widgets (`ScrollBox`), claims
+    /// for itself when it moves.
+    pub fn claim_scroll_gesture(&mut self, id: WidgetId) {
+        if self.scroll_gesture_owner.is_none() {
+            self.scroll_gesture_owner = Some(id);
+        }
+    }
+
+    /// Whether `id` may take a wheel now: while the gesture belongs to something else, no.
+    /// A wheel a composite hands its own parts is not asked (the composite was).
+    pub fn may_take_wheel(&self, id: WidgetId) -> bool {
+        self.wheel_depth > 0 || self.scroll_gesture_owner.is_none_or(|o| o == id)
+    }
+
+    /// Whether `id` owns the current gesture: it keeps it wherever the pointer goes.
+    pub fn owns_scroll_gesture(&self, id: WidgetId) -> bool {
+        self.scroll_gesture_owner == Some(id)
+    }
+
+    /// Run `f`, a widget's handling of a wheel, as one level deeper: wheels it hands its
+    /// own parts are theirs to take.
+    pub(crate) fn within_wheel<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.wheel_depth += 1;
+        let r = f(self);
+        self.wheel_depth -= 1;
+        r
+    }
+
+    /// Whether the wheel being dispatched is one an app or the router hands a widget (not
+    /// one a composite hands its parts).
+    pub(crate) fn wheel_at_top(&self) -> bool {
+        self.wheel_depth == 0
     }
 
     /// Dispatch an event into the tree rooted at `root` — a `WidgetId` resolved through the

@@ -390,9 +390,34 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 let _ = (px, py);
                 self.offer(event, ctx)
             }
-            Event::MouseButton { state: crate::widget::ElementState::Pressed, x: px, y: py, .. }
-            | Event::MouseWheel { x: px, y: py, .. } => {
+            Event::MouseButton { state: crate::widget::ElementState::Pressed, x: px, y: py, .. } => {
                 self.hit_test(*px, *py, ctx) && self.offer(event, ctx)
+            }
+            // A wheel belongs to the gesture's owner: once a wheel of a gesture has had an
+            // effect on something, every other widget declines the rest of it — a page that
+            // scrolls a control under the pointer does not hand that control the gesture —
+            // and the owner keeps it wherever the pointer goes. The first widget a gesture's
+            // wheel has an effect on claims it. A wheel a composite hands its own parts is
+            // not ruled on (the composite was).
+            Event::MouseWheel { x: px, y: py, .. } => {
+                let id = self.base.id();
+                if !ctx.wheel_at_top() {
+                    return self.hit_test(*px, *py, ctx) && self.offer(event, ctx);
+                }
+                ctx.note_scroll_event();
+                if !ctx.may_take_wheel(id) {
+                    return false;
+                }
+                // The owner keeps the gesture off its rect, but not hidden.
+                let kept = ctx.owns_scroll_gesture(id) && self.visible();
+                if !kept && !self.hit_test(*px, *py, ctx) {
+                    return false;
+                }
+                let took = ctx.within_wheel(|ctx| self.offer(event, ctx));
+                if took {
+                    ctx.claim_scroll_gesture(id);
+                }
+                took
             }
             Event::MouseButton { state: crate::widget::ElementState::Released, .. } => {
                 self.offer(event, ctx)

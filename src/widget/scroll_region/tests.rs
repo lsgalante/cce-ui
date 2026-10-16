@@ -360,3 +360,37 @@ fn keyboard_is_hover_or_focus_scoped() {
     settle(&mut r);
     assert_eq!(r.scroll_y, 24.0);
 }
+
+/// `wheel_in` takes part in the scroll-gesture rule: a wheel that moves the region claims the
+/// gesture, so a control its scroll carries under the pointer declines the rest, and the
+/// region keeps it off its rect; while another owns the gesture, the region stays put.
+#[test]
+fn a_regions_wheel_in_claims_the_gesture_it_moves() {
+    use crate::widget::{Event, Slider, WidgetHost};
+    let pause = || std::thread::sleep(std::time::Duration::from_millis(8));
+    let mut ui = crate::context::UiContext::new();
+    let mut r = region();
+    r.update_bounds(10, 20.0, 100.0); // rows to scroll
+    let (rx, ry) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    let delta = MouseScrollDelta::LineDelta(0.0, -1.0);
+    assert!(r.wheel_in(&delta, rx, ry, &mut ui), "the region scrolls");
+    let owner = ui.scroll_gesture_owner().expect("claimed");
+    // The control under the pointer declines the same gesture.
+    let s = ui.insert(Slider::new().with_value(0.5));
+    WidgetHost::set_rect(&mut ui[s], rx - 50.0, ry - 15.0, 100.0, 30.0);
+    pause();
+    let ev = Event::MouseWheel { delta, x: rx, y: ry, local_x: rx, local_y: ry };
+    assert!(!ui.propagate_event(&ev, s.id()));
+    assert_eq!(ui[s].inner().value(), 0.5);
+    pause();
+    assert!(r.wheel_in(&delta, -500.0, -500.0, &mut ui), "the region keeps it off its rect");
+    assert_eq!(ui.scroll_gesture_owner(), Some(owner));
+
+    // A gesture the slider took: the region stays put under it.
+    ui.last_scroll_time = None;
+    assert!(ui.propagate_event(&ev, s.id()));
+    let y = r.scroll_y;
+    pause();
+    assert!(!r.wheel_in(&delta, rx, ry, &mut ui));
+    assert_eq!(r.scroll_y, y);
+}

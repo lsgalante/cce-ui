@@ -95,6 +95,17 @@ pub struct UiContext {
     pub last_scroll_time: Option<web_time::Instant>,
     pub scroll_initiate_widget_id: Option<WidgetId>,
     pub scroll_gesture_new: bool,
+    /// What the current scroll gesture belongs to: the first thing a wheel of it had an
+    /// effect on (`claim_scroll_gesture`), cleared when a new gesture starts. While it is set
+    /// every wheel of the gesture goes to it alone, so a scroll that moves another widget
+    /// under the pointer — a page scrolling — never hands the rest of the gesture to that
+    /// widget ([`may_take_wheel`](Self::may_take_wheel)). A registered widget's id, or a
+    /// container's an app scrolls itself (`ScrollBox`).
+    scroll_gesture_owner: Option<WidgetId>,
+    /// How deep the current wheel's dispatch is in widgets' `handle_event`: 0 for a wheel an
+    /// app or the router hands a widget, more for the one a composite hands its own parts,
+    /// which the owner rule leaves alone (the composite already passed it).
+    wheel_depth: u32,
     pub ctrl_pressed: bool,
     pub shift_pressed: bool,
     pub alt_pressed: bool,
@@ -122,6 +133,8 @@ impl UiContext {
             last_scroll_time: None,
             scroll_initiate_widget_id: None,
             scroll_gesture_new: false,
+            scroll_gesture_owner: None,
+            wheel_depth: 0,
             ctrl_pressed: false,
             shift_pressed: false,
             alt_pressed: false,

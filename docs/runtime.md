@@ -229,6 +229,20 @@ pure state machine; `Driver::touch` routes. A finger is always natural (dispatch
 
 ## Scrolling semantics
 
+- **A scroll gesture belongs to the first thing a wheel of it moves.** A gesture is the wheels
+  less than 250 ms apart (`UiContext::note_scroll_event`). The first widget a wheel of it has an
+  effect on owns it (`scroll_gesture_owner`); from then on every wheel of the gesture goes to the
+  owner alone, wherever the pointer is — so a page that scrolls a control under the pointer never
+  hands that control the rest of the gesture — and the owner keeps it off its rect (not while
+  hidden). The rule lives in one place, the adapter's wheel arm (`Adapted::handle_event`, and
+  `mouse_wheel_ungated`), so every widget keeps it, routed or handed a wheel by an app; a wheel a
+  composite hands its own parts is not ruled on (the composite was, `within_wheel`), and the
+  composite's own latching among its parts (`scroll_initiate_widget_id`) is its business. What
+  an app scrolls outside the widgets takes part the same way: `ScrollBox::mouse_wheel` does, and
+  `ScrollRegion::wheel_in` (its `wheel` does not; an app on it should move to `wheel_in`). Other
+  app-side scrolling claims with `claim_scroll_gesture` and checks `may_take_wheel`.
+  `a_scroll_gesture_belongs_to_what_it_first_moved`, `a_scroll_box_claims_the_gesture_it_moves`
+  and `a_regions_wheel_in_claims_the_gesture_it_moves` are the tests.
 - **The delta the runner hands out is what a list scrolls by**; under natural scrolling a list
   moves its content the way the fingers went.
 - **A value control reads "up is more"** (`MouseScrollDelta::value_notches_y`): a wheel notch up

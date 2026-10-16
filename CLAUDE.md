@@ -297,6 +297,12 @@ focus all ask `focus_holder()`, which only that record makes the composite.
 `CCE_FOCUS_DEBUG=1` prints the stops. A `Dialog` (`UiContext::open_modal`) traps the walk and
 covers everything behind it.
 
+**A scroll gesture belongs to the first thing it moved** (`UiContext::scroll_gesture_owner`,
+the adapter's wheel arm): every other widget declines the rest of it, so a scroll that carries
+a control under the pointer never hands it the gesture. A widget gets this for nothing; app-side
+scrolling takes part through `ScrollBox::mouse_wheel`, `ScrollRegion::wheel_in` or
+`claim_scroll_gesture` / `may_take_wheel` (`docs/runtime.md`, "Scrolling semantics").
+
 **Context-menu actions are keyed by ID, never by label text.** Use
 `context_menu::set_row_actions` or `UiContext::show_context_menu_rows`. Matching the English
 label (`context_menu::legacy_action_for_label`) is a fallback for menus that set none; do not add
