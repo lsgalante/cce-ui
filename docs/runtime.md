@@ -239,8 +239,10 @@ pure state machine; `Driver::touch` routes. A finger is always natural (dispatch
   composite hands its own parts is not ruled on (the composite was, `within_wheel`), and the
   composite's own latching among its parts (`scroll_initiate_widget_id`) is its business. What
   an app scrolls outside the widgets takes part the same way: `ScrollBox::mouse_wheel` does, and
-  `ScrollRegion::wheel_in` (its `wheel` does not; an app on it should move to `wheel_in`). Other
-  app-side scrolling claims with `claim_scroll_gesture` and checks `may_take_wheel`.
+  `ScrollRegion::wheel_in`, its only wheel (the context-free `wheel` is gone, so a region cannot
+  scroll outside the rule). Other app-side scrolling claims with `claim_scroll_gesture` and checks
+  `may_take_wheel`; a composite whose parts scroll and take wheels latches among them itself (the
+  JSON layout in cce-cloud, the designer's dialog).
   `a_scroll_gesture_belongs_to_what_it_first_moved`, `a_scroll_box_claims_the_gesture_it_moves`
   and `a_regions_wheel_in_claims_the_gesture_it_moves` are the tests.
 - **The delta the runner hands out is what a list scrolls by**; under natural scrolling a list

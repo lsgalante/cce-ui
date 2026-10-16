@@ -42,6 +42,13 @@ fn centred_bar_x() -> f32 {
     10.0 + (200.0 - crate::layout::centred_scrollbar_width()) * 0.5
 }
 
+/// A wheel over `r` as a gesture of its own (a fresh context): the region's own scrolling,
+/// with the scroll-gesture rule out of the way (`a_regions_wheel_in_claims_the_gesture_it_moves`
+/// is about the rule).
+fn wheel(r: &mut ScrollRegion, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
+    r.wheel_in(delta, px, py, &mut crate::context::UiContext::new())
+}
+
 /// Run the glide out (a no-op with smoothing off in the test host's config).
 fn settle(r: &mut ScrollRegion) {
     let mut n = 0;
@@ -55,11 +62,11 @@ fn settle(r: &mut ScrollRegion) {
 fn wheel_scrolls_and_clamps() {
     let mut r = region();
     r.update_bounds(10, 20.0, 100.0); // content_h = 444 > 100
-    assert!(r.wheel(&MouseScrollDelta::LineDelta(0.0, -2.0), 50.0, 50.0));
+    assert!(wheel(&mut r, &MouseScrollDelta::LineDelta(0.0, -2.0), 50.0, 50.0));
     settle(&mut r);
     assert_eq!(r.scroll_y, 48.0);
-    assert!(!r.wheel(&MouseScrollDelta::LineDelta(0.0, -2.0), 500.0, 50.0)); // miss
-    r.wheel(&MouseScrollDelta::LineDelta(0.0, -100.0), 50.0, 50.0);
+    assert!(!wheel(&mut r, &MouseScrollDelta::LineDelta(0.0, -2.0), 500.0, 50.0)); // miss
+    wheel(&mut r, &MouseScrollDelta::LineDelta(0.0, -100.0), 50.0, 50.0);
     settle(&mut r);
     assert_eq!(r.scroll_y, 344.0); // clamped to max_scroll
 }
@@ -128,20 +135,20 @@ fn horizontal_scroll_is_opt_in_and_clamps() {
     r.update_bounds(10, 20.0, 100.0);
     // No content width declared: x wheel deltas change nothing and the
     // vertical-only behavior (including the y component) is untouched.
-    assert!(!r.wheel(&MouseScrollDelta::LineDelta(-2.0, 0.0), 50.0, 50.0));
+    assert!(!wheel(&mut r, &MouseScrollDelta::LineDelta(-2.0, 0.0), 50.0, 50.0));
     assert_eq!(r.scroll_x, 0.0);
     assert!(!r.h_scroll_active());
 
     // Content wider than the 200px box: x deltas pan and clamp.
     r.set_content_w(500.0);
     assert!(r.h_scroll_active());
-    assert!(r.wheel(&MouseScrollDelta::LineDelta(-2.0, 0.0), 50.0, 50.0));
+    assert!(wheel(&mut r, &MouseScrollDelta::LineDelta(-2.0, 0.0), 50.0, 50.0));
     settle(&mut r);
     assert_eq!(r.scroll_x, 48.0);
-    r.wheel(&MouseScrollDelta::LineDelta(-100.0, 0.0), 50.0, 50.0);
+    wheel(&mut r, &MouseScrollDelta::LineDelta(-100.0, 0.0), 50.0, 50.0);
     settle(&mut r);
     assert_eq!(r.scroll_x, 300.0); // max = 500 - 200
-    r.wheel(&MouseScrollDelta::LineDelta(100.0, 0.0), 50.0, 50.0);
+    wheel(&mut r, &MouseScrollDelta::LineDelta(100.0, 0.0), 50.0, 50.0);
     settle(&mut r);
     assert_eq!(r.scroll_x, 0.0);
 }
@@ -185,7 +192,7 @@ fn sink_behind_gates_input_until_a_scroll_raises() {
     assert!(!r.press(sb_x + 1.0, 50.0));
     assert!(!r.dragging);
     // A wheel scroll raises it in the same frame…
-    assert!(r.wheel(&MouseScrollDelta::LineDelta(0.0, -2.0), 50.0, 50.0));
+    assert!(wheel(&mut r, &MouseScrollDelta::LineDelta(0.0, -2.0), 50.0, 50.0));
     assert!(r.scrollbar_raised());
     // …and now the bar takes the grab.
     assert!(r.press(sb_x + 1.0, 50.0));
@@ -213,7 +220,7 @@ fn hover_sustains_but_never_raises() {
     // Raise by scrolling (and let the glide land, so the ticks below
     // measure only the raise/sink state), hover it, and let the hold
     // lapse: hover sustains.
-    r.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
+    wheel(&mut r, &MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
     settle(&mut r);
     r.cursor_moved(sb_x + 1.0, 50.0);
     r.tick(SCROLL_ACTIVE_HOLD + 0.1); // hold lapses, hover keeps it raised
@@ -239,7 +246,7 @@ fn tuple_emission_layers_by_raised_state() {
     r.push_scrollbar_quads(&mut over);
     assert!(over.is_empty());
     // Raised: bg alone below, bar above.
-    r.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
+    wheel(&mut r, &MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
     let mut under = Vec::new();
     r.push_quads(&mut under);
     assert_eq!(under.len(), 1);
@@ -277,7 +284,7 @@ fn sink_behind_bars_cross_at_the_centre() {
     assert!(!r.press(40.0, 70.0));
     assert!(!r.dragging);
     // Raised by a scroll, the cross takes the press.
-    r.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
+    wheel(&mut r, &MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
     assert!(r.press(110.0, 40.0));
     assert!(r.release());
     assert!(r.press(40.0, 70.0));
@@ -316,7 +323,7 @@ fn the_fore_copy_is_drawn_after_the_rows() {
     // border, idle track + thumb, bg — and no fore copy.
     assert_eq!(alphas(|pc| r.push_prims(pc)).len(), 4);
     assert!(alphas(|pc| r.push_scrollbar_fore(pc)).is_empty(), "sunk: no fore copy");
-    r.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
+    wheel(&mut r, &MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
     r.tick(SCROLL_FADE_SECS * 0.5);
     assert_eq!(alphas(|pc| r.push_prims(pc)).len(), 4, "raised, the idle copy still lies under the bg");
     let fore = alphas(|pc| r.push_scrollbar_fore(pc));

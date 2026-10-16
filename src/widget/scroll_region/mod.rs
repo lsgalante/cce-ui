@@ -92,7 +92,7 @@ pub struct ScrollRegion {
     /// The smooth-scroll driver behind `scroll_x`/`scroll_y`: wheel notches
     /// glide, trackpad flicks coast. The pub offsets stay the DRAWN values —
     /// hosts keep reading them — and any host write to them is adopted on the
-    /// next `wheel`/`tick` via `reconcile`.
+    /// next `wheel_in`/`tick` via `reconcile`.
     motion: ScrollMotion,
     /// What the region is to the scroll-gesture rule (`wheel_in`): an id of its own, the way
     /// a widget's is, though the region is not one.

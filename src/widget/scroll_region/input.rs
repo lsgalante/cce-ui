@@ -106,15 +106,6 @@ impl ScrollRegion {
         false
     }
 
-    /// Scroll by a wheel over the region, outside the scroll-gesture rule: prefer
-    /// [`wheel_in`](Self::wheel_in), which takes part in it.
-    pub fn wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
-        if !self.hit(px, py) {
-            return false;
-        }
-        self.apply_wheel(delta)
-    }
-
     /// Scroll by a wheel over the region, taking part in the scroll-gesture rule as a widget
     /// does (`UiContext::may_take_wheel`): while the gesture belongs to something else the
     /// region stays put; a wheel that moves it claims the gesture for it, so the rows its

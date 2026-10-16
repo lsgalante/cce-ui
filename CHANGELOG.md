@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-16
 
+- **`ScrollRegion::wheel` is gone; `wheel_in` is a region's only wheel.** The context-free wheel
+  stayed outside the scroll-gesture rule, and every app on it has moved to `wheel_in` (cce-cloud,
+  cce-fonts, cce-mail, cce-system-interface); the apps that scroll by hand beside it now claim and
+  check too (cce-files, cce-mail's body, cce-notes, cce-vault-web, cce-system-interface's page,
+  the designer's network pan), and the composites that scroll among wheel-taking parts latch
+  among them (cce-cloud's JSON layout, the designer's dialog). With no caller left, a region can
+  no longer scroll outside the rule. The region's own tests wheel it through `wheel_in` with a
+  fresh context per call (a gesture each, as `wheel` was); all 754 tests pass.
+
 - **A scroll gesture belongs to the first thing it moved, for every widget.** The latch was each
   widget's own: Slider, RangeSlider, Slider2D, the Ramp, Float3 and the parameter pane checked
   `scroll_initiate_widget_id`, everything else did not, and even the Slider took a wheel the
