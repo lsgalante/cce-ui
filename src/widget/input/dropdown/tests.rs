@@ -435,6 +435,12 @@ fn popover_reaches_hosts_through_the_adapter() {
 
     dd.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 20.0, &mut dummy);
     assert!(dd.open);
+    // The open's first frame reveals nothing and draws nothing: no popover,
+    // or the host's occlusion clamp hides the trigger's label under it (a
+    // blank trigger for a frame on every open).
+    if crate::motion::enabled() {
+        assert!(WidgetHost::popover_rect(&dd).is_none(), "nothing revealed yet: the trigger stands alone");
+    }
     // popover_rect reports the ANIMATED box — land the expansion first.
     dd.land_anim_for_test();
     let (rx, ry, rw, rh) = WidgetHost::popover_rect(&dd).expect("open dropdown registers its popover");

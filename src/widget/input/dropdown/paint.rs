@@ -41,7 +41,15 @@ impl Paint for Dropdown {
     }
 
     fn popover(&self, rect: Rect) -> Option<(f32, f32, f32, f32)> {
-        if self.open {
+        // Mid-animation with nothing revealed (an open's first frame, a
+        // close's last): `draw_popover` draws nothing and the plain trigger
+        // stands alone, so there is no popover. Reporting the unified box
+        // there hid the trigger's own label under the occlusion clamp with no
+        // redraw on top — a blank trigger for a frame on every open. A
+        // settled open (`anim_start` gone) always reports its box.
+        let (_, _, aw, ah) = self.popover_geom_drawn(rect);
+        let unrevealed = self.anim_start.is_some() && (aw <= 0.5 || ah <= 0.5);
+        if self.open && !unrevealed {
             // The ANIMATED unified box (trigger band + revealed menu), not the
             // full menu geometry: hosts replay popover text with bounds derived
             // from this rect (and the dl-text occlusion clamp reads it), so
