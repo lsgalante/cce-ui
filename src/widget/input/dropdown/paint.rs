@@ -121,24 +121,14 @@ impl Paint for Dropdown {
         }
 
         // Trigger content redrawn over its band (the box covers the widget-pass
-        // trigger paint) — display text left, arrow right, the paint_text palette.
-        // A menu that replaces the trigger has no band to redraw on.
+        // trigger paint) through the trigger's own `paint_text`, so the label
+        // stays put as the menu opens: a placement of its own here (12 pt,
+        // `align_text_y`, its own colour) sat a pixel off the closed trigger's
+        // and the label jumped on every open. Bounded by the box, which is what
+        // exempts it from the host's occlusion clamp. A menu that replaces the
+        // trigger has no band to redraw on.
         if !self.menu_replaces_trigger {
-            let (tx, ty) = (rect.x, rect.y);
-            let th = rect.height;
-            let band_bounds = Some([ux, uy, ux + uw, uy + uh]);
-            let font = crate::layout::control_label_font_detached();
-            let text_y = crate::layout::align_text_y(ty, th, 12.0, 0.0);
-            pc.text_with(
-                self.display_text(),
-                tx + 8.0,
-                text_y,
-                12.0,
-                crate::scene::paint::text_rgb([0.8, 0.8, 0.85, 1.0]),
-                Some(font),
-                band_bounds,
-            );
-            pc.icon("chevron-down", self.arrow_rect(rect), ARROW_COLOR);
+            self.paint_text_bounded(rect, pc, Some([ux, uy, ux + uw, uy + uh]));
         }
 
         if let Some(h_idx) = self.hovered_item {
@@ -378,6 +368,12 @@ impl Dropdown {
     /// the legacy `text_labels` body minus the control label (the adapter's base-label
     /// machinery draws that, with the +4px `detached_label_inset`).
     pub(super) fn paint_text(&self, content: Rect, ctx: &mut PaintCtx) {
+        self.paint_text_bounded(content, ctx, None);
+    }
+
+    /// [`paint_text`](Self::paint_text) with its text clipped to `bounds` — the
+    /// open box's, when `draw_popover` redraws the trigger over its band.
+    pub(super) fn paint_text_bounded(&self, content: Rect, ctx: &mut PaintCtx, bounds: Option<[f32; 4]>) {
         let selected_text = if let Some(ref custom_text) = self.custom_display_text {
             custom_text.clone()
         } else {
@@ -457,7 +453,7 @@ impl Dropdown {
                 // font, and its menu then opened in this one. The whole
                 // configured string, as `widget_font` and `draw_popover`
                 // pass it — the runner reads its size too.
-                ctx.text_with(piece, cur_x, text_y, font_size, color, Some(crate::layout::control_label_font_detached()), None);
+                ctx.text_with(piece, cur_x, text_y, font_size, color, Some(crate::layout::control_label_font_detached()), bounds);
             }
         }
 
