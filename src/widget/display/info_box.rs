@@ -1,8 +1,11 @@
 //! `InfoBox` — pure display: a card with a title and lines of text. Under relief the card is a
 //! raised pane plate (the DE plate fill under a rolled edge); flat, a themed card with a border.
+//! The text is inset by the pane rung's padding on every side, in lines of the toolkit's text
+//! leading with a half line between the title and the body, and the box declares the height
+//! that holds it (`natural_height`).
 
 use crate::color;
-use crate::scene::layout::Rect;
+use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{Adapted, Input, Layout, Paint};
 
@@ -16,11 +19,47 @@ impl InfoBox {
     pub fn new(title: &str, lines: Vec<String>) -> Adapted<InfoBox> {
         Adapted::new(InfoBox { title: title.to_string(), lines })
     }
+
+    /// The inset round the text, the same on all four sides: an InfoBox is a pane, and this
+    /// is the pane rung's (`plate_padding`).
+    fn pad() -> f32 {
+        crate::layout::plate_padding().max(8.0)
+    }
+
+    /// One line of the box's text, title or body: the toolkit's text leading (a TextBox's
+    /// line, a Label's height), so lines of prose do not touch.
+    fn line_h(font_size: f32) -> f32 {
+        font_size * 1.333
+    }
+
+    /// The tops of the title's line and of each body line, from the box's top `y`: the body
+    /// starts half a line under the title.
+    fn line_tops(&self, y: f32, font_size: f32) -> (f32, impl Iterator<Item = f32>) {
+        let lh = Self::line_h(font_size);
+        let title = y + Self::pad();
+        let body = title + 1.5 * lh;
+        (title, (0..self.lines.len()).map(move |i| body + i as f32 * lh))
+    }
+
+    /// The height that holds the title and every line in the padding: what the box declares
+    /// (`intrinsic_size`), at the label font's size.
+    pub fn natural_height(&self) -> f32 {
+        let (_, font_size) = crate::layout::control_label_font_parsed();
+        let lh = Self::line_h(font_size);
+        let (title, body) = self.line_tops(0.0, font_size);
+        let last = body.last().unwrap_or(title);
+        last + lh + Self::pad()
+    }
 }
 
 impl Layout for InfoBox {
     fn inline_label(&self) -> bool {
         true // draws its own title text
+    }
+
+    /// [`natural_height`](InfoBox::natural_height), any width (the lines do not wrap).
+    fn intrinsic_size(&self) -> Option<Size> {
+        Some(Size::new(0.0, self.natural_height()))
     }
 }
 
@@ -56,21 +95,53 @@ impl Paint for InfoBox {
         let hc = color::to_srgb(crate::color::highlight_primary_color());
         let title_color = [(hc[0] * 255.0).round() as u8, (hc[1] * 255.0).round() as u8, (hc[2] * 255.0).round() as u8];
         let line_color = color::control_label_color_u8();
-        let pad = crate::layout::plate_padding().max(8.0);
-        let line_h = crate::layout::line_height(font_size);
-        // Clipped to the box. The title and lines are caller-supplied text in
-        // a box the caller also sizes, so nothing here guarantees they fit.
+        let pad = Self::pad();
+        let lh = Self::line_h(font_size);
+        // Clipped to the box. The title and lines are caller-supplied text; a box sized
+        // smaller than it declares cuts them at its edge.
         let clip = Some([x + pad, y, x + rect.width - pad, y + rect.height]);
-        ctx.text_with(self.title.clone(), x + pad, y + pad, font_size, title_color, None, clip);
-        let mut current_y = y + pad + line_h * 1.4;
-        for line in &self.lines {
-            ctx.text_with(line.clone(), x + pad, current_y, font_size, line_color, None, clip);
-            current_y += line_h;
+        // Each in the middle of its line.
+        let text_y = |top: f32| crate::layout::center_text_y(top, lh, font_size);
+        let (title, body) = self.line_tops(y, font_size);
+        ctx.text_with(self.title.clone(), x + pad, text_y(title), font_size, title_color, None, clip);
+        for (line, top) in self.lines.iter().zip(body) {
+            ctx.text_with(line.clone(), x + pad, text_y(top), font_size, line_color, None, clip);
         }
     }
 }
 
 impl Input for InfoBox {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scene::paint::Prim;
+
+    /// The box declares the height that holds its text with the same padding above the title
+    /// as below the last line, a line more for each body line; the lines are a full leading
+    /// apart, never touching, and the body starts half a line further below the title.
+    #[test]
+    fn an_info_box_holds_its_lines_evenly_padded() {
+        let (_, fs) = crate::layout::control_label_font_parsed();
+        let (pad, lh) = (InfoBox::pad(), InfoBox::line_h(fs));
+        let b = InfoBox::new("Title", vec!["one".into(), "two".into()]);
+        let h = b.natural_height();
+        assert!((h - (2.0 * pad + 3.5 * lh)).abs() < 0.01, "{h}");
+        assert_eq!(Layout::intrinsic_size(&*b).map(|s| s.height), Some(h));
+        let one = InfoBox::new("Title", vec!["one".into()]);
+        assert!((h - one.natural_height() - lh).abs() < 0.01, "a line more per body line");
+
+        let rect = Rect { x: 10.0, y: 20.0, width: 300.0, height: h };
+        let mut pc = PaintCtx::new();
+        Paint::paint(&*b, rect, &mut pc);
+        let ys: Vec<f32> = pc.finish().items.iter().filter_map(|i| match &i.prim { Prim::Text { y, .. } => Some(*y), _ => None }).collect();
+        assert_eq!(ys.len(), 3);
+        let above = ys[0] - rect.y;
+        let below = rect.y + rect.height - (ys[2] + crate::layout::line_height(fs));
+        assert!((above - below).abs() < 0.01, "padded {above} above, {below} below");
+        assert!((ys[2] - ys[1] - lh).abs() < 0.01 && (ys[1] - ys[0] - 1.5 * lh).abs() < 0.01, "{ys:?}");
+    }
+}
 
 
 #[cfg(test)]

@@ -10,6 +10,16 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-16
 
+- **InfoBox lays its text out evenly and declares its height.** It declared none, so a host
+  guessed one (the gallery's 72 px), and its content ran to the bottom edge: 20 px of padding
+  over the title, almost none under the last line. Its lines were a bare font size apart
+  (`line_height`'s 1.0), touching, with the title 1.4 lines above the body. Now the text is
+  inset by `plate_padding` on every side, in lines of the toolkit's text leading (1.333, a
+  TextBox's line, a Label's height), each centred in its line, with half a line between title
+  and body; `natural_height` (what it declares) holds exactly that. Only the gallery uses it.
+  Checked: `an_info_box_holds_its_lines_evenly_padded`; a before/after shadow shot of the
+  gallery's exhibit.
+
 - **The ColorPalette's swatches are square tiles, not discs.** Each is a raised `ControlPlate`
   (22 px, the control radius capped so it reads as a square) whose face is its colour; the
   selected one wears the ramps' selection ring outside it, squared to the tile, in the focus
