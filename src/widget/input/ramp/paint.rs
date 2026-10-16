@@ -18,15 +18,11 @@ impl Ramp {
     const PEG_TINT: f32 = 0.25;
     /// The selected peg's tint: strong, the one key the pad below edits.
     const PEG_TINT_SELECTED: f32 = 0.85;
-    /// The flat selection ring's width, at the peg's outer edge.
-    const PEG_RING_W: f32 = 1.5;
-    /// The flat face's inset from the ring: the floor shows between them.
-    const PEG_RING_GAP: f32 = 1.5;
-
-    /// A flat peg's face radius, inside the selection ring's gap.
+    /// A flat peg's face radius, inside the selection ring ([`PEG_RING_W`], at the peg's outer
+    /// edge) and its gap ([`PEG_RING_GAP`]), where the floor shows.
     fn flat_face_r(&self) -> f32 {
         let r = self.key_peg_r();
-        (r - Self::PEG_RING_W - Self::PEG_RING_GAP).max(r * 0.5)
+        (r - PEG_RING_W - PEG_RING_GAP).max(r * 0.5)
     }
 
     /// The radius key `idx`'s peg is drawn to, which [`key_at`](Self::key_at) hits: the
@@ -72,7 +68,7 @@ impl Ramp {
                         cx,
                         cy,
                         r,
-                        Self::PEG_RING_W,
+                        PEG_RING_W,
                         0.0,
                         std::f32::consts::TAU,
                         [ring[0], ring[1], ring[2], 1.0],

@@ -40,8 +40,18 @@ History is in `CHANGELOG.md`; the material design record is `rfc-material.md`.
   a control plate's depth (`bevel_width`, at most 0.4 r), the selected peg drawn last; with
   relief off, flat circles (the ColorRamp's in a `color::well_frame_color` hairline). The
   Ramp's selected peg is tinted harder under relief and ringed in `ControlPlate::focus_tint`
-  flat; the ColorRamp's is ringed outside its face in both styles. A press takes the topmost
-  peg whose drawn disc it lands on.
+  flat; the ColorRamp's is ringed outside its face in both styles. Both rings are one width and
+  gap (the ramps' shared `PEG_RING_W` / `PEG_RING_GAP`). A press takes the topmost peg whose
+  drawn disc it lands on.
+- **The ColorRamp's gradient** is painted into its track one key run at a time, in slices at
+  most a logical pixel wide, so no step shows and each key's colour meets the track exactly at
+  its position; outside the first and last keys the track is their colour. There is no
+  gradient primitive (`PaintCtx` has none; the tessellator's shaded quad is the bevels'). Its
+  sliders sit a controls column under the pegs (`layout::control_gap` apart, and under a
+  selected peg's ring), and its delete button is the Ramp's kind, the `x` glyph on a square
+  plated button, but at `button_height` (the Ramp's is its own 22 px, with a 64 px label
+  fallback). Where the icon set is missing it shows its label, at that label's width. It sits
+  in a column the sliders keep whether or not it is shown, centred on the Green slider's track.
 - **Segments** share one silhouette, parted by **seams** (`Groove`s dying into the rolled edge):
   Breadcrumb and ButtonStrip segments, the ColorSelector's text/swatch split. A `Separator` is the
   same cut with no segments to part.

@@ -24,9 +24,9 @@ impl Ramp {
     /// margin + host plate padding, ~8) lands on STRIP_GAP as well.
     pub(super) fn strip_reserve() -> f32 {
         let strip = Self::label_strip();
-        10.0 + Self::STRIP_GAP + strip + 22.0
+        MARGIN + Self::STRIP_GAP + strip + 22.0
             + Self::STRIP_GAP + strip + Self::PAD_SIDE
-            + 10.0
+            + MARGIN
     }
 
     /// A key peg's radius on THIS plot — the disc plate's outer edge, and the flat selection
@@ -63,10 +63,10 @@ impl Ramp {
     pub(super) const PLOT_INSET: f32 = 22.0;
 
     /// The graph opening: the canvas well the curve is drawn in, the widget's width in its
-    /// 10 px margins and [`graph_h`](Self::graph_h) tall. Paint draws it, a right-press in
+    /// margins ([`MARGIN`]) and [`graph_h`](Self::graph_h) tall. Paint draws it, a right-press in
     /// it opens the context menu, and a press in it makes a key.
     pub(super) fn graph_rect(&self) -> Rect {
-        Rect { x: self.base.x + 10.0, y: self.base.y + 10.0, width: self.base.w - 20.0, height: self.graph_h() }
+        Rect { x: self.base.x + MARGIN, y: self.base.y + MARGIN, width: self.base.w - 2.0 * MARGIN, height: self.graph_h() }
     }
 
     /// The plot rect: where the ramp's 0..1 × 0..1 domain maps on screen —
@@ -192,7 +192,7 @@ impl Ramp {
     /// top/bottom insets, the graph claiming the strip's space.
     pub(super) fn graph_h(&self) -> f32 {
         if self.controls_collapsed {
-            (self.base.h - 20.0).max(30.0)
+            (self.base.h - 2.0 * MARGIN).max(30.0)
         } else {
             (self.base.h - Self::strip_reserve()).max(30.0)
         }

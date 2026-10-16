@@ -42,6 +42,10 @@ ramp-colour-key = Key { $n } of { $count }: position { $position }, { $colour }
 # A ramp's key pad's two axes, as a screen reader names them: the selected key's position and value.
 ramp-position = Position
 ramp-value = Value
+# A colour ramp's sliders for the selected key's channels: their labels, and their names to a screen reader.
+ramp-red = Red
+ramp-green = Green
+ramp-blue = Blue
 # A two-axis pad's (`Slider2D`) axes, as a screen reader names them.
 slider2d-x = X
 slider2d-y = Y

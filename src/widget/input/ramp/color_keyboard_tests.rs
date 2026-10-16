@@ -398,7 +398,11 @@ fn a_color_ramp_is_a_group_of_its_keys_and_sliders() {
     press(&mut ctx, h, NamedKey::ArrowRight);
     let update = tree_update(&ctx, "", 1.0);
     let slider = |s: &str| (Role::Slider, s.to_string());
-    assert_eq!(roles(&update)[4..], [slider("Red"), slider("Green"), slider("Blue"), (Role::Button, "Delete Key".into())]);
+    let tr = crate::l10n::tr;
+    assert_eq!(
+        roles(&update)[4..],
+        [slider(&tr("ramp-red")), slider(&tr("ramp-green")), slider(&tr("ramp-blue")), (Role::Button, tr("ramp-delete-key"))]
+    );
     assert_eq!(node(&update, item_id(own, 1)).toggled(), Some(Toggled::True), "the selected key is on");
     let red = node(&update, item_id(own, 4));
     assert_eq!((red.numeric_value(), red.min_numeric_value(), red.max_numeric_value()), (Some(1.0), Some(0.0), Some(1.0)));
@@ -412,6 +416,28 @@ fn a_color_ramp_is_a_group_of_its_keys_and_sliders() {
     assert_eq!(roles(&update).last(), Some(&slider("Blue")));
     for i in ColorRamp::RED..=ColorRamp::DELETE {
         assert!(!ctx.tree.is_registered(ctx[h].field_id(i)), "field {i} stays out of the registry");
+    }
+}
+
+/// The colour ramp's controls are named from the toolkit's catalogue: the sliders' labels
+/// are its Red, Green and Blue, and the delete button's item is its Delete whether the button
+/// wears the x icon (and so has no label) or falls back to the label.
+#[test]
+fn a_color_ramps_controls_are_named_from_the_catalogue() {
+    use crate::l10n::tr;
+    let (mut ctx, h) = color_ramp();
+    let r = &ctx[h];
+    let labels = [&r.r_slider, &r.g_slider, &r.b_slider].map(|s| s.label());
+    assert_eq!(labels, [Some(tr("ramp-red")), Some(tr("ramp-green")), Some(tr("ramp-blue"))]);
+    for icon in [true, false] {
+        // An icon face, as `with_icon_name` gives where the icon set is installed: no label.
+        let button = Button::new(0.0, 0.0, 0.0, 0.0);
+        ctx[h].del_button = if icon { button.with_icon(1, 32.0, 32.0) } else { button.with_label(&tr("ramp-delete-key")) };
+        ctx.set_focused_id(h.id());
+        press(&mut ctx, h, NamedKey::Home);
+        let items = Input::a11y_items(ctx[h].inner(), Rect { x: 0.0, y: 0.0, width: 450.0, height: 390.0 });
+        let delete = items.last().expect("Delete's item");
+        assert_eq!((delete.role, delete.label.as_str()), (accesskit::Role::Button, tr("ramp-delete-key").as_str()), "icon {icon}");
     }
 }
 

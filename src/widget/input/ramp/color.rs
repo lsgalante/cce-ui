@@ -42,11 +42,14 @@ impl ColorRamp {
             ColorRampKey { pos: 1.0, color: [1.0, 1.0, 1.0] },
         ];
 
-        let r_slider = Slider::new().with_label("Red");
-        let g_slider = Slider::new().with_label("Green");
-        let b_slider = Slider::new().with_label("Blue");
-        // Sized by `arrange_fields`: `DEL_W` wide, the toolkit's button height.
-        let del_button = Button::new(0.0, 0.0, 0.0, 0.0).with_label("Delete Key");
+        let r_slider = Slider::new().with_label(&crate::l10n::tr("ramp-red"));
+        let g_slider = Slider::new().with_label(&crate::l10n::tr("ramp-green"));
+        let b_slider = Slider::new().with_label(&crate::l10n::tr("ramp-blue"));
+        // The float Ramp's kind: a square x-icon button (at the button height, not the Ramp's
+        // 22 px), its label the fallback where the icon set is missing; by name, so it
+        // survives a renderer rebuild. Sized by `arrange_fields`.
+        let del_button =
+            Button::new(0.0, 0.0, 0.0, 0.0).with_icon_name("x", &crate::l10n::tr("ramp-delete-key"));
 
         Adapted::new(ColorRamp {
             base: Widget::new(),
@@ -81,12 +84,7 @@ impl ColorRamp {
                 if range.abs() < 0.0001 {
                     return k1.color;
                 }
-                let w = (t - k1.pos) / range;
-                return [
-                    k1.color[0] * (1.0 - w) + k2.color[0] * w,
-                    k1.color[1] * (1.0 - w) + k2.color[1] * w,
-                    k1.color[2] * (1.0 - w) + k2.color[2] * w,
-                ];
+                return mix(k1.color, k2.color, (t - k1.pos) / range);
             }
         }
         self.keys[0].color
@@ -155,44 +153,48 @@ impl ColorRamp {
 }
 
 impl ColorRamp {
-    /// The delete button's width: room for "Delete Key" in the button font.
-    const DEL_W: f32 = 100.0;
-    /// The gap between the slider rows.
-    const ROW_GAP: f32 = 8.0;
-    /// The margin around the whole editor, the float Ramp's.
-    const MARGIN: f32 = 10.0;
-    /// The peg row under the track: the pegs' centres sit `PEG_DROP` below the track, and
-    /// the slider block starts `PEG_ROW` below it.
-    const PEG_DROP: f32 = 15.0;
-    const PEG_ROW: f32 = 35.0;
+    /// The clearance between the track and a selected peg's ring.
+    const PEG_CLEARANCE: f32 = 4.5;
     /// A peg's face radius: the key's colour, as a disc plate.
     pub(super) const PEG_R: f32 = 7.0;
-    /// The selection ring outside the face: the gap to it, and its width.
-    const PEG_RING_GAP: f32 = 1.5;
-    const PEG_RING_W: f32 = 2.0;
 
-    /// The gradient track: the editor's width less its margins, `ramp_height()` tall.
+    /// The editor's side margin: a selected peg's outer radius, so a key at either end keeps
+    /// its ring inside the editor's rect.
+    fn side_margin() -> f32 {
+        Self::peg_outer_r()
+    }
+
+    /// The gradient track: the editor's width less its side margins, `ramp_height()` tall,
+    /// [`MARGIN`] under the editor's top (the float Ramp's graph's).
     pub(super) fn track_rect(&self) -> Rect {
+        let side = Self::side_margin();
         Rect {
-            x: self.base.x + Self::MARGIN,
-            y: self.base.y + Self::MARGIN,
-            width: (self.base.w - 2.0 * Self::MARGIN).max(1.0),
+            x: self.base.x + side,
+            y: self.base.y + MARGIN,
+            width: (self.base.w - 2.0 * side).max(1.0),
             height: crate::layout::ramp_height(),
         }
+    }
+
+    /// How far under the track the pegs' centres sit: a selected peg's ring clears the track
+    /// by [`PEG_CLEARANCE`](Self::PEG_CLEARANCE).
+    fn peg_drop() -> f32 {
+        Self::PEG_CLEARANCE + Self::peg_outer_r()
     }
 
     /// Key `idx`'s peg centre, under the track at its position.
     pub(super) fn peg_centre(&self, idx: usize) -> (f32, f32) {
         let track = self.track_rect();
-        (track.x + self.keys[idx].pos * track.width, track.y + track.height + Self::PEG_DROP)
+        (track.x + self.keys[idx].pos * track.width, track.y + track.height + Self::peg_drop())
     }
 
     /// The flat peg's hairline, outside the face.
-    const PEG_HAIRLINE: f32 = 1.0;
+    pub(super) const PEG_HAIRLINE: f32 = 1.0;
 
-    /// A selected peg's outer radius: the face and the selection ring around it.
+    /// A selected peg's outer radius: the face and the selection ring around it ([`PEG_RING_GAP`],
+    /// [`PEG_RING_W`], the float Ramp's).
     pub(super) fn peg_outer_r() -> f32 {
-        Self::PEG_R + Self::PEG_RING_GAP + Self::PEG_RING_W
+        Self::PEG_R + PEG_RING_GAP + PEG_RING_W
     }
 
     /// The radius key `idx`'s peg is drawn to, and a press on it lands within: the selected
@@ -210,7 +212,7 @@ impl ColorRamp {
     }
 
     /// The pegs in paint order, bottom first: by index, the selected one last (on top).
-    fn peg_order(&self) -> impl Iterator<Item = usize> {
+    pub(super) fn peg_order(&self) -> impl Iterator<Item = usize> {
         peg_order(self.keys.len(), self.selected_key_idx)
     }
 
@@ -225,15 +227,16 @@ impl ColorRamp {
         crate::layout::control_label_strip() + crate::layout::slider_height()
     }
 
-    /// The R, G and B rows stacked, `ROW_GAP` apart.
+    /// The R, G and B rows stacked, the controls' gap apart (`control_gap`): a controls
+    /// column.
     fn slider_block_h() -> f32 {
-        3.0 * Self::slider_row_h() + 2.0 * Self::ROW_GAP
+        3.0 * Self::slider_row_h() + 2.0 * crate::layout::control_gap()
     }
 
-    /// The slider block's top: under the peg row.
+    /// The slider block's top: the controls' gap under a selected peg's ring.
     fn slider_top(&self) -> f32 {
         let track = self.track_rect();
-        track.y + track.height + Self::PEG_ROW
+        track.y + track.height + Self::peg_drop() + Self::peg_outer_r() + crate::layout::control_gap()
     }
 
     /// The height the editor needs: the track, the peg row and the three slider rows, in
@@ -241,27 +244,44 @@ impl ColorRamp {
     /// float Ramp's control strip), so selecting a key never changes the editor's rect.
     /// What it declares (`intrinsic_size`).
     pub fn natural_height(&self) -> f32 {
-        Self::MARGIN + crate::layout::ramp_height() + Self::PEG_ROW + Self::slider_block_h() + Self::MARGIN
+        let pegs = Self::peg_drop() + Self::peg_outer_r() + crate::layout::control_gap();
+        MARGIN + crate::layout::ramp_height() + pegs + Self::slider_block_h() + MARGIN
+    }
+
+    /// The delete button's width: square at the button height with its icon (the float Ramp's
+    /// is a fixed 22 px); where the icon set is missing, its label's width in the button font.
+    fn delete_w(&self) -> f32 {
+        let bh = crate::layout::button_height();
+        if self.del_button.inner().has_icon() {
+            bh
+        } else {
+            Layout::intrinsic_size(self.del_button.inner()).map_or(bh, |s| s.width)
+        }
     }
 
     /// The R, G and B sliders and the delete button, in the slider block under the track and
     /// its pegs, while a key is selected — the button while it is shown
     /// ([`deletable`](Fields::deletable)). Each slider row is its label strip over a slider of
-    /// the toolkit's height; the button is the toolkit's height, beside the rows' middle.
+    /// the toolkit's height; the button is the toolkit's height, in a column at the right the
+    /// controls' gap from the sliders, centred on the Green slider's track. The column is kept
+    /// while the button is hidden, so the sliders' width never jumps as keys come and go.
     pub(super) fn arrange_fields(&mut self) {
-        let (x, w) = (self.base.x, self.base.w);
+        let side = Self::side_margin();
+        let (x, w) = (self.base.x + side, (self.base.w - 2.0 * side).max(1.0));
         let sy = self.slider_top();
-        let row_h = Self::slider_row_h();
+        let (row_h, gap) = (Self::slider_row_h(), crate::layout::control_gap());
         let bh = crate::layout::button_height();
-        let slider_w = (w - 2.0 * Self::MARGIN - Self::DEL_W - 10.0).max(40.0);
+        let del_w = self.delete_w();
+        let slider_w = (w - del_w - gap).max(1.0);
 
         if self.selected_key_idx.is_some() {
             for ch in 0..3 {
-                self.slider_mut(ch).set_rect(x + Self::MARGIN, sy + ch as f32 * (row_h + Self::ROW_GAP), slider_w, row_h);
+                self.slider_mut(ch).set_rect(x, sy + ch as f32 * (row_h + gap), slider_w, row_h);
             }
             if self.deletable() {
-                let rows_h = Self::slider_block_h();
-                self.del_button.set_rect(x + w - Self::MARGIN - Self::DEL_W, sy + (rows_h - bh) / 2.0, Self::DEL_W, bh);
+                let green_track = sy + row_h + gap + crate::layout::control_label_strip();
+                let by = green_track + (crate::layout::slider_height() - bh) / 2.0;
+                self.del_button.set_rect(x + w - del_w, by, del_w, bh);
             } else {
                 park(&mut self.del_button);
             }
@@ -290,95 +310,6 @@ impl Layout for ColorRamp {
         self.base.w = rect.width;
         self.base.h = rect.height;
         self.arrange_fields();
-    }
-}
-
-impl Paint for ColorRamp {
-    /// No container box: the editor draws its track, pegs and fields itself, on the host's
-    /// plate, as the float Ramp does.
-    fn color(&self) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
-    }
-
-    // The fields are the editor's own values, never in the registry, and painted here
-    // (while a key is selected): the walk must not also descend.
-    fn paints_own_subtree(&self) -> bool {
-        true
-    }
-
-    fn paint(&self, _rect: Rect, pc: &mut PaintCtx) {
-        // The track is a canvas well cut through the host's plate, the one the float Ramp's
-        // graph and every draw-in canvas share: its floor, the gradient, then its rim over the
-        // gradient's edges. At the CONTROL radius, not the panel one: the track is a control's
-        // height (`ramp_height`, 32), and the panel's 24 would round it into a pill; at the
-        // text box's radius it reads as the field it is. The gradient is clipped to the well's
-        // rounded shape, so its square slices never poke past the corners.
-        let track = self.track_rect();
-        let radius = crate::layout::control_corner_radius();
-        pc.well_floor(track, radius, &crate::scene::Material::pane(), false);
-        pc.clip_rounded(track, radius, |pc| {
-            let slices = 100;
-            let slice_w = track.width / slices as f32;
-            for i in 0..slices {
-                let t1 = i as f32 / slices as f32;
-                let col = self.get_interpolated_color(t1 + 0.5 / slices as f32);
-                let sx = track.x + t1 * track.width;
-                pc.quad(Rect { x: sx, y: track.y, width: slice_w, height: track.height }, [col[0], col[1], col[2], 1.0]);
-            }
-        });
-        // Lit while the track has the keyboard.
-        pc.well_rim_lit(track, radius, crate::layout::control_relief(), self.walk.at == Some(Self::TRACK));
-
-        self.paint_pegs(pc);
-
-        // The fields paint themselves (`paint_self`), once.
-        if self.selected_key_idx.is_some() {
-            let dummy = UiContext::new();
-            self.r_slider.paint_self(&dummy, pc);
-            self.g_slider.paint_self(&dummy, pc);
-            self.b_slider.paint_self(&dummy, pc);
-            if self.deletable() {
-                self.del_button.paint_self(&dummy, pc);
-            }
-        }
-    }
-}
-
-impl ColorRamp {
-    /// The key pegs, in paint order — the selected one last, on top. A peg's face is the
-    /// key's colour, opaque: the face IS the key's data, so selection never tints it; the
-    /// selected peg wears the focus ring outside the face instead. Under relief the face is a
-    /// disc plate ([`PaintCtx::plate_shaped`] at `Some(2.0)`, a true circle) with a control
-    /// plate's roll (the relief width, at most 0.4 of the radius); flat, a flat disc in a
-    /// hairline of the wells' frame colour, so a key the colour of the plate still shows.
-    fn paint_pegs(&self, pc: &mut PaintCtx) {
-        let r = Self::PEG_R;
-        let relief = crate::layout::control_relief();
-        let depth = crate::layout::bevel_width().min(0.4 * r);
-        let ring = crate::scene::paint::ControlPlate::focus_tint();
-        for idx in self.peg_order() {
-            let (cx, cy) = self.peg_centre(idx);
-            let c = self.keys[idx].color;
-            let face = [c[0], c[1], c[2], 1.0];
-            if relief {
-                let disc = Rect { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r };
-                pc.plate_shaped(disc, (r, r, r, r), &crate::scene::Material::opaque(face), depth, Some(2.0));
-            } else {
-                pc.circle(cx, cy, r + Self::PEG_HAIRLINE, crate::color::well_frame_color(false, false));
-                pc.circle(cx, cy, r, face);
-            }
-            if Some(idx) == self.selected_key_idx {
-                pc.arc(
-                    cx,
-                    cy,
-                    Self::peg_outer_r(),
-                    Self::PEG_RING_W,
-                    0.0,
-                    std::f32::consts::TAU,
-                    [ring[0], ring[1], ring[2], 1.0],
-                );
-            }
-        }
     }
 }
 
@@ -486,6 +417,11 @@ impl ColorRamp {
     }
 }
 
+/// `a` and `b` mixed, `w` of the way to `b`: the gradient between two keys.
+pub(super) fn mix(a: [f32; 3], b: [f32; 3], w: f32) -> [f32; 3] {
+    [0, 1, 2].map(|i| a[i] * (1.0 - w) + b[i] * w)
+}
+
 /// A key's colour as a reader hears it: `#rrggbb`, each channel as its slider shows it.
 fn colour_hex(c: [f32; 3]) -> String {
     let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -552,7 +488,7 @@ impl Input for ColorRamp {
         if self.deletable() {
             items.push(A11yItem {
                 field: Some(self.field_id(Self::DELETE)),
-                ..A11yItem::new(Role::Button, self.del_button.label().unwrap_or_default(), rect(&self.del_button))
+                ..A11yItem::new(Role::Button, crate::l10n::tr("ramp-delete-key"), rect(&self.del_button))
             });
         }
         items

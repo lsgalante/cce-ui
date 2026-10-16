@@ -10,6 +10,48 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-15
 
+- **The ColorRamp's look comes from the toolkit, not from numbers of its own.** Its delete
+  control was a 100 px text button ("Delete Key", sized for English) beside the middle of the
+  slider block, lined up with nothing, in a 110 px column the sliders lost even with two keys.
+  It is now the Ramp's kind of button, the `x` glyph on a square plate, but at `button_height`
+  (24 px at the defaults; the Ramp's is still its own 22 px, with a 64 px label fallback): its
+  label, `ramp-delete-key` "Delete", is the fallback where the icon set is missing, and then the
+  button is that label's width. It is centred on the Green slider's track, `control_gap` from
+  the sliders; the column is still kept at two keys, now 48 px against 110 (the button 76 px
+  narrower, the gap 14 px wider), so the sliders gain 62 px at the defaults, less with the label
+  fallback. The button and its reader item now say "Delete" (they said "Delete Key"), the float
+  Ramp's name: the item is named `ramp-delete-key` whatever the face, since the icon button has
+  no label to name it from. The Red, Green and Blue labels are `ramp-red` / `ramp-green` /
+  `ramp-blue` in the catalogue. The gradient was 100 fixed slices sampled at their middles,
+  steps of 4.3 px at the gallery's 450 and 10.5 px at 1100 wide, visible in the dark half, and a
+  key's colour landed up to half a slice off its position; it is now painted a key run at a time
+  in slices at most a pixel wide, each key's position a slice edge (about one quad per pixel of
+  track; `PaintCtx` has no gradient primitive). The slider rows are a controls column,
+  `control_gap` apart (they were 8 px, the labels crowding the track above), and the first is
+  `control_gap` under a selected peg's ring; the pegs hang a 4.5 px clearance plus that ring's
+  radius under the track. A selected key at either end now keeps its ring inside the editor (it
+  poked 0.5 px out): the thinner ring brings the radius to 10 px, the old fixed side margin, and
+  the side margin is now defined as that radius (pixel-neutral at these constants), so it keeps
+  the ring inside if they change. The selection ring is the Ramp's width, 1.5 px (it was 2.0):
+  both ramps now share `PEG_RING_W` / `PEG_RING_GAP` and the 10 px top and bottom margin
+  (`ramp::MARGIN`, the Ramp's literals before; pixel-neutral there). The editor is 45.5 px
+  taller at its natural height (253.5 at the defaults). `color.rs` passed 800 lines, so its
+  paint moved to `ramp/color_paint.rs`. Mouse and keyboard behaviour are unchanged, and so is
+  the reader's model but for the Delete item's name. Checked by
+  `a_color_ramps_delete_is_a_square_x_button_beside_the_green_track`,
+  `a_color_ramps_gradient_steps_a_pixel_at_most_and_meets_each_key`,
+  `a_color_ramps_end_keys_ring_stays_inside_it`,
+  `a_color_ramps_controls_are_named_from_the_catalogue` and the tightened
+  `a_color_ramp_lays_its_sliders_out_whole` (rows `control_gap` apart, under the ring) and
+  `color_ramp_pegs_under_relief_are_opaque_disc_plates_the_selected_on_top` (the ring's radius
+  and width), each failing with its part put back (the 100-slice gradient, the old button
+  geometry, the label-named reader item, the 8 px rows, the 2.0 ring with the fixed 10 px side
+  margin, the 2.0 ring's width); the side margin alone put back fails nothing, being the same 10
+  px. English slider labels read the same from a literal, so only the reader names' test pins
+  the catalogue there. Looked at in a shadow session: the editor window and the gallery's
+  exhibit beside the Ramp, unselected and selected, Relief and Flat, the delete button clicked;
+  under a level stretch the gradient shows no bands where the old one showed 4 px steps.
+
 - **The ColorRamp is one keyboard stop too, and a reader sees its keys and sliders.** It had no
   focus role, no Tab arm and no `FocusIn` handler: its sliders and delete button took keys only
   when the focus record named them, which nothing but its tests ever set, so it could not be

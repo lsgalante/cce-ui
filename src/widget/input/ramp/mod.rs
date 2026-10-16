@@ -12,13 +12,15 @@
 //!
 //! | module | holds |
 //! |---|---|
-//! | `mod.rs` | the float `Ramp`: its key, construction, presets, the spec in and out, `impl Layout`; and what both ramps share: the keyboard on their fields and keys (`Fields`), resettling a moved key, peg order and the topmost-peg hit test, the closed point test, parking a field |
+//! | `mod.rs` | the float `Ramp`: its key, construction, presets, the spec in and out, `impl Layout`; and what both ramps share: the keyboard on their fields and keys (`Fields`), resettling a moved key, peg order and the topmost-peg hit test, the closed point test, parking a field, the margin round the well and the selected peg's ring |
 //! | `geometry` | the plot, the key pegs (size, order, hit test), where a dragged key lands, the controls' places |
 //! | `paint` | `impl Paint for Ramp` |
 //! | `input` | `impl Input for Ramp`: key drags, the hover-scroll, its fields and keys (`impl Fields`), the accessibility items |
-//! | `color` | the `ColorRamp` widget whole |
+//! | `color` | the `ColorRamp` widget but its paint: its key, construction, geometry (track, pegs, the fields' places), `impl Layout`, `impl Fields`, `impl Input` and the accessibility items |
+//! | `color_paint` | `impl Paint for ColorRamp`: the track and its gradient, the pegs, the fields |
 
 mod color;
+mod color_paint;
 mod geometry;
 mod input;
 mod paint;
@@ -151,6 +153,14 @@ fn topmost_peg(n: usize, sel: Option<usize>, px: f32, py: f32, peg: impl Fn(usiz
 fn within(r: Rect, x: f32, y: f32) -> bool {
     x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height
 }
+
+/// The margin a ramp keeps round its well — above it and below the controls, and at the
+/// float ramp's sides: both ramps', so their wells sit at one depth in a host.
+const MARGIN: f32 = 10.0;
+
+/// A selected key peg's ring, both ramps': its width, and its gap to the face inside it.
+const PEG_RING_W: f32 = 1.5;
+const PEG_RING_GAP: f32 = 1.5;
 
 /// Park a field off-screen at no size: how a ramp hides a control it is not showing.
 fn park(w: &mut dyn WidgetHost) {
@@ -510,11 +520,11 @@ impl Ramp {
 
     /// The height the ramp needs: a graph [`GRAPH_H`](Ramp::GRAPH_H) tall over the
     /// control strip ([`strip_reserve`](Ramp::strip_reserve)), or with its controls
-    /// collapsed the graph alone in its 10 px margins. What it declares
+    /// collapsed the graph alone in its margins ([`MARGIN`]). What it declares
     /// (`intrinsic_size`), and what a host that sizes its rows itself asks for.
     pub fn natural_height(&self) -> f32 {
         if self.controls_collapsed {
-            Self::GRAPH_H + 20.0
+            Self::GRAPH_H + 2.0 * MARGIN
         } else {
             Self::expanded_height()
         }

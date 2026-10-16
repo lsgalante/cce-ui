@@ -303,10 +303,102 @@ fn a_color_ramp_lays_its_sliders_out_whole() {
     for (_, _, _, rh) in &rows {
         assert_eq!(*rh, crate::layout::control_label_strip() + crate::layout::slider_height());
     }
+    let gap = crate::layout::control_gap();
     for pair in rows.windows(2) {
-        assert!(pair[1].1 >= pair[0].1 + pair[0].3, "rows overlap: {pair:?}");
+        assert!((pair[1].1 - (pair[0].1 + pair[0].3) - gap).abs() < 1e-3, "rows the controls' gap apart: {pair:?}");
     }
+    let ring_bottom = peg(r, 1).1 + ColorRamp::peg_outer_r();
+    assert!((rows[0].1 - ring_bottom - gap).abs() < 1e-3, "the Red row the controls' gap under the selected ring");
     assert_eq!(r.del_button.rect().3, crate::layout::button_height());
+}
+
+/// A selected key at either end keeps its ring inside the editor: the track is inset by the
+/// ring's outer radius.
+#[test]
+fn a_color_ramps_end_keys_ring_stays_inside_it() {
+    let (mut ctx, h) = color_ramp();
+    for i in [0, 3] {
+        let (x, y) = peg(&ctx[h], i);
+        ctx.propagate_event(&press(x, y), h.id());
+        ctx.propagate_event(&release(x, y), h.id());
+        assert_eq!(ctx[h].selected_key_idx, Some(i));
+        let (r, base) = (ColorRamp::peg_outer_r(), &ctx[h].base);
+        assert!(x - r >= base.x - 1e-3 && x + r <= base.x + base.w + 1e-3, "key {i}'s ring lies inside");
+    }
+}
+
+/// The delete button is the float Ramp's kind: with its x icon a square at the button height,
+/// without it its label's width; at the right of the editor, the controls' gap from the
+/// sliders, centred on the Green slider's track. Its column is kept with two keys, so the
+/// sliders are as wide with or without the button.
+#[test]
+fn a_color_ramps_delete_is_a_square_x_button_beside_the_green_track() {
+    let tr = crate::l10n::tr;
+    for icon in [true, false] {
+        let (mut ctx, h) = color_ramp();
+        let button = Button::new(0.0, 0.0, 0.0, 0.0);
+        ctx[h].del_button = if icon { button.with_icon(1, 32.0, 32.0) } else { button.with_label(&tr("ramp-delete-key")) };
+        let (x, y) = peg(&ctx[h], 1);
+        ctx.propagate_event(&press(x, y), h.id());
+        ctx.propagate_event(&release(x, y), h.id());
+        let r = &ctx[h];
+        let bh = crate::layout::button_height();
+        let (bx, by, bw, bhh) = r.del_button.rect();
+        let want_w = if icon { bh } else { Layout::intrinsic_size(r.del_button.inner()).unwrap().width };
+        assert_eq!((bw, bhh), (want_w, bh), "icon {icon}: the button's size");
+        assert!(want_w < 100.0, "narrower than the label button was");
+        let track = r.track_rect();
+        assert!((bx + bw - (track.x + track.width)).abs() < 1e-3, "flush with the track's right end");
+        let (gx, gy, gw, _) = r.g_slider.rect();
+        assert!((bx - (gx + gw) - crate::layout::control_gap()).abs() < 1e-3, "the controls' gap from the sliders");
+        let green_track = gy + crate::layout::control_label_strip() + crate::layout::slider_height() / 2.0;
+        assert!((by + bh / 2.0 - green_track).abs() < 1e-3, "centred on the Green track");
+        // Two keys: the button hidden, the sliders as wide.
+        let mut r2 = ctx.remove(h).unwrap();
+        r2.keys.drain(2..4);
+        r2.selected_key_idx = Some(1);
+        r2.arrange_fields();
+        assert!(r2.del_button.rect().0 < -900.0, "hidden at two keys");
+        assert_eq!(r2.g_slider.rect().2, gw, "the sliders keep their width");
+    }
+}
+
+/// The gradient has no visible step: between two keys it is painted in slices at most a
+/// pixel wide, each the gradient's colour at its middle; each key's position is a slice edge;
+/// before the first key and after the last it is that key's colour; and the slices tile the
+/// track.
+#[test]
+fn a_color_ramps_gradient_steps_a_pixel_at_most_and_meets_each_key() {
+    use crate::scene::paint::Prim;
+    let (mut ctx, h) = color_ramp();
+    ctx[h].keys[0].pos = 0.1;
+    ctx[h].keys[3].pos = 0.9;
+    let r = &ctx[h];
+    let track = r.track_rect();
+    let mut slices: Vec<Rect> = Vec::new();
+    for p in painted(r.inner()) {
+        if let Prim::Quad { rect, color } = p {
+            if rect.y == track.y && rect.height == track.height && rect.width < track.width {
+                let t = (rect.x + rect.width / 2.0 - track.x) / track.width;
+                let want = r.get_interpolated_color(t);
+                assert!((0..3).all(|i| (color[i] - want[i]).abs() < 1e-4), "the slice at {t} is the gradient's colour there");
+                let end = t < r.keys[0].pos || t > r.keys[3].pos;
+                assert!(end || rect.width <= 1.0 + 1e-4, "a slice {} px wide at {t}", rect.width);
+                slices.push(rect);
+            }
+        }
+    }
+    assert!(slices.len() > track.width as usize / 2, "slices about a pixel each: {}", slices.len());
+    assert!((slices[0].x - track.x).abs() < 1e-3, "from the track's left end");
+    for pair in slices.windows(2) {
+        assert!((pair[1].x - (pair[0].x + pair[0].width)).abs() < 1e-3, "contiguous: {pair:?}");
+    }
+    let last = slices.last().unwrap();
+    assert!((last.x + last.width - (track.x + track.width)).abs() < 1e-3, "to its right end");
+    for k in &r.keys {
+        let kx = track.x + k.pos * track.width;
+        assert!(slices.iter().any(|s| (s.x - kx).abs() < 1e-3), "a slice starts at the key at {}", k.pos);
+    }
 }
 
 /// The sliders and the delete button are painted once: what a selected key adds to the
@@ -514,8 +606,9 @@ fn color_ramp_pegs_under_relief_are_opaque_disc_plates_the_selected_on_top() {
     assert!(near(pegs.last().unwrap().0, peg(&ctx[h], 1)), "the selected peg is drawn last");
     let plate = prims.iter().rposition(|p| matches!(p, Prim::Plate { .. })).unwrap();
     assert!(
-        matches!(prims[plate + 1], Prim::Arc { radius, .. } if radius > ColorRamp::PEG_R),
-        "its ring follows it, outside the face"
+        matches!(prims[plate + 1], Prim::Arc { radius, thickness, .. }
+            if radius == ColorRamp::peg_outer_r() && thickness == PEG_RING_W),
+        "its ring follows it, outside the face, the float Ramp's width"
     );
 }
 
@@ -571,7 +664,10 @@ fn a_press_on_a_color_ramp_peg_beside_its_neighbour_takes_that_peg() {
     for relief in [true, false] {
         crate::layout::set_control_relief(relief);
         let (mut ctx, h) = color_ramp();
-        ctx[h].keys[2].pos = 0.54;
+        // Key 2 between the farthest its face can be from key 1's and still not overlap it,
+        // and the nearest a press on key 1's face can be to it and still be outside its ring.
+        let (apart, reach) = (2.0 * (ColorRamp::PEG_R + 1.0), ColorRamp::PEG_R - 0.1 + ColorRamp::peg_outer_r());
+        ctx[h].keys[2].pos = 0.5 + (apart + reach) / 2.0 / ctx[h].track_rect().width;
         let ((x1, y), (x2, _)) = (peg(&ctx[h], 1), peg(&ctx[h], 2));
         assert!(x2 - x1 > 2.0 * (ColorRamp::PEG_R + 1.0), "the faces do not overlap, hairlines included");
         let x = x1 + ColorRamp::PEG_R - 0.1;

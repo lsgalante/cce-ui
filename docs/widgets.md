@@ -278,7 +278,9 @@ ramps implement (`ramp::Fields`, `widget/input/ramp/mod.rs`).
   `ramp-colour-key`, "Key 2 of 4: position 0.50, #ff0000"); the Ramp's Preset and Line as
   `ComboBox`es with their choice and, while a key is selected, its pad as two `Slider`s,
   Position and Value (`ramp-position`, `ramp-value`); the ColorRamp's Red, Green and Blue
-  `Slider`s with their numbers; Delete while it is shown. The item of the field with the
+  `Slider`s with their numbers (`ramp-red`, `ramp-green`, `ramp-blue`, which are also their
+  labels); Delete while it is shown, named `ramp-delete-key` whether its button wears the `x`
+  glyph (and so has no label) or falls back to the label. The item of the field with the
   keyboard is the reader's focus — the selected key's while the graph or track has it, Position
   for the pad. A reader's Click on a key selects it; on a control it gives it the keyboard and
   does what Space does there (a dropdown opens, Delete deletes), at the ramp's next tick, which
