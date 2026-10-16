@@ -32,7 +32,7 @@ pub use trackpad::{Trackpad, Finger};
 pub use font_selector::FontSelector;
 pub use button_strip::ButtonStrip;
 pub use keybind_recorder::KeybindRecorder;
-pub use ramp::{Ramp, RampKey, ColorRamp, ColorRampKey, format_ramp_spec, parse_ramp_spec};
+pub use ramp::{Ramp, RampKey, ColorRamp, ColorRampKey, ColorPalette, format_ramp_spec, parse_ramp_spec};
 pub use bevel_preview::{BevelPreview, bevel_ease, parse_bevel_knobs};
 pub use ramp_preview::RampPreview;
 

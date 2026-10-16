@@ -232,7 +232,7 @@ under their ids (`child_ids`). A host that owns its controls by value and routes
 itself (the parameter pane, below) keeps it HELD — never inserted: `set_rect` places the parts,
 `parts` / `parts_mut` reach them, and `sync_parts` does the sync after each event.
 
-## Ramp, ColorRamp and Slider2D: the keyboard and a reader
+## Ramp, ColorRamp, ColorPalette and Slider2D: the keyboard and a reader
 
 **Slider2D** is a `FocusRole::Well` stop. Focused, Left / Right step x by `STEP` (0.02) and Up /
 Down step y (Up is more); Home / End send x to 0 / 1 and PageDown / PageUp send y. Each move is a
@@ -290,6 +290,33 @@ ramps implement (`ramp::Fields`, `widget/input/ramp/mod.rs`).
 `tab_enters_a_color_ramp_walks_its_fields_and_leaves` are the tests through the runner;
 `widget/input/ramp/keyboard_tests.rs` and `widget/input/ramp/color_keyboard_tests.rs` hold the
 rest.
+
+**ColorPalette** is the ColorRamp's discrete kin, on the same `Fields` walk: an editable row of
+colour swatches (`ColorPalette::new`, six hues; `with_colors`). Its strip is the ColorRamp's
+kind of track — a canvas well `ramp_height` tall at the control radius — with the swatches
+standing in it as the ColorRamp's pegs (`paint_peg`, one painter for both), ended by an add
+slot (the `plus` glyph). Under the strip, while a swatch is selected, the ColorRamp's Red,
+Green and Blue sliders and delete button, arranged as its are; the rows are reserved, so the
+height it declares (`natural_height`) never changes.
+
+- **Pointer.** A press on a swatch selects it and, held, drags it along the strip, the others
+  closing up behind it. A press on the add slot appends a copy of the last swatch and selects
+  it. Swatches keep a full spacing until the strip runs short; then they close up and overlap
+  (the later on top), but the add slot stays a full spacing past the last, so it can always be
+  pressed.
+- **The strip's keys** are the ramps' (arrows, Home / End, Delete / Backspace), plus
+  Shift+Left / Shift+Right, which move the selected swatch, and Insert, which adds a copy of
+  the selected swatch after it (with none selected, of the last at the end).
+- **One swatch at least** (`Fields::MIN_KEYS`, which a ramp keeps at two): on the last the
+  delete button is hidden.
+- **What it tells its host.** An edit, an add, a delete and a move raise `take_change` (a
+  `Changed` in the sweep); a selection does not, nor does `set_colors`. `colors()` and
+  `selected_color()` read it.
+- **To a reader** a `RadioButton` per swatch (`palette-colour`, "Colour 2 of 6: #ff0000"), the
+  add slot as a `Button` (`palette-add-colour`; a Click adds as Insert does), the sliders and
+  Delete (`palette-delete-colour`) as the ColorRamp's.
+
+`widget/input/ramp/palette_tests.rs` holds its tests.
 
 ## Float3 trackball
 

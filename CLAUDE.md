@@ -469,7 +469,7 @@ and a string the toolkit shows goes in the `.ftl`, not the source. Never give an
 role description (it registers as AT-SPI `Extended` and never appears on the bus).
 `docs/rfc-accessibility-locale.md` has the state and the parked plan.
 
-One extension was asked for and is in: the Ramp, the ColorRamp and Slider2D are keyboard stops
+One extension was asked for and is in: the Ramp, the ColorRamp, the ColorPalette and Slider2D are keyboard stops
 and read as a `Group` of items (`docs/widgets.md` has the model). What any composite may use from
 it: `claim_field_focus` / `focus_holder` (above), and `A11yItem`'s `value`, `range` and `field` —
 an item with a range is a number a reader sets (`Input::a11y_set_item_value`), and an item whose

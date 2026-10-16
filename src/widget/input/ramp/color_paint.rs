@@ -75,39 +75,32 @@ impl ColorRamp {
         run(x_at(last.pos), track.x + track.width, last.color);
     }
 
-    /// The key pegs, in paint order — the selected one last, on top. A peg's face is the
-    /// key's colour, opaque: the face IS the key's data, so selection never tints it; the
-    /// selected peg wears the focus ring outside the face instead. Under relief the face is a
-    /// disc plate ([`PaintCtx::plate_shaped`] at `Some(2.0)`, a true circle) with a control
-    /// plate's roll (the relief width, at most 0.4 of the radius); flat, a flat disc in a
-    /// hairline of the wells' frame colour, so a key the colour of the plate still shows.
+    /// The key pegs ([`paint_peg`]), in paint order — the selected one last, on top.
     fn paint_pegs(&self, pc: &mut PaintCtx) {
-        let r = Self::PEG_R;
-        let relief = crate::layout::control_relief();
-        let depth = crate::layout::bevel_width().min(0.4 * r);
-        let ring = crate::scene::paint::ControlPlate::focus_tint();
         for idx in self.peg_order() {
-            let (cx, cy) = self.peg_centre(idx);
-            let c = self.keys[idx].color;
-            let face = [c[0], c[1], c[2], 1.0];
-            if relief {
-                let disc = Rect { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r };
-                pc.plate_shaped(disc, (r, r, r, r), &crate::scene::Material::opaque(face), depth, Some(2.0));
-            } else {
-                pc.circle(cx, cy, r + Self::PEG_HAIRLINE, crate::color::well_frame_color(false, false));
-                pc.circle(cx, cy, r, face);
-            }
-            if Some(idx) == self.selected_key_idx {
-                pc.arc(
-                    cx,
-                    cy,
-                    Self::peg_outer_r(),
-                    PEG_RING_W,
-                    0.0,
-                    std::f32::consts::TAU,
-                    [ring[0], ring[1], ring[2], 1.0],
-                );
-            }
+            paint_peg(pc, self.peg_centre(idx), Self::PEG_R, self.keys[idx].color, Some(idx) == self.selected_key_idx);
         }
+    }
+}
+
+/// One colour peg of face radius `r` centred at `(cx, cy)` — a colour ramp's key, a palette's
+/// swatch. Its face is `color`, opaque: the face IS the data, so selection never tints it; a
+/// `selected` peg wears the focus ring outside the face instead. Under relief the face is a
+/// disc plate ([`PaintCtx::plate_shaped`] at `Some(2.0)`, a true circle) with a control
+/// plate's roll (the relief width, at most 0.4 of the radius); flat, a flat disc in a hairline
+/// of the wells' frame colour, so a colour the plate's still shows.
+pub(super) fn paint_peg(pc: &mut PaintCtx, (cx, cy): (f32, f32), r: f32, color: [f32; 3], selected: bool) {
+    let face = [color[0], color[1], color[2], 1.0];
+    if crate::layout::control_relief() {
+        let depth = crate::layout::bevel_width().min(0.4 * r);
+        let disc = Rect { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r };
+        pc.plate_shaped(disc, (r, r, r, r), &crate::scene::Material::opaque(face), depth, Some(2.0));
+    } else {
+        pc.circle(cx, cy, r + ColorRamp::PEG_HAIRLINE, crate::color::well_frame_color(false, false));
+        pc.circle(cx, cy, r, face);
+    }
+    if selected {
+        let ring = crate::scene::paint::ControlPlate::focus_tint();
+        pc.arc(cx, cy, r + PEG_RING_GAP + PEG_RING_W, PEG_RING_W, 0.0, std::f32::consts::TAU, [ring[0], ring[1], ring[2], 1.0]);
     }
 }

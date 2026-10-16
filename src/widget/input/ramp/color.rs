@@ -412,7 +412,7 @@ pub(super) fn mix(a: [f32; 3], b: [f32; 3], w: f32) -> [f32; 3] {
 }
 
 /// A key's colour as a reader hears it: `#rrggbb`, each channel as its slider shows it.
-fn colour_hex(c: [f32; 3]) -> String {
+pub(super) fn colour_hex(c: [f32; 3]) -> String {
     let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     format!("#{:02x}{:02x}{:02x}", byte(c[0]), byte(c[1]), byte(c[2]))
 }

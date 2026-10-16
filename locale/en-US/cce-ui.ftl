@@ -46,6 +46,11 @@ ramp-value = Value
 ramp-red = Red
 ramp-green = Green
 ramp-blue = Blue
+# A colour palette's swatch as a screen reader names it: its place among the swatches, and its colour as #rrggbb.
+palette-colour = Colour { $n } of { $count }: { $colour }
+# A colour palette's add slot and delete button, as a screen reader names them.
+palette-add-colour = Add colour
+palette-delete-colour = Delete colour
 # A two-axis pad's (`Slider2D`) axes, as a screen reader names them.
 slider2d-x = X
 slider2d-y = Y

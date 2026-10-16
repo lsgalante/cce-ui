@@ -3,6 +3,8 @@
 //! and value) and — with more than two keys — a delete button. A hover-scroll over a key
 //! steers it and coasts. [`ColorRamp`] is the colour gradient: keys of colour along a bar, the
 //! selected one edited by R, G and B sliders and — with more than two keys — a delete button.
+//! [`ColorPalette`] is its discrete kin: a row of colour swatches, added, deleted, dragged into
+//! order, and edited by the same sliders and button.
 //! Each ramp's controls are its own values, never registered. Each ramp is one keyboard stop
 //! whose fields take the keyboard in turn ([`Fields`], which both share): the ramp itself (its
 //! graph or track: the ramp's own id focused), then each control, which the window's focus
@@ -17,21 +19,28 @@
 //! | `paint` | `impl Paint for Ramp` |
 //! | `input` | `impl Input for Ramp`: key drags, the hover-scroll, its fields and keys (`impl Fields`), the accessibility items |
 //! | `color` | the `ColorRamp` widget but its paint: its key, construction, geometry (track, pegs, the fields' places), `impl Layout`, `impl Fields`, `impl Input` and the accessibility items |
-//! | `color_paint` | `impl Paint for ColorRamp`: the track and its gradient, the pegs, the fields |
+//! | `color_paint` | `impl Paint for ColorRamp`: the track and its gradient, the pegs, the fields; `paint_peg`, a colour peg, which the palette's swatches share |
+//! | `palette` | the `ColorPalette` widget but its paint: its swatches, construction, geometry (strip, swatch slots, the add slot, the fields' places), `impl Layout`, `impl Fields`, `impl Input` and the accessibility items |
+//! | `palette_paint` | `impl Paint for ColorPalette`: the strip, its swatches and add slot, the fields |
 
 mod color;
 mod color_paint;
 mod geometry;
 mod input;
 mod paint;
+mod palette;
+mod palette_paint;
 #[cfg(test)]
 mod color_keyboard_tests;
+#[cfg(test)]
+mod palette_tests;
 #[cfg(test)]
 mod keyboard_tests;
 #[cfg(test)]
 mod tests;
 
 pub use color::{ColorRamp, ColorRampKey};
+pub use palette::ColorPalette;
 
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::{Cap, PaintCtx};
@@ -206,6 +215,8 @@ pub(super) struct FieldWalk {
 trait Fields {
     /// How many fields the ramp has at most, itself included.
     const TOTAL: usize;
+    /// How few keys it keeps: a ramp two, its ends; a palette one.
+    const MIN_KEYS: usize = 2;
     /// How many fields take the keyboard now, in walk order, the ramp itself first.
     fn field_count(&self) -> usize;
     /// Control field `i` (`1..TOTAL`).
@@ -233,10 +244,11 @@ trait Fields {
     fn delete_button(&mut self) -> &mut Adapted<Button>;
 
     /// Whether the delete button is shown: while a key is selected and the ramp has more
-    /// than the two keys it keeps. With two it is hidden — parked, unpainted, no Tab stop —
-    /// rather than shown doing nothing (a button has no disabled state).
+    /// than the keys it keeps ([`MIN_KEYS`](Self::MIN_KEYS)). At that count it is hidden —
+    /// parked, unpainted, no Tab stop — rather than shown doing nothing (a button has no
+    /// disabled state).
     fn deletable(&self) -> bool {
-        self.selected_key().is_some() && self.key_count() > 2
+        self.selected_key().is_some() && self.key_count() > Self::MIN_KEYS
     }
 
     /// The field the window's focus is on, if it is one of the ramp's: the ramp itself when
@@ -343,10 +355,10 @@ trait Fields {
 
     /// Delete the selected key from the keyboard — Delete on the ramp itself, the delete
     /// button pressed from the keyboard or by a reader — and select its neighbour (the key
-    /// after it, else the one before), so a keyboard user can go on. A ramp keeps two keys
-    /// at least. Returns whether a key went.
+    /// after it, else the one before), so a keyboard user can go on. A ramp keeps
+    /// [`MIN_KEYS`](Self::MIN_KEYS) at least. Returns whether a key went.
     fn delete_from_keyboard(&mut self) -> bool {
-        let Some(idx) = self.selected_key().filter(|_| self.key_count() > 2) else { return false };
+        let Some(idx) = self.selected_key().filter(|_| self.key_count() > Self::MIN_KEYS) else { return false };
         self.remove_selected_key();
         self.pick_key(idx.min(self.key_count() - 1));
         true

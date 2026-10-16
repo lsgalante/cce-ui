@@ -10,6 +10,15 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-16
 
+- **A new widget, `ColorPalette`**: an editable row of colour swatches — added from an add slot
+  or Insert, deleted (down to one), dragged or Shift+arrowed into order, and edited by the
+  ColorRamp's R, G and B sliders. It lives in the ramp module to share the ColorRamp's field
+  walk (`Fields`, which gains `MIN_KEYS`, two for a ramp and one for a palette) and its pegs
+  (`paint_peg`, lifted out of the ColorRamp's paint unchanged). Its edits raise `take_change`.
+  Checked: `widget/input/ramp/palette_tests.rs` (a press on the add slot was crowded under the
+  last swatch on a full strip until the add slot kept a full spacing; the test failed before);
+  the gallery's new exhibit in a shadow shot.
+
 - **The Ramp's key pad is a Slider2D at its own size.** It was a 64 px square (`PAD_SIDE`), the
   Slider2D's old size; now `PAD_SIDE` is `Slider2D::SIDE` (120), one constant with what the
   Slider2D declares. The control strip, so `natural_height`, grows 56 px: hosts that size a ramp

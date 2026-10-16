@@ -202,7 +202,7 @@ pub use self::input::{
     Button, TextBox, Spinbox, SliderSpinbox, Dropdown, Checkbox, Toggle, RadioGroup, Slider, RangeSlider,
     ColorSelector, Finger, Trackpad, get_font_db, ActiveThumb, FontSelector,
     BevelPreview, bevel_ease, parse_bevel_knobs, RampPreview,
-    ButtonStrip, KeybindRecorder, Ramp, RampKey, ColorRamp, ColorRampKey,
+    ButtonStrip, KeybindRecorder, Ramp, RampKey, ColorRamp, ColorRampKey, ColorPalette,
     format_ramp_spec, parse_ramp_spec
 };
 
