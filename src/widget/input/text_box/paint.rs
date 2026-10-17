@@ -129,6 +129,10 @@ impl Paint for TextBox {
         if self.editing && !self.disabled {
             let (ox, oy) = ctx.offset();
             crate::text_input::claim(self.rect.x + ox, self.rect.y + top + oy, self.rect.width, visual_h);
+            if !self.is_password {
+                let (text, cursor, anchor) = self.surrounding();
+                crate::text_input::surrounding(&text, cursor, anchor);
+            }
         }
 
         // Keep the model's cached rect and the paint rect consistent: paint receives the

@@ -34,6 +34,17 @@ pub fn claim(x: f32, y: f32, w: f32, h: f32) {
     crate::ime::report_caret(x, y, w, h);
 }
 
+/// The field claiming this frame holds `text`, its caret at byte offset
+/// `cursor` and its selection's other end at `anchor` (equal to `cursor`
+/// with no selection): the input method reads the field from it (Wayland's
+/// `set_surrounding_text`; cce-remote shows it on the phone). Call it beside
+/// [`claim`]. Never for a password. `TextBox` and a focused `DocEditor` do it
+/// on their own; an app drawing its own field may. See
+/// [`crate::ime::report_surrounding`].
+pub fn surrounding(text: &str, cursor: usize, anchor: usize) {
+    crate::ime::report_surrounding(text, cursor, anchor);
+}
+
 /// Run `paint` and return what it claimed, alongside its result. A claim
 /// made earlier this frame stands if `paint` makes none, so wrapping a
 /// painting changes nothing about the frame's claim — it only reports it.

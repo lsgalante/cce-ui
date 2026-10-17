@@ -20,6 +20,37 @@ fn editor(text: &str) -> DocEditor {
     e
 }
 
+/// A focused editor's surrounding text is its caret's line, the caret and
+/// the selection's other end as byte offsets in it; a selection from
+/// another line ends at the line's edge.
+#[test]
+fn the_surrounding_text_is_the_caret_line() {
+    use crate::ime;
+    let rect = Rect { x: 0.0, y: 0.0, width: 600.0, height: 400.0 };
+    let mut e = editor("first\nsé cond\nthird");
+    let mut pc = PaintCtx::new();
+    let mut frame = |e: &mut DocEditor| {
+        ime::begin_frame();
+        e.paint(&mut pc, rect, true);
+        ime::end_frame();
+        ime::surrounding().map(|s| (s.text, s.cursor, s.anchor))
+    };
+    e.buf.caret = Pos::new(1, 3); // after "sé"
+    e.buf.anchor = None;
+    assert_eq!(frame(&mut e), Some(("sé cond".into(), 3, 3)));
+    e.buf.anchor = Some(Pos::new(1, 0));
+    assert_eq!(frame(&mut e), Some(("sé cond".into(), 3, 0)));
+    e.buf.anchor = Some(Pos::new(0, 2));
+    assert_eq!(frame(&mut e), Some(("sé cond".into(), 3, 0)), "from the line above: its start");
+    e.buf.anchor = Some(Pos::new(2, 1));
+    assert_eq!(frame(&mut e), Some(("sé cond".into(), 3, 8)), "from the line below: its end");
+    // Unfocused reports nothing.
+    ime::begin_frame();
+    e.paint(&mut pc, rect, false);
+    ime::end_frame();
+    assert_eq!(ime::surrounding(), None);
+}
+
 /// A composition is in the caret line's layout and never in the buffer:
 /// drawn as typed and underlined, the caret where the input method has
 /// its cursor, columns read off the line mapped across it; keys wait

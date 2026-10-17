@@ -160,8 +160,22 @@ impl<A: Application> EngineState<A> {
         // Forced mode: the surface is the compositor's scale-1 space.
         let surface_scale = crate::scale::forced_scale().unwrap_or(1.0);
         let pressed = crate::ime::take_press();
-        match self.text_input_state.plan(crate::ime::caret(), surface_scale, reset, pressed) {
-            Send::Nothing => {}
+        let plan = self.text_input_state.plan(crate::ime::caret(), surface_scale, reset, pressed);
+        let surrounding = self.text_input_state.surrounding_due(plan, crate::ime::surrounding());
+        let send_surrounding = |ti: &zwp_text_input_v3::ZwpTextInputV3| {
+            if let Some(s) = &surrounding {
+                ti.set_surrounding_text(s.text.clone(), s.cursor as i32, s.anchor as i32);
+            }
+        };
+        match plan {
+            Send::Nothing => {
+                // The text changed with the caret where it was (a paste
+                // over a selection, a deletion forward).
+                if surrounding.is_some() {
+                    send_surrounding(&ti);
+                    ti.commit();
+                }
+            }
             Send::Enable { rect: [x, y, w, h], reset } => {
                 if reset {
                     ti.disable();
@@ -170,10 +184,12 @@ impl<A: Application> EngineState<A> {
                 ti.enable();
                 ti.set_content_type(ContentHint::None, ContentPurpose::Normal);
                 ti.set_cursor_rectangle(x, y, w, h);
+                send_surrounding(&ti);
                 ti.commit();
             }
             Send::Move { rect: [x, y, w, h] } => {
                 ti.set_cursor_rectangle(x, y, w, h);
+                send_surrounding(&ti);
                 ti.commit();
             }
             Send::Disable => {

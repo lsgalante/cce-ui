@@ -69,6 +69,17 @@ impl DocEditor {
         if focused {
             let (dx, dy) = pc.offset();
             crate::text_input::claim(rect.x + dx, rect.y + dy, rect.width, rect.height);
+            // The caret's line is the surrounding text: what is being typed
+            // into, and never the whole document per frame. A selection
+            // reaching off the line ends at its edge.
+            let line = self.buf.line(caret.line);
+            let anchor = match self.buf.anchor {
+                Some(a) if a.line == caret.line => a.col,
+                Some(a) if a.line < caret.line => 0,
+                Some(_) => line.len(),
+                None => caret.col,
+            };
+            crate::text_input::surrounding(line, caret.col, anchor);
         }
         let first = self.line_at_y(self.scroll - self.pad);
         pc.clip(rect, |pc| {

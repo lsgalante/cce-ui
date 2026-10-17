@@ -201,6 +201,15 @@ render (`EngineState::sync_text_input`) it is enabled while the seat's text-inpu
 surface and a widget is editing (content type normal, the caret as the cursor rectangle in surface
 px), re-sent when the caret moves; disabled when nothing edits; disabled-then-enabled for a
 composition a widget dropped (`ime::take_reset`). Every change is one counted `commit`.
+**The surrounding text** — what the editing widget holds, with its caret and selection anchor
+as byte offsets (`ime::report_surrounding`, `text_input::surrounding`) — goes in the enable's
+commit and again whenever it changes (`TextInput::surrounding_due`); it must be in the enable's
+commit, since wlroots fixes a text input's features when it is enabled. `TextBox` reports its
+committed text (never a password box's; a composition is left out), a focused `DocEditor` its
+caret's line; text longer than the protocol's 4000 bytes is cut to a window around the caret
+(`ime::Surrounding::new`). A frame that keeps the same caret but reports no text keeps the last
+text — a `capture` replay — while a caret elsewhere with none has none. cce-remote reads it to
+show the field on the phone.
 `preedit_string` / `commit_string` / `delete_surrounding_text` are applied on `done` in the
 protocol's order (`Batch::apply_order`); `leave` drops the composition and disables an enabled
 text input (wlroots keeps the enabled state across a leave). **A press re-announces an open
@@ -210,8 +219,9 @@ keyboard (the compositor reacts only to an enable or commit right after a touch)
 are pure (`TextInput::plan`, `Batch`) and tested with no compositor. Sway routes text-input focus
 only while an input method is bound.
 
-Not supported yet: surrounding text (so `delete_surrounding_text` is not applied), and a password
-box is announced with the normal content purpose. The browser and macOS input-method paths are in
+Not supported yet: `delete_surrounding_text` is not applied (commits arrive as typed text, and a
+deletion has no typed form), and a password box is announced with the normal content purpose —
+it reports no surrounding text, which is what keeps its contents off the wire. The browser and macOS input-method paths are in
 `docs/platforms.md`.
 
 ## Touch

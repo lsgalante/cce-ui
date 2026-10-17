@@ -22,6 +22,13 @@
 //!   the macOS shell then keeps keys away from the input method, so an IME
 //!   left on does not swallow an app's single-key shortcuts).
 //!
+//! - **The surrounding text** goes the same way as the caret: a widget that
+//!   is editing reports the text around its caret, and where the caret and
+//!   selection sit in it ([`report_surrounding`]), so the input method reads
+//!   the field — `text-input-v3`'s `set_surrounding_text`. What reads it today
+//!   is cce-remote, which shows the field's contents on the phone. Optional:
+//!   a widget that reports none sends none. A password box never reports.
+//!
 //! A widget that drops a composition it was showing — it stopped editing
 //! mid-composition — asks the shell to cancel it in the input method too
 //! ([`request_reset`], drained by the shell with [`take_reset`]).
@@ -62,6 +69,44 @@ impl Preedit {
     }
 }
 
+/// The text around an editing widget's caret, as `text-input-v3` carries it:
+/// `cursor` and `anchor` are byte offsets into `text` (equal with no
+/// selection), on char boundaries.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Surrounding {
+    pub text: String,
+    pub cursor: usize,
+    pub anchor: usize,
+}
+
+/// The protocol caps surrounding text at 4000 bytes, the whole request.
+pub const SURROUNDING_MAX: usize = 4000 - 64;
+
+impl Surrounding {
+    /// `text` with the caret and anchor at byte offsets `cursor` and
+    /// `anchor` (clamped back onto char boundaries). Longer than the
+    /// protocol allows, it is cut to a window around the caret, which keeps
+    /// the anchor only if it falls inside.
+    pub fn new(text: &str, cursor: usize, anchor: usize) -> Self {
+        let floor = |s: &str, mut i: usize| {
+            i = i.min(s.len());
+            while !s.is_char_boundary(i) {
+                i -= 1;
+            }
+            i
+        };
+        let (cursor, anchor) = (floor(text, cursor), floor(text, anchor));
+        if text.len() <= SURROUNDING_MAX {
+            return Self { text: text.to_string(), cursor, anchor };
+        }
+        let half = SURROUNDING_MAX / 2;
+        let start = floor(text, cursor.saturating_sub(half));
+        let end = floor(text, (start + SURROUNDING_MAX).min(text.len()));
+        let anchor = if (start..=end).contains(&anchor) { anchor } else { cursor };
+        Self { text: text[start..end].to_string(), cursor: cursor - start, anchor: anchor - start }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct State {
     preedit: Option<Preedit>,
@@ -72,6 +117,10 @@ pub(crate) struct State {
     /// so far.
     caret: Option<[f32; 4]>,
     reported: Option<[f32; 4]>,
+    /// The surrounding text the last built frame stood for, and the one
+    /// this frame has reported so far.
+    surrounding: Option<Surrounding>,
+    surrounding_reported: Option<Surrounding>,
     reset: bool,
     /// A press landed since the shell last asked ([`note_press`]).
     pressed: bool,
@@ -107,13 +156,28 @@ pub fn generation() -> u64 {
 
 /// A frame is being built: carets are reported afresh.
 pub fn begin_frame() {
-    state(|s| s.borrow_mut().reported = None);
+    state(|s| {
+        let mut s = s.borrow_mut();
+        s.reported = None;
+        s.surrounding_reported = None;
+    });
 }
 
-/// The frame is built: what was reported is the caret.
+/// The frame is built: what was reported is the caret, and the surrounding
+/// text. A frame that keeps the same caret but reports no text keeps the
+/// last text: an app replaying a cached painting (`text_input::capture`)
+/// claims the captured caret again on frames where nothing paints, and its
+/// field has not changed. A caret anywhere else with no text has none.
 pub fn end_frame() {
     state(|s| {
         let mut s = s.borrow_mut();
+        let reported = s.surrounding_reported.take();
+        s.surrounding = match (s.reported, reported) {
+            (None, _) => None,
+            (Some(_), Some(text)) => Some(text),
+            (Some(r), None) if s.caret == Some(r) => s.surrounding.take(),
+            (Some(_), None) => None,
+        };
         s.caret = s.reported;
     });
 }
@@ -128,6 +192,20 @@ pub fn report_caret(x: f32, y: f32, w: f32, h: f32) {
 /// when no widget is editing text.
 pub fn caret() -> Option<[f32; 4]> {
     state(|s| s.borrow().caret)
+}
+
+/// The widget editing text this frame holds `text`, its caret at byte
+/// offset `cursor` and its selection's other end at `anchor` (the caret's
+/// own offset with no selection). Called as it paints, beside the caret.
+pub fn report_surrounding(text: &str, cursor: usize, anchor: usize) {
+    let surrounding = Surrounding::new(text, cursor, anchor);
+    state(|s| s.borrow_mut().surrounding_reported = Some(surrounding));
+}
+
+/// The text around the editing widget's caret in the last built frame, if
+/// it reported any.
+pub fn surrounding() -> Option<Surrounding> {
+    state(|s| s.borrow().surrounding.clone())
 }
 
 /// A widget dropped a composition it was showing: the input method should
@@ -194,6 +272,45 @@ mod tests {
         // Off a boundary, clamped back.
         assert_eq!(Preedit::new("にほん", Some((0, 4))).caret_chars(), 1);
         assert_eq!(Preedit::new("ab", Some((0, 9))).caret_chars(), 2);
+    }
+
+    #[test]
+    fn the_surrounding_text_is_the_frames_and_survives_a_replay() {
+        begin_frame();
+        report_caret(1.0, 1.0, 1.0, 1.0);
+        report_surrounding("hello", 5, 5);
+        end_frame();
+        assert_eq!(surrounding(), Some(Surrounding::new("hello", 5, 5)));
+        // A replayed frame: the same caret, nothing painted.
+        begin_frame();
+        report_caret(1.0, 1.0, 1.0, 1.0);
+        end_frame();
+        assert_eq!(surrounding().map(|s| s.text), Some("hello".into()), "a replay keeps it");
+        // Another caret with no text: another field, which says nothing.
+        begin_frame();
+        report_caret(9.0, 9.0, 1.0, 1.0);
+        end_frame();
+        assert_eq!(surrounding(), None);
+        // Nothing editing: nothing.
+        begin_frame();
+        report_surrounding("stale", 0, 0);
+        end_frame();
+        assert_eq!(surrounding(), None, "text with no caret is not a field");
+    }
+
+    #[test]
+    fn long_surrounding_text_is_a_window_around_the_caret() {
+        let text = "é".repeat(5000); // 10000 bytes
+        let s = Surrounding::new(&text, 6001, 0); // off a boundary
+        assert!(s.text.len() <= SURROUNDING_MAX);
+        // The caret floors to 6000; the window is the slice of `text` that
+        // puts it there.
+        let start = 6000 - s.cursor;
+        assert_eq!(&text[start..start + s.text.len()], s.text);
+        assert!(s.cursor > 0 && s.cursor < s.text.len(), "the caret is inside the window");
+        assert_eq!(s.anchor, s.cursor, "an anchor outside the window collapses onto the caret");
+        let short = Surrounding::new("abc", 9, 1);
+        assert_eq!((short.cursor, short.anchor), (3, 1), "offsets past the end are clamped");
     }
 
     #[test]

@@ -12,13 +12,17 @@
 //!   it is disabled. A composition a widget dropped (`ime::take_reset`) is
 //!   cancelled by disabling and enabling again, which resets the input
 //!   method's state. Every state change is one `commit`, counted.
+//! - **The surrounding text** (`ime::surrounding`) goes with the enable and
+//!   again whenever it changes ([`TextInput::surrounding_due`]). It must be
+//!   in the ENABLE's commit to count at all: wlroots fixes a text input's
+//!   features when it is enabled, so text first sent later is never relayed.
 //! - **What it tells us.** `preedit_string`, `commit_string` and
 //!   `delete_surrounding_text` are double-buffered and applied on `done`, in
 //!   the protocol's order: the old composition out, the commit typed
 //!   (`Driver::commit_text`), the new composition in (`Driver::preedit`).
-//!   A batch with no `preedit_string` ends the composition. We send no
-//!   surrounding text, so a deletion has nothing to count its bytes in and
-//!   is not applied. A `done` whose serial is behind our commits still
+//!   A batch with no `preedit_string` ends the composition. A deletion
+//!   (`delete_surrounding_text`) is not applied: commits arrive as typed
+//!   text, and a deletion has no typed form. A `done` whose serial is behind our commits still
 //!   applies its text — the protocol asks only that it not change our state.
 //! - `enter` applies the last frame's caret at once (an idle window builds
 //!   no frame to do it); `leave` drops any composition, as the protocol
@@ -41,7 +45,7 @@
 //! [`Batch::apply_order`] and [`TextInput::plan`], tested with no
 //! compositor.
 
-use crate::ime::Preedit;
+use crate::ime::{Preedit, Surrounding};
 
 /// The double-buffered text a `done` applies.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -105,6 +109,8 @@ pub struct TextInput {
     pub sent_rect: Option<[i32; 4]>,
     /// `commit` requests issued: what a current `done` carries as its serial.
     pub commits: u32,
+    /// The surrounding text last sent, while enabled.
+    pub sent_surrounding: Option<Surrounding>,
     /// The batch since the last `done`.
     pub pending: Batch,
 }
@@ -148,12 +154,43 @@ impl TextInput {
         send
     }
 
+    /// The surrounding text to send with `send` (this turn's plan), if any:
+    /// all there is with an `Enable`, a change with anything else while
+    /// enabled. A change with `Send::Nothing` needs a commit of its own,
+    /// counted here — the caller commits whenever this returns `Some` and
+    /// the plan sent nothing.
+    pub fn surrounding_due(&mut self, send: Send, now: Option<Surrounding>) -> Option<Surrounding> {
+        match send {
+            Send::Disable => {
+                self.sent_surrounding = None;
+                None
+            }
+            Send::Enable { .. } => {
+                self.sent_surrounding = now.clone();
+                now
+            }
+            Send::Move { .. } | Send::Nothing if self.enabled => {
+                let changed = now.is_some() && now != self.sent_surrounding;
+                if !changed {
+                    return None;
+                }
+                if send == Send::Nothing {
+                    self.commits += 1;
+                }
+                self.sent_surrounding = now.clone();
+                now
+            }
+            _ => None,
+        }
+    }
+
     /// `enter`: our surface has the text-input focus; the next plan enables
     /// if a widget is editing.
     pub fn enter(&mut self) {
         self.entered = true;
         self.enabled = false;
         self.sent_rect = None;
+        self.sent_surrounding = None;
     }
 
     /// `leave`: the focus went. True when we were enabled, and so owe a
@@ -168,6 +205,7 @@ impl TextInput {
         self.entered = false;
         self.enabled = false;
         self.sent_rect = None;
+        self.sent_surrounding = None;
         self.pending = Batch::default();
         owed
     }
@@ -200,6 +238,36 @@ mod tests {
         let mut b = Batch::default();
         b.set_preedit(Some("か".into()), -1, -1);
         assert_eq!(b.apply_order(), vec![Apply::Preedit(Some(Preedit::new("か", None)))]);
+    }
+
+    #[test]
+    fn the_surrounding_text_goes_with_the_enable_and_then_on_change() {
+        let s = |t: &str| Some(Surrounding::new(t, t.len(), t.len()));
+        let mut ti = TextInput::default();
+        ti.enter();
+        let send = ti.plan(Some([0.0, 0.0, 10.0, 10.0]), 1.0, false, false);
+        assert!(matches!(send, Send::Enable { .. }));
+        assert_eq!(ti.surrounding_due(send, s("a")), s("a"), "in the enable's commit");
+        let commits = ti.commits;
+        // Unchanged: nothing to send.
+        let send = ti.plan(Some([0.0, 0.0, 10.0, 10.0]), 1.0, false, false);
+        assert_eq!(ti.surrounding_due(send, s("a")), None);
+        // Changed with the caret where it was: sent, with a commit of its own.
+        let send = ti.plan(Some([0.0, 0.0, 10.0, 10.0]), 1.0, false, false);
+        assert_eq!(send, Send::Nothing);
+        assert_eq!(ti.surrounding_due(send, s("ab")), s("ab"));
+        assert_eq!(ti.commits, commits + 1);
+        // With a move: rides the move's commit.
+        let send = ti.plan(Some([5.0, 0.0, 10.0, 10.0]), 1.0, false, false);
+        assert_eq!(ti.surrounding_due(send, s("abc")), s("abc"));
+        assert_eq!(ti.commits, commits + 2);
+        // A field that reports none sends none; disabled, nothing is due.
+        let send = ti.plan(Some([5.0, 0.0, 10.0, 10.0]), 1.0, false, false);
+        assert_eq!(ti.surrounding_due(send, None), None);
+        let send = ti.plan(None, 1.0, false, false);
+        assert_eq!(send, Send::Disable);
+        assert_eq!(ti.surrounding_due(send, s("abc")), None);
+        assert_eq!(ti.sent_surrounding, None, "the next enable sends it afresh");
     }
 
     #[test]

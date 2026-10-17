@@ -7,6 +7,32 @@ use super::*;
 /// (`committed_buffer`, `take_change`), replaced by the commit, which is
 /// typed — and dropped, the input method told, when editing ends under it.
 #[test]
+fn the_surrounding_text_is_what_the_box_holds_in_bytes() {
+    use crate::ime::{self, Preedit};
+    let mut tb = TextBox::new("héllo".to_string());
+    tb.set_rect(10.0, 10.0, 300.0, 30.0);
+    tb.focus();
+    tb.all_selected = false;
+    tb.select_anchor = None;
+    tb.cursor_idx = 2; // after "hé": byte 3
+    assert_eq!(tb.surrounding(), ("héllo".to_string(), 3, 3));
+    tb.select_anchor = Some(5);
+    assert_eq!(tb.surrounding(), ("héllo".to_string(), 3, 6), "the anchor at the end");
+    tb.all_selected = true;
+    assert_eq!(tb.surrounding(), ("héllo".to_string(), 6, 0), "select-all spans the text");
+    // A composition is not held: left out, offsets past it moved back.
+    tb.all_selected = false;
+    tb.select_anchor = None;
+    tb.cursor_idx = 1;
+    ime::set_preedit(Some(Preedit::new("にほ", Some((0, 3)))));
+    tb.sync_preedit();
+    assert_eq!(tb.edit_buffer, "hにほéllo");
+    assert_eq!(tb.surrounding(), ("héllo".to_string(), 1, 1), "the caret where the run began");
+    ime::set_preedit(None);
+    tb.sync_preedit();
+}
+
+#[test]
 fn a_composition_is_shown_in_place_and_the_commit_is_typed() {
     use crate::ime::{self, Preedit};
     let mut dummy = crate::context::UiContext::new();

@@ -14,6 +14,24 @@ impl TextBox {
         }
     }
 
+    /// What the box holds and where its caret and selection's other end are
+    /// in it, as byte offsets: the field as the input method reads it
+    /// (`text_input::surrounding`). The provisional run is not held, so it is
+    /// left out, and a caret inside it sits where it began.
+    pub fn surrounding(&self) -> (String, usize, usize) {
+        let text = self.committed_buffer();
+        let held = |i: usize| match self.composing {
+            Some((start, len)) if i >= start + len => i - len,
+            Some((start, _)) if i > start => start,
+            _ => i,
+        };
+        let byte = |i: usize| text.char_indices().nth(i).map_or(text.len(), |(b, _)| b);
+        let cursor = held(self.cursor_idx);
+        let anchor = if self.all_selected { 0 } else { self.select_anchor.map_or(cursor, held) };
+        let cursor = if self.all_selected { text.chars().count() } else { cursor };
+        (text.clone(), byte(cursor), byte(anchor))
+    }
+
     /// Take the provisional run out of the buffer, the caret back where it
     /// began. Whether there was one.
     pub(super) fn strip_composition(&mut self) -> bool {

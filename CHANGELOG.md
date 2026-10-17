@@ -10,6 +10,19 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-17
 
+- **Editing widgets report their surrounding text** (`text-input-v3`'s
+  `set_surrounding_text`). `ime::report_surrounding` / `text_input::surrounding` take the
+  field's text with its caret and selection anchor as byte offsets; the Wayland shell sends it
+  in the enable's commit (wlroots fixes a text input's features at enable, so text first sent
+  later is never relayed) and again on every change, with a commit of its own when the caret
+  did not move. `TextBox` reports its committed text — never a password box's — and a focused
+  `DocEditor` its caret's line. Wanted by cce-remote, which shows the desktop field's real
+  contents on the phone instead of an echo of what the phone typed. Checked: tests for the
+  frame rule (a `capture` replay keeps the text), the 4000-byte window, the planner, the
+  `TextBox` byte conversion (with a composition and a selection) and the `DocEditor` line;
+  in a shadow session cce-remote received each keystroke's text and caret from a rebuilt
+  cce-weather and cce-text-editor, a caret moved with the arrow keys, and a select-all.
+
 - **An indeterminate ProgressBar, a slower Spinner, and both follow the DE's animation speed.**
   `ProgressBar::indeterminate()` / `set_indeterminate` sweep a third of the track across it,
   easing at either end, for work of unknown size. The Spinner turns once every 1.6 s (it was
