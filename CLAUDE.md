@@ -80,8 +80,9 @@ an allowance).
   (`color::reload_colors`) or pins it on its thread. Fonts are the exception: `fonts_dir()` still
   reads `$CCE_FONTS_DIR` (else `~/Dropbox/Fonts`) and the shaping tests need real faces.
 - **Pin what a result depends on, per thread.** `motion::force_for_test`,
-  `input::force_natural_scroll`, `scroll_motion::force_scroll_settings` pin the animations
-  switch, natural scrolling and kinetic settings for the calling thread. Never set a
+  `motion::force_speed_for_test`, `input::force_natural_scroll`,
+  `scroll_motion::force_scroll_settings` pin the animations switch, the animation speed,
+  natural scrolling and kinetic settings for the calling thread. Never set a
   process-wide env var in a test (the suite is parallel). The window properties
   (`scale::set_scale_factor` and kin) are per thread off a window, in every build: a test that
   sets the scale sets its own thread's (one test's write once rescaled another's text

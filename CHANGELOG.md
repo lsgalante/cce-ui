@@ -10,6 +10,20 @@ today's date — what changed, why, and how it was checked.
 
 ## 2026-10-17
 
+- **An indeterminate ProgressBar, a slower Spinner, and both follow the DE's animation speed.**
+  `ProgressBar::indeterminate()` / `set_indeterminate` sweep a third of the track across it,
+  easing at either end, for work of unknown size. The Spinner turns once every 1.6 s (it was
+  1 s) and breathes every 2.6 s. Both step by `dt * motion::speed()` — cce-core's new speed,
+  the Appearance page's `style.animation_speed`, re-read within half a second — through one
+  shared tick (`widget/display/rhythm.rs`) that also gives both the motion-off still pose.
+  Every ProgressBar now registers for ticks (`wants_tick`), so one made indeterminate after
+  it was inserted still sweeps; a determinate bar's tick is a branch. Found while measuring:
+  the gallery ticked every exhibit by hand and the driver then re-ticked the context's
+  receivers, so everything there stepping by `dt` ran at twice its rate — the first Spinner
+  turned twice a second there. Fixed in the gallery. Checked: the indicator and rhythm tests;
+  in a shadow session the bar's sweep timed off screenshots at 8.0 s at 0.25×, then 1.01 s
+  after the config was switched to 2× with the gallery running.
+
 - **A `Spinner`: the toolkit's first activity indicator.** An indeterminate one, for work
   with no measurable progress; no app had one, and the ProgressBar has no indeterminate mode.
   It is drawn, not a glyph sequence from cce-icons: two `Arc` prims a frame (the track ring and

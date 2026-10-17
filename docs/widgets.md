@@ -498,12 +498,21 @@ is the test.
 
 ## Other widget notes
 
-- **`Spinner`** (`widget/display/spinner.rs`): the indeterminate activity indicator, an arc
-  turning round a faint ring in the ProgressBar's fill and track colours (20 px square unless
-  sized). It animates in `tick` and registers with `UiContext` (`wants_tick`), so it asks for
-  frames only while it is visible and running; `set_running(false)` paints nothing and keeps
-  its place in the layout. With the animations switch off it holds a still quarter arc and asks
-  for none. `with_motion_off_a_spinner_holds_still_and_asks_for_no_frames` is the test.
+- **Activity indicators**: the **`Spinner`** (`widget/display/spinner.rs`), an arc turning
+  round a faint ring (20 px square unless sized), and the **indeterminate `ProgressBar`**
+  (`ProgressBar::indeterminate`, `set_indeterminate`), a third of the track sweeping across
+  it, both in the ProgressBar's fill and track colours. They share one tick
+  (`widget/display/rhythm.rs`): they register with `UiContext` (`wants_tick`; every
+  ProgressBar does, so one made indeterminate later still sweeps), ask for frames only while
+  visible and animating, step by `dt * motion::speed()` — the DE's animation speed, the
+  Appearance page's preset, so a turn takes 1.6 s and a sweep 2 s at Normal — and with the
+  animations switch off land on a still pose (a quarter arc; the middle third) in one frame
+  and then ask for none. `set_running(false)` stops a Spinner, which then paints nothing and
+  keeps its place. A host must tick each widget once a frame: a widget ticked by hand AND by
+  the context runs at twice its rate (`Driver::tick` re-ticks the context unless the app's
+  own tick did). `with_motion_off_a_spinner_holds_still_and_asks_for_no_frames` and
+  `an_indeterminate_bar_sweeps_its_segment_across_the_track` are the tests.
+
 - **`LineEdit`** (`widget/line_edit/`): the text, caret, selection and keymap of one line of
   text an app draws itself (cce-browser's URL bar and dialogs, cce-sheets' cell editor,
   cce-documents' fields). An Alt or Ctrl chord types nothing: it is left to the host as

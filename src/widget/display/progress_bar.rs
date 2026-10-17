@@ -2,7 +2,14 @@
 //! well composition) and a flat rounded track otherwise. It implements [`Layout`] + [`Paint`] +
 //! [`Input`]; [`ProgressBar::new`] returns it already wrapped in [`Adapted`], ready to insert
 //! (optionally `.with_label(..)`).
+//!
+//! **Indeterminate** ([`ProgressBar::indeterminate`], `set_indeterminate`): for work whose
+//! amount is unknown, a segment a third of the track sweeps across it, easing at either end,
+//! once every 2 s at the DE's normal animation speed (`motion::speed`). It ticks like the
+//! Spinner (`rhythm`): with the animations switch off it holds the segment still in the middle
+//! of the track and asks for no frames.
 
+use super::rhythm::{self, Beat, Rhythm};
 use crate::color;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
@@ -15,6 +22,12 @@ pub struct ProgressBar {
     /// fill inset onto that floor. Defaults to `control_relief()`; the flat
     /// style keeps the filled, rounded track.
     recessed: Option<bool>,
+    /// Indeterminate: the segment sweeps (`sweep`) and `value` is not drawn.
+    indeterminate: bool,
+    /// Where the segment is in its sweep, 0 → 1.
+    sweep: f32,
+    /// Whether the segment is held at its still pose (motion off).
+    rhythm: Rhythm,
 }
 
 impl ProgressBar {
@@ -25,8 +38,46 @@ impl ProgressBar {
         self.recessed.unwrap_or_else(crate::layout::control_relief)
     }
 
+    /// One sweep every 2 s, at normal speed.
+    const SWEEP_PERIOD: f32 = 2.0;
+    /// The segment's length, as a fraction of the track.
+    const SEGMENT: f32 = 1.0 / 3.0;
+
     pub fn new(value: f32) -> Adapted<ProgressBar> {
-        Adapted::new(ProgressBar { value, recessed: None })
+        Adapted::new(ProgressBar { value, recessed: None, indeterminate: false, sweep: 0.0, rhythm: Rhythm::default() })
+    }
+
+    /// An indeterminate bar: see the module doc.
+    pub fn indeterminate() -> Adapted<ProgressBar> {
+        let mut bar = Self::new(0.0);
+        bar.indeterminate = true;
+        bar
+    }
+
+    pub fn is_indeterminate(&self) -> bool {
+        self.indeterminate
+    }
+
+    /// Switch between sweeping (work of unknown size) and showing `value`. A bar inserted
+    /// determinate can turn indeterminate later: every bar registers for ticks.
+    pub fn set_indeterminate(&mut self, indeterminate: bool) {
+        self.indeterminate = indeterminate;
+    }
+
+    /// The fill's span along the track, as fractions of its width (start, end). Determinate,
+    /// it runs from the start to `value`; indeterminate, it is the segment, clipped to the
+    /// track as it enters and leaves.
+    fn fill_span(&self) -> (f32, f32) {
+        if !self.indeterminate {
+            return (0.0, self.value.clamp(0.0, 1.0));
+        }
+        if self.rhythm.still {
+            return (0.5 - Self::SEGMENT / 2.0, 0.5 + Self::SEGMENT / 2.0);
+        }
+        // Ease in and out across the sweep: from wholly before the track to wholly past it.
+        let e = 0.5 - 0.5 * (self.sweep * std::f32::consts::PI).cos();
+        let start = -Self::SEGMENT + (1.0 + Self::SEGMENT) * e;
+        (start.max(0.0), (start + Self::SEGMENT).min(1.0))
     }
 }
 
@@ -63,27 +114,27 @@ impl Paint for ProgressBar {
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
             let inset = depth;
             let floor = Rect { x: rect.x + inset, y: rect.y + inset, width: rect.width - 2.0 * inset, height: rect.height - 2.0 * inset };
-            let fill_w = floor.width * self.value.clamp(0.0, 1.0);
-            if fill_w > 0.0 {
-                ctx.rounded_rect(
-                    Rect { width: fill_w, ..floor },
-                    radius.min(floor.height / 2.0),
-                    (true, true, true, true),
-                    color::progress_fill(),
-                );
-            }
+            self.paint_fill(floor, radius, ctx);
             let (well, radii) = crate::layout::carve_inside(rect, (radius, radius, radius, radius), depth);
             ctx.recess(well, radii, depth);
             return;
         }
         // Track.
         ctx.rounded_rect(rect, radius, (true, true, true, true), color::progress_bg());
-        // Fill.
-        let fill_w = rect.width * self.value.clamp(0.0, 1.0);
-        if fill_w > 0.0 {
+        self.paint_fill(rect, radius, ctx);
+    }
+}
+
+impl ProgressBar {
+    /// The fill over `track` (the flat track, or the well's floor): its span, rounded at the
+    /// bar's radius clamped to half its height.
+    fn paint_fill(&self, track: Rect, radius: f32, ctx: &mut PaintCtx) {
+        let (a, b) = self.fill_span();
+        let width = track.width * (b - a);
+        if width > 0.0 {
             ctx.rounded_rect(
-                Rect { x: rect.x, y: rect.y, width: fill_w, height: rect.height },
-                radius.min(rect.height / 2.0),
+                Rect { x: track.x + track.width * a, width, ..track },
+                radius.min(track.height / 2.0),
                 (true, true, true, true),
                 color::progress_fill(),
             );
@@ -91,7 +142,27 @@ impl Paint for ProgressBar {
     }
 }
 
-impl Input for ProgressBar {}
+impl Input for ProgressBar {
+    /// Every bar, so one inserted determinate still sweeps once it is made indeterminate
+    /// (`UiContext` registers a widget for ticks when it is inserted). A determinate bar's
+    /// tick is a branch.
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
+    /// Sweep the segment by `dt` at the DE's speed, as the Spinner turns: a frame every tick
+    /// while indeterminate; with motion off one to land on the still pose, then none.
+    fn tick(&mut self, dt: f32, _rect: Rect) -> bool {
+        if !self.indeterminate {
+            return false;
+        }
+        let beat = self.rhythm.beat(dt);
+        if let Beat::Advance(t) = beat {
+            self.sweep = rhythm::advance(self.sweep, t, Self::SWEEP_PERIOD);
+        }
+        Rhythm::redraws(beat)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -143,6 +214,71 @@ mod tests {
         if let Prim::RoundedRect { rect, .. } = &prims[0] {
             assert!(rect.x > 0.0 && rect.width < 50.0, "the fill is inset onto the floor: {rect:?}");
         }
+    }
+
+    /// The fill's span along a 100 px flat track, for `bar`.
+    fn fill_x(bar: &Adapted<ProgressBar>) -> Option<(f32, f32)> {
+        let quads = crate::widget::shown_rounded_quads(bar);
+        quads.get(1).map(|q| (q.0, q.0 + q.2))
+    }
+
+    /// Indeterminate, the segment sweeps the track: it enters at the start, crosses it and
+    /// leaves at the end, never past either, and the value is not drawn.
+    #[test]
+    fn an_indeterminate_bar_sweeps_its_segment_across_the_track() {
+        crate::motion::force_for_test(true);
+        let mut bar = ProgressBar::indeterminate().with_recessed(false);
+        assert!(bar.is_indeterminate());
+        WidgetHost::set_rect(&mut bar, 0.0, 0.0, 100.0, 8.0);
+        assert_eq!(fill_x(&bar), None, "at the start of a sweep it has not entered");
+        let mut seen = Vec::new();
+        for _ in 0..20 {
+            assert!(Input::tick(&mut *bar, 0.1, Rect { x: 0.0, y: 0.0, width: 100.0, height: 8.0 }), "it asks for frames");
+            if let Some(span) = fill_x(&bar) {
+                assert!(span.0 >= 0.0 && span.1 <= 100.0 + 1e-3, "inside the track: {span:?}");
+                assert!(span.1 - span.0 <= 100.0 / 3.0 + 1e-3, "no longer than its segment: {span:?}");
+                seen.push(span);
+            }
+        }
+        assert!(seen.first().unwrap().0 < 1e-3, "it enters at the start");
+        assert!(seen.iter().any(|s| s.0 > 30.0 && s.1 < 70.0), "it crosses the middle whole");
+        assert!(seen.iter().any(|s| (s.1 - 100.0).abs() < 1e-3), "it leaves at the end");
+    }
+
+    /// With motion off it lands on a still segment in the middle and asks for no more frames;
+    /// at half speed it sweeps half as far a tick.
+    #[test]
+    fn an_indeterminate_bar_holds_still_without_motion_and_follows_the_speed() {
+        let r = Rect { x: 0.0, y: 0.0, width: 100.0, height: 8.0 };
+        crate::motion::force_for_test(false);
+        let mut bar = ProgressBar::indeterminate().with_recessed(false);
+        WidgetHost::set_rect(&mut bar, 0.0, 0.0, 100.0, 8.0);
+        assert!(Input::tick(&mut *bar, 0.1, r), "one frame to land");
+        assert!(!Input::tick(&mut *bar, 0.1, r), "then none");
+        let (a, b) = fill_x(&bar).unwrap();
+        assert!((a - 100.0 / 3.0).abs() < 1e-3 && (b - 200.0 / 3.0).abs() < 1e-3, "the middle third: {a} {b}");
+        crate::motion::force_for_test(true);
+        crate::motion::force_speed_for_test(0.5);
+        let mut slow = ProgressBar::indeterminate();
+        Input::tick(&mut *slow, 0.5, r);
+        crate::motion::force_speed_for_test(1.0);
+        assert!((slow.sweep - 0.125).abs() < 1e-6, "a quarter of a sweep's 2 s at half speed: {}", slow.sweep);
+    }
+
+    /// Determinate bars do not animate; one switched to indeterminate sweeps, and back shows
+    /// its value again.
+    #[test]
+    fn a_determinate_bar_asks_for_no_frames_until_it_is_made_indeterminate() {
+        crate::motion::force_for_test(true);
+        let r = Rect { x: 0.0, y: 0.0, width: 100.0, height: 8.0 };
+        let mut bar = ProgressBar::new(0.5).with_recessed(false);
+        WidgetHost::set_rect(&mut bar, 0.0, 0.0, 100.0, 8.0);
+        assert!(!Input::tick(&mut *bar, 0.1, r));
+        bar.set_indeterminate(true);
+        assert!(Input::tick(&mut *bar, 0.1, r));
+        bar.set_indeterminate(false);
+        assert!(!Input::tick(&mut *bar, 0.1, r));
+        assert_eq!(fill_x(&bar), Some((0.0, 50.0)), "its value again");
     }
 
     /// The one detached-label convention: the assigned rect is the whole block, the

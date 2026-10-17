@@ -12,6 +12,7 @@ pub mod usage_bar;
 pub mod info_box;
 pub mod status_dot;
 pub mod spinner;
+mod rhythm;
 pub mod image_view;
 pub mod text_sizer;
 

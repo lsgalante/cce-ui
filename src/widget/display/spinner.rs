@@ -4,12 +4,14 @@
 //! textures.
 //!
 //! It animates in `tick`, so a host must tick it (it registers with `UiContext`, which ticks the
-//! visible ones), and it asks for frames only while it runs and motion is on. With the DE's
-//! animations switch off (`motion::enabled`) it holds a still quarter arc at twelve o'clock and
-//! asks for none; stopped (`set_running(false)`) it paints nothing and keeps its place.
+//! visible ones), and it asks for frames only while it runs and motion is on. It turns once every
+//! 1.6 s at the DE's normal animation speed, and faster or slower with `motion::speed`. With the
+//! DE's animations switch off (`motion::enabled`) it holds a still quarter arc at twelve o'clock
+//! and asks for none; stopped (`set_running(false)`) it paints nothing and keeps its place.
 
 use std::f32::consts::{FRAC_PI_2, TAU};
 
+use super::rhythm::{self, Beat, Rhythm};
 use crate::color;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
@@ -18,21 +20,22 @@ use crate::widget::{Adapted, Input, Layout, Paint};
 #[derive(Debug, Clone)]
 pub struct Spinner {
     running: bool,
-    /// The arc's leading end, radians clockwise from three o'clock.
-    angle: f32,
+    /// Where the arc's leading end is in its turn, 0 → 1 clockwise from twelve o'clock.
+    turn: f32,
     /// Where the arc is in its lengthen-and-shorten cycle, 0 → 1.
     breath: f32,
-    /// The last tick found motion off: the arc is held at its still pose.
-    still: bool,
+    /// Whether the arc is held at its still pose (motion off).
+    rhythm: Rhythm,
 }
 
 impl Spinner {
     /// The spinner's default side.
     pub const SIZE: f32 = 20.0;
-    /// One turn a second.
-    const TURN_RATE: f32 = TAU;
-    /// The arc lengthens and shortens once every 1.6 s.
-    const BREATH_PERIOD: f32 = 1.6;
+    /// One turn every 1.6 s, at normal speed.
+    const TURN_PERIOD: f32 = 1.6;
+    /// The arc lengthens and shortens once every 2.6 s, out of step with the turn so the two
+    /// do not lock into one repeating figure.
+    const BREATH_PERIOD: f32 = 2.6;
     /// The arc's length at its shortest and longest, in turns.
     const MIN_ARC: f32 = 0.12;
     const MAX_ARC: f32 = 0.7;
@@ -40,7 +43,7 @@ impl Spinner {
     const STILL_ARC: f32 = 0.25;
 
     pub fn new() -> Adapted<Spinner> {
-        Adapted::new(Spinner { running: true, angle: -FRAC_PI_2, breath: 0.0, still: false })
+        Adapted::new(Spinner { running: true, turn: 0.0, breath: 0.0, rhythm: Rhythm::default() })
     }
 
     pub fn running(&self) -> bool {
@@ -56,12 +59,13 @@ impl Spinner {
     /// The arc as drawn: (start, end) in radians. `end` is the leading end; the arc's length
     /// follows a cosine through its cycle, so it eases at its shortest and longest.
     fn arc(&self) -> (f32, f32) {
-        if self.still {
+        if self.rhythm.still {
             return (-FRAC_PI_2, -FRAC_PI_2 + Self::STILL_ARC * TAU);
         }
         let s = 0.5 - 0.5 * (self.breath * TAU).cos();
         let len = (Self::MIN_ARC + (Self::MAX_ARC - Self::MIN_ARC) * s) * TAU;
-        (self.angle - len, self.angle)
+        let lead = -FRAC_PI_2 + self.turn * TAU;
+        (lead - len, lead)
     }
 
     /// The stroke's width for a ring of outer radius `r`.
@@ -107,19 +111,18 @@ impl Input for Spinner {
         true
     }
 
-    /// Turn the arc by `dt`. A frame is asked for every tick while it runs; with motion off,
-    /// one to land on the still pose and then none, until motion is back on.
+    /// Turn the arc by `dt` at the DE's speed. A frame is asked for every tick while it runs;
+    /// with motion off, one to land on the still pose and then none, until motion is back on.
     fn tick(&mut self, dt: f32, _rect: Rect) -> bool {
         if !self.running {
             return false;
         }
-        if !crate::motion::enabled() {
-            return !std::mem::replace(&mut self.still, true);
+        let beat = self.rhythm.beat(dt);
+        if let Beat::Advance(t) = beat {
+            self.turn = rhythm::advance(self.turn, t, Self::TURN_PERIOD);
+            self.breath = rhythm::advance(self.breath, t, Self::BREATH_PERIOD);
         }
-        self.still = false;
-        self.angle = (self.angle + dt * Self::TURN_RATE) % TAU;
-        self.breath = (self.breath + dt / Self::BREATH_PERIOD) % 1.0;
-        true
+        Rhythm::redraws(beat)
     }
 }
 
@@ -172,7 +175,21 @@ mod tests {
         for _ in 0..10_000 {
             Input::tick(&mut *s, 1.0 / 60.0, NO_RECT);
         }
-        assert!(s.angle.abs() <= TAU && (0.0..1.0).contains(&s.breath));
+        assert!((0.0..1.0).contains(&s.turn) && (0.0..1.0).contains(&s.breath));
+    }
+
+    /// The DE's speed scales the turn: at half speed a tick turns it half as far.
+    #[test]
+    fn a_spinner_turns_at_the_des_speed() {
+        crate::motion::force_for_test(true);
+        let mut normal = Spinner::new();
+        Input::tick(&mut *normal, 0.4, NO_RECT);
+        assert!((normal.turn - 0.25).abs() < 1e-6, "a quarter turn in 0.4 s: {}", normal.turn);
+        crate::motion::force_speed_for_test(0.5);
+        let mut slow = Spinner::new();
+        Input::tick(&mut *slow, 0.4, NO_RECT);
+        crate::motion::force_speed_for_test(1.0);
+        assert!((slow.turn - 0.125).abs() < 1e-6, "half speed, an eighth: {}", slow.turn);
     }
 
     /// With motion off it lands on the still pose in one frame and then asks for none; motion
