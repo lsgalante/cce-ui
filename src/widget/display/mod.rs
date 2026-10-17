@@ -11,6 +11,7 @@ pub mod graph;
 pub mod usage_bar;
 pub mod info_box;
 pub mod status_dot;
+pub mod spinner;
 pub mod image_view;
 pub mod text_sizer;
 
@@ -28,6 +29,7 @@ pub use self::graph::{GraphNode, Graph, TaggedQuad, WireStyle, node_wires};
 pub use self::usage_bar::UsageBar;
 pub use self::info_box::InfoBox;
 pub use self::status_dot::{DotStatus, StatusDot};
+pub use self::spinner::Spinner;
 pub use self::image_view::ImageView;
 pub use self::text_sizer::{measure_text_width, measure_text, truncate_head, truncate_tail};
 

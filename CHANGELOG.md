@@ -8,6 +8,18 @@ and `docs/rfc-material.md`, and in `git log`.
 When you change behaviour: update the reference to the new state, and add an entry here under
 today's date — what changed, why, and how it was checked.
 
+## 2026-10-17
+
+- **A `Spinner`: the toolkit's first activity indicator.** An indeterminate one, for work
+  with no measurable progress; no app had one, and the ProgressBar has no indeterminate mode.
+  It is drawn, not a glyph sequence from cce-icons: two `Arc` prims a frame (the track ring and
+  a turning arc that lengthens and shortens), so it scales and takes the style's colours with
+  no texture per frame against the renderer's image budget. It follows the animations switch:
+  off, it lands on a still pose in one frame and then reports no change, so the loop idles.
+  Checked: five tests in `widget/display/spinner.rs` (geometry, turning, the motion-off pose,
+  stopping, the context ticking it); the gallery's new exhibit turning in a shadow session,
+  captured a quarter second apart.
+
 ## 2026-10-16
 
 - **`ScrollRegion::wheel` is gone; `wheel_in` is a region's only wheel.** The context-free wheel

@@ -215,7 +215,7 @@ pub use self::container::{
 
 pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, UsageBar,
-    InfoBox, StatusDot, InteractiveListItem,
+    InfoBox, StatusDot, Spinner, InteractiveListItem,
     Float3, ProgressBar, StatusBar, Splitter, Separator,
     DotStatus, ImageView,
     truncate_head, truncate_tail,

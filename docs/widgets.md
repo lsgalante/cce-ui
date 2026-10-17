@@ -498,6 +498,12 @@ is the test.
 
 ## Other widget notes
 
+- **`Spinner`** (`widget/display/spinner.rs`): the indeterminate activity indicator, an arc
+  turning round a faint ring in the ProgressBar's fill and track colours (20 px square unless
+  sized). It animates in `tick` and registers with `UiContext` (`wants_tick`), so it asks for
+  frames only while it is visible and running; `set_running(false)` paints nothing and keeps
+  its place in the layout. With the animations switch off it holds a still quarter arc and asks
+  for none. `with_motion_off_a_spinner_holds_still_and_asks_for_no_frames` is the test.
 - **`LineEdit`** (`widget/line_edit/`): the text, caret, selection and keymap of one line of
   text an app draws itself (cce-browser's URL bar and dialogs, cce-sheets' cell editor,
   cce-documents' fields). An Alt or Ctrl chord types nothing: it is left to the host as
